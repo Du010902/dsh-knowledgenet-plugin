@@ -18,7 +18,8 @@
  * 用法：node build.mjs
  */
 import { createRequire } from "node:module";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readdir, readFile, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -320,6 +321,44 @@ async function loadRolldown() {
       "找不到 rolldown：本插件复用项目里 vite 自带的打包器（node_modules/.pnpm/rolldown@*）。"
       + "先在项目根执行一次 pnpm install，再重跑 node build.mjs。",
     );
+  }
+}
+
+/**
+ * 打包期间把**父项目的 `node_modules`** 挂到插件目录下（Windows 用 junction，其他平台用目录链接）。
+ *
+ * 为什么需要：插件原来住在 `<项目>/dsh-plugin`，Node 的向上查找自然命中项目的依赖 ✓；
+ * 独立成仓库后父目录没有 `node_modules` ⇒ 打包器把 `three` / `d3-force-3d` 静默当成 external ✗
+ * （终端只留一行 "Module not found"）⇒ 产物运行时 `require("three")` 直接炸
+ * （`tests/selfcontained.test.mjs` 抓的正是这个 ✓）。
+ *
+ * 为什么不用自定义 `resolveId` 自己解析：手写解析只能拿到 CJS 条件（`three.cjs` 只是个 631 字节的壳），
+ * 打包器接着去 require 它的 core ⇒ 产物从 1.76 MB 涨到 2.38 MB（实测）。**原生解析才是对的**，
+ * 所以这里只负责让原生向上查找能命中。
+ *
+ * 只有当插件目录**没有** `node_modules` 时才创建，并且 `finally` 里只删这一个链接（绝不递归删）。
+ */
+async function withProjectModules(run) {
+  const local = path.join(PLUGIN, "node_modules");
+  const upstream = path.join(PROJECT, "node_modules");
+  if (existsSync(local) || !existsSync(upstream)) return await run();
+  let linked = false;
+  try {
+    await symlink(upstream, local, process.platform === "win32" ? "junction" : "dir");
+    linked = true;
+    return await run();
+  } finally {
+    if (linked) {
+      try {
+        await rmdir(local);
+      } catch {
+        try {
+          await unlink(local);
+        } catch {
+          // 删不掉就留着（下一次构建会复用），总比删错东西好
+        }
+      }
+    }
   }
 }
 
@@ -725,9 +764,16 @@ const panelCss = await readFile(path.join(PLUGIN, "src/client/panel.css"), "utf8
 const graphCss = await readFile(path.join(UPSTREAM, "styles/graph.css"), "utf8");
 const css = `${panelCss}\n${graphCss}`;
 
-const host = await buildHost(rolldown);
-const workerCode = await buildWorkerCode(rolldown);
-const client = await buildClient(rolldown, css, workerCode);
+/*
+ * 三次构建都在「插件目录下临时挂了父项目 node_modules」的作用域里跑：
+ * 这样 `three` / `d3-force-3d` 由打包器**按原生规则**解析并内联，而不是被静默当成 external ✓。
+ */
+const { host, workerCode, client } = await withProjectModules(async () => {
+  const hostHalf = await buildHost(rolldown);
+  const workerSource = await buildWorkerCode(rolldown);
+  const clientHalf = await buildClient(rolldown, css, workerSource);
+  return { host: hostHalf, workerCode: workerSource, client: clientHalf };
+});
 
 console.log(`Host 半    index.js  ${host.bytes} 字节，${host.modules} 个模块`);
 console.log(`布局 Worker 源码      ${Buffer.byteLength(workerCode, "utf8")} 字节（内联为 Blob）`);

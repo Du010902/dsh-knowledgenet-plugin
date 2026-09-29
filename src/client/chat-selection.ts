@@ -84,6 +84,39 @@ export function defaultTitle(snippet: string): string {
   return head.trim();
 }
 
+/** 一条待落地的「前置」：原文（进 evidence）+ 节点标题（可以被用户改） */
+export interface PrereqDraft {
+  /** 归一化后的原文（写进关系的 evidence.snippet） */
+  text: string;
+  /** 要新建 / 复用的节点标题 */
+  title: string;
+}
+
+/**
+ * 把「弹窗里的每一行」变成各自的草稿（一行为一个节点）。
+ *
+ * 为什么必须分开算标题（真实 bug ✗）：界面上只有**一个**标题输入框，
+ * 多行时如果所有行都用它，点「添加为前置」就会拿同一个标题发 N 次请求 ——
+ * 第 1 次建点，后面 N-1 次精确命中同一个节点、又被关系去重吃掉
+ * （`addEdge` 对同 (from,to,type) 直接返回已有边）⇒ **除了第一行，其余全丢，还没有任何提示** ✗。
+ *
+ * 规则：**单行**才用用户改过的标题（空则回落到默认标题）；**多行**每行各用自己的默认标题。
+ *
+ * @param lines - 弹窗文本切出来的行（未归一化，内部会归一化 + 去重 + 截断）。
+ * @param editedTitle - 用户在标题框里改过的标题（只在单行时有意义）。
+ * @returns 草稿列表（顺序与首次出现顺序一致）。
+ */
+export function draftPrereqs(lines: readonly string[], editedTitle?: string | null): PrereqDraft[] {
+  let list: Snippet[] = [];
+  for (const line of lines) list = appendSnippet(list, line);
+  const edited = normalizeSnippet(editedTitle ?? "");
+  const single = list.length === 1;
+  return list.map((item) => ({
+    text: item.text,
+    title: single && edited !== "" ? edited : defaultTitle(item.text),
+  }));
+}
+
 /** 推荐用的记忆（都是节点 id） */
 export interface TargetMemory {
   /** 最近聚焦/聊到的节点，越靠前越新 */

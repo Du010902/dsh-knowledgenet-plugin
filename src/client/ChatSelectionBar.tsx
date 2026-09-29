@@ -17,15 +17,14 @@ import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { pickWorkspacePath } from "./workspace-path.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import {
-  appendSnippet,
   defaultTitle,
-  joinSnippets,
+  draftPrereqs,
   normalizeSnippet,
   readLastSessionId,
   recommendTargets,
   rememberId,
   MRU_KEY,
-  type Snippet,
+  type PrereqDraft,
   type StoredMemory,
 } from "./chat-selection.ts";
 import { notifyLibraryChanged, readCurrentContext, readLastWorkspacePath, readNodeTitle } from "./current-context.ts";
@@ -121,6 +120,8 @@ function ensureStyle(): void {
     "  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
     ".kn-pick-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
     ".kn-pick-item small { opacity: .6; }",
+    ".kn-draft-row { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }",
+    ".kn-draft-text { font-size: 11px; opacity: .6; word-break: break-all; }",
     ".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }",
   ].join("\n");
   document.head.append(style);
@@ -205,9 +206,8 @@ function domSessionOf(): string | null {
 }
 
 interface PickState {
-  snippets: Snippet[];
-  x: number;
-  y: number;
+  /** 每行一条草稿（标题可以在这里改） */
+  drafts: PrereqDraft[];
 }
 
 /**
@@ -216,14 +216,21 @@ interface PickState {
  * @returns portal 出去的小条与弹窗（没有划词时什么都不渲染）。
  */
 export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
-  const [snippets, setSnippets] = useState<Snippet[]>([]);
-  const [bar, setBar] = useState<{ x: number; y: number } | null>(null);
+  const [bar, setBar] = useState<{ x: number; y: number; text: string } | null>(null);
   const [picking, setPicking] = useState<PickState | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ id: string; title: string }>>([]);
   const [searching, setSearching] = useState(false);
-  const [title, setTitle] = useState("");
-  const [pendingCandidates, setPendingCandidates] = useState<{ fromId: string; typed: string; candidates: string[] } | null>(null);
+  /**
+   * 「相近候选」等用户决定时**挂起的队列**：第 `index` 条命中了候选，
+   * 用户决定后从 `index + 1` 继续 —— 多行时后面的行既不会被丢掉，也不会拿着同一个标题乱发 ✓。
+   */
+  const [pendingCandidates, setPendingCandidates] = useState<{
+    fromId: string;
+    queue: PrereqDraft[];
+    index: number;
+    candidates: string[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * 推荐项的标题：浮条拿不到图谱数据，而面板发布的标题表未必对得上会话（实测推荐只剩 id 前 8 位）。
@@ -319,7 +326,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       collecting.current = false;
       setMultiOpen(false);
       setMultiText("");
-      setSnippets([]);
       report("multi-cancel", "esc");
     };
     window.addEventListener("keydown", onKey);
@@ -376,26 +382,130 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   };
 
   /**
-   * 把弹窗里的**每一行各自建成一个节点** ✓，并都挂到同一个目标节点下（用户要求：一行为一个节点 ✓）。
+   * 把**一条草稿**真正写到某个目标节点下（一次请求）。
    *
-   * @param targetId - 目标节点 id（这些新节点都会成为它的前置 ✓）。
+   * 为什么返回结果而不是自己收尾：多行时一次要发 N 条请求，中途命中「相近候选」必须**停下来**
+   * 问用户 —— 否则后面的行会继续拿同一个标题乱发 ✗（旧实现就是一路发完 ✓）。
+   *
+   * @param fromId - 目标节点 id（A → B 里的 A）。
+   * @param draft - 原文 + 标题（**这条自己的标题**，不是界面上那个共用的标题 ✗）。
+   * @param create - true = 明确新建（跳过"相近候选先确认"）。
+   * @returns 三种结果：成功 / 命中相近候选 / 失败。
    */
-  const addLinesAsPrereq = async (targetId: string): Promise<void> => {
-    const texts = (picking?.snippets ?? []).map((item) => item.text).filter((text) => text.trim() !== "");
-    if (texts.length === 0) return;
-    for (const text of texts) await addTo(targetId, text, false);
-    report("prereq-create", `lines:${texts.length}`);
-    /*
-     * 建完就收工（用户要求 ✓）：
-     * ① 通知面板**刷新数据 + 重跑布局 + 重新取景** ✓（否则新节点落在视野外，只提示"按 F 返回" ✗）；
-     * ② 关掉弹窗 ✓。
-     */
-    notifyLibraryChanged();
-    collecting.current = false;
+  const postAdd = async (
+    fromId: string,
+    draft: PrereqDraft,
+    create: boolean,
+  ): Promise<{ kind: "ok"; created: boolean } | { kind: "candidates"; candidates: string[] } | { kind: "error"; message: string }> => {
+    report("add", { create, titleChars: draft.title.length });
+    /* 标题被清空时回落到默认标题 ✓（不然宿主会回一句"title 不能为空"，用户还得自己找回来 ✗） */
+    const nodeTitle = draft.title.trim() === "" ? defaultTitle(draft.text) : draft.title.trim();
+    try {
+      const response = await fetch(GRAPH_API_ROUTE, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ kind: "add-prerequisite", fromId, title: nodeTitle, snippet: draft.text, create }),
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        added?: { created?: boolean; candidates?: Array<{ title?: string }> };
+        error?: { message?: string };
+      };
+      if (body.ok !== true) {
+        report("add-failed", { message: body.error?.message ?? "" });
+        return { kind: "error", message: body.error?.message ?? props.copy.failed };
+      }
+      const candidates = (body.added?.candidates ?? []).map((item) => item.title ?? "").filter((item) => item !== "");
+      if (create !== true && candidates.length > 0) {
+        report("add-candidates", { count: candidates.length });
+        return { kind: "candidates", candidates };
+      }
+      report("add-done", { created: body.added?.created === true });
+      return { kind: "ok", created: body.added?.created === true };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      report("add-failed", { message: message.slice(0, 120) });
+      return { kind: "error", message };
+    }
+  };
+
+  /** 落地成功后记住这个目标（"最近被加过前置的节点"→下次优先推荐 ✓） */
+  const rememberTarget = (fromId: string): void => {
+    const memory = readMemory();
+    writeMemory({ recentFocus: memory.recentFocus, recentPrereqTargets: rememberId(memory.recentPrereqTargets, fromId) });
+  };
+
+  /** 队列全部落地后的收尾：通知面板刷新 + 关掉这一轮的所有界面 ✓ */
+  const finishQueue = (): void => {
+    setError(null);
     setPicking(null);
     setMultiOpen(false);
     setMultiText("");
-    setSnippets([]);
+    collecting.current = false;
+    setBar(null);
+    setQuery("");
+    setResults([]);
+    /* 通知面板**刷新数据 + 重跑布局 + 重新取景** ✓（否则新节点落在视野外 ✗） */
+    notifyLibraryChanged();
+  };
+
+  /**
+   * 依次落地队列里的草稿（从 `start` 开始），**把每一行各自建成一个节点** ✓。
+   *
+   * 两条关键纪律：
+   * - **逐条用自己的标题**（见 `draftPrereqs`）：旧实现把 N 行都塞进同一个标题 ✗
+   *   ⇒ 只有第一行真的建了点，其余行精确命中同一个节点、又被关系去重吃掉，**静默丢失** ✗；
+   * - 命中相近候选就**暂停**队列，把剩下的连 `index` 一起存进 `pendingCandidates` ✓
+   *   （用户决定复用/新建后从 `index + 1` 继续 ✓）。
+   *
+   * @param fromId - 目标节点 id。
+   * @param queue - 草稿队列。
+   * @param start - 从第几条开始（恢复时用）。
+   */
+  const runQueue = async (fromId: string, queue: readonly PrereqDraft[], start: number): Promise<void> => {
+    for (let index = start; index < queue.length; index += 1) {
+      const outcome = await postAdd(fromId, queue[index], false);
+      if (outcome.kind === "candidates") {
+        setPendingCandidates({ fromId, queue: [...queue], index, candidates: outcome.candidates });
+        return;
+      }
+      if (outcome.kind === "error") {
+        setError(outcome.message);
+        return;
+      }
+    }
+    rememberTarget(fromId);
+    report("prereq-create", `lines:${queue.length - start}`);
+    finishQueue();
+  };
+
+  /**
+   * 用户对「相近候选」的决定：复用某个候选（create=false）或坚持新建（create=true），
+   * 然后把挂起的队列跑完 ✓。
+   *
+   * 为什么必须**显式传标题**：旧实现在对话框里 `setTitle(target)` 之后立刻调 `addTo`，
+   * 而 `addTo` 读的是**这次渲染闭包里的旧标题** ✗ ⇒ 「复用」发出去的还是原来那个标题
+   * ⇒ 又命中同一批候选 ⇒ 对话框再次弹出，**点几次都不动**（死循环 ✓）。
+   *
+   * @param nodeTitle - 这条草稿最终要用的标题。
+   * @param create - true = 坚持新建。
+   */
+  const resolveCandidate = async (nodeTitle: string, create: boolean): Promise<void> => {
+    const pending = pendingCandidates;
+    if (pending === null) return;
+    setPendingCandidates(null);
+    const draft: PrereqDraft = { ...pending.queue[pending.index], title: nodeTitle };
+    const outcome = await postAdd(pending.fromId, draft, create);
+    if (outcome.kind === "error") {
+      setError(outcome.message);
+      return;
+    }
+    if (outcome.kind === "candidates") {
+      setPendingCandidates({ ...pending, candidates: outcome.candidates });
+      return;
+    }
+    await runQueue(pending.fromId, pending.queue, pending.index + 1);
   };
 
   /**
@@ -657,7 +767,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         const selection = window.getSelection();
         if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return { ok: false, reason: "no-selection" };
         const text = normalizeSnippet(selection.toString());
-        if (text.length < 2) return { ok: false, reason: "too-short" };
+        /* 单字也算数：中文里「熵 / 场 / 秩」这种一个字的考点是正常输入 ✓（只有空选区才拒绝） */
+        if (text.length === 0) return { ok: false, reason: "too-short" };
         const target = selection.anchorNode;
         const element = target === null ? null : (target.nodeType === 1 ? (target as Element) : target.parentElement);
         // 输入框里的选择不算（那是用户在编辑自己的话）
@@ -770,7 +881,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
        */
       // 记下浮条属于哪个「会话|工作区」✓ —— 之后只要这个作用域变了就收起（切换会话/仓库 ✓）
       barScopeRef.current = `${domSessionId() ?? ""}|${domWorkspacePath()}`;
-      setBar({ x: info.x, y: info.y });
+      setBar({ x: info.x, y: info.y, text: info.text });
         setNote(null);
         report("bar-shown", { chars: info.text.length });
     };
@@ -874,6 +985,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   /** 推荐项显示用：优先自己补的标题 → 发布/缓存 → id */
   const labelOf = (id: string): string => resolvedTitles[id] ?? titleOf(id);
 
+  /** 从选择弹窗的状态里取草稿（回调里 TS 收窄不了 `picking`，所以单独抽一个空安全的读取） */
+  const draftsOf = (state: PickState | null): PrereqDraft[] => state?.drafts ?? [];
+
   /** 调宿主：搜索可选目标节点 */
   const doSearch = async (text: string): Promise<void> => {
     if (text.trim() === "") {
@@ -895,46 +1009,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       setResults([]);
     } finally {
       setSearching(false);
-    }
-  };
-
-  /** 调宿主：把这段原文挂到某个节点下 */
-  const addTo = async (fromId: string, snippetText: string, create: boolean): Promise<void> => {
-    report("add", { create });
-    try {
-      const response = await fetch(GRAPH_API_ROUTE, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ kind: "add-prerequisite", fromId, title, snippet: snippetText, create }),
-      });
-      const body = (await response.json()) as {
-        ok?: boolean;
-        added?: { created?: boolean; candidates?: Array<{ title?: string }> };
-        error?: { message?: string };
-      };
-      if (body.ok !== true) {
-        setError(body.error?.message ?? props.copy.failed);
-        report("add-failed", { message: body.error?.message ?? "" });
-        return;
-      }
-      const candidates = (body.added?.candidates ?? []).map((item) => item.title ?? "").filter((item) => item !== "");
-      if (create !== true && candidates.length > 0) {
-        setPendingCandidates({ fromId, typed: title, candidates });
-        return;
-      }
-      // 成功：把目标记进 MRU（"最近被加过前置的节点"）
-      const memory = readMemory();
-      writeMemory({ recentFocus: memory.recentFocus, recentPrereqTargets: rememberId(memory.recentPrereqTargets, fromId) });
-      report("add-done", { created: body.added?.created === true });
-      setPicking(null);
-      setSnippets([]);
-      collecting.current = false;
-      setBar(null);
-      setQuery("");
-      setResults([]);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -966,11 +1040,23 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           <button
             type="button"
             className="kn-sel-primary"
+            /*
+             * **按下时不许动选区** ✗→✓：浏览器默认会在 mousedown 时把选区收掉
+             * ⇒ 取消默认行为后，点击那一刻 `getSelection()` 还读得到原文 ✓，
+             * 浮条也不会因为 selectionchange 先把自己收掉（表现为"点了没反应" ✗）。
+             */
+            onMouseDown={(event) => { event.preventDefault(); }}
             onClick={() => {
-              const text = normalizeSnippet(window.getSelection()?.toString() ?? "").trim();
+              /*
+               * 现读选区优先；**读不到就回落到浮条弹出时记下的原文** ✓
+               * （旧实现只现读 ⇒ 选区一旦被清掉就 `return`，用户看到的就是"点了没反应" ✗）。
+               */
+              const live = normalizeSnippet(window.getSelection()?.toString() ?? "").trim();
+              const text = live === "" ? bar.text : live;
               if (text === "") return;
               setMultiText(text);
               setNote(null);
+              setError(null);
               collecting.current = true;
               setMultiOpen(true);
               setBar(null);
@@ -1024,11 +1110,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 title={knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「添加为独立节点」建一个" : undefined}
                 onClick={() => {
                   const lines = multiLines(multiText);
-                  const list = lines.reduce<ReturnType<typeof appendSnippet>>((acc, line) => appendSnippet(acc, line), []);
+                  /* 一行为一个节点，**每行各自的标题**（多行时共用一个标题会把后面的行静默丢掉 ✗） */
+                  const list = draftPrereqs(lines);
+                  if (list.length === 0) return;
                   collecting.current = false;
                   setMultiOpen(false);
-                  setPicking({ snippets: list, x: 0, y: 0 });
-                  setTitle(defaultTitle(lines[0] ?? ""));
+                  setError(null);
+                  setPicking({ drafts: list });
                   report("open-picker", { count: list.length, from: "multi-modal" });
                   void hydrateTitles(recommended);
                 }}
@@ -1060,7 +1148,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                       collecting.current = false;
                       setMultiOpen(false);
                       setMultiText("");
-                      setSnippets([]);
                     } else {
                       // 全失败：保留弹窗与文本，让用户看到原因后直接重试 ✓
                       setNote(`创建失败：0/${lines.length} 个成功`);
@@ -1077,7 +1164,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   collecting.current = false;
                   setMultiOpen(false);
                   setMultiText("");
-                  setSnippets([]);
                   report("multi-cancel", null);
                 }}
               >
@@ -1101,7 +1187,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 <div className="kn-pick-section">{props.copy.recommended}</div>
                 <div className="kn-pick-targets">
                   {recommended.map((id) => (
-                    <button key={id} type="button" className="kn-pick-item" onClick={() => { void addLinesAsPrereq(id); }}>
+                    <button key={id} type="button" className="kn-pick-item" onClick={() => { void runQueue(id, draftsOf(picking), 0); }}>
                       <span>{labelOf(id)}</span>
                     </button>
                   ))}
@@ -1123,14 +1209,34 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
             {!searching && query.trim() !== "" && results.length === 0 ? <div className="kn-modal-hint">{props.copy.noResult}</div> : null}
             <div className="kn-pick-targets">
               {results.map((node) => (
-                <button key={node.id} type="button" className="kn-pick-item" onClick={() => { void addLinesAsPrereq(node.id); }}>
+                <button key={node.id} type="button" className="kn-pick-item" onClick={() => { void runQueue(node.id, draftsOf(picking), 0); }}>
                   <span>{node.title}</span>
                 </button>
               ))}
             </div>
 
+            {/*
+              * 标题：**每一条草稿一个输入框** ✓。
+              * 旧实现只有一个输入框，多行时所有行都用它 ⇒ 第 1 行建点、其余行精确命中同一个节点
+              * 又被关系去重吃掉 ⇒ 静默丢失 ✗。多行时同时显示原文，方便对照修改 ✓。
+              */}
             <div className="kn-pick-section">{props.copy.titleLabel}</div>
-            <input className="kn-modal-input" value={title} onChange={(event) => { setTitle(event.target.value); }} />
+            {picking.drafts.map((draft, index) => (
+              <div className="kn-draft-row" key={`${index}:${draft.text.slice(0, 24)}`}>
+                <input
+                  className="kn-modal-input"
+                  value={draft.title}
+                  aria-label={draft.text.slice(0, 40)}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setPicking((prev) => prev === null ? null : {
+                      drafts: prev.drafts.map((item, i) => (i === index ? { ...item, title: value } : item)),
+                    });
+                  }}
+                />
+                {picking.drafts.length > 1 ? <span className="kn-draft-text">{draft.text.slice(0, 40)}</span> : null}
+              </div>
+            ))}
 
             <div className="kn-modal-actions">
               <button type="button" className="kn-modal-btn" onClick={() => { setPicking(null); }}>{props.copy.cancel}</button>
@@ -1147,20 +1253,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           message={`${props.copy.candidatesMessage}：${pendingCandidates.candidates.join("、")}`}
           confirmLabel={`${props.copy.reuse}「${pendingCandidates.candidates[0]}」`}
           cancelLabel={props.copy.createAnyway}
-          onConfirm={() => {
-            const target = pendingCandidates.candidates[0] ?? "";
-            const fromId = pendingCandidates.fromId;
-            setPendingCandidates(null);
-            setTitle(target);
-            void addTo(fromId, joinSnippets(snippets), false);
-          }}
-          onCancel={() => {
-            const fromId = pendingCandidates.fromId;
-            const typed = pendingCandidates.typed;
-            setPendingCandidates(null);
-            setTitle(typed);
-            void addTo(fromId, joinSnippets(snippets), true);
-          }}
+          /* 决定后由 `resolveCandidate` 用**显式标题**重发，并从下一条继续 ✓（不再读闭包里的旧标题 ✗） */
+          onConfirm={() => { void resolveCandidate(pendingCandidates.candidates[0] ?? "", false); }}
+          onCancel={() => { void resolveCandidate(pendingCandidates.queue[pendingCandidates.index]?.title ?? "", true); }}
         />
       )}
     </>

@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 import {
   appendSnippet,
   defaultTitle,
+  draftPrereqs,
   joinSnippets,
   MAX_SNIPPETS,
   normalizeSnippet,
@@ -94,6 +95,35 @@ describe("目标节点推荐", () => {
   it("非法值被忽略（脏 localStorage 不炸）", () => {
     const out = recommendTargets({ current: "  ", recentFocus: ["", "ok"] });
     assert.deepEqual(out, ["ok"]);
+  });
+});
+
+describe("多行 → 每条各自的标题（回归：曾把所有行建成同一个节点）", () => {
+  it("多行时每行用自己的默认标题", () => {
+    const drafts = draftPrereqs(["注意力机制", "自注意力，一种把序列内部关联起来的机制", "   "]);
+    assert.deepEqual(drafts.map((d) => d.text), ["注意力机制", "自注意力，一种把序列内部关联起来的机制"]);
+    assert.deepEqual(drafts.map((d) => d.title), ["注意力机制", "自注意力"]);
+  });
+
+  it("多行时**忽略**那个共用的标题输入框（用它就是旧的静默丢行 bug）", () => {
+    const drafts = draftPrereqs(["甲概念", "乙概念"], "同一个标题");
+    assert.deepEqual(drafts.map((d) => d.title), ["甲概念", "乙概念"]);
+  });
+
+  it("单行才用用户改过的标题；空标题回落到默认标题", () => {
+    assert.deepEqual(draftPrereqs(["信噪比，是信号与噪声的比值"], "SNR").map((d) => d.title), ["SNR"]);
+    assert.deepEqual(draftPrereqs(["信噪比，是信号与噪声的比值"], "   ").map((d) => d.title), ["信噪比"]);
+    assert.deepEqual(draftPrereqs(["信噪比，是信号与噪声的比值"], null).map((d) => d.title), ["信噪比"]);
+  });
+
+  it("重复行只算一条；超过上限就截断", () => {
+    assert.deepEqual(draftPrereqs(["甲", " 甲 ", "乙"]).map((d) => d.text), ["甲", "乙"]);
+    const many = draftPrereqs(Array.from({ length: MAX_SNIPPETS + 3 }, (_, i) => `概念${i}`));
+    assert.equal(many.length, MAX_SNIPPETS);
+  });
+
+  it("空输入 → 空队列（调用方据此不发请求）", () => {
+    assert.deepEqual(draftPrereqs(["", "   ", "\n"]), []);
   });
 });
 
