@@ -20,6 +20,7 @@ import {
   defaultTitle,
   draftPrereqs,
   keepKnownTargets,
+  MAX_SNIPPETS,
   normalizeSnippet,
   readLastSessionId,
   recommendTargets,
@@ -43,6 +44,14 @@ export interface ChatSelectionBarProps {
     multiTitle?: string;
     multiPlaceholder?: string;
     multiCount?: (count: number) => string;
+    /** 可选：收集弹窗的副标题 */
+    multiSubtitle?: string;
+    /** 可选：「被添加的知识点」标签 */
+    multiLabel?: string;
+    /** 可选：标签组右侧的说明（点击标签可修改名称） */
+    multiHint?: string;
+    /** 可选：标签组下方的说明（一个标签 = 一个知识点） */
+    multiDetails?: string;
     multi: string;
     selected: (count: number) => string;
     done: string;
@@ -98,29 +107,13 @@ function ensureStyle(): void {
   if (typeof document === "undefined") return;
   const rules = [
     /*
-     * 多选弹窗（用户要求）：浮条是 root 作用域，拿不到面板的 `.kn-modal*` 样式 ⇒ 自带一份 ✓。
+     * 浮条与它的遮罩：浮条是 root 作用域，拿不到面板的 `.kn-modal*` 样式 ⇒ 自带一份 ✓。
      * 遮罩 z-index 要高于浮条（10001）与菜单（10002）✓。
+     * （弹窗本体已改成设计稿的 `.kn-pick-dialog` 系列，旧的 `.kn-sel-modal*` / 文本框样式已删 ✓）
      */
     ".kn-sel-mask {",
     "  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
     "  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
-    ".kn-sel-modal {",
-    "  pointer-events: auto;",
-    "  width: min(560px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 10px;",
-    "  padding: 14px 16px; border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);",
-    "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523); }",
-    ".kn-sel-modal-title { font-size: 13px; font-weight: 600; }",
-    ".kn-sel-textarea {",
-    "  width: 100%; min-height: 148px; resize: vertical; box-sizing: border-box;",
-    "  font: inherit; font-size: 13px; line-height: 1.6; padding: 10px 12px; border-radius: 8px;",
-    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); background: var(--dsw-alias-bg-layer-2, #ffffff); color: inherit; }",
-    ".kn-sel-modal-hint { font-size: 12px; opacity: 0.65; }",
-    ".kn-sel-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }",
-    ".kn-sel-modal-actions button {",
-    "  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;",
-    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); background: transparent; color: inherit; }",
-    ".kn-sel-modal-actions button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06)); }",
-    ".kn-sel-modal-actions button:disabled { opacity: 0.5; cursor: default; }",
     ".kn-sel-bar {",
     "  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
     "  padding: 4px 6px; border-radius: 999px;",
@@ -133,21 +126,39 @@ function ensureStyle(): void {
     "  font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; }",
     ".kn-sel-bar button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
     ".kn-sel-bar .kn-sel-primary { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); font-weight: 600; }",
-    ".kn-sel-count { padding: 0 4px; opacity: .75; }",
-    ".kn-pick-targets { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; max-height: 240px; overflow: auto; }",
-    ".kn-pick-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px;",
-    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 9px;",
-    "  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
-    ".kn-pick-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
-    ".kn-pick-item small { opacity: .6; }",
-    ".kn-draft-row { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }",
-    ".kn-draft-text { font-size: 11px; opacity: .6; word-break: break-all; }",
+    /*
+     * 「收集知识点」弹窗的标签组（形态照设计稿 `knowledgenet-multiselect-design.html`）：
+     * 一个 chip = 一个待建的知识点，chip 内可改名、× 可删；末尾一个输入框负责新增 ✓。
+     * 弹窗外壳复用上面那套 `.kn-pick-*`（同一个设计语言，两处弹窗共用 ✓）。
+     */
+    ".kn-ms-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }",
+    ".kn-ms-label-row .kn-pick-label { margin: 0; }",
+    ".kn-ms-hint { font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-ms-composer { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 7px; min-height: 90px; padding: 10px; box-sizing: border-box;",
+    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
+    ".kn-ms-composer:focus-within { border-color: #819b91; }",
+    ".kn-ms-chip { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; min-height: 30px; padding: 0 5px 0 10px;",
+    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-2, #ffffff); color: inherit; }",
+    ".kn-ms-chip input { padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
+    ".kn-ms-remove { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;",
+    "  background: transparent; color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 16px; line-height: 1; cursor: pointer; }",
+    ".kn-ms-remove:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); color: inherit; }",
+    ".kn-ms-new { flex: 1 1 190px; min-width: 120px; height: 30px; padding: 0 5px; border: 0; outline: 0;",
+    "  background: transparent; color: inherit; font: inherit; }",
+    ".kn-ms-new::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-ms-note { margin-top: 8px; font-size: 12px; }",
     /*
      * 「设为前置」弹窗（形态照设计稿 `knowledgenet-picker-design.html`）：
      * 头部 / 内容 / 底部三段，全出血分隔线；字段与结果行都走宿主 token，亮暗主题自动跟随 ✓。
      */
     ".kn-pick-dialog {",
     "  box-sizing: border-box; width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto;",
+    /*
+     * **必须显式 `pointer-events: auto`**：收集弹窗的遮罩是 `pointer-events: none`（这样还能继续在对话里划词 ✓），
+     * 子元素不打开指针事件的话整个弹窗都点不动 ✗（旧 `.kn-sel-modal` 就带着这一条，重构时容易漏）。
+     */
+    "  pointer-events: auto;",
     "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 12px;",
     "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523);",
     "  box-shadow: 0 22px 64px rgba(0, 0, 0, .35); font-size: 13px; line-height: 1.5; }",
@@ -410,8 +421,15 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const [note, setNote] = useState<string | null>(null);
   /** 多选弹窗是否打开 */
   const [multiOpen, setMultiOpen] = useState(false);
-  /** 多选弹窗里的文本：**每一块选中的文字占一行** ✓ */
-  const [multiText, setMultiText] = useState("");
+  /**
+   * 多选弹窗里的**标签**：一个标签 = 一个待建的知识点 ✓
+   * （设计稿：chip 组 + 末尾一个可输入的新标签，Enter/粘贴多行追加、退格删最后一个 ✓）。
+   */
+  const [chips, setChips] = useState<string[]>([]);
+  /** 末尾输入框里正在敲的新标签 */
+  const [newName, setNewName] = useState("");
+  /** 「创建独立节点」正在跑：避免连点建出重复节点 ✗ */
+  const busyRef = useRef(false);
   /** 作用域刚变过：此刻不允许再弹浮条（等下一次真正的按下 ✓）—— 彻底消除"一闪" ✓ */
   const suppressBarRef = useRef(false);
   /** 已知的节点数量：-1 表示"还不知道"（不改按钮状态，避免误灰 ✓）；0 表示库是空的 ✓ */
@@ -432,9 +450,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     if (!multiOpen) return undefined;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
-      collecting.current = false;
-      setMultiOpen(false);
-      setMultiText("");
+      closeMulti();
       report("multi-cancel", "esc");
     };
     window.addEventListener("keydown", onKey);
@@ -477,17 +493,33 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     window.addEventListener("mouseup", onUp);
   };
 
-  /** 从多选文本里取出有效行（去空行、去重 ✓） */
-  const multiLines = (text: string): string[] => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const raw of text.split("\n")) {
-      const line = raw.trim();
-      if (line === "" || seen.has(line)) continue;
-      seen.add(line);
-      out.push(line);
+  /**
+   * 把一段（可能多行的）文本追加成标签：去空行、去重、有上限（`MAX_SNIPPETS`）✓。
+   *
+   * 为什么在**标签层**就去重和截断：`draftPrereqs` 也会做一次，但那是在"确定添加"之后 ——
+   * 界面上看得见的标签和被创建的节点必须一一对应，不能"显示 12 个、只建 8 个" ✗。
+   *
+   * @param current - 现有标签。
+   * @param raw - 新文本（可含换行 ⇒ 一次加多个）。
+   * @returns 新数组（不修改入参）。
+   */
+  const appendChips = (current: readonly string[], raw: string): string[] => {
+    const next = [...current];
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim();
+      if (text === "" || next.includes(text)) continue;
+      if (next.length >= MAX_SNIPPETS) break;
+      next.push(text);
     }
-    return out;
+    return next;
+  };
+
+  /** 关掉多选弹窗（顺带清空标签与输入框 ✓） */
+  const closeMulti = (): void => {
+    collecting.current = false;
+    setMultiOpen(false);
+    setChips([]);
+    setNewName("");
   };
 
   /**
@@ -566,7 +598,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     setPicking(null);
     setSelectedTarget(null);
     setMultiOpen(false);
-    setMultiText("");
+    setChips([]);
+    setNewName("");
     collecting.current = false;
     setBar(null);
     setQuery("");
@@ -942,18 +975,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         return;
       }
       /*
-       * **弹窗已开**：每选一块就往文本框里追加一行 ✓（用户要求：一行为一个节点 ✓）。
+       * **弹窗已开**：每选一块就追加一个标签 ✓（设计稿：继续划词自动追加 ✓）。
        * 不做门禁、不打宿主 —— 弹窗已经开着，目标在打开时就解析过 ✓。
        */
       if (collecting.current) {
         const text = info.text.trim();
         if (text === "") return;
-        setMultiText((current) => {
-          // 同一块文字只留一行 ✓（避免重复划同一段时堆积 ✓）
-          const existing = current.split("\n").map((line) => line.trim());
-          if (existing.includes(text)) return current;
-          return current.trim() === "" ? text : `${current.replace(/\n+$/, "")}\n${text}`;
-        });
+        setChips((current) => appendChips(current, text));
         report("multi-append-line", { chars: text.length });
         return;
       }
@@ -1200,6 +1228,49 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     ? recommended.map((id) => ({ id, title: labelOf(id) }))
     : results;
 
+  /** 「添加为前置…」：把标签变成草稿，打开「添加为谁的前置」弹窗 ✓ */
+  const openPickerFromChips = (): void => {
+    const list = draftPrereqs(chips);
+    if (list.length === 0) return;
+    collecting.current = false;
+    setMultiOpen(false);
+    setError(null);
+    setPicking({ drafts: list });
+    setSelectedTarget(null);
+    /* 先把"当前库有哪些节点"读回来（`null` 期间一个推荐都不显示 ✓） */
+    setLibraryTitles(null);
+    void loadLibraryNodes();
+    report("open-picker", { count: list.length, from: "multi-modal" });
+  };
+
+  /**
+   * 「创建独立节点」：逐个建，**提示留在弹窗里**（先建、后关 ✗→✓：关闭后再报错就是"点了没反应" ✗）；
+   * 只有**至少成功一个**才清空并关窗 ✓。`busyRef` 兜住连点，避免建出重复节点 ✗。
+   */
+  const createStandaloneAll = (): void => {
+    if (busyRef.current) return;
+    const list = [...chips];
+    if (list.length === 0) return;
+    busyRef.current = true;
+    void (async () => {
+      let ok = 0;
+      try {
+        for (const name of list) {
+          if (await createStandalone(name)) ok += 1;
+        }
+      } finally {
+        busyRef.current = false;
+      }
+      if (ok > 0) {
+        notifyLibraryChanged();
+        closeMulti();
+      } else {
+        setNote(`创建失败：0/${list.length} 个成功`);
+      }
+      report("standalone-create", `multi:${ok}/${list.length}`);
+    })();
+  };
+
   return (
     <>
       {/*
@@ -1225,7 +1296,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
               const live = normalizeSnippet(window.getSelection()?.toString() ?? "").trim();
               const text = live === "" ? bar.text : live;
               if (text === "") return;
-              setMultiText(text);
+              /* 打开弹窗：当前这段文字就是第一个标签 ✓（之后继续划词会往后追加 ✓） */
+              setChips(appendChips([], text));
+              setNewName("");
               setNote(null);
               setError(null);
               collecting.current = true;
@@ -1241,111 +1314,132 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       )}
 
       {/*
-        * **文本框弹窗**：第一次划词（经浮条）打开 ✓，之后每选中一块文字自动追加**单独一行** ✓
-        * （**一行为一个节点** ✓）；底部三个按钮：创建前置节点 / 创建独立节点 / 取消 ✓。
+        * **收集知识点弹窗**（浮条点开后出现）：形态按设计稿 `knowledgenet-multiselect-design.html` ✓
+        * —— 头部（可拖动）→ 「被添加的知识点」标签组 + 末尾新标签输入框 → 说明 → 底部计数与三个动作。
+        * 之后每在对话里划一块文字，就自动追加一个标签 ✓（一个标签 = 一个节点）。
         */}
       {multiOpen ? createPortal(
         <div className="kn-sel-mask" role="presentation">
           <div
-            className="kn-sel-modal"
+            className="kn-pick-dialog"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="kn-ms-title"
             style={multiPos === null ? undefined : { position: "fixed", left: multiPos.x, top: multiPos.y, margin: 0 }}
           >
             <div
-              className="kn-sel-modal-title"
+              className="kn-pick-head"
               style={{ cursor: "move", userSelect: "none" }}
               onMouseDown={startDragMulti}
               title="按住拖动可以把它挪开，方便继续在对话里选文字"
             >
-              {props.copy.multiTitle ?? "多选：每一块文字占一行"}
+              <div className="kn-pick-title" id="kn-ms-title">{props.copy.multiTitle ?? "收集知识点"}</div>
+              <div className="kn-pick-subtitle">
+                {props.copy.multiSubtitle ?? "继续在对话中划词会自动追加，也可以在这里输入"}
+              </div>
             </div>
-            <textarea
-              className="kn-sel-textarea"
-              value={multiText}
-              rows={8}
-              spellCheck={false}
-              onChange={(event) => { setMultiText(event.target.value); }}
-              placeholder={props.copy.multiPlaceholder ?? "在对话里继续划词，会自动追加到下一行；也可以直接在这里编辑"}
-            />
-            {note !== null ? <div className="kn-sel-modal-hint" style={{ opacity: 1 }}>{note}</div> : null}
-            <div className="kn-sel-modal-hint">
-              {props.copy.multiCount ? props.copy.multiCount(multiLines(multiText).length) : `共 ${multiLines(multiText).length} 行`}
+
+            <div className="kn-pick-content">
+              <div className="kn-ms-label-row">
+                <span className="kn-pick-label">{props.copy.multiLabel ?? "被添加的知识点"}</span>
+                <span className="kn-ms-hint">{props.copy.multiHint ?? "点击标签可修改名称"}</span>
+              </div>
+
+              <div className="kn-ms-composer">
+                {chips.map((name, index) => (
+                  /*
+                   * key 只用 index：**别把内容拼进 key** —— 内容一变 key 就变，React 会重挂输入框，
+                   * 打字打到一半就丢焦点 ✗（输入框是受控的，按 index 复用 DOM 是正确的 ✓）。
+                   */
+                  <span className="kn-ms-chip" key={index}>
+                    <input
+                      value={name}
+                      aria-label={`第 ${index + 1} 个知识点名称`}
+                      /* 宽度跟着内容走（设计稿的做法 ✓），长标题最多 300px */
+                      style={{ width: Math.min(300, Math.max(24, name.length * 14 + 8)) }}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setChips((current) => current.map((item, i) => (i === index ? value : item)));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="kn-ms-remove"
+                      aria-label={`移除 ${name}`}
+                      /* 按下别动选区/焦点，免得删一个标签就把对话里的选区弄没 ✓ */
+                      onMouseDown={(event) => { event.preventDefault(); }}
+                      onClick={() => { setChips((current) => current.filter((_, i) => i !== index)); }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <input
+                  className="kn-ms-new"
+                  value={newName}
+                  placeholder={props.copy.multiPlaceholder ?? "输入后按 Enter 添加，或粘贴多行"}
+                  aria-label="添加知识点"
+                  onChange={(event) => { setNewName(event.target.value); }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      setChips((current) => appendChips(current, newName));
+                      setNewName("");
+                      return;
+                    }
+                    /* 空输入时退格删掉最后一个标签（设计稿 ✓） */
+                    if (event.key === "Backspace" && newName === "") {
+                      setChips((current) => (current.length === 0 ? current : current.slice(0, -1)));
+                    }
+                  }}
+                  onPaste={(event) => {
+                    /* 粘贴多行 = 一次加多个 ✓；单行交给默认行为（用户可能只想编辑文字） */
+                    const text = event.clipboardData.getData("text");
+                    if (!/\r|\n/.test(text)) return;
+                    event.preventDefault();
+                    setChips((current) => appendChips(current, text));
+                    setNewName("");
+                  }}
+                />
+              </div>
+
+              <div className="kn-ms-details">
+                {props.copy.multiDetails ?? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁"}
+              </div>
+              {note === null ? null : <div className="kn-ms-note" style={{ opacity: 1 }}>{note}</div>}
             </div>
-            <div className="kn-sel-modal-actions">
-              <button
-                type="button"
-                className="kn-sel-primary"
-                /* 空库（已知节点数为 0）时置灰 ✓；未知(-1)时保持可点 ✓（避免误灰 ✓） */
-                disabled={multiLines(multiText).length === 0 || knownNodeCountRef.current === 0}
-                title={knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「添加为独立节点」建一个" : undefined}
-                onClick={() => {
-                  const lines = multiLines(multiText);
-                  /* 一行为一个节点，**每行各自的标题**（多行时共用一个标题会把后面的行静默丢掉 ✗） */
-                  const list = draftPrereqs(lines);
-                  if (list.length === 0) return;
-                  collecting.current = false;
-                  setMultiOpen(false);
-                  setError(null);
-                  setPicking({ drafts: list });
-                  setSelectedTarget(null);
-                  /*
-                   * **先把"当前库有哪些节点"读回来**（`null` 期间一个推荐都不显示 ✓）：
-                   * 推荐项必须是本库真实存在的节点，否则点下去只会得到"找不到节点" ✗。
-                   */
-                  setLibraryTitles(null);
-                  void loadLibraryNodes();
-                  report("open-picker", { count: list.length, from: "multi-modal" });
-                }}
-              >
-                添加为前置
-              </button>
-              <button
-                type="button"
-                disabled={multiLines(multiText).length === 0}
-                onClick={() => {
-                  const lines = multiLines(multiText);
-                  /*
-                   * **先建、后关** ✗→✓：之前先关弹窗再创建 ⇒ 失败提示落在已关闭的界面上 ✗
-                   * ⇒ 用户看到的就是"点了没反应"（真实反馈 ✓）。
-                   * 现在提示留在弹窗里；只有**至少成功一个**才清空文本、继续下一批 ✓。
-                   */
-                  void (async () => {
-                    let ok = 0;
-                    for (const line of lines) {
-                      if (await createStandalone(line)) ok += 1;
-                    }
-                    if (ok > 0) {
-                      /*
-                       * 建完就收工（用户要求 ✓）：
-                       * ① 通知面板**刷新数据 + 重跑布局 + 重新取景** ✓（新节点必须在视野里 ✓）；
-                       * ② **关掉弹窗** ✓（不再让用户手动点取消）。
-                       */
-                      notifyLibraryChanged();
-                      collecting.current = false;
-                      setMultiOpen(false);
-                      setMultiText("");
-                    } else {
-                      // 全失败：保留弹窗与文本，让用户看到原因后直接重试 ✓
-                      setNote(`创建失败：0/${lines.length} 个成功`);
-                    }
-                    report("standalone-create", `multi:${ok}/${lines.length}`);
-                  })();
-                }}
-              >
-                添加为独立节点
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  collecting.current = false;
-                  setMultiOpen(false);
-                  setMultiText("");
-                  report("multi-cancel", null);
-                }}
-              >
-                取消
-              </button>
+
+            <div className="kn-pick-foot">
+              <div className="kn-pick-status">
+                {props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`}
+              </div>
+              <div className="kn-pick-actions">
+                <button
+                  type="button"
+                  className="kn-pick-btn"
+                  onClick={() => { closeMulti(); report("multi-cancel", null); }}
+                >
+                  {props.copy.cancel}
+                </button>
+                <button
+                  type="button"
+                  className="kn-pick-btn"
+                  disabled={chips.length === 0}
+                  onClick={createStandaloneAll}
+                >
+                  {props.copy.addStandalone ?? "创建独立节点"}
+                </button>
+                <button
+                  type="button"
+                  className="kn-pick-btn is-primary"
+                  /* 空库（已知节点数为 0）时置灰 ✓；未知(-1)时保持可点 ✓（避免误灰 ✓） */
+                  disabled={chips.length === 0 || knownNodeCountRef.current === 0}
+                  title={knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「创建独立节点」建一个" : undefined}
+                  onClick={openPickerFromChips}
+                >
+                  {props.copy.addPrereq ?? "添加为前置…"}
+                </button>
+              </div>
             </div>
           </div>
         </div>,

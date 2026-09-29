@@ -96,6 +96,31 @@ describe("划词添加前置：三条回归的守门", () => {
     assert.ok(/display: flex[\s\S]{0,160}gap: 8/.test(code), "搜索框外层要是一行 flex（图标 + 输入框）");
   });
 
+  /*
+   * 「收集知识点」弹窗（点浮条后出现的那个）形态按设计稿 `knowledgenet-multiselect-design.html`：
+   * 头部可拖动 → 标签组（可改名、可 × 删除）→ 末尾输入框（Enter / 粘贴多行 / 退格删最后一个）
+   * → 说明一行 → 底部计数与三个动作。
+   */
+  it("「收集知识点」弹窗保持设计稿的形态与交互", () => {
+    for (const token of ["kn-ms-composer", "kn-ms-chip", "kn-ms-remove", "kn-ms-new", "kn-pick-foot"]) {
+      assert.ok(code.includes(token), `设计稿元素缺失：${token}`);
+    }
+    assert.ok(code.includes('event.key === "Enter"'), "Enter 添加标签");
+    assert.ok(code.includes("onPaste"), "粘贴多行要一次加多个标签");
+    assert.ok(code.includes('event.key === "Backspace"'), "空输入时退格删掉最后一个标签");
+    assert.ok(code.includes("multiCount"), "底部要显示「N 个知识点」");
+    assert.ok(code.includes("appendChips("), "标签追加要走去重 + 上限那套逻辑");
+    assert.equal(code.includes("kn-sel-textarea"), false, "旧的 textarea 形态必须撤掉（连样式一起）");
+    /*
+     * 收集弹窗的遮罩是 `pointer-events: none`（这样还能继续在对话里划词 ✓），
+     * 所以弹窗本体必须**显式**打开指针事件 —— 漏了就是"整个弹窗点不动" ✗（旧 `.kn-sel-modal` 靠它救着）。
+     */
+    assert.ok(
+      /kn-pick-dialog \{[\s\S]{0,400}pointer-events: auto/.test(code),
+      "弹窗本体必须显式 pointer-events: auto，否则按钮和标签全都点不动",
+    );
+  });
+
   it("注入的样式表必须跟着这一版走（热更新不能留下上一版的 <style>）", () => {
     /*
      * 实测 ✗：插件重新安装后页面没有整体刷新，上一版留在 head 里的 `<style id="knowledgenet-selection-style">`

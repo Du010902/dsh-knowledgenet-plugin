@@ -150,11 +150,23 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
 
   // 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）
   registerChatSelectionBar(ctx as never, {
-    addPrereq: zh ? "添加前置" : "Add prerequisite",
+    addPrereq: zh ? "添加为前置…" : "Add as prerequisite…",
     multi: zh ? "多选" : "Multi-select",
     selected: (count: number) => (zh ? `已选 ${count} 段` : `${count} selected`),
     done: zh ? "完成" : "Done",
     cancel: zh ? "取消" : "Cancel",
+    multiTitle: zh ? "收集知识点" : "Collect nodes",
+    multiSubtitle: zh
+      ? "继续在对话中划词会自动追加，也可以在这里输入"
+      : "Keep selecting text in the chat to append — or type here",
+    multiLabel: zh ? "被添加的知识点" : "Nodes to add",
+    multiHint: zh ? "点击标签可修改名称" : "Click a tag to rename it",
+    multiPlaceholder: zh ? "输入后按 Enter 添加，或粘贴多行" : "Type and press Enter, or paste multiple lines",
+    multiDetails: zh
+      ? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁"
+      : "Each tag becomes a node. Pick “Add as prerequisite…” to choose their parent",
+    multiCount: (count: number) => (zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`),
+    addStandalone: zh ? "创建独立节点" : "Create standalone",
     pickTitle: zh ? "被添加的知识点" : "Nodes to add",
     pickHint: zh
       ? "将这些知识点添加为另一个知识点的前置"
