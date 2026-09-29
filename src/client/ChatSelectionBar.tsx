@@ -95,10 +95,8 @@ const STYLE_ID = "knowledgenet-selection-style";
 const PICK_SEARCH_ID = "knowledgenet-pick-search";
 
 function ensureStyle(): void {
-  if (typeof document === "undefined" || document.getElementById(STYLE_ID) !== null) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = [
+  if (typeof document === "undefined") return;
+  const rules = [
     /*
      * 多选弹窗（用户要求）：浮条是 root 作用域，拿不到面板的 `.kn-modal*` 样式 ⇒ 自带一份 ✓。
      * 遮罩 z-index 要高于浮条（10001）与菜单（10002）✓。
@@ -168,10 +166,24 @@ function ensureStyle(): void {
     ".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
     ".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
     ".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
-    /* 搜索框：放大镜画在框内左侧 ⇒ 文本让出左边距 */
-    ".kn-search-wrap { position: relative; }",
-    ".kn-search-wrap svg { position: absolute; top: 9px; left: 11px; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); pointer-events: none; }",
-    ".kn-search-wrap .kn-modal-input { height: 36px; padding-left: 35px; }",
+    /*
+     * 搜索框：**图标与输入框是同一行的两个 flex 子项**，不是"绝对定位盖在输入框上"。
+     *
+     * 为什么改（实测 ✗）：原来图标 `position: absolute` + 输入框 `padding-left: 35px`，
+     * 而输入框的 padding 还会被别处的 `.kn-modal-input` 规则插一脚 ⇒ 图标和占位文字挤在同一条线上。
+     * 现在边框/底色/内边距都长在**外层** `.kn-search-wrap` 上：11px 内边距 + 16px 图标 + 8px 间距
+     * = 文字正好从 35px 处开始 ✓（与设计稿的 `padding-left: 35px` 等价），图标不可能再飘 ✓。
+     */
+    ".kn-search-wrap { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; box-sizing: border-box;",
+    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
+    ".kn-search-wrap svg { flex: none; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-search-wrap input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
+    "  background: transparent; color: inherit; font: inherit; }",
+    ".kn-search-wrap input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /* 输入框自己的类（守门测试要求用到的 kn-* 必须有定义；行为与上面那条一致 ✓） */
+    ".kn-search-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
+    "  background: transparent; color: inherit; font: inherit; }",
+    ".kn-search-input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
     /* 结果行：整行可点，选中时描边 + ✓ */
     ".kn-pick-results { display: flex; flex-direction: column; gap: 2px; max-height: 236px; overflow: auto; }",
     ".kn-pick-row { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px;",
@@ -197,6 +209,21 @@ function ensureStyle(): void {
     ".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary, #e5534b); }",
     ".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }",
   ].join("\n");
+  /*
+   * 已经存在同 id 的 `<style>` 时**更新内容，不能直接 return** ✓。
+   *
+   * 为什么（用户实测 ✗）：插件重新安装/重新加载客户端半时页面并没有整体刷新，
+   * 上一版留下的 `<style id="…">` 还在 head 里 ⇒ 直接 return 的话这一版**新增与修改的规则一条都进不去**，
+   * 表现为"弹窗只有一半样式、放大镜被撑成巨型" ✗。样式表和代码一样，必须跟着这一版走 ✓。
+   */
+  const existing = document.getElementById(STYLE_ID);
+  if (existing !== null) {
+    if (existing.textContent !== rules) existing.textContent = rules;
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = rules;
   document.head.append(style);
 }
 
@@ -1369,18 +1396,55 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 <label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>
                   {props.copy.searchLabel ?? props.copy.searchHint}
                 </label>
-                <div className="kn-search-wrap">
-                  {/* 放大镜（设计稿：图标在输入框内部左侧） */}
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <div
+                  className="kn-search-wrap"
+                  /* 行内也写一份：边框/底色/内边距长在外层，图标与输入框是同一行的 flex 兄弟 ✓ */
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    height: 36,
+                    boxSizing: "border-box",
+                    padding: "0 11px",
+                    border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
+                    borderRadius: 7,
+                    background: "var(--dsw-alias-bg-layer-1, #ffffff)",
+                  }}
+                >
+                  {/*
+                    * 放大镜（设计稿：图标在输入框内部左侧）。
+                    * **尺寸写死成属性 + 行内样式**：宿主页面里有大量 `… svg { width: … }` 规则，
+                    * 只靠类选择器一旦被压过去，svg 会按 viewBox 撑满整行（实测变成巨型放大镜 ✗）。
+                    */}
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    width={16}
+                    height={16}
+                    aria-hidden="true"
+                    style={{ flex: "none", width: 16, height: 16, color: "var(--dsw-alias-label-secondary, #8a8a8a)" }}
+                  >
                     <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
                     <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
                   </svg>
                   <input
                     id={PICK_SEARCH_ID}
-                    className="kn-modal-input"
+                    className="kn-search-input"
                     type="search"
                     value={query}
                     placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
+                    /* 输入框自己不画框（框在外层），也不依赖任何外部样式表 ✓ */
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      height: "100%",
+                      padding: 0,
+                      border: 0,
+                      outline: 0,
+                      background: "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                    }}
                     onChange={(event) => {
                       setQuery(event.target.value);
                       void doSearch(event.target.value);

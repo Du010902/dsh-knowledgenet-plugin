@@ -80,5 +80,34 @@ describe("划词添加前置：三条回归的守门", () => {
       false,
       "点结果行不应再直接添加（设计稿是先选后确认）",
     );
+    /*
+     * 放大镜必须**显式给尺寸**：宿主页面里到处是 `… svg { width: … }` 规则，
+     * 只靠我们的类选择器一旦被压过去，svg 会按 viewBox 撑满整行 —— 实测变成挡住半个弹窗的巨型放大镜 ✗。
+     */
+    assert.ok(code.includes("width={16}") && code.includes("height={16}"), "放大镜要写死宽高属性");
+    assert.ok(/width: 16[^}]*height: 16/.test(code), "放大镜的行内样式要同时固定尺寸");
+    /*
+     * 图标与输入框必须是**同一行的两个 flex 子项**（而不是绝对定位盖在输入框上）：
+     * 绝对定位那版实测图标和占位文字挤在同一条线上 ✗；flex 行让文字正好从 11+16+8 = 35px 处开始
+     * （与设计稿的 `padding-left: 35px` 等价），图标不可能再飘 ✓。
+     */
+    assert.ok(code.includes('className="kn-search-input"'), "搜索框用自有类名，不蹭 `.kn-modal-input`");
+    assert.equal(code.includes("position: absolute"), false, "图标不许再用绝对定位（会和文字打架）");
+    assert.ok(/display: flex[\s\S]{0,160}gap: 8/.test(code), "搜索框外层要是一行 flex（图标 + 输入框）");
+  });
+
+  it("注入的样式表必须跟着这一版走（热更新不能留下上一版的 <style>）", () => {
+    /*
+     * 实测 ✗：插件重新安装后页面没有整体刷新，上一版留在 head 里的 `<style id="knowledgenet-selection-style">`
+     * 让 `ensureStyle()` 直接 return ⇒ 这一版新增/修改的规则一条都不生效
+     * （弹窗只有一半样式、放大镜被撑成巨型）。所以必须**更新已存在那份的 textContent**。
+     */
+    assert.ok(code.includes("existing.textContent !== rules"), "已存在的 <style> 要按这一版更新内容");
+    assert.ok(code.includes("existing.textContent = rules"), "内容不同就替换");
+    assert.equal(
+      /getElementById\(STYLE_ID\) !== null\)\s*return/.test(code),
+      false,
+      "不能因为“已经有一个同 id 的 <style>”就直接 return",
+    );
   });
 });

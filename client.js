@@ -499,10 +499,8 @@ window.__ModuleLoader__.load({
 		/** 搜索框的 id（`<label htmlFor>` 要指到它上面） */
 		const PICK_SEARCH_ID = "knowledgenet-pick-search";
 		function ensureStyle$1() {
-			if (typeof document === "undefined" || document.getElementById(STYLE_ID$1) !== null) return;
-			const style = document.createElement("style");
-			style.id = STYLE_ID$1;
-			style.textContent = [
+			if (typeof document === "undefined") return;
+			const rules = [
 				".kn-sel-mask {",
 				"  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
 				"  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
@@ -562,9 +560,15 @@ window.__ModuleLoader__.load({
 				".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
 				".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
 				".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
-				".kn-search-wrap { position: relative; }",
-				".kn-search-wrap svg { position: absolute; top: 9px; left: 11px; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); pointer-events: none; }",
-				".kn-search-wrap .kn-modal-input { height: 36px; padding-left: 35px; }",
+				".kn-search-wrap { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; box-sizing: border-box;",
+				"  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
+				".kn-search-wrap svg { flex: none; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-search-wrap input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
+				"  background: transparent; color: inherit; font: inherit; }",
+				".kn-search-wrap input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-search-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
+				"  background: transparent; color: inherit; font: inherit; }",
+				".kn-search-input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
 				".kn-pick-results { display: flex; flex-direction: column; gap: 2px; max-height: 236px; overflow: auto; }",
 				".kn-pick-row { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px;",
 				"  border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
@@ -588,6 +592,14 @@ window.__ModuleLoader__.load({
 				".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary, #e5534b); }",
 				".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }"
 			].join("\n");
+			const existing = document.getElementById(STYLE_ID$1);
+			if (existing !== null) {
+				if (existing.textContent !== rules) existing.textContent = rules;
+				return;
+			}
+			const style = document.createElement("style");
+			style.id = STYLE_ID$1;
+			style.textContent = rules;
 			document.head.append(style);
 		}
 		function readMemory() {
@@ -1613,10 +1625,29 @@ window.__ModuleLoader__.load({
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											className: "kn-search-wrap",
+											style: {
+												display: "flex",
+												alignItems: "center",
+												gap: 8,
+												height: 36,
+												boxSizing: "border-box",
+												padding: "0 11px",
+												border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
+												borderRadius: 7,
+												background: "var(--dsw-alias-bg-layer-1, #ffffff)"
+											},
 											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
 												viewBox: "0 0 24 24",
 												fill: "none",
+												width: 16,
+												height: 16,
 												"aria-hidden": "true",
+												style: {
+													flex: "none",
+													width: 16,
+													height: 16,
+													color: "var(--dsw-alias-label-secondary, #8a8a8a)"
+												},
 												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
 													cx: "10.5",
 													cy: "10.5",
@@ -1631,10 +1662,21 @@ window.__ModuleLoader__.load({
 												})]
 											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 												id: PICK_SEARCH_ID,
-												className: "kn-modal-input",
+												className: "kn-search-input",
 												type: "search",
 												value: query,
 												placeholder: props.copy.searchPlaceholder ?? "输入名称搜索",
+												style: {
+													flex: 1,
+													minWidth: 0,
+													height: "100%",
+													padding: 0,
+													border: 0,
+													outline: 0,
+													background: "transparent",
+													color: "inherit",
+													font: "inherit"
+												},
 												onChange: (event) => {
 													setQuery(event.target.value);
 													doSearch(event.target.value);
