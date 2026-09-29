@@ -23,6 +23,8 @@ import { readdir, readFile, rmdir, stat, symlink, unlink, writeFile } from "node
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { patchAnchorSpacing } from "./scripts/layout-anchor-patch.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN = HERE;
 /**
@@ -405,6 +407,24 @@ function panelCssPlugin(css) {
 }
 
 /**
+ * **分量锚点间距**补丁（上游 `topology.ts`）：孤点不再按 `edgeLength` 铺开。
+ *
+ * 这里只做"把补丁点替换掉"这一件事，补丁点字符串住在 `scripts/layout-anchor-patch.mjs`
+ * —— 同一个文件也被 `tests/layout-spacing.test.mjs` 用来在临时副本上量结果 ✓。
+ * 注意它必须挂在**布局 Worker 那次构建**上（`topology.ts` 只被 Worker 的 layoutCore 引用 ✓）。
+ */
+function anchorSpacingPatchPlugin() {
+  return {
+    name: "kn-anchor-spacing",
+    transform(code, id) {
+      const clean = String(id).split("?")[0].replaceAll("\\", "/");
+      if (!clean.endsWith("/vendor/upstream/graph3d/topology.ts")) return null;
+      return { code: patchAnchorSpacing(code), map: null };
+    },
+  };
+}
+
+/**
  * **只在布局 Worker 里生效**的补丁：节点半径统一（大小不再由连接数/根节点决定）。
  *
  * 为什么单独一个插件：`adapter.ts`（`buildSpaceGraph` 算半径的地方）只被 **Worker** 构建引用 ✗，
@@ -671,7 +691,8 @@ async function buildWorkerCode(rolldown) {
     // 上游 engine.ts 里有 `import.meta.env.DEV` 的调试分支；显式置 false（define 的值必须是字符串）
     transform: { define: { "import.meta.env.DEV": "false" } },
     // 节点半径在这里补：adapter.ts 只被 Worker 构建引用（见 nodeSizePatchPlugin 注释）
-    plugins: [atAliasPlugin(), nodeSizePatchPlugin()],
+    // 分量锚点间距也在这里补：topology.ts 只被 Worker 的 layoutCore 引用（见 anchorSpacingPatchPlugin 注释）
+    plugins: [atAliasPlugin(), nodeSizePatchPlugin(), anchorSpacingPatchPlugin()],
   });
   try {
     const { output } = await bundle.generate({ format: "iife", entryFileNames: "kn-layout-worker.js" });
@@ -712,6 +733,8 @@ async function buildClient(rolldown, css, workerSource) {
       layoutWorkerPlugin(workerSource),
       layoutClientPatchPlugin(),
       freeRotationPatchPlugin(),
+      /* 客户端这一侧也挂上：万一 topology.ts 也进了主图，锚点间距必须是同一套 ✓ */
+      anchorSpacingPatchPlugin(),
       atAliasPlugin(),
     ],
   });
