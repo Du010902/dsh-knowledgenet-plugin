@@ -19,7 +19,12 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_DIR = path.resolve(SCRIPT_DIR, "..");
-const PROJECT_DIR = path.resolve(PLUGIN_DIR, "..");
+/**
+ * 上游源码（KnowledgeNet）所在的父项目。插件独立成仓库后父目录不再是项目 ⇒
+ * 用 `KN_PROJECT` 显式指定：
+ *   $env:KN_PROJECT='D:\资料\file_useless\test\KnowledgeNet'; node scripts/sync-vendor.mjs --check
+ */
+const PROJECT_DIR = path.resolve(process.env.KN_PROJECT ?? path.join(PLUGIN_DIR, ".."));
 const CHECK_ONLY = process.argv.includes("--check");
 
 /** 上游文件 → 插件内副本（相对各自根目录），镜像原始相对结构 */
@@ -95,7 +100,10 @@ async function buildPlan() {
     const to = path.join(PLUGIN_DIR, toRel);
     assertInsidePlugin(to);
     await stat(from).catch(() => {
-      throw new Error(`上游文件不存在：${fromRel}（是否改过 src/ 结构？）`);
+      throw new Error(
+        `上游文件不存在：${fromRel}（是否改过 src/ 结构？当前上游根目录：${PROJECT_DIR}；`
+        + "若插件已独立成仓库，请用 KN_PROJECT 指向 KnowledgeNet 项目）",
+      );
     });
     plan.push({ fromRel, toRel, from, to });
   }

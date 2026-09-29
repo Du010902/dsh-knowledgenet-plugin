@@ -24,7 +24,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN = HERE;
-const PROJECT = path.resolve(HERE, "..");
+/**
+ * 构建只从「父项目」取一样东西：`node_modules/.pnpm` 下的 rolldown（打包器）。
+ * 插件从 `<项目>/dsh-plugin` 独立成仓库后，父目录不再是项目 ⇒ 用 `KN_PROJECT` 显式指定：
+ *   $env:KN_PROJECT='D:\资料\file_useless\test\KnowledgeNet'; node build.mjs
+ */
+const PROJECT = path.resolve(process.env.KN_PROJECT ?? path.join(HERE, ".."));
 const UPSTREAM = path.join(PLUGIN, "src/vendor/upstream");
 
 const HOST_ENTRY = path.join(PLUGIN, "src/host/index.ts");

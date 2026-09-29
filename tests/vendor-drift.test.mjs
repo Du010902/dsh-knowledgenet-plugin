@@ -13,7 +13,12 @@ import { describe, it } from "node:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN = path.resolve(HERE, "..");
-const PROJECT = path.resolve(PLUGIN, "..");
+/**
+ * 上游项目（KnowledgeNet）。插件独立成仓库后父目录不再是项目 ⇒ 用 `KN_PROJECT` 指定，
+ * 例如：`$env:KN_PROJECT='D:\资料\file_useless\test\KnowledgeNet'; npm test`
+ * 未指定且父目录没有上游源码时，下面的用例只校验「副本 ↔ 清单」。
+ */
+const PROJECT = path.resolve(process.env.KN_PROJECT ?? path.join(PLUGIN, ".."));
 
 const manifest = JSON.parse(await readFile(path.join(PLUGIN, "scripts", "vendor-manifest.json"), "utf8"));
 
