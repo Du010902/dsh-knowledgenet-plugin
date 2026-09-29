@@ -1,0 +1,24 @@
+# KnowledgeNet 插件对本 profile 的两处改动。
+#
+# 1) 插入插件的 Host 行。config 里的值都可以在 profile 的 cordis.patch.yml 里覆盖：
+#    - libraryRoot: null 表示「按当前会话的 cwd 向上找最近的 library.json」，
+#      也就是「一个 DSH 工作区 = 一个知识库」；只有在知识库不在工作区根时才需要显式指定。
+#    - maxNodes: kn_list_graph 默认返回的节点上限（10–2000）。
+#    - 每次调用 kn_read_node 的正文上限是工具入参 noteMaxChars（默认 6000 字）。
+#
+# 2) 关闭官方 DeepSeek 的会话日志后缀上传。
+#    KnowledgeNet 的产品承诺是「提问时只发送当前知识点所需的上下文」，
+#    而 dsh-session-log-deepseek 默认会把未接受过的会话日志后缀（最多 8 MiB/次）
+#    作为 dsh_session_log 字段随请求发给服务端 —— 两者直接冲突，必须显式关掉。
+#    这一行对该 profile 的所有会话生效；不需要时删掉本段即可恢复默认。
+- insert:
+    - id: knowledgenet
+      name: '@local/dsh-knowledgenet'
+      config:
+        libraryRoot: null
+        maxNodes: 400
+
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+  config:
+    enabled: false

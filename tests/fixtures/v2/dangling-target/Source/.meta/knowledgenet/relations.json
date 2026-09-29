@@ -1,0 +1,27 @@
+{
+  "format": "knowledgenet-relations",
+  "formatVersion": 1,
+  "nodeId": "0199eeee-0000-7000-8000-000000000001",
+  "revision": 2,
+  "outgoing": [
+    {
+      "id": "0199eeee-0000-7000-8000-0000000000e1",
+      "toNodeId": "0199eeee-0000-7000-8000-0000000000ff",
+      "type": "prerequisite",
+      "description": "理解它需要先理解向量点积",
+      "toTitleSnapshot": "向量点积",
+      "createdAt": "2026-09-20T10:00:00.000Z",
+      "updatedAt": "2026-09-20T10:00:00.000Z",
+      "evidence": [
+        {
+          "id": "0199eeee-0000-7000-8000-0000000000d1",
+          "threadId": null,
+          "messageId": null,
+          "snippet": "这里涉及 Query 与 Key 的点积",
+          "question": "为什么要做点积？",
+          "createdAt": "2026-09-20T10:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,390 @@
+{
+  "upstreamRoot": "..",
+  "files": {
+    "src/vendor/upstream/components/graphMode.ts": {
+      "from": "src/components/graphMode.ts",
+      "sha256": "a24f9f68441b63884fec54028513cccc2eabd384393327472f8c95d149b725f4",
+      "bytes": 736
+    },
+    "src/vendor/upstream/components/GraphSpace.tsx": {
+      "from": "src/components/GraphSpace.tsx",
+      "sha256": "47475fc7ed68bc52814d834f365bcbb76647a7a7f55f03736f644f1c3c54f333",
+      "bytes": 18578
+    },
+    "src/vendor/upstream/components/GraphUniverse.tsx": {
+      "from": "src/components/GraphUniverse.tsx",
+      "sha256": "759856af42b91b46ac40f8b9866f51d884122376db5e330c02fe526902665eb1",
+      "bytes": 15824
+    },
+    "src/vendor/upstream/components/icons.tsx": {
+      "from": "src/components/icons.tsx",
+      "sha256": "dbdc0484299a6d9131920516f28a8bffdf2c891c6c6645c1fdedf161ba447e53",
+      "bytes": 5568
+    },
+    "src/vendor/upstream/components/nodeContextMenu.ts": {
+      "from": "src/components/nodeContextMenu.ts",
+      "sha256": "295707b1c104fd441270a6bf7817a42237f5492ebe9562cea9a6df047c62227d",
+      "bytes": 2816
+    },
+    "src/vendor/upstream/data/chatTypes.ts": {
+      "from": "src/data/chatTypes.ts",
+      "sha256": "5d911ba8e6b4c42a1b05320b41b2d872a796bed6cbd2482867f7f99480915d25",
+      "bytes": 7855
+    },
+    "src/vendor/upstream/data/engine.ts": {
+      "from": "src/data/engine.ts",
+      "sha256": "d96ab9dce3db3c749a4d04ef3eef907c68e88143071337192483eb3d9b686bb7",
+      "bytes": 18358
+    },
+    "src/vendor/upstream/data/errors.ts": {
+      "from": "src/data/errors.ts",
+      "sha256": "36c71b27ad5d29d261d2331ea7509378e10c3aaae594d1c8ec7c737ea5689390",
+      "bytes": 5593
+    },
+    "src/vendor/upstream/data/types.ts": {
+      "from": "src/data/types.ts",
+      "sha256": "37fba3c188076f44a2fc53204aa29ad1ff3b9aefbfa7040b9f77b125d7eac63a",
+      "bytes": 17444
+    },
+    "src/vendor/upstream/data/uuid.ts": {
+      "from": "src/data/uuid.ts",
+      "sha256": "c7e83545963c45adf7219ff600398926814950b21139e9c3dbacd9aca0201960",
+      "bytes": 2269
+    },
+    "src/vendor/upstream/data/v2/fs.ts": {
+      "from": "src/data/v2/fs.ts",
+      "sha256": "515216f465ecdb5c950aad45148f1c504c6f144d20c1cc3fa0f2693f725d2403",
+      "bytes": 11003
+    },
+    "src/vendor/upstream/data/v2/hash.ts": {
+      "from": "src/data/v2/hash.ts",
+      "sha256": "760d1cb6bef7325341cb5451339d68477e3596c9236584ac44b1386887ae2293",
+      "bytes": 4732
+    },
+    "src/vendor/upstream/data/v2/nodeMeta.ts": {
+      "from": "src/data/v2/nodeMeta.ts",
+      "sha256": "b2e8f237d7480eba91aadeeb0540bf452e28d9a134010789befa2458adfbf4ad",
+      "bytes": 4267
+    },
+    "src/vendor/upstream/data/v2/notes.ts": {
+      "from": "src/data/v2/notes.ts",
+      "sha256": "5effa3af0f26d6b09193c362e9ba77c40f3b55d28d74cf96f418316a74c1c9bc",
+      "bytes": 12504
+    },
+    "src/vendor/upstream/data/v2/paths.ts": {
+      "from": "src/data/v2/paths.ts",
+      "sha256": "eb6ce0c589b8292e21741f8e452d2bf9e8c42588bd36824f3f9bee67e7951bd1",
+      "bytes": 7230
+    },
+    "src/vendor/upstream/data/v2/relations.ts": {
+      "from": "src/data/v2/relations.ts",
+      "sha256": "70ff2775dac7420ffe1612b32366c45905441523d0259b548d5a98c448b7dea6",
+      "bytes": 12262
+    },
+    "src/vendor/upstream/data/v2/resources.ts": {
+      "from": "src/data/v2/resources.ts",
+      "sha256": "77884dce9bf9dbb5dcea8f7824d3dca99ad475e719add25193f586b2c7726006",
+      "bytes": 11841
+    },
+    "src/vendor/upstream/data/v2/scanner.ts": {
+      "from": "src/data/v2/scanner.ts",
+      "sha256": "802f8fbb3c2cd0f265c7f0c04733fac89dd5c4738b157eb44c4bfb089f494771",
+      "bytes": 13231
+    },
+    "src/vendor/upstream/data/v2/schema.ts": {
+      "from": "src/data/v2/schema.ts",
+      "sha256": "586bc6c3dc4236d486f714e3d580dd1f48c8160fde257a84dec736808cb342b5",
+      "bytes": 36403
+    },
+    "src/vendor/upstream/graph/levels.ts": {
+      "from": "src/graph/levels.ts",
+      "sha256": "c27afd4ca2bf818f22365233d3019896e3088b572bc6ad9ba168912b0294d942",
+      "bytes": 13619
+    },
+    "src/vendor/upstream/graph3d/adapter.ts": {
+      "from": "src/graph3d/adapter.ts",
+      "sha256": "4d93ae63287cd03d64e79057f955a70b79fd0bdb477bd01b3ee24b43e21bd47e",
+      "bytes": 4753
+    },
+    "src/vendor/upstream/graph3d/camera.ts": {
+      "from": "src/graph3d/camera.ts",
+      "sha256": "f509be2bfbc1c42ae212209551ba4bac5d2b79d677524d7cdd78c982b467dd3e",
+      "bytes": 12510
+    },
+    "src/vendor/upstream/graph3d/d3-force-3d.d.ts": {
+      "from": "src/graph3d/d3-force-3d.d.ts",
+      "sha256": "dd4e06a18239325327fc3f25b1232924efdb5319f65c4d65ceab7ea84e19e170",
+      "bytes": 4585
+    },
+    "src/vendor/upstream/graph3d/engine.ts": {
+      "from": "src/graph3d/engine.ts",
+      "sha256": "2488b348e2d2329770ff201c0814ac213b29dfe777573906c72c79b4f901bbb1",
+      "bytes": 39583
+    },
+    "src/vendor/upstream/graph3d/forces.ts": {
+      "from": "src/graph3d/forces.ts",
+      "sha256": "a8cb8135ef21776490121552d06b57604c20345a64dc6f4c766c7764ee9294b6",
+      "bytes": 10356
+    },
+    "src/vendor/upstream/graph3d/labels.ts": {
+      "from": "src/graph3d/labels.ts",
+      "sha256": "1b8a4b72d5e371a697b08dc60b209b4e8dbcbb213a52eefe1b13653e15412640",
+      "bytes": 7917
+    },
+    "src/vendor/upstream/graph3d/layout.worker.ts": {
+      "from": "src/graph3d/layout.worker.ts",
+      "sha256": "3a6d56c0d6e2bbe8be74eaddd989f23baf624a6cfeb388f6cdc42e4f7233ec24",
+      "bytes": 7578
+    },
+    "src/vendor/upstream/graph3d/layoutClient.ts": {
+      "from": "src/graph3d/layoutClient.ts",
+      "sha256": "5d8885e2799386a87825a353587c8a4d19fe5dbfcce48d7d761f99152d4edef8",
+      "bytes": 10638
+    },
+    "src/vendor/upstream/graph3d/layoutCore.ts": {
+      "from": "src/graph3d/layoutCore.ts",
+      "sha256": "96317a9d9b920bf7a69bf55684cbd54781e461c9ecbeadcee85264725ac25962",
+      "bytes": 9238
+    },
+    "src/vendor/upstream/graph3d/navigation.ts": {
+      "from": "src/graph3d/navigation.ts",
+      "sha256": "b8f1dfcc60e085f6a5a41e9dc53a78cbd924819e0a15a27bd3398b1c25f0b10d",
+      "bytes": 18553
+    },
+    "src/vendor/upstream/graph3d/palette.ts": {
+      "from": "src/graph3d/palette.ts",
+      "sha256": "4c0b8ac03cfc9a27d350330d6b1690140df7f4c355b92cc41d44dc34fed5180e",
+      "bytes": 5144
+    },
+    "src/vendor/upstream/graph3d/renderer.ts": {
+      "from": "src/graph3d/renderer.ts",
+      "sha256": "3b16e7e91a49cab02f856e4febd81828c7ce7f53903e55111a0eca07841ae898",
+      "bytes": 44045
+    },
+    "src/vendor/upstream/graph3d/session.ts": {
+      "from": "src/graph3d/session.ts",
+      "sha256": "b9470676a8c17fd18557cb3da145c6938c0141c3558284d54f3608543888da96",
+      "bytes": 5097
+    },
+    "src/vendor/upstream/graph3d/topology.ts": {
+      "from": "src/graph3d/topology.ts",
+      "sha256": "a82bebbd836062dca6e556ca4e64b0e59fa29794de8a900899bfb1cfbad7f659",
+      "bytes": 13625
+    },
+    "src/vendor/upstream/graph3d/types.ts": {
+      "from": "src/graph3d/types.ts",
+      "sha256": "0691807edcdb49c0fe249f0cb041295003ea0ca98f69a74422891c8a64a5013d",
+      "bytes": 9908
+    },
+    "src/vendor/upstream/styles/graph.css": {
+      "from": "src/styles/graph.css",
+      "sha256": "30e214b02c2d5e8ec9d3ac30df334dd94dcd0f5dffd286e21828d88f0fcb0486",
+      "bytes": 14957
+    },
+    "tests/fixtures/v2/damaged/Bad_Json/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/damaged/Bad_Json/.meta/knowledgenet/node.json",
+      "sha256": "a08f1918373843cbf465b84bf789fb73351d58d505a6eaaae5926f6f50cb7dfa",
+      "bytes": 26
+    },
+    "tests/fixtures/v2/damaged/Future_Version/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/damaged/Future_Version/.meta/knowledgenet/node.json",
+      "sha256": "30f7b08e64a1d0fde25e90381f37d95cd1cb49ef829042fd5d9a8734bf7773d7",
+      "bytes": 321
+    },
+    "tests/fixtures/v2/damaged/Good/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/damaged/Good/.meta/knowledgenet/node.json",
+      "sha256": "35c7da6d11a57211ec4e1ce3d6d8e86ff576473a4fba9a8ed8bc1a188929d9f3",
+      "bytes": 320
+    },
+    "tests/fixtures/v2/damaged/library.json": {
+      "from": "fixtures/v2/damaged/library.json",
+      "sha256": "29274143e1d8827acd25d1862d5d488f64d925e68e8cbb238f6564713004d48c",
+      "bytes": 394
+    },
+    "tests/fixtures/v2/damaged/Missing_Fields/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/damaged/Missing_Fields/.meta/knowledgenet/node.json",
+      "sha256": "168bbb116f01dc4de935f6a8ef20e859c0081cc97b29f2edcf5a74a6bfdc214e",
+      "bytes": 58
+    },
+    "tests/fixtures/v2/damaged/Only_Meta/.meta/some-other-tool/notes.txt": {
+      "from": "fixtures/v2/damaged/Only_Meta/.meta/some-other-tool/notes.txt",
+      "sha256": "7dde30b49e62b896bd31e4e08310b77ddca34685b0c6edcded2bfd5c714bad50",
+      "bytes": 31
+    },
+    "tests/fixtures/v2/damaged/Wrong_Format/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/damaged/Wrong_Format/.meta/knowledgenet/node.json",
+      "sha256": "2db7021670c037b4d97ecf83186b8176844bc3845ac8acf57d5f7450315433b8",
+      "bytes": 134
+    },
+    "tests/fixtures/v2/dangling-target/library.json": {
+      "from": "fixtures/v2/dangling-target/library.json",
+      "sha256": "5cb6bca4f2a7fb8c030500694af17be09a61b99da2dd237ecb7a862a8a935104",
+      "bytes": 400
+    },
+    "tests/fixtures/v2/dangling-target/Source/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/dangling-target/Source/.meta/knowledgenet/node.json",
+      "sha256": "4b31eac9f7135f2f800d2705c52a1df39a016b9ef26e44699b56f4f6c6b5549b",
+      "bytes": 329
+    },
+    "tests/fixtures/v2/dangling-target/Source/.meta/knowledgenet/relations.json": {
+      "from": "fixtures/v2/dangling-target/Source/.meta/knowledgenet/relations.json",
+      "sha256": "d064d41ef3f971dd618a732e07e1e587d4af9c8602d3c30324fad3c30bd6d5af",
+      "bytes": 823
+    },
+    "tests/fixtures/v2/duplicate-id/Copy_A/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/duplicate-id/Copy_A/.meta/knowledgenet/node.json",
+      "sha256": "08450eac39be4beb5269bb217790b53596f7e42b8447bbf4f46d633e33b8551d",
+      "bytes": 326
+    },
+    "tests/fixtures/v2/duplicate-id/Copy_B/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/duplicate-id/Copy_B/.meta/knowledgenet/node.json",
+      "sha256": "08450eac39be4beb5269bb217790b53596f7e42b8447bbf4f46d633e33b8551d",
+      "bytes": 326
+    },
+    "tests/fixtures/v2/duplicate-id/library.json": {
+      "from": "fixtures/v2/duplicate-id/library.json",
+      "sha256": "d0aa8e009330e2e12649ad3f543d4262e1627e0a3fc6caf2a262ffe0c3880726",
+      "bytes": 398
+    },
+    "tests/fixtures/v2/expected/scan.json": {
+      "from": "fixtures/v2/expected/scan.json",
+      "sha256": "e6227f5b3802a92cfb95c93d001f6b2ddc455708146b25858a49f4554b8f4650",
+      "bytes": 3465
+    },
+    "tests/fixtures/v2/long-chat/library.json": {
+      "from": "fixtures/v2/long-chat/library.json",
+      "sha256": "514cbb512ed773c4ac37c0fc0a0264126064f62255d8e19d7c3d4ed47dc3998d",
+      "bytes": 397
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000001_0199ffff-0000-7000-8000-000000000101.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000001_0199ffff-0000-7000-8000-000000000101.json",
+      "sha256": "e1ac594e79e9ae98884a137230278a3d2983a2df3114d09abfc8884e9c007a67",
+      "bytes": 443
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000002_0199ffff-0000-7000-8000-000000000102.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000002_0199ffff-0000-7000-8000-000000000102.json",
+      "sha256": "5a9f2a9a36ac220c7455c924940d6303fc71eb3042c4f0a1081e3db0d4d670a5",
+      "bytes": 448
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000003_0199ffff-0000-7000-8000-000000000103.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000003_0199ffff-0000-7000-8000-000000000103.json",
+      "sha256": "336f168ca522104ae6e5267783efe656e87e1c7fa1c05291c6d30579c8e94b9a",
+      "bytes": 443
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000004_0199ffff-0000-7000-8000-000000000104.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000004_0199ffff-0000-7000-8000-000000000104.json",
+      "sha256": "9aab3c60eb4d9f03e0452f285254bc75b175d2079a0128f583f0642a0cb8641c",
+      "bytes": 448
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000005_0199ffff-0000-7000-8000-000000000105.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000005_0199ffff-0000-7000-8000-000000000105.json",
+      "sha256": "3e7543c671e797701d96d412fd37ec18ff08a2b4d9d4ab88de08626def356583",
+      "bytes": 443
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000006_0199ffff-0000-7000-8000-000000000106.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000006_0199ffff-0000-7000-8000-000000000106.json",
+      "sha256": "e55c6a53966c1fb914ef6f5e31d62bc7a433cc0dad420e823bc9c929cf48619c",
+      "bytes": 448
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000007_0199ffff-0000-7000-8000-000000000107.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000007_0199ffff-0000-7000-8000-000000000107.json",
+      "sha256": "c7fdca360db9c01b9d0160917ba46be7ebea66fc6360f7b8dfcf4d09c958e5d0",
+      "bytes": 443
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000008_0199ffff-0000-7000-8000-000000000108.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000008_0199ffff-0000-7000-8000-000000000108.json",
+      "sha256": "416567c70933606c23c004339131a5c5f26aba4dc4f01d152c1a0674149baa9e",
+      "bytes": 448
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000009_0199ffff-0000-7000-8000-000000000109.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000009_0199ffff-0000-7000-8000-000000000109.json",
+      "sha256": "78164d8112a09b3525639b13c0880303efaaba05019dcdfa9540aa05a999515d",
+      "bytes": 443
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000010_0199ffff-0000-7000-8000-000000000110.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000010_0199ffff-0000-7000-8000-000000000110.json",
+      "sha256": "d63dfe53dde3d501a17f5dcc4fd17d41650dbb16c2458ef611ed541180cb7b0c",
+      "bytes": 450
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000011_0199ffff-0000-7000-8000-000000000111.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000011_0199ffff-0000-7000-8000-000000000111.json",
+      "sha256": "b7954658752e8d42a47bb9f3c3ae7691330b3db43310e6c592dc0c1488c8034c",
+      "bytes": 464
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000012_0199ffff-0000-7000-8000-000000000112.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/messages/000012_0199ffff-0000-7000-8000-000000000112.json",
+      "sha256": "13f23d550a95f5d7c5126fbaa7a13066c5d22c70b50b0b57f979b797752429a9",
+      "bytes": 450
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/thread.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/chats/0199ffff-0000-7000-8000-0000000000aa/thread.json",
+      "sha256": "9b87f3b13545bf5bb096f915042107798bf6b28c6a3c20b631738853b46f1b07",
+      "bytes": 312
+    },
+    "tests/fixtures/v2/long-chat/Topic/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/long-chat/Topic/.meta/knowledgenet/node.json",
+      "sha256": "7cb3e188267a525809311a905fc315e7e7b1c8276fef653fb6b22de9fad1a34e",
+      "bytes": 328
+    },
+    "tests/fixtures/v2/long-chat/Topic/note.md": {
+      "from": "fixtures/v2/long-chat/Topic/note.md",
+      "sha256": "fb2b0debbce9de128492dc1071bbdb2060a5d853c85118b445845560b1896dfe",
+      "bytes": 18
+    },
+    "tests/fixtures/v2/minimal/library.json": {
+      "from": "fixtures/v2/minimal/library.json",
+      "sha256": "0992f87ac142e2a5862edb0f1fa002af4c56db30ea4a38af448d39a329a33ec7",
+      "bytes": 397
+    },
+    "tests/fixtures/v2/minimal/Nodes/Attention/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/minimal/Nodes/Attention/.meta/knowledgenet/node.json",
+      "sha256": "859855c13b983be2560fde4a7ab1b306b255deb9692675f2f8fd76246f904d47",
+      "bytes": 346
+    },
+    "tests/fixtures/v2/nested/library.json": {
+      "from": "fixtures/v2/nested/library.json",
+      "sha256": "41eb0bc17a181e56d5f9bc0d91caba7b45826b7f4bf5b501192f8814833fe6c6",
+      "bytes": 397
+    },
+    "tests/fixtures/v2/nested/Root/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/nested/Root/.meta/knowledgenet/node.json",
+      "sha256": "9b1e40a03270ec3a7d6d98b61225501929c5ef66b274c53a0be112bb08914e54",
+      "bytes": 322
+    },
+    "tests/fixtures/v2/nested/Root/assets/diagram.txt": {
+      "from": "fixtures/v2/nested/Root/assets/diagram.txt",
+      "sha256": "2c135022f095c1be405096362bf3526e444bffc1853283d1d1d00d73bd71546a",
+      "bytes": 70
+    },
+    "tests/fixtures/v2/nested/Root/Child/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/nested/Root/Child/.meta/knowledgenet/node.json",
+      "sha256": "316c8d37df5fb0fe1c4729afdb2ffb94e99ce527900cee138776cddc71d8b590",
+      "bytes": 328
+    },
+    "tests/fixtures/v2/nested/Root/Child/child-note.md": {
+      "from": "fixtures/v2/nested/Root/Child/child-note.md",
+      "sha256": "3084590e5307232c1cc4ba52a5c183374cdb4a6232b4ba8b652f36c10e8ee652",
+      "bytes": 41
+    },
+    "tests/fixtures/v2/nested/Root/note.md": {
+      "from": "fixtures/v2/nested/Root/note.md",
+      "sha256": "e11309f302325fcfa7c2fbf1b6e49f7e882d92bc0c34fca5944ae4eee1f939dd",
+      "bytes": 35
+    },
+    "tests/fixtures/v2/nested/Root/other.txt": {
+      "from": "fixtures/v2/nested/Root/other.txt",
+      "sha256": "528659966b4da9b12a37a812bb122ca81b5728e3c47c3b52b30cc9a90690b5f1",
+      "bytes": 31
+    },
+    "tests/fixtures/v2/nested/VendorLib/InnerNode/.meta/knowledgenet/node.json": {
+      "from": "fixtures/v2/nested/VendorLib/InnerNode/.meta/knowledgenet/node.json",
+      "sha256": "09e29a5e25e83e76f6803313dc281ee77210274933f7956530def7e33e553ece",
+      "bytes": 323
+    },
+    "tests/fixtures/v2/nested/VendorLib/library.json": {
+      "from": "fixtures/v2/nested/VendorLib/library.json",
+      "sha256": "6b7414da89a2e4d4796f815fcc907fc5390f65d066f43c0fd298af5636e82bb0",
+      "bytes": 394
+    }
+  }
+}

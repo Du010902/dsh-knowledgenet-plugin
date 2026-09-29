@@ -1,0 +1,143 @@
+{
+  "note": "Rust 与 TS 两个实现都必须跑出同一组结果；比较时按 id / 路径排序，忽略顺序。",
+  "fixtures": {
+    "minimal": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199aaaa-0000-7000-8000-000000000001",
+          "relativePath": "Nodes/Attention",
+          "title": "注意力机制",
+          "health": "ok"
+        }
+      ],
+      "edges": [],
+      "threads": [],
+      "issueCodes": []
+    },
+    "nested": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199bbbb-0000-7000-8000-000000000001",
+          "relativePath": "Root",
+          "title": "父节点",
+          "health": "ok"
+        },
+        {
+          "id": "0199bbbb-0000-7000-8000-000000000002",
+          "relativePath": "Root/Child",
+          "title": "子节点",
+          "health": "ok"
+        }
+      ],
+      "edges": [],
+      "threads": [],
+      "issueCodes": [
+        "nested_library_boundary"
+      ],
+      "plainFiles": {
+        "Root": [
+          "Root/assets/diagram.txt",
+          "Root/note.md",
+          "Root/other.txt"
+        ],
+        "Root/Child": [
+          "Root/Child/child-note.md"
+        ]
+      }
+    },
+    "damaged": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199cccc-0000-7000-8000-000000000001",
+          "relativePath": "Good",
+          "title": "仍然有效",
+          "health": "ok"
+        }
+      ],
+      "edges": [],
+      "threads": [],
+      "issueCodes": [
+        "metadata_invalid",
+        "metadata_unsupported"
+      ]
+    },
+    "duplicate-id": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199dddd-0000-7000-8000-000000000001",
+          "relativePath": "Copy_A",
+          "health": "duplicate_id"
+        },
+        {
+          "id": "0199dddd-0000-7000-8000-000000000001",
+          "relativePath": "Copy_B",
+          "health": "duplicate_id"
+        }
+      ],
+      "duplicateIdGroups": [
+        {
+          "nodeId": "0199dddd-0000-7000-8000-000000000001",
+          "relativePaths": [
+            "Copy_A",
+            "Copy_B"
+          ]
+        }
+      ],
+      "edges": [],
+      "threads": [],
+      "issueCodes": [
+        "duplicate_node_id"
+      ]
+    },
+    "dangling-target": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199eeee-0000-7000-8000-000000000001",
+          "relativePath": "Source",
+          "title": "发起依赖的节点",
+          "health": "ok"
+        }
+      ],
+      "edges": [
+        {
+          "id": "0199eeee-0000-7000-8000-0000000000e1",
+          "fromNodeId": "0199eeee-0000-7000-8000-000000000001",
+          "toNodeId": "0199eeee-0000-7000-8000-0000000000ff",
+          "relationType": "prerequisite",
+          "dangling": true
+        }
+      ],
+      "threads": [],
+      "issueCodes": [
+        "dangling_relation"
+      ]
+    },
+    "long-chat": {
+      "rootIsNode": false,
+      "nodes": [
+        {
+          "id": "0199ffff-0000-7000-8000-000000000001",
+          "relativePath": "Topic",
+          "title": "长对话主题",
+          "health": "ok"
+        }
+      ],
+      "edges": [],
+      "threads": [
+        {
+          "id": "0199ffff-0000-7000-8000-0000000000aa",
+          "nodeId": "0199ffff-0000-7000-8000-000000000001",
+          "title": "数学推导",
+          "messageCount": 12,
+          "nodeRelativePath": "Topic"
+        }
+      ],
+      "issueCodes": []
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "format": "knowledgenet-chat-message",
+  "formatVersion": 1,
+  "id": "0199ffff-0000-7000-8000-000000000107",
+  "threadId": "0199ffff-0000-7000-8000-0000000000aa",
+  "sequence": 7,
+  "role": "user",
+  "content": "第 7 条消息正文",
+  "status": "complete",
+  "finishReason": "stop",
+  "requestId": null,
+  "usage": null,
+  "model": "deepseek-chat",
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:30:00.000Z"
+}

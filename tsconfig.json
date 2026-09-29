@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/vendor/upstream/*"]
+    },
+    "types": []
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "build.mjs", "scripts/**/*.mjs", "tests/**/*.mjs"]
+}

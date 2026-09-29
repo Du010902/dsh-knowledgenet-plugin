@@ -1,0 +1,1168 @@
+/**
+ * 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）→ 写入。
+ *
+ * 设计要点：
+ * - **不碰宿主 DOM**：浮条是 portal 到 `body` 的自己的元素，靠 `window.getSelection()`
+ *   的选区矩形定位；宿主 DOM 只被读选区，不被改写。
+ * - **多选**：点「多选」后把片段攒进列表，浮条变成「已选 N 段 · 完成 · 取消」，
+ *   继续在对话里划词即继续追加（同一句重复划只算一条）。
+ * - **目标节点**：给 2–3 个推荐（当前聚焦 → 最近加过前置的 → 最近聚焦的），
+ *   外加**搜索**（走宿主 `POST {kind:'search-nodes'}`，与模型看到的同一套检索）。
+ * - 每一步都上报（`chat-selection/…`），出问题可从 `kn_status` 自证。
+ */
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+import { GRAPH_API_ROUTE } from "../shared/routes.ts";
+import { pickWorkspacePath } from "./workspace-path.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import {
+  appendSnippet,
+  defaultTitle,
+  joinSnippets,
+  normalizeSnippet,
+  readLastSessionId,
+  recommendTargets,
+  rememberId,
+  MRU_KEY,
+  type Snippet,
+  type StoredMemory,
+} from "./chat-selection.ts";
+import { notifyLibraryChanged, readCurrentContext, readLastWorkspacePath, readNodeTitle } from "./current-context.ts";
+
+export interface ChatSelectionBarProps {
+  copy: {
+    addPrereq: string;
+    addNode?: string;
+    addStandalone?: string;
+    createNodeDone?: string;
+    createNodeFailed?: string;
+    createLibraryFailed?: string;
+    noWorkspace?: string;
+    nothingSelected?: string;
+    multiTitle?: string;
+    multiPlaceholder?: string;
+    multiCount?: (count: number) => string;
+    multi: string;
+    selected: (count: number) => string;
+    done: string;
+    cancel: string;
+    pickTitle: string;
+    pickHint: string;
+    recommended: string;
+    searchHint: string;
+    searching: string;
+    noResult: string;
+    titleLabel: string;
+    confirm: string;
+    added: string;
+    failed: string;
+    reuse: string;
+    createAnyway: string;
+    candidatesTitle: string;
+    candidatesMessage: string;
+  };
+  /** 逐步上报 */
+  report?: (step: string, detail?: Record<string, unknown> | null) => void;
+  /** 标准 props：工作区快照选择器（判断当前工作区是不是知识库） */
+  useWorkspaces?: (selector: (snapshot: unknown) => unknown) => unknown;
+  /** 标准 props：当前会话 id */
+  sessionId?: string;
+}
+
+/** 浮条的样式（light DOM，注入 head） */
+const STYLE_ID = "knowledgenet-selection-style";
+
+function ensureStyle(): void {
+  if (typeof document === "undefined" || document.getElementById(STYLE_ID) !== null) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = [
+    /*
+     * 多选弹窗（用户要求）：浮条是 root 作用域，拿不到面板的 `.kn-modal*` 样式 ⇒ 自带一份 ✓。
+     * 遮罩 z-index 要高于浮条（10001）与菜单（10002）✓。
+     */
+    ".kn-sel-mask {",
+    "  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
+    "  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
+    ".kn-sel-modal {",
+    "  pointer-events: auto;",
+    "  width: min(560px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 10px;",
+    "  padding: 14px 16px; border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);",
+    "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523); }",
+    ".kn-sel-modal-title { font-size: 13px; font-weight: 600; }",
+    ".kn-sel-textarea {",
+    "  width: 100%; min-height: 148px; resize: vertical; box-sizing: border-box;",
+    "  font: inherit; font-size: 13px; line-height: 1.6; padding: 10px 12px; border-radius: 8px;",
+    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); background: var(--dsw-alias-bg-layer-2, #ffffff); color: inherit; }",
+    ".kn-sel-modal-hint { font-size: 12px; opacity: 0.65; }",
+    ".kn-sel-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }",
+    ".kn-sel-modal-actions button {",
+    "  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;",
+    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); background: transparent; color: inherit; }",
+    ".kn-sel-modal-actions button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06)); }",
+    ".kn-sel-modal-actions button:disabled { opacity: 0.5; cursor: default; }",
+    ".kn-sel-bar {",
+    "  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
+    "  padding: 4px 6px; border-radius: 999px;",
+    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);",
+    "  background: var(--dsw-alias-bg-layer-2, #ffffff);",
+    "  color: var(--dsw-alias-label-primary, #192523);",
+    "  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); font-size: 12px; }",
+    ".kn-sel-bar button {",
+    "  border: 0; border-radius: 999px; background: transparent; color: inherit;",
+    "  font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; }",
+    ".kn-sel-bar button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
+    ".kn-sel-bar .kn-sel-primary { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); font-weight: 600; }",
+    ".kn-sel-count { padding: 0 4px; opacity: .75; }",
+    ".kn-pick-targets { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; max-height: 240px; overflow: auto; }",
+    ".kn-pick-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px;",
+    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 9px;",
+    "  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
+    ".kn-pick-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
+    ".kn-pick-item small { opacity: .6; }",
+    ".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }",
+  ].join("\n");
+  document.head.append(style);
+}
+
+function readMemory(): StoredMemory {
+  try {
+    const raw = localStorage.getItem(MRU_KEY);
+    if (raw === null) return { recentFocus: [], recentPrereqTargets: [] };
+    const parsed = JSON.parse(raw) as Partial<StoredMemory>;
+    return {
+      recentFocus: Array.isArray(parsed.recentFocus) ? parsed.recentFocus.filter((x): x is string => typeof x === "string") : [],
+      recentPrereqTargets: Array.isArray(parsed.recentPrereqTargets)
+        ? parsed.recentPrereqTargets.filter((x): x is string => typeof x === "string")
+        : [],
+    };
+  } catch {
+    return { recentFocus: [], recentPrereqTargets: [] };
+  }
+}
+
+function writeMemory(memory: StoredMemory): void {
+  try {
+    localStorage.setItem(MRU_KEY, JSON.stringify(memory));
+  } catch {
+    // 存不下就算了
+  }
+}
+
+/** 供面板侧调用：把"当前聚焦/聊到的节点"记进记忆 */
+export function rememberFocusNode(id: string | null | undefined, name?: string): void {
+  if (typeof id !== "string" || id.trim() === "") return;
+  const memory = readMemory();
+  writeMemory({
+    recentFocus: rememberId(memory.recentFocus, id),
+    recentPrereqTargets: memory.recentPrereqTargets,
+  });
+  if (typeof name === "string" && name !== "") {
+    try {
+      const key = "knowledgenet.nodeTitles";
+      const raw = localStorage.getItem(key);
+      const titles = raw === null ? {} : (JSON.parse(raw) as Record<string, string>);
+      titles[id] = name;
+      localStorage.setItem(key, JSON.stringify(titles));
+    } catch {
+      // 标题缓存失败不影响功能
+    }
+  }
+}
+
+/** 记忆里 id → 标题（用于推荐项显示） */
+function titleOf(id: string): string {
+  // 1) 最近一次发布的 id→标题（库级信息、跨会话保留）——推荐项要显示真名
+  const latest = readNodeTitle(id);
+  if (latest !== null) return latest;
+  try {
+    const published = readCurrentContext(domSessionOf());
+    const exact = published?.titles?.[id];
+    if (typeof exact === "string" && exact !== "") return exact;
+  } catch {
+    // 读发布失败就退到缓存
+  }
+  try {
+    const raw = localStorage.getItem("knowledgenet.nodeTitles");
+    if (raw === null) return id.slice(0, 8);
+    const titles = JSON.parse(raw) as Record<string, string>;
+    return titles[id] ?? id.slice(0, 8);
+  } catch {
+    return id.slice(0, 8);
+  }
+}
+
+/** 当前聊天会话 id（供 titleOf 在渲染期读取发布用） */
+function domSessionOf(): string | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const value = document.querySelector("[data-conversation-session]")?.getAttribute("data-conversation-session");
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+interface PickState {
+  snippets: Snippet[];
+  x: number;
+  y: number;
+}
+
+/**
+ * 划词浮条 + 片段收集 + 目标选择。
+ * @param props - 文案与上报回调。
+ * @returns portal 出去的小条与弹窗（没有划词时什么都不渲染）。
+ */
+export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [bar, setBar] = useState<{ x: number; y: number } | null>(null);
+  const [picking, setPicking] = useState<PickState | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; title: string }>>([]);
+  const [searching, setSearching] = useState(false);
+  const [title, setTitle] = useState("");
+  const [pendingCandidates, setPendingCandidates] = useState<{ fromId: string; typed: string; candidates: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * 推荐项的标题：浮条拿不到图谱数据，而面板发布的标题表未必对得上会话（实测推荐只剩 id 前 8 位）。
+   * 所以打开弹窗时**自己按当前会话取一次**图谱，把 id→标题补上；仍取不到才退化成 id。
+   */
+  const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
+  const collecting = useRef(false);
+  const latest = useRef(props);
+  latest.current = props;
+
+  /*
+   * 门禁：只在知识库工作区出现浮条（与面板同一套判据：登记过 ∧ 该目录本身是知识库）。
+   *
+   * **Hook 只能在渲染期调用**：`useWorkspaces` 如果是 Hook，放进 mouseup 回调里会抛
+   * `Invalid hook call`，被我下面的 catch 吞掉后会变成"一律拒绝、浮条永不出现"（实测踩过）。
+   * 所以这里在渲染期把「当前会话 + 当前工作区路径」取好存进 ref，判定时只读 ref + 读登记表。
+   */
+  const pathRef = useRef<string>("");
+  const sessionRef = useRef<string>("");
+  const snapCountRef = useRef<number>(-1);
+  /** 渲染期拿到的快照：只用来"按 id 查路径"，不用它判断"当前是哪个工作区"（它可能不刷新） */
+  const snapRef = useRef<unknown>(undefined);
+  const allowed = (() => {
+    try {
+      const identity = (snapshot: unknown): unknown => snapshot;
+      const snapshot = props.useWorkspaces?.(identity);
+      snapRef.current = snapshot;
+      const sessionId = props.sessionId ?? readLastSessionId();
+      const workspacePath = pickWorkspacePath(snapshot, sessionId ?? undefined) ?? "";
+      pathRef.current = workspacePath;
+      sessionRef.current = String(sessionId ?? "");
+      /*
+       * 会话或工作区变了 ⇒ 上一次的门禁结论、浮条、多选态全部作废 ✓。
+       * 否则"在知识库会话里选过字，切到没有知识库的仓库"会继续显示浮条（实测反馈 ✓）。
+       */
+      const scope = `${sessionId ?? ""}|${workspacePath}`;
+      if (lastScopeRef.current !== scope) {
+        lastScopeRef.current = scope;
+        gateAllowedRef.current = false;
+        collecting.current = false;
+        setBar(null);
+      }
+      const items = (snapshot as { items?: unknown[] } | undefined)?.items;
+      snapCountRef.current = Array.isArray(items) ? items.length : -1;
+      // 新模型：只要有工作区路径就继续（真正的判定在 gateNow：面板发布的上下文 / 问宿主）
+      return workspacePath.trim() !== "";
+    } catch {
+      return false;
+    }
+  })();
+  const allowedRef = useRef(allowed);
+  allowedRef.current = allowed;
+  /*
+   * **最近一次门禁结论**：只有它为 true 时才允许渲染浮条 ✓。
+   *
+   * 为什么需要：浮条是 portal、"bar" 是组件状态 ⇒ 切换会话/工作区时旧的 bar 不会被清掉 ✗，
+   * 于是"在知识库会话里选过字、再切到**没有知识库**的仓库"仍会看到浮条（实测反馈 ✓）。
+   * 用一次真实的门禁判定当硬前提，比依赖"状态恰好被清掉"可靠 ✓。
+   */
+  const gateAllowedRef = useRef(false);
+  /** 上一次判定的「会话|工作区」：变化即作废旧状态（见上面的清理逻辑） */
+  const lastScopeRef = useRef("");
+  /** 当前库根（有库时）；空串表示"还没有库" */
+  const libraryRootRef = useRef("");
+  /** 还没有库时，宿主建议的建库位置（`<工作区>/.dsh_knowledge`） */
+  const createPathRef = useRef("");
+  /** 弹窗里的一行反馈（建库/建点成功或失败 ✓ —— 必须可见，否则就是"点了没反应" ✗） */
+  const [note, setNote] = useState<string | null>(null);
+  /** 多选弹窗是否打开 */
+  const [multiOpen, setMultiOpen] = useState(false);
+  /** 多选弹窗里的文本：**每一块选中的文字占一行** ✓ */
+  const [multiText, setMultiText] = useState("");
+  /** 作用域刚变过：此刻不允许再弹浮条（等下一次真正的按下 ✓）—— 彻底消除"一闪" ✓ */
+  const suppressBarRef = useRef(false);
+  /** 已知的节点数量：-1 表示"还不知道"（不改按钮状态，避免误灰 ✓）；0 表示库是空的 ✓ */
+  const knownNodeCountRef = useRef(-1);
+  /** 浮条弹出时所在的「会话|工作区」：一变就收起（见下面的轮询）✓ */
+  const barScopeRef = useRef("");
+  /** 正在拖动弹窗：拖动产生的 mouseup 不能当成"划词" ✗ */
+  const draggingRef = useRef(false);
+  /** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
+  const [multiPos, setMultiPos] = useState<{ x: number; y: number } | null>(null);
+
+  /*
+   * 多选弹窗打开时，**Esc = 取消** ✓。
+   * 遮罩特意设成 `pointer-events: none`（这样还能继续在对话里划词 ✓），代价是"点外面关闭"没了 ✓
+   * ⇒ 必须给一个键盘出口 ✓。
+   */
+  useEffect(() => {
+    if (!multiOpen) return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      collecting.current = false;
+      setMultiOpen(false);
+      setMultiText("");
+      setSnippets([]);
+      report("multi-cancel", "esc");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [multiOpen]);
+
+  /**
+   * 拖动多选弹窗（按住标题拖 ✓）。
+   *
+   * 为什么需要：弹窗再小也可能压住要选的正文 ✓；能拖开就能在任何位置划词 ✓。
+   *
+   * **注意**：拖动会在页面上**真的产生一个选区** ✗（浏览器把"拖鼠标"当成划词 ✓），
+   * 于是拖动结束时全局 mouseup 会把鼠标划过处的页面文字追加成一行（用户实测 ✓）。
+   * 所以拖动期间：① 每帧清掉选区 ✓；② 置 `draggingRef` 让 mouseup 处理器直接跳过 ✓。
+   */
+  const startDragMulti = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = multiPos ?? {
+      // 首次拖动：以当前实际位置为起点，避免"跳一下"✗
+      x: window.innerWidth / 2 - 280,
+      y: Math.max(24, window.innerHeight / 2 - 140),
+    };
+    draggingRef.current = true;
+    const onMove = (move: MouseEvent): void => {
+      // 拖动不是划词：把浏览器顺手产生的选区清掉 ✓
+      try { window.getSelection()?.removeAllRanges(); } catch { /* 忽略 */ }
+      setMultiPos({
+        x: Math.min(window.innerWidth - 120, Math.max(8, origin.x + (move.clientX - startX))),
+        y: Math.min(window.innerHeight - 80, Math.max(8, origin.y + (move.clientY - startY))),
+      });
+    };
+    const onUp = (): void => {
+      draggingRef.current = false;
+      try { window.getSelection()?.removeAllRanges(); } catch { /* 忽略 */ }
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  /** 从多选文本里取出有效行（去空行、去重 ✓） */
+  const multiLines = (text: string): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (line === "" || seen.has(line)) continue;
+      seen.add(line);
+      out.push(line);
+    }
+    return out;
+  };
+
+  /**
+   * 把弹窗里的**每一行各自建成一个节点** ✓，并都挂到同一个目标节点下（用户要求：一行为一个节点 ✓）。
+   *
+   * @param targetId - 目标节点 id（这些新节点都会成为它的前置 ✓）。
+   */
+  const addLinesAsPrereq = async (targetId: string): Promise<void> => {
+    const texts = (picking?.snippets ?? []).map((item) => item.text).filter((text) => text.trim() !== "");
+    if (texts.length === 0) return;
+    for (const text of texts) await addTo(targetId, text, false);
+    report("prereq-create", `lines:${texts.length}`);
+    /*
+     * 建完就收工（用户要求 ✓）：
+     * ① 通知面板**刷新数据 + 重跑布局 + 重新取景** ✓（否则新节点落在视野外，只提示"按 F 返回" ✗）；
+     * ② 关掉弹窗 ✓。
+     */
+    notifyLibraryChanged();
+    collecting.current = false;
+    setPicking(null);
+    setMultiOpen(false);
+    setMultiText("");
+    setSnippets([]);
+  };
+
+  /**
+   * **添加为孤立节点**：不挂任何前置，直接把选中的文字建成一个节点 ✓。
+   *
+   * 用户要求（2026-09）：还要覆盖两种以前做不到的情况 ——
+   * ① 只想单独加一个孤立节点；② 库里**一个节点都没有**（这时"添加前置"无从谈起 ✓）。
+   * 所以这里先在需要时**顺手建库**（默认位置 `<工作区>/.dsh_knowledge` ✓），再建节点 ✓。
+   *
+   * @param text - 选中的文字（已归一化）。
+   */
+  const createStandalone = async (text: string): Promise<boolean> => {
+    const title = text.trim();
+    if (title === "") {
+      setNote(props.copy.nothingSelected ?? "没有选中文字");
+      return false;
+    }
+    try {
+      let root = libraryRootRef.current;
+      if (root === "") {
+        /*
+         * **写入目标必须先拿到**（这是"点了没创建"的根因 ✓）：
+         * 之前多选分支被提到门禁之前 ⇒ `libraryRootRef`/`createPathRef` 还是空的 ✗，
+         * 而失败提示只写在（那时已隐藏的）浮条上 ⇒ 表现为"静默没反应" ✗。
+         * 现在这里**自己现算一次**（现读 DOM 工作区 → 问宿主 → 需要就先建库 ✓）。
+         */
+        const target = await resolveWriteTarget();
+        root = target.root !== "" ? target.root : target.createPath;
+        if (root === "") {
+          setNote(props.copy.noWorkspace ?? "找不到当前工作区，无法创建");
+          report("standalone-create", "no-workspace");
+          return false;
+        }
+      }
+      if (createPathRef.current !== "" && libraryRootRef.current === "") {
+        // 还没有库：按宿主建议的位置建一个（用户要求：创建第一个节点时默认同时创建知识库 ✓）
+        const created = await fetch(GRAPH_API_ROUTE, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ kind: "create-library", root: createPathRef.current }),
+        });
+        const outcome = (await created.json().catch(() => null)) as
+          | { ok?: boolean; error?: { code?: string; message?: string } }
+          | null;
+        if (outcome?.ok !== true) {
+          const code = outcome?.error?.code ?? "unknown";
+          setNote(`${props.copy.createLibraryFailed ?? "创建知识库失败"}：[${code}] ${outcome?.error?.message ?? ""}`);
+          report("standalone-create", `library-failed:${code}`);
+          return false;
+        }
+        libraryRootRef.current = createPathRef.current;
+        root = createPathRef.current;
+      }
+      const response = await fetch(GRAPH_API_ROUTE, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ kind: "create-node", root, title }),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | { ok?: boolean; node?: { title?: string }; error?: { code?: string; message?: string } }
+        | null;
+      if (body?.ok !== true) {
+        const code = body?.error?.code ?? "unknown";
+        setNote(`${props.copy.createNodeFailed ?? "创建节点失败"}：[${code}] ${body?.error?.message ?? ""}`);
+        report("standalone-create", `node-failed:${code}`);
+        return false;
+      }
+      setNote(`${props.copy.createNodeDone ?? "已创建"}：${body.node?.title ?? title}`);
+      report("standalone-create", "ok");
+      return true;
+    } catch (cause) {
+      setNote(`${props.copy.createNodeFailed ?? "创建节点失败"}：${cause instanceof Error ? cause.message : String(cause)}`);
+      report("standalone-create", `threw:${cause instanceof Error ? cause.message : String(cause)}`.slice(0, 120));
+      return false;
+    }
+  };
+
+  /**
+   * 从 DOM 读"**当前**工作区的路径"。
+   *
+   * 为什么不用 props：浮条挂在 root 作用域，工作区切换时它可能不重渲染（实测：切到普通工作区后
+   * `pathRef` 仍是上一个知识库的路径），于是判定会一直停留在旧值。
+   *
+   * 依据是宿主稳定的无障碍属性（`ui-workspace/src/client/rows/Rows.tsx`）：
+   * - 会话行 `data-row-key="session:<id>"` + `aria-selected="true"` = 当前会话；
+   * - 往上找最近的 `data-row-key="workspace:<id>"` = 当前工作区；
+   * - 路径从快照里按 id 查（快照只用于查路径，不用于判断"当前是哪台"）。
+   *
+   * @returns 路径；取不到返回空串。
+   */
+  const domWorkspacePath = (): string => {
+    try {
+      if (typeof document === "undefined") return "";
+      const row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]');
+      const group = row?.closest?.('[data-row-key^="workspace:"]');
+      const key = group?.getAttribute?.("data-row-key") ?? "";
+      if (!key.startsWith("workspace:")) return "";
+      const id = key.slice("workspace:".length);
+      const items = (snapRef.current as { items?: Array<Record<string, unknown>> } | undefined)?.items ?? [];
+      const hit = items.find((item) => item["workspaceId"] === id || item["id"] === id);
+      const path = hit?.["path"];
+      return typeof path === "string" ? path : "";
+    } catch {
+      return "";
+    }
+  };
+
+  /**
+   * 从 DOM 读**当前聊天会话 id**：宿主在对话容器上给了稳定属性
+   * （`ui-conversation/src/ConversationContent.tsx:193` → `data-conversation-session={sessionId}`）。
+   * 这是"我正在打字的那个会话"的权威来源——不依赖 props 是否刷新、也不依赖侧栏是否折叠。
+   *
+   * @returns 会话 id；读不到返回 null。
+   */
+  const domSessionId = (): string | null => {
+    try {
+      if (typeof document === "undefined") return null;
+      const value = document.querySelector("[data-conversation-session]")?.getAttribute("data-conversation-session");
+      return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** 问宿主：按 sessionId / root 查询库信息（写入目标与归属判定共用 ✓） */
+    const ask = async (query: string): Promise<{ ok: boolean; root: string; code: string; createPath: string }> => {
+      const response = await fetch(`${GRAPH_API_ROUTE}?${query}`, {
+        headers: { accept: "application/json" },
+        credentials: "same-origin",
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        library?: { root?: string };
+        error?: { code?: string; createPath?: string };
+      };
+      return {
+        ok: body.ok === true && typeof body.library?.root === "string" && body.library.root !== "",
+        root: typeof body.library?.root === "string" ? body.library.root : "",
+        code: body.error?.code ?? (body.ok === true ? "library" : "unknown"),
+        createPath: typeof body.error?.createPath === "string" ? body.error.createPath : "",
+      };
+    };
+  /**
+   * **现算"该往哪里写"**：现读 DOM 的工作区 → 问宿主 → 有库给库根、没库给"建议建库位置"。
+   *
+   * 抽出来的原因（真实 bug ✗）：多选分支被提到门禁之前后，创建节点时 `libraryRootRef`/`createPathRef`
+   * 还是空的 ⇒ 点"创建"什么都没发生，而提示只写在已隐藏的浮条上 ⇒ **静默失败** ✓。
+   * 现在创建动作会自己调一次这里 ✓，不再依赖"门禁刚好跑过" ✓。
+   *
+   * @returns 库根（有库时）与建议建库位置（没库时）；两个都空表示"这个会话没有工作区归属"。
+   */
+  const resolveWriteTarget = async (): Promise<{ root: string; createPath: string }> => {
+    /*
+     * **必须在这里取一次会话 id** ✗→✓：
+     * 这段逻辑原来长在 `gateNow` 里，用的 `sessionId` 是它的局部变量 ✓；
+     * 抽成独立函数后我漏了声明 ⇒ `ReferenceError: sessionId is not defined` ✗
+     * —— 而它抛在 `try` 之前 ⇒ 被上层 catch 成"threw"，节点一个都没建 ✓（用户实测"点了没反应" ✓）。
+     */
+    const sessionId = domSessionId();
+    /*
+     * **工作区路径的三个来源，按可靠度取**（重构时我把第 2 个来源丢了 ⇒ 才会出现"找不到当前工作区" ✗）：
+     *  1. DOM 现读（最准：当前选中会话所属的工作区分组 ✓）；
+     *  2. **面板发布过的上下文**（`readCurrentContext` —— 面板是按会话发布的 ✓；
+     *     诊断里 `source: context-library` 就说明这条路是通的 ✓）；
+     *  3. 本会话渲染期写入的快照路径（要求"确实属于当前会话" ✓，避免旧值 ✗）。
+     */
+    const published = (() => {
+      try {
+        return readCurrentContext(sessionId);
+      } catch {
+        return null;
+      }
+    })();
+    /*
+     * **0 号来源：面板发布的库根** ✓（最可靠）。
+     * 面板取数成功时就知道**确切的库根** ✓ —— 不依赖 DOM 工作区行、不依赖会话 id 是否对得上、
+     * 也不用再问宿主 ✓。实测：某些会话里前三种路径都拿不到 ⇒ 出现过"找不到当前工作区" ✗。
+     */
+    if (typeof published?.libraryRoot === "string" && published.libraryRoot.trim() !== "") {
+      libraryRootRef.current = published.libraryRoot;
+      createPathRef.current = "";
+      return { root: published.libraryRoot, createPath: "" };
+    }
+    const publishedPath = published?.workspacePath ?? "";
+    const workspacePath = domWorkspacePath();
+    const sessionKey = `${sessionId ?? ""}|`;
+    const snapshotPath = lastScopeRef.current.startsWith(sessionKey) ? pathRef.current : "";
+    const effectivePath = [workspacePath, publishedPath, snapshotPath].map((v) => v.trim()).find((v) => v !== "") ?? "";
+    if (effectivePath === "") {
+      libraryRootRef.current = "";
+      createPathRef.current = "";
+      return { root: "", createPath: "" };
+    }
+    try {
+      let resolvedRoot = "";
+      let createPath = "";
+      if (sessionId !== null) {
+        const bySession = await ask(`sessionId=${encodeURIComponent(sessionId)}`);
+        if (bySession.ok) resolvedRoot = bySession.root;
+        else createPath = bySession.createPath;
+      }
+      if (resolvedRoot === "") {
+        const byWorkspace = await ask(`root=${encodeURIComponent(effectivePath)}`);
+        if (byWorkspace.ok) resolvedRoot = byWorkspace.root;
+        else if (createPath === "") createPath = byWorkspace.createPath;
+      }
+      libraryRootRef.current = resolvedRoot;
+      createPathRef.current = createPath;
+      return { root: resolvedRoot, createPath };
+    } catch {
+      libraryRootRef.current = "";
+      createPathRef.current = "";
+      return { root: "", createPath: "" };
+    }
+  };
+
+  /**
+   * **划词那一刻**的权威判定（异步）。
+   *
+   * 规则（用户要求）：**只有"有工作区归属"的会话**才参与 ✓ —— 判据是侧栏里当前会话行往上能找到
+   * `workspace:` 分组行（`domWorkspacePath()` 找不到就返回空串 ✓）；未分组会话直接拒绝，
+   * 而且**放在探测之前**：既不看库、也不打宿主 ✓。
+   *
+   * @returns 是否允许 + 判定依据（供上报）。
+   */
+
+  /*
+   * 门禁判定上报：`shown` 一直不出现时，靠它区分「被门禁挡住」还是「选区没识别到」。
+   * 只在结论变化时发，避免刷屏。
+   */
+  const gateSignature = `${allowed}|${props.sessionId ?? readLastSessionId() ?? ""}|${props.useWorkspaces !== undefined}`;
+  const lastGate = useRef("");
+  useEffect(() => {
+    if (lastGate.current === gateSignature) return;
+    lastGate.current = gateSignature;
+    report("gate", {
+      allowed,
+      hasSession: (props.sessionId ?? readLastSessionId()) !== null,
+      hasWorkspaces: props.useWorkspaces !== undefined,
+    });
+  }, [gateSignature, allowed]);
+
+  const report = (step: string, detail: Record<string, unknown> | null = null): void => {
+    try {
+      latest.current.report?.(step, detail);
+    } catch {
+      // 上报失败不影响功能
+    }
+  };
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    ensureStyle();
+
+    const selectionInfo = (): { ok: true; text: string; x: number; y: number } | { ok: false; reason: string } => {
+      try {
+        const selection = window.getSelection();
+        if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return { ok: false, reason: "no-selection" };
+        const text = normalizeSnippet(selection.toString());
+        if (text.length < 2) return { ok: false, reason: "too-short" };
+        const target = selection.anchorNode;
+        const element = target === null ? null : (target.nodeType === 1 ? (target as Element) : target.parentElement);
+        // 输入框里的选择不算（那是用户在编辑自己的话）
+        if (element !== null && typeof element.closest === "function"
+          && element.closest("input, textarea, [contenteditable='true']") !== null) {
+          return { ok: false, reason: "in-editable" };
+        }
+        /*
+         * **侧栏里的选中不算划词** ✓（用户反馈：切仓库时浮条"一闪而过" ✗）。
+         *
+         * 点会话/工作区行时，浏览器常顺手把行内文字选中 ✓ ⇒ 被当成一次划词 ⇒ 浮条弹出、
+         * 又被作用域检查收掉 ⇒ 就是你看到的那一闪 ✓。判据用宿主稳定的无障碍属性 ✓。
+         */
+        if (element !== null && typeof element.closest === "function"
+          && element.closest('[data-row-key^="session:"], [data-row-key^="workspace:"]') !== null) {
+          return { ok: false, reason: "in-sidebar" };
+        }
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return { ok: false, reason: "no-rect" };
+        return { ok: true, text, x: rect.left + rect.width / 2, y: rect.top };
+      } catch (error) {
+        return { ok: false, reason: `throw:${error instanceof Error ? error.message : String(error)}`.slice(0, 60) };
+      }
+    };
+
+    const onMouseUp = (): void => {
+      /*
+       * **先判"有没有选中文字"，再问宿主**。
+       *
+       * 顺序很重要：`gateNow()` 在缓存未命中时会**发请求给宿主**并写诊断上报 ✗。
+       * 之前它排在 `info.ok` 判断之前 ⇒ 每次普通点击、每次拖拽结束（哪怕没选中任何字）
+       * 都会打一次宿主查询 + 几条上报 ⇒ 拖动结束时额外负担（代码审查提出 ✓）。
+       * 现在没有有效选区就直接返回，一个请求都不发 ✓。
+       */
+      // 拖动弹窗产生的那次 mouseup：不是划词，直接忽略 ✗（用户实测：每拖一次就多一行 ✓）
+      if (draggingRef.current) return;
+      const info = selectionInfo();
+      if (info.ok === false) {
+        /*
+         * 没选中文字 ⇒ **收起浮条** ✓（但不动弹窗：用户可能正在弹窗里点按钮 ✓）。
+         *
+         * 实测反馈 ✗："添加节点"浮条总是不及时消失 —— 之前这里只 `return`，浮条会一直赖在屏幕上 ✓
+         * （点空白、滚走、松手都留着 ✗）。现在无选区即收起 ✓，配合下面的 mousedown 立即消失 ✓。
+         */
+        setBar(null);
+        return;
+      }
+      /*
+       * **弹窗已开**：每选一块就往文本框里追加一行 ✓（用户要求：一行为一个节点 ✓）。
+       * 不做门禁、不打宿主 —— 弹窗已经开着，目标在打开时就解析过 ✓。
+       */
+      if (collecting.current) {
+        const text = info.text.trim();
+        if (text === "") return;
+        setMultiText((current) => {
+          // 同一块文字只留一行 ✓（避免重复划同一段时堆积 ✓）
+          const existing = current.split("\n").map((line) => line.trim());
+          if (existing.includes(text)) return current;
+          return current.trim() === "" ? text : `${current.replace(/\n+$/, "")}\n${text}`;
+        });
+        report("multi-append-line", { chars: text.length });
+        return;
+      }
+      /*
+       * **同步判定后就显示** ✓（用户反馈：消失/出现都不够干脆 ✓）。
+       *
+       * 之前这里是 `await gateNow()`（1~2 次宿主请求 ✓）⇒ 浮条要等往返回来才出现 ✗，
+       * 甚至可能在用户已经切走之后才冒出来 ✓（于是表现为"闪一下/不干脆" ✗）。
+       * 现在显示只看**同步可得**的两件事：
+       *  1. 这个会话有没有工作区归属（DOM 现读 ✓ / 面板发布的路径或库根 ✓）—— 未分组会话不显示 ✓；
+       *  2. 库里已知有几个节点（用于"空库时置灰前置按钮" ✓）。
+       * 至于"写入目标在哪"，等用户真的点创建时再解析 ✓（`createStandalone` 自己会做 ✓），
+       * 所以显示路径上**一次网络请求都不需要** ✓。
+       */
+      let hasWorkspace = domWorkspacePath().trim() !== "";
+      let published = null as ReturnType<typeof readCurrentContext>;
+      try {
+        published = readCurrentContext(domSessionId());
+        if (!hasWorkspace) {
+          hasWorkspace = (published?.libraryRoot ?? "").trim() !== "" || (published?.workspacePath ?? "").trim() !== "";
+        }
+        knownNodeCountRef.current = published === null ? -1 : Object.keys(published.titles ?? {}).length;
+      } catch {
+        knownNodeCountRef.current = -1;
+      }
+      if (!hasWorkspace) {
+        report("blocked-by-gate", { source: "no-workspace" });
+        setBar(null);
+        return;
+      }
+      /*
+       * 上一次交互刚导致作用域变化（切了会话/仓库 ✓）⇒ 那次遗留的选区不该再弹浮条 ✓
+       * —— 这是"一闪而过"的最后一道闸门（下一次真正的按下会解除它 ✓）。
+       */
+      if (suppressBarRef.current) {
+        report("blocked-by-gate", { source: "just-switched-scope" });
+        setBar(null);
+        return;
+      }
+      gateAllowedRef.current = true;
+      report("bar-shown-scope", {
+        source: published?.libraryRoot ? "published-root" : "dom-or-published-path",
+        pathTail: String(published?.libraryRoot ?? published?.workspacePath ?? domWorkspacePath()).split(/[\\/]/).filter((part) => part !== "").pop() ?? "",
+        sessionTail: (domSessionId() ?? "").slice(-6),
+        snapCount: snapCountRef.current,
+      });
+      /*
+       * **划词后先出浮条**（用户要求：浮条只有一个「添加节点」✓），点它才打开文本框弹窗 ✓。
+       * 弹窗打开后，之后每次划词继续往文本框追加一行（见上面的 collecting 分支 ✓）。
+       */
+      // 记下浮条属于哪个「会话|工作区」✓ —— 之后只要这个作用域变了就收起（切换会话/仓库 ✓）
+      barScopeRef.current = `${domSessionId() ?? ""}|${domWorkspacePath()}`;
+      setBar({ x: info.x, y: info.y });
+        setNote(null);
+        report("bar-shown", { chars: info.text.length });
+    };
+
+    document.addEventListener("mouseup", onMouseUp);
+
+    /*
+     * **点别处 ⇒ 浮条立即消失** ✓（用户反馈：浮条总是不及时消失 ✗）。
+     *
+     * 用 `mousedown` 而不是等 `mouseup`：点下去的瞬间就收掉，手感才对 ✓。
+     * 但要排除"点在浮条自己身上" —— 否则按钮会在 click 到达前就被卸载 ✗（点不动了 ✓）。
+     */
+    const onMouseDown = (event: MouseEvent): void => {
+      const target = event.target as Element | null;
+      const insideBar = target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
+      // 用户开始新的交互 ⇒ 解除"切换后禁止弹出"（这是新的一次划词机会 ✓）
+      suppressBarRef.current = false;
+      if (!insideBar) setBar(null);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+
+    /*
+     * **选区一没，浮条立刻收** ✓（比 200ms 轮询更跟手 ✓）。
+     * 注意：拖拽选择的过程中 `selectionchange` 会连续触发，但那时选区**没有折叠**（不是空 ✓）
+     * ⇒ 不会误收 ✓；只有点别处/选区被清掉（折叠 ✓）才收起 ✓。
+     */
+    const onSelectionChange = (): void => {
+      try {
+        const selection = window.getSelection();
+        if (selection === null || selection.isCollapsed) {
+          barScopeRef.current = "";
+          setBar(null);
+        }
+      } catch {
+        // 忽略
+      }
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+
+    /*
+     * **浮条只在它自己的「会话|工作区」里有效** ✓。
+     *
+     * 实测反馈 ✗：在当前仓库划词弹出浮条后，**点另一个仓库里的会话**，浮条还赖着不走 ✓。
+     * 与其枚举所有切换方式（点侧栏 / 键盘 / 程序化切换，还得考虑阴影 DOM ✗），
+     * 不如**直接核对作用域**：每 400ms 比一次，作用域变了就收起 ✓ —— 覆盖所有切换方式 ✓。
+     */
+    const scopeTimer = window.setInterval(() => {
+      if (barScopeRef.current === "") return;
+      const scope = `${domSessionId() ?? ""}|${domWorkspacePath()}`;
+      if (scope !== barScopeRef.current) {
+        barScopeRef.current = "";
+        // 切换后的这段"余波"里禁止再弹浮条 ✓（直到用户下一次真正按下 ✓）—— 彻底消掉那一闪
+        suppressBarRef.current = true;
+        setBar(null);
+        /*
+         * **连选区一起清掉** ✓（否则会"闪一下" ✗）。
+         *
+         * 实测反馈：切到别的仓库后浮条是"消失→出现→消失" ✓ —— 因为旧会话遗留的选区还在，
+         * 紧接着的 mouseup 又把它当成一次新划词 ⇒ 浮条被重新弹出 ⇒ 再被这里收掉 ✓。
+         * 清掉选区后，那次 mouseup 根本看不到选区 ⇒ 不会重新弹出 ✓。
+         */
+        try { window.getSelection()?.removeAllRanges(); } catch { /* 忽略 */ }
+      }
+    }, 200);
+    report("mounted", { ua: typeof navigator === "undefined" ? "" : String(navigator.platform ?? "").slice(0, 12) });
+    return () => {
+      window.clearInterval(scopeTimer);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, []);
+
+  /** 调宿主：拉一次当前会话的图谱，补齐推荐项标题（只在需要时请求） */
+  const hydrateTitles = async (ids: readonly string[]): Promise<void> => {
+    const missing = ids.filter((id) => resolvedTitles[id] === undefined && titleOf(id) === id.slice(0, 8));
+    if (missing.length === 0) return;
+    try {
+      /*
+       * 取数用**工作区路径**（`?root=`），而不是会话 id：
+       * 实测面板用路径取数成功，而客户端拿到的会话 id 交给路由取数会失败（一律"找不到库"）。
+       */
+      const root = readLastWorkspacePath();
+      const sessionId = domSessionOf();
+      const url = root !== ""
+        ? `${GRAPH_API_ROUTE}?root=${encodeURIComponent(root)}`
+        : (sessionId === null ? GRAPH_API_ROUTE : `${GRAPH_API_ROUTE}?sessionId=${encodeURIComponent(sessionId)}`);
+      const response = await fetch(url, { headers: { accept: "application/json" }, credentials: "same-origin" });
+      const body = (await response.json()) as { ok?: boolean; nodes?: Array<{ id?: string; title?: string }> };
+      if (body.ok !== true) return;
+      const map: Record<string, string> = {};
+      for (const node of body.nodes ?? []) {
+        if (typeof node.id === "string" && typeof node.title === "string") map[node.id] = node.title;
+      }
+      setResolvedTitles((prev) => ({ ...prev, ...map }));
+      report("titles-hydrated", { count: Object.keys(map).length });
+    } catch {
+      // 补标题失败不影响功能（仍可搜索/手填名称）
+    }
+  };
+
+  /** 推荐项显示用：优先自己补的标题 → 发布/缓存 → id */
+  const labelOf = (id: string): string => resolvedTitles[id] ?? titleOf(id);
+
+  /** 调宿主：搜索可选目标节点 */
+  const doSearch = async (text: string): Promise<void> => {
+    if (text.trim() === "") {
+      setResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const response = await fetch(GRAPH_API_ROUTE, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ kind: "search-nodes", query: text }),
+      });
+      const body = (await response.json()) as { ok?: boolean; nodes?: Array<{ id: string; title: string }> };
+      setResults(body.ok === true ? (body.nodes ?? []) : []);
+      report("search", { count: (body.nodes ?? []).length });
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /** 调宿主：把这段原文挂到某个节点下 */
+  const addTo = async (fromId: string, snippetText: string, create: boolean): Promise<void> => {
+    report("add", { create });
+    try {
+      const response = await fetch(GRAPH_API_ROUTE, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ kind: "add-prerequisite", fromId, title, snippet: snippetText, create }),
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        added?: { created?: boolean; candidates?: Array<{ title?: string }> };
+        error?: { message?: string };
+      };
+      if (body.ok !== true) {
+        setError(body.error?.message ?? props.copy.failed);
+        report("add-failed", { message: body.error?.message ?? "" });
+        return;
+      }
+      const candidates = (body.added?.candidates ?? []).map((item) => item.title ?? "").filter((item) => item !== "");
+      if (create !== true && candidates.length > 0) {
+        setPendingCandidates({ fromId, typed: title, candidates });
+        return;
+      }
+      // 成功：把目标记进 MRU（"最近被加过前置的节点"）
+      const memory = readMemory();
+      writeMemory({ recentFocus: memory.recentFocus, recentPrereqTargets: rememberId(memory.recentPrereqTargets, fromId) });
+      report("add-done", { created: body.added?.created === true });
+      setPicking(null);
+      setSnippets([]);
+      collecting.current = false;
+      setBar(null);
+      setQuery("");
+      setResults([]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  // 非知识库工作区：着色/渲染都不做（门禁在划词那一刻现算，这里只保证有文档环境）
+  if (typeof document === "undefined") return null;
+  const memory = readMemory();
+  /*
+   * 推荐**只在当前库里筛**：记忆目前是跨库共用的，里面可能残留别的库的节点 id
+   * ——那既显示不出标题（只剩 id 前 8 位，看着像乱码），点下去还会把前置挂到**别的库**的节点上
+   * （实测发现：推荐 id 取到了 21 个标题却不在其中）。已取到标题表时就只保留当前库确实存在的。
+   */
+  const candidates = recommendTargets(
+    { recentFocus: memory.recentFocus, recentPrereqTargets: memory.recentPrereqTargets },
+    5,
+  );
+  const hydratedCount = Object.keys(resolvedTitles).length;
+  const recommended = (
+    hydratedCount === 0 ? candidates : candidates.filter((id) => resolvedTitles[id] !== undefined)
+  ).slice(0, 3);
+
+  return (
+    <>
+      {/*
+        * **浮条**（用户要求：只保留一个「添加节点」✓）。
+        * 点它才打开下面的文本框弹窗 ✓ —— 弹窗里再决定"创建独立节点 / 创建前置节点"✓。
+        */}
+      {bar === null || gateAllowedRef.current !== true ? null : createPortal(
+        <div className="kn-sel-bar" style={{ left: bar.x, top: Math.max(8, bar.y - 40), transform: "translateX(-50%)" }}>
+          <button
+            type="button"
+            className="kn-sel-primary"
+            onClick={() => {
+              const text = normalizeSnippet(window.getSelection()?.toString() ?? "").trim();
+              if (text === "") return;
+              setMultiText(text);
+              setNote(null);
+              collecting.current = true;
+              setMultiOpen(true);
+              setBar(null);
+              report("open-dialog", { chars: text.length });
+            }}
+          >
+            {props.copy.addNode ?? "添加节点"}
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {/*
+        * **文本框弹窗**：第一次划词（经浮条）打开 ✓，之后每选中一块文字自动追加**单独一行** ✓
+        * （**一行为一个节点** ✓）；底部三个按钮：创建前置节点 / 创建独立节点 / 取消 ✓。
+        */}
+      {multiOpen ? createPortal(
+        <div className="kn-sel-mask" role="presentation">
+          <div
+            className="kn-sel-modal"
+            role="dialog"
+            aria-modal="true"
+            style={multiPos === null ? undefined : { position: "fixed", left: multiPos.x, top: multiPos.y, margin: 0 }}
+          >
+            <div
+              className="kn-sel-modal-title"
+              style={{ cursor: "move", userSelect: "none" }}
+              onMouseDown={startDragMulti}
+              title="按住拖动可以把它挪开，方便继续在对话里选文字"
+            >
+              {props.copy.multiTitle ?? "多选：每一块文字占一行"}
+            </div>
+            <textarea
+              className="kn-sel-textarea"
+              value={multiText}
+              rows={8}
+              spellCheck={false}
+              onChange={(event) => { setMultiText(event.target.value); }}
+              placeholder={props.copy.multiPlaceholder ?? "在对话里继续划词，会自动追加到下一行；也可以直接在这里编辑"}
+            />
+            {note !== null ? <div className="kn-sel-modal-hint" style={{ opacity: 1 }}>{note}</div> : null}
+            <div className="kn-sel-modal-hint">
+              {props.copy.multiCount ? props.copy.multiCount(multiLines(multiText).length) : `共 ${multiLines(multiText).length} 行`}
+            </div>
+            <div className="kn-sel-modal-actions">
+              <button
+                type="button"
+                className="kn-sel-primary"
+                /* 空库（已知节点数为 0）时置灰 ✓；未知(-1)时保持可点 ✓（避免误灰 ✓） */
+                disabled={multiLines(multiText).length === 0 || knownNodeCountRef.current === 0}
+                title={knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「添加为独立节点」建一个" : undefined}
+                onClick={() => {
+                  const lines = multiLines(multiText);
+                  const list = lines.reduce<ReturnType<typeof appendSnippet>>((acc, line) => appendSnippet(acc, line), []);
+                  collecting.current = false;
+                  setMultiOpen(false);
+                  setPicking({ snippets: list, x: 0, y: 0 });
+                  setTitle(defaultTitle(lines[0] ?? ""));
+                  report("open-picker", { count: list.length, from: "multi-modal" });
+                  void hydrateTitles(recommended);
+                }}
+              >
+                添加为前置
+              </button>
+              <button
+                type="button"
+                disabled={multiLines(multiText).length === 0}
+                onClick={() => {
+                  const lines = multiLines(multiText);
+                  /*
+                   * **先建、后关** ✗→✓：之前先关弹窗再创建 ⇒ 失败提示落在已关闭的界面上 ✗
+                   * ⇒ 用户看到的就是"点了没反应"（真实反馈 ✓）。
+                   * 现在提示留在弹窗里；只有**至少成功一个**才清空文本、继续下一批 ✓。
+                   */
+                  void (async () => {
+                    let ok = 0;
+                    for (const line of lines) {
+                      if (await createStandalone(line)) ok += 1;
+                    }
+                    if (ok > 0) {
+                      /*
+                       * 建完就收工（用户要求 ✓）：
+                       * ① 通知面板**刷新数据 + 重跑布局 + 重新取景** ✓（新节点必须在视野里 ✓）；
+                       * ② **关掉弹窗** ✓（不再让用户手动点取消）。
+                       */
+                      notifyLibraryChanged();
+                      collecting.current = false;
+                      setMultiOpen(false);
+                      setMultiText("");
+                      setSnippets([]);
+                    } else {
+                      // 全失败：保留弹窗与文本，让用户看到原因后直接重试 ✓
+                      setNote(`创建失败：0/${lines.length} 个成功`);
+                    }
+                    report("standalone-create", `multi:${ok}/${lines.length}`);
+                  })();
+                }}
+              >
+                添加为独立节点
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  collecting.current = false;
+                  setMultiOpen(false);
+                  setMultiText("");
+                  setSnippets([]);
+                  report("multi-cancel", null);
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+
+
+      {picking !== null ? createPortal(
+        <div className="kn-modal-backdrop" role="presentation" onClick={() => { setPicking(null); }}>
+          <div className="kn-modal" role="dialog" aria-modal="true" style={{ width: "min(520px, calc(100vw - 48px))" }} onClick={(event) => { event.stopPropagation(); }}>
+            <div className="kn-modal-title">{props.copy.pickTitle}</div>
+            <div className="kn-modal-body">{props.copy.pickHint}</div>
+
+            {recommended.length === 0 ? null : (
+              <>
+                <div className="kn-pick-section">{props.copy.recommended}</div>
+                <div className="kn-pick-targets">
+                  {recommended.map((id) => (
+                    <button key={id} type="button" className="kn-pick-item" onClick={() => { void addLinesAsPrereq(id); }}>
+                      <span>{labelOf(id)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="kn-pick-section">{props.copy.searchHint}</div>
+            <input
+              className="kn-modal-input"
+              value={query}
+              placeholder={props.copy.searchHint}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                void doSearch(event.target.value);
+              }}
+            />
+            {searching ? <div className="kn-modal-hint">{props.copy.searching}</div> : null}
+            {!searching && query.trim() !== "" && results.length === 0 ? <div className="kn-modal-hint">{props.copy.noResult}</div> : null}
+            <div className="kn-pick-targets">
+              {results.map((node) => (
+                <button key={node.id} type="button" className="kn-pick-item" onClick={() => { void addLinesAsPrereq(node.id); }}>
+                  <span>{node.title}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="kn-pick-section">{props.copy.titleLabel}</div>
+            <input className="kn-modal-input" value={title} onChange={(event) => { setTitle(event.target.value); }} />
+
+            <div className="kn-modal-actions">
+              <button type="button" className="kn-modal-btn" onClick={() => { setPicking(null); }}>{props.copy.cancel}</button>
+            </div>
+            {error === null ? null : <div className="kn-modal-error">{error}</div>}
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+
+      {pendingCandidates === null ? null : (
+        <ConfirmDialog
+          title={props.copy.candidatesTitle}
+          message={`${props.copy.candidatesMessage}：${pendingCandidates.candidates.join("、")}`}
+          confirmLabel={`${props.copy.reuse}「${pendingCandidates.candidates[0]}」`}
+          cancelLabel={props.copy.createAnyway}
+          onConfirm={() => {
+            const target = pendingCandidates.candidates[0] ?? "";
+            const fromId = pendingCandidates.fromId;
+            setPendingCandidates(null);
+            setTitle(target);
+            void addTo(fromId, joinSnippets(snippets), false);
+          }}
+          onCancel={() => {
+            const fromId = pendingCandidates.fromId;
+            const typed = pendingCandidates.typed;
+            setPendingCandidates(null);
+            setTitle(typed);
+            void addTo(fromId, joinSnippets(snippets), true);
+          }}
+        />
+      )}
+    </>
+  );
+}

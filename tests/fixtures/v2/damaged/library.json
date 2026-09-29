@@ -1,0 +1,19 @@
+{
+  "format": "knowledgenet-library",
+  "formatVersion": 2,
+  "libraryId": "01990000-0000-7000-8000-000000000003",
+  "title": "损坏样本",
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "scan": {
+    "exclude": [
+      ".git",
+      "node_modules",
+      ".knowledgenet",
+      "**/.meta/knowledgenet"
+    ],
+    "followSymlinks": false
+  },
+  "defaults": {
+    "newNodeParent": "Nodes"
+  }
+}

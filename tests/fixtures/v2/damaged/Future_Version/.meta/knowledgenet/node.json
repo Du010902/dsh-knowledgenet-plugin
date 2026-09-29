@@ -1,0 +1,13 @@
+{
+  "format": "knowledgenet-node",
+  "formatVersion": 99,
+  "id": "0199cccc-0000-7000-8000-0000000000f2",
+  "revision": 1,
+  "title": "未来版本",
+  "aliases": [],
+  "status": "todo",
+  "primaryDocument": null,
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:00:00.000Z",
+  "extensions": {}
+}

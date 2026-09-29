@@ -1,0 +1,588 @@
+/* ============================================================================
+   KnowledgeNet 插件面板样式（注入到 Shadow Root 内）
+   ----------------------------------------------------------------------------
+   1) token 桥：把上游 graph.css 用的 KnowledgeNet 变量名，映射到宿主主题 token
+      （--dsw-alias-*，取自 cordis_inspect_query 的 Theme provider）。宿主主题切换时
+      这些自定义属性会随宿主一起变，因此亮/暗色自动跟随。
+   2) 面板自身的少量骨架样式。所有颜色都来自 token，只有阴影与圆角是字面值。
+   注意：本文件不引入任何全局选择器，且只在 Shadow Root 内生效，不会污染宿主页面。
+   ========================================================================== */
+
+.kn-root {
+  --surface: var(--dsw-alias-bg-layer-1, #ffffff);
+  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);
+  --canvas: var(--dsw-alias-bg-base, #f5f8f7);
+  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);
+  --text: var(--dsw-alias-label-primary, #192523);
+  --secondary: var(--dsw-alias-label-secondary, #526663);
+  --muted: var(--dsw-alias-state-idle-primary, #778a87);
+  --border: var(--dsw-alias-border-l2, #d6e0dd);
+  --line: var(--dsw-alias-border-l1, #d6e0dd);
+  --line-soft: var(--dsw-alias-border-l1, #e5ecea);
+  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);
+  --dot: var(--dsw-alias-border-l1, #dbe4e1);
+  --accent: var(--dsw-alias-brand-primary, #167f68);
+  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);
+  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);
+  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);
+  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);
+  --accent-text: var(--dsw-alias-brand-primary, #146b58);
+  --success: var(--dsw-alias-state-success-primary, #2f8a70);
+  --warning: var(--dsw-alias-state-warn-primary, #a8762c);
+  --todo: var(--dsw-alias-state-idle-primary, #74878d);
+  --danger: var(--dsw-alias-state-error-primary, #c63e48);
+  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);
+  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);
+  /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */
+  --on-accent: #ffffff;
+  --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);
+  --shadow-soft: 0 5px 24px rgba(0, 0, 0, 0.1);
+  --radius: 12px;
+  --radius-node: 12px;
+
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.kn-root *,
+.kn-root *::before,
+.kn-root *::after {
+  box-sizing: border-box;
+}
+
+.kn-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.kn-head-title {
+  font-weight: 600;
+}
+
+.kn-head-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kn-head-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kn-graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.kn-graph > .graph {
+  height: 100%;
+}
+
+/* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */
+.kn-graph > .graph-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.kn-msg {
+  padding: 10px 12px;
+  color: var(--muted);
+}
+
+/* 两个错误类名并存：.kn-error 是新的统一写法，.kn-msg-error 保留给早期卡片 */
+.kn-error,
+.kn-msg-error {
+  color: var(--danger);
+}
+
+.kn-simple {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* ------------------------------ 紧凑卡片（节点 / 建前置） ------------------------------ */
+
+/* height: null 的 ShadowPanel 用这个类：按内容自适应，不再撑满父容器 */
+.kn-root-auto {
+  height: auto;
+  max-height: 460px;
+  /*
+   * 关键：auto 模式是「把组件嵌进宿主已有容器」用的（指南页的入口卡片就是），
+   * 所以必须**去掉面板外壳**——否则 .kn-root 的边框/底色会和卡片自己的框叠成两层
+   * （实测就是这样：外面一圈是外壳，里面一圈是卡片）。
+   */
+  border: 0;
+  border-radius: 0;
+  background: none;
+  overflow: visible;
+}
+
+/* height: "fill" 的 ShadowPanel 用这个类：撑满宿主给的面板区域 */
+.kn-root-fill {
+  height: 100%;
+}
+
+/* 左侧栏的「知识库」标志不在 Shadow DOM 里：它是一条注入到 head 的数据驱动样式，
+   规则由 src/client/badges-css.ts 生成（工作区行没有插槽，只有稳定的 data-row-key）。 */
+
+/* --------------------- 「开始」页上的入口卡片 --------------------- */
+
+/*
+ * 卡片形状**逐项照抄**宿主指南页的胶囊（ui-sidebar-right 的 GuideBody.module.css `.entry`
+ * 与 `.entryIcon`/`.entryText`/`.entryTitle`/`.entryDescription`）：尺寸、内边距、边框宽度、
+ * 圆角、颜色 token 全部对齐，所以它和 shipped 的三张卡片看起来是同一套东西。
+ * 类名与作用域仍然是我自己的（Shadow DOM 里），不 import 任何 Client 包。
+ */
+.kn-guide-card {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 380px;
+  max-width: 100%;
+  min-height: 56px;
+  padding: 14px 20px;
+  color: var(--dsw-alias-label-primary, #1b1b1b);
+  font: inherit;
+  text-align: left;
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);
+  border-radius: var(--dsl-guide-entry-radius, 16px);
+  cursor: pointer;
+}
+
+.kn-guide-card:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.kn-guide-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 26px 的固定盒子、安静一点的字色：与 shipped 卡片的字形框一致（**不要**填充底） */
+.kn-guide-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--dsw-alias-label-secondary, #5c6b66);
+}
+
+.kn-guide-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.kn-guide-title {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kn-guide-desc {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary, #8a9994);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------ 常驻面板 ------------------------------ */
+
+.kn-head-panel {
+  gap: 6px 10px;
+}
+
+.kn-modes {
+  display: inline-flex;
+  margin-left: auto;
+  gap: 4px;
+}
+
+.kn-btn {
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kn-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.kn-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.kn-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
+
+.kn-warn-inline {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+}
+
+.kn-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 12px;
+  overflow: auto;
+}
+
+.kn-sect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kn-sect-title {
+  color: var(--secondary);
+  font-weight: 600;
+}
+
+.kn-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kn-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  font-size: 12px;
+}
+
+.kn-list {
+  margin: 0;
+  padding-left: 14px;
+}
+
+.kn-list li {
+  margin: 2px 0;
+}
+
+.kn-arrow {
+  color: var(--accent);
+}
+
+.kn-dim {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kn-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+}
+
+.kn-note {
+  margin: 0;
+  max-height: 220px;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--canvas-soft);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kn-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+/* ---------------- 聚焦视图（胶囊 + 两个矩形框） ---------------- */
+
+
+
+
+/* ---------------- 聚焦视图：收紧空间（覆盖上面的默认值） ---------------- */
+
+
+/* 箭头改成水平（朝右） */
+
+/* 面板很窄时退回纵向（等价于原来那套），避免挤压 */
+@media (max-width: 900px) {
+}
+
+/* ---------------- 标签页模式：去掉卡片外壳，和宿主其它标签页一致（贴边铺满） ---------------- */
+
+.kn-root-fill {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* 头部与内容之间只留一条与宿主同风格的分隔线，不再自成一张卡片 */
+.kn-root-fill .kn-head-panel {
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.kn-root-fill .kn-graph { background: transparent; }
+
+/* ---------------- 标签页模式：与宿主其它标签页同一套网格（头行 + 贯通分隔线 + 统一左起点） ---------------- */
+
+.kn-root-fill .kn-head-panel {
+  margin: 0;
+  padding: 0 12px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+}
+.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }
+.kn-root-fill .kn-head-meta { font-size: 12px; }
+.kn-root-fill .kn-graph { padding: 0; }
+/* 内容区与头行左对齐：聚焦/空间视图不各加一层内边距 */
+.kn-root-fill .kn-msg { padding: 12px; }
+.kn-root-fill .kn-warn-inline { margin: 0 12px; }
+
+/* ---------------- 标签页模式：不再自画头部分隔线（否则永远与宿主的线对不齐） ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  margin: 0;
+  padding: 6px 12px;
+  min-height: 0;            /* 不再固定 44px：高度随内容，宿主的线在哪就是哪 */
+  border: 0;                /* 不再画自己的线 */
+  border-bottom: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }
+.kn-root-fill .kn-head-meta { font-size: 12px; }
+
+/* ---------------- 聚焦视图：框改用底色块表达（1px 描边会被误读成"分隔线"，且与宿主那条线错位） ---------------- */
+
+
+/* ---------------- 标签页模式：不自己画底色/描边，与宿主内容区一致 ---------------- */
+
+.kn-root-fill .kn-msg,
+.kn-root-fill .kn-warn-inline { background: transparent; }
+
+/* ---------------- 标签页模式：三维/二维画布容器不自绘底色、底纹与分隔线 ---------------- */
+
+.kn-root-fill .graph,
+.kn-root-fill .kn-graph,
+.kn-root-fill .graph-canvas,
+.kn-root-fill canvas {
+  background-color: transparent;
+  background-image: none;
+  border-top: 0;
+}
+
+/* ---------------- 标签页模式：三维视图的自绘 chrome（提示条/状态胶囊）不再画底色与描边 ---------------- */
+
+.kn-root-fill [class^="universe-"],
+.kn-root-fill [class*=" universe-"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.kn-root-fill .universe-hint { opacity: .55; font-size: 11.5px; }
+.kn-root-fill .graph,
+.kn-root-fill .graph-space,
+.kn-root-fill .universe { border-top: 0; background: transparent; }
+
+/* ---------------- 聚焦视图：两个分组框是必要组件——恢复矩形框（仅描边，不铺底色） ---------------- */
+
+
+/* ---------------- 标签页模式：恢复头行下沿的分隔线（必要组件），用宿主同源 token ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  min-height: 46px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* ---------------- 标签页模式：头部行不换行、按钮收紧，分隔线不再被挤下去 ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  flex-wrap: nowrap;           /* 不许换行：换行会把整行撑高、把分隔线推下去 */
+  height: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 0 8px;
+  overflow: hidden;
+  align-items: center;
+}
+.kn-root-fill .kn-head-title,
+.kn-root-fill .kn-head-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kn-root-fill .kn-head-meta { margin-right: auto; }   /* 标题/计数靠左，按钮靠右 */
+.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }
+.kn-root-fill .kn-btn {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+/* ---------------- 标签页模式（B 方案）：不再自画分隔线，头行压成紧凑一行 ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  border-bottom: 0;          /* 面板里只留宿主那条线 */
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  flex-wrap: nowrap;
+  gap: 0 8px;
+  overflow: hidden;
+  align-items: center;
+}
+.kn-root-fill .kn-head-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; white-space: nowrap; }
+.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }
+.kn-root-fill .kn-btn { height: 22px; padding: 0 8px; font-size: 11.5px; line-height: 20px; }
+
+/* ---------------- 恢复头行分隔线（线是必须的），高度先回到 40px，待与宿主对齐后再微调 ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  border-bottom: 1px solid var(--line-soft);
+  height: 40px;
+  min-height: 40px;
+  padding: 0 12px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }
+.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; }
+.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }
+
+/* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header
+   （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）
+   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */
+
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  display: flex;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 6px 0 16px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  overflow: hidden;
+}
+.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.kn-root-fill .kn-head-meta { font-size: 12px; margin-right: auto; white-space: nowrap; }
+.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }
+.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }
+
+/* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */
+.kn-root-fill .kn-btn {
+  border-color: var(--dsw-alias-border-l3, #d6e0dd);
+  color: var(--dsw-alias-label-secondary, #526663);
+  background: transparent;
+}
+.kn-root-fill .kn-btn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-label-secondary, #526663);
+  color: var(--dsw-alias-label-primary, #192523);
+}
+.kn-root-fill .kn-btn:disabled { opacity: .5; }
+
+/* ---------------- 聚焦视图：分组块内，标签下方加一条分隔线，节点一律在线以下 ---------------- */
+
+
+/* ---------------- agent 提案审阅区 ---------------- */
+
+.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }
+.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }
+.kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }
+.kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }
+.kn-plan-summary { font-size: 12px; opacity: .8; }
+.kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }
+.kn-plan-tag.is-reuse { opacity: .6; }
+.kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.kn-plan-hint { font-size: 11px; opacity: .55; }
+.kn-plan-note { font-size: 12px; opacity: .85; }
+.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }
+
+/* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */
+.kn-empty-hint {
+  position: absolute; left: 0; right: 0; top: 0;
+  padding: 10px 12px; text-align: center;
+  pointer-events: none;
+}
+
+/* 危险按钮（彻底删除）：红字描边，视觉上与"备份删除"分得开 */
+.kn-modal-btn.is-danger {
+  color: #e5534b;
+  border: 0.5px solid rgba(229, 83, 75, 0.5);
+}
+.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }

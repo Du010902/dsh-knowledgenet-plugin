@@ -1,0 +1,597 @@
+/* ============================================================================
+   KnowledgeNet · 画布：二维聚焦与三维空间视图
+   ----------------------------------------------------------------------------
+   画布：二维聚焦与三维空间视图
+   由 src/styles.css 按小节边界拆分而来：段内内容与顺序都没有改动，
+   导入顺序见 src/main.tsx（响应式那一份排在最后，覆盖才生效）。
+   ========================================================================== */
+
+/* ------------------------------- 画布：图 ------------------------------- */
+
+/*
+ * 二维聚焦画布：背景不再是规则点阵，而是「低对比度微尘 + 中心雾光」。
+ * 规则点阵会暗示这是一张二维平面，而这里只是**同一张三维网的一个切面**；
+ * 微尘与雾光不带方向感，也不与卡片抢注意力。
+ */
+.graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line-soft);
+  background-color: var(--canvas);
+  background-image:
+    radial-gradient(circle at 50% 44%, var(--accent-faint), transparent 38%),
+    radial-gradient(circle at 80% 18%, rgba(93, 113, 168, 0.035), transparent 30%),
+    radial-gradient(var(--dot) 0.7px, transparent 0.7px);
+  background-size: 100% 100%, 100% 100%, 26px 26px;
+}
+
+.graph-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  /*
+   * 稳定预留滚动条的位置。**这一行是必须的，不是优化。**
+   *
+   * 分屏比例算出来的面板宽度经常是小数（例如 1236.75），而 `clientWidth` 会取整（1237）。
+   * 画布平面的尺寸取自 `clientWidth`，于是它比真实内容盒大不到 1px → 出现滚动条 →
+   * `clientWidth` 少掉滚动条那几像素 → ResizeObserver 把平面改小 → 滚动条又消失 → 平面又变大……
+   * 一帧一轮，永不停歇：桌面上看到的就是「图谱视图不停抖动」（WebView2 用经典滚动条，
+   * 必然复现；无头 Chrome 默认 overlay 滚动条，所以自检一直没发现）。
+   *
+   * `scrollbar-gutter: stable` 让 `clientWidth` 与「滚动条在不在」无关，环路从根上断掉：
+   * 平面尺寸不再反复变，滚动条要么一直有、要么一直没有。
+   */
+  scrollbar-gutter: stable;
+}
+
+.graph-plane {
+  position: relative;
+  transform-origin: top center;
+  transition: transform 0.2s;
+}
+
+.graph-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/*
+ * 连线：可见层 + 命中层（六项交互修复第 1 条）
+ *
+ * 可见线只有 1–1.6px，鼠标根本点不准，因此每条边还有一个 12px 宽的**透明命中层**：
+ * 它只在描边上命中（`pointer-events: stroke`），不挡住节点卡片，也不改变任何视觉。
+ * `vector-effect: non-scaling-stroke` 让命中宽度不随平面缩放变化——
+ * 缩到 60% 时命中区不该跟着缩成 7px。
+ */
+.graph-edge-hit {
+  pointer-events: stroke;
+  cursor: context-menu;
+}
+
+.graph-edge-hit:focus {
+  outline: none;
+}
+
+/* 悬停与选中都加粗、提亮同一条可见线；命中层不参与视觉 */
+.graph-edge:hover .graph-edge-line,
+.graph-edge:focus-within .graph-edge-line {
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  opacity: 1;
+}
+
+/*
+ * 已选中的关系要**一直**看得出来：它比悬停更持久——
+ * 右键菜单关掉之后，用户还得能认出刚才那条线是哪一条。
+ */
+.graph-edge[data-selected="true"] .graph-edge-line {
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  opacity: 1;
+}
+
+.graph-label {
+  position: absolute;
+  left: 24px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/*
+ * 画布节点：一张轻卡片。
+ *
+ * 与之前的三处区别：圆角 12px、边框用 `--line-soft`（分组线，不是硬边界）、
+ * 状态从彩色胶囊变成「小圆点 + 文字」、选中靠一圈强调色光晕而不是加粗整张卡。
+ */
+.graph-node {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 9px;
+  width: 172px;
+  min-height: 84px;
+  padding: 13px 15px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-node);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  text-align: left;
+  transition:
+    background 0.18s,
+    border-color 0.18s,
+    box-shadow 0.18s,
+    transform 0.18s,
+    width 0.18s;
+}
+
+.graph-node:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));
+  box-shadow: var(--shadow);
+  transform: translate(-50%, -50%) translateY(-2px);
+}
+
+.graph-node.selected {
+  z-index: 4;
+  width: 190px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-soft);
+}
+
+.graph-node.root:not(.selected) {
+  background: var(--surface-raised);
+}
+
+.graph-node-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.graph-node.selected .graph-node-title {
+  font-size: 15px;
+}
+
+.graph-node-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--canvas-soft);
+  color: var(--secondary);
+}
+
+.graph-node.selected .graph-node-icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.graph-node-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.graph-node-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 节点状态：小圆点 + 文字，不是胶囊 */
+.graph-node-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.graph-node-status.is-learning {
+  color: var(--warning);
+}
+
+.graph-node-status.is-done {
+  color: var(--success);
+}
+
+.graph-node-info {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 三维空间视图：画布交给 WebGL，不再铺二维底纹 */
+.graph[data-mode="space"] {
+  background-image: none;
+}
+
+/*
+ * 画布浮层（缩放 / 图例 / 当前视图说明）：统一成「半透明底 + 模糊」的玻璃片，
+ * 而不是三个各自带边框和阴影的小盒子。
+ *
+ * 参考图里这些浮层**没有边框**（`.space-status`/`.graph-legend`/`.graph-help`
+ * 都只有 `--canvas 82%` 的底 + blur），边框是这版实现多出来的结构感；
+ * 去掉之后画布更通透，浮层仍然读得清。
+ */
+.canvas-controls,
+.graph-legend,
+.selection-label {
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.canvas-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 6;
+  gap: 2px;
+  padding: 4px;
+}
+
+.canvas-controls .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.canvas-controls output {
+  min-width: 38px;
+  font-size: 12px;
+  color: var(--secondary);
+  text-align: center;
+}
+
+.canvas-controls .sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line-soft);
+}
+
+.graph-legend {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 6;
+  gap: 13px;
+  padding: 7px 9px;
+  pointer-events: none;
+}
+
+.graph-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-legend .status-dot {
+  width: 7px;
+  height: 7px;
+  /* 参考图的图例点带一点内阴影：小圆点因此不是一个纯色贴片 */
+  box-shadow: inset -1px -1px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* 「未开始」用 --todo（#74878d），与参考图的图例一致，而不是文字用的中性灰 */
+.graph-legend .status-dot:not(.is-learning):not(.is-done) {
+  background: var(--todo);
+}
+
+.selection-label {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 6;
+  gap: 7px;
+  padding: 7px 9px;
+  color: var(--secondary);
+  pointer-events: none;
+}
+
+.selection-label .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* 名称密度已收进工具栏的「视图设置」菜单（验收清单 P2-6）：这里的下拉框规则删除 */
+
+/* ------------------------- 三维空间视图（GraphUniverse） ------------------------- */
+
+.universe {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* 指针手势全部由相机控制器接管：拖动转向、滚轮缩放，都不要触发页面滚动 */
+  touch-action: none;
+  /*
+   * 平时是普通箭头，**按下左键拖动时**才变成一只手（`data-dragging` 由
+   * `graph3d/navigation.ts` 的指针状态机打上/取下）。
+   * 整块画布常驻 `cursor: grab` 会让人以为「这里有东西可以抓」，
+   * 而它其实只是一个观察视图。
+   */
+  cursor: default;
+  /*
+   * 中心辉光由 CSS 画（不占 GPU 绘制调用）：三维画布本身是透明的，
+   * 底色与辉光都来自这一层，于是「星空 + 雾」与主题切换天然一致。
+   *
+   * 参数照参考图 `drawBackground()`：圆心 (51%, 48%)、半径 58% 视口长边、
+   * 两个 stop（--graph-glow-1 / -2）。二维视图那层蓝色辉光不在这里——
+   * 参考图的空间画布是不透明的，那层压根看不见。
+   */
+  background-image: radial-gradient(
+    circle 58vmax at 51% 48%,
+    var(--graph-glow-1),
+    var(--graph-glow-2) 48%,
+    transparent
+  );
+}
+
+/* 按住左键拖动时才是「抓住」的手型（状态由指针状态机给出） */
+.universe[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.universe:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.universe-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 标题层：有限、自行投影的 HTML 标签，不随全图缩放，也不吃指针事件 */
+.universe-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.universe-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 220px;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  /*
+   * 文字描边用画布底色：节点背后有连线时仍然读得清。
+   * 参考图是在画布上先 stroke 一圈 4px 的底色再 fill，这里用一圈无模糊的
+   * 阴影近似同一个「光晕」效果——方块字有笔画间隙，模糊版本会糊成一团。
+   */
+  text-shadow:
+    0 0 3px var(--canvas),
+    0 0 3px var(--canvas),
+    1px 0 0 var(--canvas),
+    -1px 0 0 var(--canvas),
+    0 1px 0 var(--canvas),
+    0 -1px 0 var(--canvas);
+  will-change: transform;
+}
+
+/* 三档配色与参考图一致：选中 = accent-strong，相关/悬停 = 正文色，普通 = 次要色 */
+.universe-label.is-selected {
+  color: var(--accent-strong);
+}
+
+.universe-label.is-related {
+  color: var(--text);
+}
+
+.universe-label.is-normal {
+  color: var(--secondary);
+}
+
+/* 画布浮层统一成「玻璃片」：半透明底 + 模糊，不抢星空的视觉 */
+.universe-status,
+.universe-hint,
+.universe-offstage,
+.universe-tooltip {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/*
+ * 布局状态条放右上角。
+ *
+ * 左上角已经被「当前视图说明」（`.selection-label`）占住——参考图那里只有
+ * 一条状态，这一版有两件事要说，因此把「布局在算什么」移到右上：
+ * 两块玻璃片各占一角，不互相压字。
+ */
+.universe-status {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  /* 状态句不许折行：折一次就会在「可自由探索」中间断开，看着像被裁掉 */
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.universe-status .statuslight {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* 旧的「模式提示横幅」样式已随控制方式开关一起删除：
+   只剩环绕观察一种控制方式时，不需要再提示当前处于哪种模式 */
+
+.universe-offstage {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  /* 它是可点的按钮，不是说明条：这里保留一圈强调色边框 */
+  border: 1px solid var(--accent);
+  color: var(--accent-text);
+}
+
+.universe-tooltip {
+  position: absolute;
+  z-index: 8;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  max-width: 230px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.universe-tooltip strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.universe-tooltip span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 操作提示放左下角：与左下角的缩放控件同一侧，不与图例抢位置 */
+.universe-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  padding: 7px 9px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* WebGL 2 不可用或上下文丢失：给明确出路，而不是留一块黑画布 */
+.universe-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 40px;
+  text-align: center;
+  color: var(--secondary);
+}
+
+.universe-fallback h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.universe-fallback p {
+  max-width: 380px;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.universe-fallback-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* 画布空态：没有目标或没有节点时，说明下一步做什么 */
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 40px;
+  text-align: center;
+  color: var(--secondary);
+  pointer-events: none;
+}
+
+.graph-empty .empty-mark {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  border-radius: 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.graph-empty h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.graph-empty p {
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+/* 首屏拉取三维代码时的占位（图谱按需加载，见 WorkspaceShell） */
+.graph-loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  height: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.graph-loading .spinner {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+

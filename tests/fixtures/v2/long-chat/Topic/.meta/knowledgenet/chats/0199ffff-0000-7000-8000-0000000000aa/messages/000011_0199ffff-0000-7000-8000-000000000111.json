@@ -1,0 +1,16 @@
+{
+  "format": "knowledgenet-chat-message",
+  "formatVersion": 1,
+  "id": "0199ffff-0000-7000-8000-000000000111",
+  "threadId": "0199ffff-0000-7000-8000-0000000000aa",
+  "sequence": 11,
+  "role": "user",
+  "content": "正在生成到一半的回答",
+  "status": "streaming",
+  "finishReason": null,
+  "requestId": "req-fixture-11",
+  "usage": null,
+  "model": "deepseek-chat",
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:00:00.000Z"
+}
