@@ -438,6 +438,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const barScopeRef = useRef("");
   /** 正在拖动弹窗：拖动产生的 mouseup 不能当成"划词" ✗ */
   const draggingRef = useRef(false);
+  /**
+   * 按下那一刻的现场（在**捕获阶段**记下）：松开时用它判断"这一按到底是不是划词"。
+   * `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）。
+   */
+  const pressRef = useRef<{ x: number; y: number; text: string; inside: boolean } | null>(null);
   /** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
   const [multiPos, setMultiPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -952,7 +957,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       }
     };
 
-    const onMouseUp = (): void => {
+    const onMouseUp = (event: MouseEvent): void => {
       /*
        * **先判"有没有选中文字"，再问宿主**。
        *
@@ -973,6 +978,27 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
          */
         setBar(null);
         return;
+      }
+      /*
+       * **这一次按下没有产生新的选区 ⇒ 不许把浮条弹回来** ✓。
+       *
+       * 用户实测 ✗：选中文字后点右侧栏的放大按钮（或任何按钮），浮条被这次 `mouseup` 又弹了出来。
+       * 判据：按下到松开**没移动**（< 4px）且**选区文字没变** ⇒ 那只是一次点击，不是划词 ✓。
+       * 按下点在浮条自己身上（`inside`）时同理：交给它自己的 click 处理，这里不收也不重弹 ✓。
+       */
+      const press = pressRef.current;
+      pressRef.current = null;
+      if (press !== null) {
+        if (press.inside) {
+          report("blocked-by-gate", { source: "press-inside-bar" });
+          return;
+        }
+        const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
+        if (!moved && press.text === info.text) {
+          report("blocked-by-gate", { source: "click-not-drag" });
+          setBar(null);
+          return;
+        }
       }
       /*
        * **弹窗已开**：每选一块就追加一个标签 ✓（设计稿：继续划词自动追加 ✓）。
@@ -1041,20 +1067,48 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
     document.addEventListener("mouseup", onMouseUp);
 
-    /*
-     * **点别处 ⇒ 浮条立即消失** ✓（用户反馈：浮条总是不及时消失 ✗）。
+    /**
+     * 这个事件是不是发生在**浮条自己身上**？
      *
-     * 用 `mousedown` 而不是等 `mouseup`：点下去的瞬间就收掉，手感才对 ✓。
-     * 但要排除"点在浮条自己身上" —— 否则按钮会在 click 到达前就被卸载 ✗（点不动了 ✓）。
+     * 用 `composedPath()` 而不是 `event.target.closest(...)`：宿主侧栏/面板有 Shadow DOM，
+     * 事件穿透出来时 `target` 会被**重定向**成宿主元素 ⇒ 拿不到浮条 ⇒ 判断失效 ✓（实测点侧栏按钮收不掉浮条）。
      */
-    const onMouseDown = (event: MouseEvent): void => {
+    const insideBar = (event: Event): boolean => {
+      try {
+        const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+        if (path.some((node) => node instanceof Element && node.classList.contains("kn-sel-bar"))) return true;
+      } catch {
+        // 忽略：退到下面的 closest 判断
+      }
       const target = event.target as Element | null;
-      const insideBar = target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
-      // 用户开始新的交互 ⇒ 解除"切换后禁止弹出"（这是新的一次划词机会 ✓）
-      suppressBarRef.current = false;
-      if (!insideBar) setBar(null);
+      return target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
     };
-    document.addEventListener("mousedown", onMouseDown);
+
+    /*
+     * **点别处 ⇒ 浮条立即消失，而且不许再弹回来** ✓。
+     *
+     * 两条纪律（都是实测踩出来的）：
+     * 1. 用**捕获阶段**的 `pointerdown`/`mousedown`：侧栏/面板可能在自己的（Shadow）树里
+     *    `stopPropagation`，冒泡阶段根本收不到 ✗；而且 Shadow DOM 里 `event.target` 会被**重定向**
+     *    成宿主元素，靠它判断"点没点在浮条上"不可靠 ✗ ⇒ 用 `composedPath()` 判断 ✓。
+     * 2. 记下这一按的**起点与按下时的选区**：`mouseup` 才是显示浮条的地方，而"点别处"的事件序列是
+     *    `按下（收浮条）→ 松开（又弹回来）` ✗ —— 用户实测：选中文字后点右侧栏的放大按钮，浮条又冒出来了。
+     *    所以【没移动 + 选区文字没变】就不许再弹（那只是一次点击，不是划词）✓。
+     */
+    const onPressCapture = (event: MouseEvent): void => {
+      const inside = insideBar(event);      /* 用户开始新的交互 ⇒ 解除"切换后禁止弹出"（这是新的一次划词机会 ✓） */
+      suppressBarRef.current = false;
+      pressRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        text: inside ? "" : normalizeSnippet(window.getSelection()?.toString() ?? "").trim(),
+        inside,
+      };
+      if (!inside) setBar(null);
+    };
+    document.addEventListener("pointerdown", onPressCapture, true);
+    /* 某些环境（老浏览器/合成事件）不发 pointerdown ⇒ 再用 mousedown 兜一次（同一个处理器，幂等 ✓） */
+    document.addEventListener("mousedown", onPressCapture, true);
 
     /*
      * **选区一没，浮条立刻收** ✓（比 200ms 轮询更跟手 ✓）。
@@ -1103,7 +1157,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     return () => {
       window.clearInterval(scopeTimer);
       document.removeEventListener("mouseup", onMouseUp);
-      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("pointerdown", onPressCapture, true);
+      document.removeEventListener("mousedown", onPressCapture, true);
     };
   }, []);
 

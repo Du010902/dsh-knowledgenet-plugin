@@ -121,6 +121,20 @@ describe("划词添加前置：三条回归的守门", () => {
     );
   });
 
+  it("点浮条之外的任何地方都要收掉浮条，而且不许被 mouseup 弹回来", () => {
+    /*
+     * 用户实测 ✗：选中文字后点右侧栏的放大按钮，浮条不消失（甚至又被弹了一次）。
+     * 两个原因都要防：① 侧栏在 Shadow DOM 里 `stopPropagation` ⇒ 冒泡阶段收不到；
+     * ② `mouseup` 才是显示浮条的地方 ⇒ "按下收掉、松开又弹回来"。
+     */
+    assert.ok(code.includes("composedPath"), "判断「点在浮条上」必须用 composedPath（Shadow DOM 里 target 会被重定向）");
+    assert.ok(code.includes('addEventListener("pointerdown", onPressCapture, true)'), "必须用捕获阶段监听按下（stopPropagation 拦不住）");
+    assert.ok(code.includes('addEventListener("mousedown", onPressCapture, true)'), "mousedown 也要捕获兜底");
+    assert.ok(code.includes("pressRef.current"), "按下时要记下「起点 + 当时的选区」");
+    assert.ok(code.includes("click-not-drag"), "松开时若没移动、选区也没变 ⇒ 不许把浮条弹回来");
+    assert.ok(code.includes("Math.hypot(event.clientX - press.x"), "判据是「按下到松开有没有移动」");
+  });
+
   it("注入的样式表必须跟着这一版走（热更新不能留下上一版的 <style>）", () => {
     /*
      * 实测 ✗：插件重新安装后页面没有整体刷新，上一版留在 head 里的 `<style id="knowledgenet-selection-style">`

@@ -752,6 +752,11 @@ window.__ModuleLoader__.load({
 			const barScopeRef = (0, react.useRef)("");
 			/** 正在拖动弹窗：拖动产生的 mouseup 不能当成"划词" ✗ */
 			const draggingRef = (0, react.useRef)(false);
+			/**
+			* 按下那一刻的现场（在**捕获阶段**记下）：松开时用它判断"这一按到底是不是划词"。
+			* `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）。
+			*/
+			const pressRef = (0, react.useRef)(null);
 			/** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
 			const [multiPos, setMultiPos] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
@@ -1263,12 +1268,25 @@ window.__ModuleLoader__.load({
 						};
 					}
 				};
-				const onMouseUp = () => {
+				const onMouseUp = (event) => {
 					if (draggingRef.current) return;
 					const info = selectionInfo();
 					if (info.ok === false) {
 						setBar(null);
 						return;
+					}
+					const press = pressRef.current;
+					pressRef.current = null;
+					if (press !== null) {
+						if (press.inside) {
+							report("blocked-by-gate", { source: "press-inside-bar" });
+							return;
+						}
+						if (!(Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4) && press.text === info.text) {
+							report("blocked-by-gate", { source: "click-not-drag" });
+							setBar(null);
+							return;
+						}
 					}
 					if (collecting.current) {
 						const text = info.text.trim();
@@ -1313,13 +1331,32 @@ window.__ModuleLoader__.load({
 					report("bar-shown", { chars: info.text.length });
 				};
 				document.addEventListener("mouseup", onMouseUp);
-				const onMouseDown = (event) => {
+				/**
+				* 这个事件是不是发生在**浮条自己身上**？
+				*
+				* 用 `composedPath()` 而不是 `event.target.closest(...)`：宿主侧栏/面板有 Shadow DOM，
+				* 事件穿透出来时 `target` 会被**重定向**成宿主元素 ⇒ 拿不到浮条 ⇒ 判断失效 ✓（实测点侧栏按钮收不掉浮条）。
+				*/
+				const insideBar = (event) => {
+					try {
+						if ((typeof event.composedPath === "function" ? event.composedPath() : []).some((node) => node instanceof Element && node.classList.contains("kn-sel-bar"))) return true;
+					} catch {}
 					const target = event.target;
-					const insideBar = target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
-					suppressBarRef.current = false;
-					if (!insideBar) setBar(null);
+					return target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
 				};
-				document.addEventListener("mousedown", onMouseDown);
+				const onPressCapture = (event) => {
+					const inside = insideBar(event);
+					suppressBarRef.current = false;
+					pressRef.current = {
+						x: event.clientX,
+						y: event.clientY,
+						text: inside ? "" : normalizeSnippet(window.getSelection()?.toString() ?? "").trim(),
+						inside
+					};
+					if (!inside) setBar(null);
+				};
+				document.addEventListener("pointerdown", onPressCapture, true);
+				document.addEventListener("mousedown", onPressCapture, true);
 				const onSelectionChange = () => {
 					try {
 						const selection = window.getSelection();
@@ -1345,7 +1382,8 @@ window.__ModuleLoader__.load({
 				return () => {
 					window.clearInterval(scopeTimer);
 					document.removeEventListener("mouseup", onMouseUp);
-					document.removeEventListener("mousedown", onMouseDown);
+					document.removeEventListener("pointerdown", onPressCapture, true);
+					document.removeEventListener("mousedown", onPressCapture, true);
 				};
 			}, []);
 			/**
