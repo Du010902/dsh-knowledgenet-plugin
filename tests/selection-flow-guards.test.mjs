@@ -61,4 +61,24 @@ describe("划词添加前置：三条回归的守门", () => {
     assert.ok(code.includes('code === "node_not_found"'), "必须识别 node_not_found");
     assert.ok(code.includes("forgetTarget(fromId)"), "必须把跨库残留的 id 从记忆里清掉");
   });
+
+  /*
+   * 形态按设计稿 `knowledgenet-picker-design.html`：被添加的知识点（可编辑 chip）+
+   * 「添加为谁的前置」搜索区（带放大镜的输入框、推荐/搜索结果切换、可选中行）+ 底部状态行与确认。
+   */
+  it("「设为前置」弹窗保持设计稿的形态与交互", () => {
+    for (const token of ["kn-pick-dialog", "kn-pick-chip", "kn-search-wrap", "kn-pick-row", "kn-pick-foot"]) {
+      assert.ok(code.includes(token), `设计稿元素缺失：${token}`);
+    }
+    assert.ok(code.includes("PICK_SEARCH_ID"), "搜索框要有 id（<label htmlFor> 指向它）");
+    assert.ok(code.includes('cx="10.5"'), "搜索框里要有放大镜图标");
+    assert.ok(/aria-pressed=\{active\}/.test(code), "结果行要用 aria-pressed 表达选中（设计稿的高亮态）");
+    assert.ok(code.includes("setSelectedTarget({ id: row.id, title: row.title })"), "点结果行 = 选中该目标");
+    assert.ok(code.includes("void runQueue(target.id, draftsOf(picking), 0)"), "「确认添加」才真的写");
+    assert.equal(
+      /onClick=\{\(\) => \{ void runQueue\(id, draftsOf\(picking\), 0\); \}\}/.test(code),
+      false,
+      "点结果行不应再直接添加（设计稿是先选后确认）",
+    );
+  });
 });

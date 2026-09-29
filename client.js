@@ -496,6 +496,8 @@ window.__ModuleLoader__.load({
 		*/
 		/** 浮条的样式（light DOM，注入 head） */
 		const STYLE_ID$1 = "knowledgenet-selection-style";
+		/** 搜索框的 id（`<label htmlFor>` 要指到它上面） */
+		const PICK_SEARCH_ID = "knowledgenet-pick-search";
 		function ensureStyle$1() {
 			if (typeof document === "undefined" || document.getElementById(STYLE_ID$1) !== null) return;
 			const style = document.createElement("style");
@@ -542,6 +544,48 @@ window.__ModuleLoader__.load({
 				".kn-pick-item small { opacity: .6; }",
 				".kn-draft-row { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }",
 				".kn-draft-text { font-size: 11px; opacity: .6; word-break: break-all; }",
+				".kn-pick-dialog {",
+				"  box-sizing: border-box; width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto;",
+				"  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 12px;",
+				"  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523);",
+				"  box-shadow: 0 22px 64px rgba(0, 0, 0, .35); font-size: 13px; line-height: 1.5; }",
+				".kn-pick-head { padding: 20px 22px 15px; }",
+				".kn-pick-title { font-size: 15px; font-weight: 500; }",
+				".kn-pick-subtitle { margin-top: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-pick-content { padding: 0 22px 15px; }",
+				".kn-pick-chips { display: flex; flex-wrap: wrap; gap: 7px; }",
+				".kn-pick-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 30px; padding: 3px 11px;",
+				"  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; cursor: text; }",
+				".kn-pick-chip:focus-within { border-color: #819b91; }",
+				".kn-pick-chip input { width: 150px; min-width: 60px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
+				".kn-pick-chip-mark { color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 11px; }",
+				".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
+				".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
+				".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-search-wrap { position: relative; }",
+				".kn-search-wrap svg { position: absolute; top: 9px; left: 11px; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); pointer-events: none; }",
+				".kn-search-wrap .kn-modal-input { height: 36px; padding-left: 35px; }",
+				".kn-pick-results { display: flex; flex-direction: column; gap: 2px; max-height: 236px; overflow: auto; }",
+				".kn-pick-row { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px;",
+				"  border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
+				".kn-pick-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
+				".kn-pick-row[aria-pressed='true'] { border-color: #819b91; background: rgba(129, 155, 145, .18); }",
+				".kn-pick-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+				".kn-pick-row-mark { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-pick-row[aria-pressed='true'] .kn-pick-row-mark { color: inherit; }",
+				".kn-pick-empty { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px;",
+				"  border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
+				".kn-pick-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-pick-actions { display: flex; gap: 8px; flex: none; }",
+				".kn-pick-btn { height: 34px; padding: 0 13px; border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px;",
+				"  background: transparent; color: inherit; font: inherit; cursor: pointer; }",
+				".kn-pick-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
+				".kn-pick-btn.is-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill, #d5e5df);",
+				"  color: var(--dsw-alias-label-primary-foreground, #17221e); }",
+				".kn-pick-btn.is-primary:hover:not(:disabled) { filter: brightness(1.06); }",
+				".kn-pick-btn.is-primary:disabled { opacity: .42; cursor: not-allowed; }",
+				".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary, #e5534b); }",
 				".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }"
 			].join("\n");
 			document.head.append(style);
@@ -638,6 +682,11 @@ window.__ModuleLoader__.load({
 			const [libraryTitles, setLibraryTitles] = (0, react.useState)(null);
 			/** 这份节点表属于哪个库根（换库即作废，避免把上一个库的表当成本库的） */
 			const libraryKeyRef = (0, react.useRef)("");
+			/**
+			* 选中的目标节点（设计稿的交互：**先选、再点「确认添加」**）。
+			* `null` = 还没选，此时确认按钮置灰 ✓（避免误点就把前置挂到别的节点上 ✗）。
+			*/
+			const [selectedTarget, setSelectedTarget] = (0, react.useState)(null);
 			const collecting = (0, react.useRef)(false);
 			const latest = (0, react.useRef)(props);
 			latest.current = props;
@@ -845,6 +894,7 @@ window.__ModuleLoader__.load({
 			const finishQueue = () => {
 				setError(null);
 				setPicking(null);
+				setSelectedTarget(null);
 				setMultiOpen(false);
 				setMultiText("");
 				collecting.current = false;
@@ -1365,6 +1415,10 @@ window.__ModuleLoader__.load({
 				recentFocus: memory.recentFocus,
 				recentPrereqTargets: memory.recentPrereqTargets
 			}, 5), libraryTitles, 3);
+			const pickRows = query.trim() === "" ? recommended.map((id) => ({
+				id,
+				title: labelOf(id)
+			})) : results;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				bar === null || gateAllowedRef.current !== true ? null : (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "kn-sel-bar",
@@ -1452,6 +1506,7 @@ window.__ModuleLoader__.load({
 											setMultiOpen(false);
 											setError(null);
 											setPicking({ drafts: list });
+											setSelectedTarget(null);
 											setLibraryTitles(null);
 											loadLibraryNodes();
 											report("open-picker", {
@@ -1502,111 +1557,163 @@ window.__ModuleLoader__.load({
 						setPicking(null);
 					},
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "kn-modal",
+						className: "kn-pick-dialog",
 						role: "dialog",
 						"aria-modal": "true",
-						style: { width: "min(520px, calc(100vw - 48px))" },
+						"aria-labelledby": "kn-pick-title",
 						onClick: (event) => {
 							event.stopPropagation();
 						},
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-title",
-								children: props.copy.pickTitle
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-pick-head",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-pick-title",
+									id: "kn-pick-title",
+									children: props.copy.pickTitle
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-pick-subtitle",
+									children: props.copy.pickHint
+								})]
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-body",
-								children: props.copy.pickHint
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-pick-content",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-pick-chips",
+									children: picking.drafts.map((draft, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+										className: "kn-pick-chip",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+											value: draft.title,
+											"aria-label": draft.text.slice(0, 40),
+											title: draft.text.slice(0, 120),
+											onChange: (event) => {
+												const value = event.target.value;
+												setPicking((prev) => prev === null ? null : { drafts: prev.drafts.map((item, i) => i === index ? {
+													...item,
+													title: value
+												} : item) });
+											}
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "kn-pick-chip-mark",
+											"aria-hidden": "true",
+											children: "✎"
+										})]
+									}, `${index}:${draft.text.slice(0, 24)}`))
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-pick-target",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "kn-pick-section",
+											children: props.copy.targetSection ?? "添加为谁的前置"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+											className: "kn-pick-label",
+											htmlFor: PICK_SEARCH_ID,
+											children: props.copy.searchLabel ?? props.copy.searchHint
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "kn-search-wrap",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+												viewBox: "0 0 24 24",
+												fill: "none",
+												"aria-hidden": "true",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+													cx: "10.5",
+													cy: "10.5",
+													r: "6.5",
+													stroke: "currentColor",
+													strokeWidth: "1.7"
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+													d: "m16 16 4.5 4.5",
+													stroke: "currentColor",
+													strokeWidth: "1.7",
+													strokeLinecap: "round"
+												})]
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+												id: PICK_SEARCH_ID,
+												className: "kn-modal-input",
+												type: "search",
+												value: query,
+												placeholder: props.copy.searchPlaceholder ?? "输入名称搜索",
+												onChange: (event) => {
+													setQuery(event.target.value);
+													doSearch(event.target.value);
+												}
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "kn-pick-group",
+											children: query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果"
+										}),
+										query.trim() === "" && libraryTitles === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+											className: "kn-pick-empty",
+											children: props.copy.loadingNodes ?? "正在读取当前知识库…"
+										}) : null,
+										searching ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+											className: "kn-pick-empty",
+											children: props.copy.searching
+										}) : null,
+										pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+											className: "kn-pick-empty",
+											children: query.trim() === "" ? props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧" : props.copy.noResult ?? "没有匹配的知识点"
+										}) : null,
+										pickRows.length === 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "kn-pick-results",
+											"aria-label": query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果",
+											children: pickRows.map((row) => {
+												const active = selectedTarget?.id === row.id;
+												return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+													type: "button",
+													className: "kn-pick-row",
+													"aria-pressed": active,
+													onClick: () => {
+														setSelectedTarget({
+															id: row.id,
+															title: row.title
+														});
+													},
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "kn-pick-row-name",
+														children: row.title
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "kn-pick-row-mark",
+														children: active ? "✓" : props.copy.selectMark ?? "选择"
+													})]
+												}, row.id);
+											})
+										})
+									]
+								})]
 							}),
-							libraryTitles === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-hint",
-								children: props.copy.loadingNodes ?? "正在读取当前知识库…"
-							}) : null,
-							libraryTitles !== null && recommended.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-hint",
-								children: props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧"
-							}) : null,
-							recommended.length === 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-pick-section",
-								children: props.copy.recommended
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-pick-targets",
-								children: recommended.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: "kn-pick-item",
-									onClick: () => {
-										runQueue(id, draftsOf(picking), 0);
-									},
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: labelOf(id) })
-								}, id))
-							})] }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-pick-section",
-								children: props.copy.searchHint
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-								className: "kn-modal-input",
-								value: query,
-								placeholder: props.copy.searchHint,
-								onChange: (event) => {
-									setQuery(event.target.value);
-									doSearch(event.target.value);
-								}
-							}),
-							searching ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-hint",
-								children: props.copy.searching
-							}) : null,
-							!searching && query.trim() !== "" && results.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-hint",
-								children: props.copy.noResult
-							}) : null,
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-pick-targets",
-								children: results.map((node) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: "kn-pick-item",
-									onClick: () => {
-										runQueue(node.id, draftsOf(picking), 0);
-									},
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: node.title })
-								}, node.id))
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-pick-section",
-								children: props.copy.titleLabel
-							}),
-							picking.drafts.map((draft, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "kn-draft-row",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-									className: "kn-modal-input",
-									value: draft.title,
-									"aria-label": draft.text.slice(0, 40),
-									onChange: (event) => {
-										const value = event.target.value;
-										setPicking((prev) => prev === null ? null : { drafts: prev.drafts.map((item, i) => i === index ? {
-											...item,
-											title: value
-										} : item) });
-									}
-								}), picking.drafts.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "kn-draft-text",
-									children: draft.text.slice(0, 40)
-								}) : null]
-							}, `${index}:${draft.text.slice(0, 24)}`)),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-actions",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: "kn-modal-btn",
-									onClick: () => {
-										setPicking(null);
-									},
-									children: props.copy.cancel
-								})
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-pick-foot",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-pick-status",
+									children: selectedTarget === null ? props.copy.statusPick ?? "请选择要添加到的知识点" : props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-pick-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: "kn-pick-btn",
+										onClick: () => {
+											setPicking(null);
+										},
+										children: props.copy.cancel
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: "kn-pick-btn is-primary",
+										disabled: selectedTarget === null,
+										onClick: () => {
+											const target = selectedTarget;
+											if (target === null) return;
+											runQueue(target.id, draftsOf(picking), 0);
+										},
+										children: props.copy.confirm
+									})]
+								})]
 							}),
 							error === null ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-modal-error",
+								className: "kn-pick-error",
 								children: error
 							})
 						]
@@ -41053,14 +41160,21 @@ void main() {
 				selected: (count) => zh ? `已选 ${count} 段` : `${count} selected`,
 				done: zh ? "完成" : "Done",
 				cancel: zh ? "取消" : "Cancel",
-				pickTitle: zh ? "作为哪个知识点的前置？" : "Prerequisite of which node?",
-				pickHint: zh ? "从推荐里选一个，或搜索知识点标题。原文会作为这条关系的出处记录下来。" : "Pick a recommendation or search a node title. The passage is recorded as this relation's evidence.",
+				pickTitle: zh ? "被添加的知识点" : "Nodes to add",
+				pickHint: zh ? "将这些知识点添加为另一个知识点的前置" : "Add these nodes as prerequisites of another node",
 				recommended: zh ? "推荐" : "Recommended",
 				searchHint: zh ? "搜索知识点…" : "Search nodes…",
 				searching: zh ? "搜索中…" : "Searching…",
-				noResult: zh ? "没有匹配的知识点" : "No matching node",
+				noResult: zh ? "没有找到相关知识点" : "No matching node",
 				titleLabel: zh ? "前置知识点的名称" : "Prerequisite title",
-				confirm: zh ? "添加" : "Add",
+				confirm: zh ? "确认添加" : "Confirm",
+				targetSection: zh ? "添加为谁的前置" : "Add as a prerequisite of",
+				searchLabel: zh ? "搜索知识点" : "Search nodes",
+				searchPlaceholder: zh ? "输入名称搜索" : "Type a name to search",
+				resultsLabel: zh ? "搜索结果" : "Search results",
+				selectMark: zh ? "选择" : "Select",
+				statusPick: zh ? "请选择要添加到的知识点" : "Pick the node to add to",
+				statusSelected: (title) => zh ? `添加为「${title}」的前置` : `Add as a prerequisite of “${title}”`,
 				added: zh ? "已添加" : "Added",
 				failed: zh ? "添加失败" : "Add failed",
 				reuse: zh ? "复用" : "Reuse",

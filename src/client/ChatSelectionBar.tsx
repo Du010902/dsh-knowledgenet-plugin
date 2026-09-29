@@ -65,6 +65,20 @@ export interface ChatSelectionBarProps {
     loadingNodes?: string;
     /** 可选：当前库没有可推荐的最近节点 */
     noRecommend?: string;
+    /** 可选：「添加为谁的前置」小节标题 */
+    targetSection?: string;
+    /** 可选：搜索框上方的标签 */
+    searchLabel?: string;
+    /** 可选：搜索框里的占位符 */
+    searchPlaceholder?: string;
+    /** 可选：有输入时的结果区标题（没输入时用 `recommended`） */
+    resultsLabel?: string;
+    /** 可选：结果行右侧的动作提示（选中时显示 ✓） */
+    selectMark?: string;
+    /** 可选：底部状态行——还没选目标 */
+    statusPick?: string;
+    /** 可选：底部状态行——已选目标（设计稿：`添加为 X 的前置`） */
+    statusSelected?: (title: string) => string;
   };
   /** 逐步上报 */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
@@ -76,6 +90,9 @@ export interface ChatSelectionBarProps {
 
 /** 浮条的样式（light DOM，注入 head） */
 const STYLE_ID = "knowledgenet-selection-style";
+
+/** 搜索框的 id（`<label htmlFor>` 要指到它上面） */
+const PICK_SEARCH_ID = "knowledgenet-pick-search";
 
 function ensureStyle(): void {
   if (typeof document === "undefined" || document.getElementById(STYLE_ID) !== null) return;
@@ -127,6 +144,57 @@ function ensureStyle(): void {
     ".kn-pick-item small { opacity: .6; }",
     ".kn-draft-row { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }",
     ".kn-draft-text { font-size: 11px; opacity: .6; word-break: break-all; }",
+    /*
+     * 「设为前置」弹窗（形态照设计稿 `knowledgenet-picker-design.html`）：
+     * 头部 / 内容 / 底部三段，全出血分隔线；字段与结果行都走宿主 token，亮暗主题自动跟随 ✓。
+     */
+    ".kn-pick-dialog {",
+    "  box-sizing: border-box; width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto;",
+    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 12px;",
+    "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523);",
+    "  box-shadow: 0 22px 64px rgba(0, 0, 0, .35); font-size: 13px; line-height: 1.5; }",
+    ".kn-pick-head { padding: 20px 22px 15px; }",
+    ".kn-pick-title { font-size: 15px; font-weight: 500; }",
+    ".kn-pick-subtitle { margin-top: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-content { padding: 0 22px 15px; }",
+    /* 被添加的知识点：每条一个 chip，就地可编辑 */
+    ".kn-pick-chips { display: flex; flex-wrap: wrap; gap: 7px; }",
+    ".kn-pick-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 30px; padding: 3px 11px;",
+    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; cursor: text; }",
+    ".kn-pick-chip:focus-within { border-color: #819b91; }",
+    ".kn-pick-chip input { width: 150px; min-width: 60px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
+    ".kn-pick-chip-mark { color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 11px; }",
+    /* 「添加为谁的前置」：与上面的 chip 区隔开 */
+    ".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
+    ".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
+    ".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /* 搜索框：放大镜画在框内左侧 ⇒ 文本让出左边距 */
+    ".kn-search-wrap { position: relative; }",
+    ".kn-search-wrap svg { position: absolute; top: 9px; left: 11px; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); pointer-events: none; }",
+    ".kn-search-wrap .kn-modal-input { height: 36px; padding-left: 35px; }",
+    /* 结果行：整行可点，选中时描边 + ✓ */
+    ".kn-pick-results { display: flex; flex-direction: column; gap: 2px; max-height: 236px; overflow: auto; }",
+    ".kn-pick-row { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px;",
+    "  border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
+    ".kn-pick-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
+    ".kn-pick-row[aria-pressed='true'] { border-color: #819b91; background: rgba(129, 155, 145, .18); }",
+    ".kn-pick-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+    ".kn-pick-row-mark { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-row[aria-pressed='true'] .kn-pick-row-mark { color: inherit; }",
+    ".kn-pick-empty { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /* 底部：状态行 + 取消/确认添加 */
+    ".kn-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px;",
+    "  border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
+    ".kn-pick-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-actions { display: flex; gap: 8px; flex: none; }",
+    ".kn-pick-btn { height: 34px; padding: 0 13px; border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px;",
+    "  background: transparent; color: inherit; font: inherit; cursor: pointer; }",
+    ".kn-pick-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
+    ".kn-pick-btn.is-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill, #d5e5df);",
+    "  color: var(--dsw-alias-label-primary-foreground, #17221e); }",
+    ".kn-pick-btn.is-primary:hover:not(:disabled) { filter: brightness(1.06); }",
+    ".kn-pick-btn.is-primary:disabled { opacity: .42; cursor: not-allowed; }",
+    ".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary, #e5534b); }",
     ".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }",
   ].join("\n");
   document.head.append(style);
@@ -246,6 +314,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const [libraryTitles, setLibraryTitles] = useState<Record<string, string> | null>(null);
   /** 这份节点表属于哪个库根（换库即作废，避免把上一个库的表当成本库的） */
   const libraryKeyRef = useRef("");
+  /**
+   * 选中的目标节点（设计稿的交互：**先选、再点「确认添加」**）。
+   * `null` = 还没选，此时确认按钮置灰 ✓（避免误点就把前置挂到别的节点上 ✗）。
+   */
+  const [selectedTarget, setSelectedTarget] = useState<{ id: string; title: string } | null>(null);
   const collecting = useRef(false);
   const latest = useRef(props);
   latest.current = props;
@@ -464,6 +537,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const finishQueue = (): void => {
     setError(null);
     setPicking(null);
+    setSelectedTarget(null);
     setMultiOpen(false);
     setMultiText("");
     collecting.current = false;
@@ -1091,6 +1165,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     5,
   );
   const recommended = keepKnownTargets(candidates, libraryTitles, 3);
+  /*
+   * 结果区**只有一份**（设计稿）：没输入时列推荐，有输入时列搜索结果；
+   * 行上的「选择 / ✓」由 `selectedTarget` 决定（先选、再确认添加）。
+   */
+  const pickRows: Array<{ id: string; title: string }> = query.trim() === ""
+    ? recommended.map((id) => ({ id, title: labelOf(id) }))
+    : results;
 
   return (
     <>
@@ -1180,6 +1261,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   setMultiOpen(false);
                   setError(null);
                   setPicking({ drafts: list });
+                  setSelectedTarget(null);
                   /*
                    * **先把"当前库有哪些节点"读回来**（`null` 期间一个推荐都不显示 ✓）：
                    * 推荐项必须是本库真实存在的节点，否则点下去只会得到"找不到节点" ✗。
@@ -1246,82 +1328,137 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
       {picking !== null ? createPortal(
         <div className="kn-modal-backdrop" role="presentation" onClick={() => { setPicking(null); }}>
-          <div className="kn-modal" role="dialog" aria-modal="true" style={{ width: "min(520px, calc(100vw - 48px))" }} onClick={(event) => { event.stopPropagation(); }}>
-            <div className="kn-modal-title">{props.copy.pickTitle}</div>
-            <div className="kn-modal-body">{props.copy.pickHint}</div>
-
-            {/*
-              * 还没拿到当前库的节点表（`libraryTitles === null`）时**一个推荐都不列**，
-              * 只给一行提示 —— 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
-              */}
-            {libraryTitles === null ? (
-              <div className="kn-modal-hint">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</div>
-            ) : null}
-
-            {libraryTitles !== null && recommended.length === 0 ? (
-              <div className="kn-modal-hint">{props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧"}</div>
-            ) : null}
-
-            {recommended.length === 0 ? null : (
-              <>
-                <div className="kn-pick-section">{props.copy.recommended}</div>
-                <div className="kn-pick-targets">
-                  {recommended.map((id) => (
-                    <button key={id} type="button" className="kn-pick-item" onClick={() => { void runQueue(id, draftsOf(picking), 0); }}>
-                      <span>{labelOf(id)}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            <div className="kn-pick-section">{props.copy.searchHint}</div>
-            <input
-              className="kn-modal-input"
-              value={query}
-              placeholder={props.copy.searchHint}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                void doSearch(event.target.value);
-              }}
-            />
-            {searching ? <div className="kn-modal-hint">{props.copy.searching}</div> : null}
-            {!searching && query.trim() !== "" && results.length === 0 ? <div className="kn-modal-hint">{props.copy.noResult}</div> : null}
-            <div className="kn-pick-targets">
-              {results.map((node) => (
-                <button key={node.id} type="button" className="kn-pick-item" onClick={() => { void runQueue(node.id, draftsOf(picking), 0); }}>
-                  <span>{node.title}</span>
-                </button>
-              ))}
+          {/*
+            * 「设为前置」弹窗 —— 形态按设计稿（`knowledgenet-picker-design.html`）：
+            * 头部标题/副标题 → 被添加的知识点（每条一个可编辑 chip）→ 「添加为谁的前置」搜索区
+            * → 底部状态行 + 取消/确认添加。样式自带一份（portal 在 light DOM，Shadow 样式管不到 ✓）。
+            */}
+          <div className="kn-pick-dialog" role="dialog" aria-modal="true" aria-labelledby="kn-pick-title" onClick={(event) => { event.stopPropagation(); }}>
+            <div className="kn-pick-head">
+              <div className="kn-pick-title" id="kn-pick-title">{props.copy.pickTitle}</div>
+              <div className="kn-pick-subtitle">{props.copy.pickHint}</div>
             </div>
 
-            {/*
-              * 标题：**每一条草稿一个输入框** ✓。
-              * 旧实现只有一个输入框，多行时所有行都用它 ⇒ 第 1 行建点、其余行精确命中同一个节点
-              * 又被关系去重吃掉 ⇒ 静默丢失 ✗。多行时同时显示原文，方便对照修改 ✓。
-              */}
-            <div className="kn-pick-section">{props.copy.titleLabel}</div>
-            {picking.drafts.map((draft, index) => (
-              <div className="kn-draft-row" key={`${index}:${draft.text.slice(0, 24)}`}>
-                <input
-                  className="kn-modal-input"
-                  value={draft.title}
-                  aria-label={draft.text.slice(0, 40)}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setPicking((prev) => prev === null ? null : {
-                      drafts: prev.drafts.map((item, i) => (i === index ? { ...item, title: value } : item)),
-                    });
-                  }}
-                />
-                {picking.drafts.length > 1 ? <span className="kn-draft-text">{draft.text.slice(0, 40)}</span> : null}
+            <div className="kn-pick-content">
+              {/*
+                * **被添加的知识点**：一条草稿一个 chip，标题可以就地改 ✎
+                * （旧实现只有一个输入框 ⇒ 多行时全部行共用一个标题、后面的行被静默丢掉 ✗）。
+                */}
+              <div className="kn-pick-chips">
+                {picking.drafts.map((draft, index) => (
+                  <label className="kn-pick-chip" key={`${index}:${draft.text.slice(0, 24)}`}>
+                    <input
+                      value={draft.title}
+                      aria-label={draft.text.slice(0, 40)}
+                      title={draft.text.slice(0, 120)}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setPicking((prev) => prev === null ? null : {
+                          drafts: prev.drafts.map((item, i) => (i === index ? { ...item, title: value } : item)),
+                        });
+                      }}
+                    />
+                    <span className="kn-pick-chip-mark" aria-hidden="true">✎</span>
+                  </label>
+                ))}
               </div>
-            ))}
 
-            <div className="kn-modal-actions">
-              <button type="button" className="kn-modal-btn" onClick={() => { setPicking(null); }}>{props.copy.cancel}</button>
+              <div className="kn-pick-target">
+                <div className="kn-pick-section">{props.copy.targetSection ?? "添加为谁的前置"}</div>
+
+                <label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>
+                  {props.copy.searchLabel ?? props.copy.searchHint}
+                </label>
+                <div className="kn-search-wrap">
+                  {/* 放大镜（设计稿：图标在输入框内部左侧） */}
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+                    <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    id={PICK_SEARCH_ID}
+                    className="kn-modal-input"
+                    type="search"
+                    value={query}
+                    placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      void doSearch(event.target.value);
+                    }}
+                  />
+                </div>
+
+                {/* 有输入 → 「搜索结果」；没输入 → 「推荐」（与设计稿一致） */}
+                <div className="kn-pick-group">
+                  {query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}
+                </div>
+
+                {/*
+                  * 还没拿到当前库的节点表（`libraryTitles === null`）时**一个推荐都不列** ——
+                  * 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
+                  */}
+                {query.trim() === "" && libraryTitles === null ? (
+                  <p className="kn-pick-empty">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</p>
+                ) : null}
+
+                {searching ? <p className="kn-pick-empty">{props.copy.searching}</p> : null}
+
+                {pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? (
+                  <p className="kn-pick-empty">
+                    {query.trim() === ""
+                      ? (props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧")
+                      : (props.copy.noResult ?? "没有匹配的知识点")}
+                  </p>
+                ) : null}
+
+                {pickRows.length === 0 ? null : (
+                  <div className="kn-pick-results" aria-label={query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}>
+                    {pickRows.map((row) => {
+                      const active = selectedTarget?.id === row.id;
+                      return (
+                        <button
+                          key={row.id}
+                          type="button"
+                          className="kn-pick-row"
+                          aria-pressed={active}
+                          onClick={() => { setSelectedTarget({ id: row.id, title: row.title }); }}
+                        >
+                          <span className="kn-pick-row-name">{row.title}</span>
+                          <span className="kn-pick-row-mark">{active ? "✓" : (props.copy.selectMark ?? "选择")}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-            {error === null ? null : <div className="kn-modal-error">{error}</div>}
+
+            <div className="kn-pick-foot">
+              {/* 状态行（设计稿：左侧一句话说明"添加为谁的前置"） */}
+              <div className="kn-pick-status">
+                {selectedTarget === null
+                  ? (props.copy.statusPick ?? "请选择要添加到的知识点")
+                  : (props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`)}
+              </div>
+              <div className="kn-pick-actions">
+                <button type="button" className="kn-pick-btn" onClick={() => { setPicking(null); }}>{props.copy.cancel}</button>
+                <button
+                  type="button"
+                  className="kn-pick-btn is-primary"
+                  disabled={selectedTarget === null}
+                  onClick={() => {
+                    const target = selectedTarget;
+                    if (target === null) return;
+                    /* 点「确认添加」才真的写：选中的目标 + 这一批草稿 ✓（设计稿的交互） */
+                    void runQueue(target.id, draftsOf(picking), 0);
+                  }}
+                >
+                  {props.copy.confirm}
+                </button>
+              </div>
+            </div>
+
+            {error === null ? null : <div className="kn-pick-error">{error}</div>}
           </div>
         </div>,
         document.body,
