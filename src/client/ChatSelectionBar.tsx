@@ -19,6 +19,7 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import {
   defaultTitle,
   draftPrereqs,
+  keepKnownTargets,
   normalizeSnippet,
   readLastSessionId,
   recommendTargets,
@@ -60,6 +61,10 @@ export interface ChatSelectionBarProps {
     createAnyway: string;
     candidatesTitle: string;
     candidatesMessage: string;
+    /** 可选：正在读当前库的节点表（推荐加载中） */
+    loadingNodes?: string;
+    /** 可选：当前库没有可推荐的最近节点 */
+    noRecommend?: string;
   };
   /** 逐步上报 */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
@@ -233,10 +238,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
-   * 推荐项的标题：浮条拿不到图谱数据，而面板发布的标题表未必对得上会话（实测推荐只剩 id 前 8 位）。
-   * 所以打开弹窗时**自己按当前会话取一次**图谱，把 id→标题补上；仍取不到才退化成 id。
+   * **当前库**的节点表（id → 标题）。`null` = 还不知道（正在读 / 读失败）。
+   *
+   * 它同时承担两件事：① 推荐项显示真名；② **充当"哪些节点真的存在"的唯一依据** ——
+   * 记忆（MRU）与标题缓存都是跨库的，不能拿它们判断"存在" ✗（否则推荐里会列出别的库的节点 ✓）。
    */
-  const [resolvedTitles, setResolvedTitles] = useState<Record<string, string>>({});
+  const [libraryTitles, setLibraryTitles] = useState<Record<string, string> | null>(null);
+  /** 这份节点表属于哪个库根（换库即作废，避免把上一个库的表当成本库的） */
+  const libraryKeyRef = useRef("");
   const collecting = useRef(false);
   const latest = useRef(props);
   latest.current = props;
@@ -410,10 +419,25 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       const body = (await response.json()) as {
         ok?: boolean;
         added?: { created?: boolean; candidates?: Array<{ title?: string }> };
-        error?: { message?: string };
+        error?: { code?: string; message?: string };
       };
       if (body.ok !== true) {
-        report("add-failed", { message: body.error?.message ?? "" });
+        const code = body.error?.code ?? "";
+        /*
+         * **归属节点在当前库里不存在**（跨库残留的推荐）⇒ 顺手把它从记忆里删掉 ✓，
+         * 免得下次又推荐一次、又失败（自愈）。库里节点表的这份也一并剔除 ✓。
+         */
+        if (code === "node_not_found") {
+          forgetTarget(fromId);
+          setLibraryTitles((prev) => {
+            if (prev === null || prev[fromId] === undefined) return prev;
+            const next = { ...prev };
+            delete next[fromId];
+            return next;
+          });
+          report("add-stale-target", { fromId: fromId.slice(0, 8) });
+        }
+        report("add-failed", { code, message: body.error?.message ?? "" });
         return { kind: "error", message: body.error?.message ?? props.copy.failed };
       }
       const candidates = (body.added?.candidates ?? []).map((item) => item.title ?? "").filter((item) => item !== "");
@@ -954,36 +978,75 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     };
   }, []);
 
-  /** 调宿主：拉一次当前会话的图谱，补齐推荐项标题（只在需要时请求） */
-  const hydrateTitles = async (ids: readonly string[]): Promise<void> => {
-    const missing = ids.filter((id) => resolvedTitles[id] === undefined && titleOf(id) === id.slice(0, 8));
-    if (missing.length === 0) return;
+  /**
+   * 调宿主：读一次**当前库**的节点表（id → 标题）。
+   *
+   * 与旧实现的区别（真实 bug ✗）：旧代码叫 `hydrateTitles`，会先判断
+   * 「这个 id 是不是只有前 8 位」，而**跨库的标题缓存**让它以为"标题已经有了" ⇒ 直接 `return`，
+   * 于是一次请求都不发、`resolvedTitles` 一直是空的 ⇒ 下面的过滤被跳过
+   * ⇒ 推荐里列出别的库的节点（用户实测：推荐项全是当前库里没有的 ✗）。
+   *
+   * 现在无条件按**当前库**取一次，并把结果当成"什么存在"的**唯一依据** ✓；
+   * 取不到就置 `null`，此时一个推荐都不显示 ✓。
+   */
+  const loadLibraryNodes = async (): Promise<void> => {
     try {
       /*
-       * 取数用**工作区路径**（`?root=`），而不是会话 id：
-       * 实测面板用路径取数成功，而客户端拿到的会话 id 交给路由取数会失败（一律"找不到库"）。
+       * 取数顺序（可靠度从高到低）：
+       * 1. 面板按**当前会话**发布的库根（`readCurrentContext`）—— 最准 ✓；
+       * 2. 最近一次发布的工作区路径（`?root=`，实测面板走这条路取数成功 ✓）；
+       * 3. 当前聊天会话 id（有些会话里 `?sessionId=` 会答"找不到库" ✗，所以放最后）。
        */
-      const root = readLastWorkspacePath();
       const sessionId = domSessionOf();
+      const published = (() => {
+        try {
+          return readCurrentContext(sessionId);
+        } catch {
+          return null;
+        }
+      })();
+      const root = (published?.libraryRoot ?? "").trim() || readLastWorkspacePath().trim();
       const url = root !== ""
         ? `${GRAPH_API_ROUTE}?root=${encodeURIComponent(root)}`
         : (sessionId === null ? GRAPH_API_ROUTE : `${GRAPH_API_ROUTE}?sessionId=${encodeURIComponent(sessionId)}`);
       const response = await fetch(url, { headers: { accept: "application/json" }, credentials: "same-origin" });
-      const body = (await response.json()) as { ok?: boolean; nodes?: Array<{ id?: string; title?: string }> };
-      if (body.ok !== true) return;
+      const body = (await response.json()) as {
+        ok?: boolean;
+        library?: { root?: string };
+        nodes?: Array<{ id?: string; title?: string }>;
+      };
+      if (body.ok !== true) {
+        setLibraryTitles(null);
+        report("library-nodes", "not-ok");
+        return;
+      }
       const map: Record<string, string> = {};
       for (const node of body.nodes ?? []) {
         if (typeof node.id === "string" && typeof node.title === "string") map[node.id] = node.title;
       }
-      setResolvedTitles((prev) => ({ ...prev, ...map }));
-      report("titles-hydrated", { count: Object.keys(map).length });
+      libraryKeyRef.current = String(body.library?.root ?? root ?? "");
+      setLibraryTitles(map);
+      report("library-nodes", { count: Object.keys(map).length });
     } catch {
-      // 补标题失败不影响功能（仍可搜索/手填名称）
+      /* 读不到就保持"不知道" ⇒ 不显示任何推荐（搜索仍然可用 ✓） */
+      setLibraryTitles(null);
     }
   };
 
-  /** 推荐项显示用：优先自己补的标题 → 发布/缓存 → id */
-  const labelOf = (id: string): string => resolvedTitles[id] ?? titleOf(id);
+  /** 推荐项显示用：**当前库**的标题优先 → 发布/缓存 → id */
+  const labelOf = (id: string): string => libraryTitles?.[id] ?? titleOf(id);
+
+  /**
+   * 把某个 id 从记忆里彻底删掉（跨库残留的推荐：宿主答 `node_not_found` 时自愈 ✓）。
+   * @param id - 要忘掉的节点 id。
+   */
+  const forgetTarget = (id: string): void => {
+    const memory = readMemory();
+    writeMemory({
+      recentFocus: memory.recentFocus.filter((item) => item !== id),
+      recentPrereqTargets: memory.recentPrereqTargets.filter((item) => item !== id),
+    });
+  };
 
   /** 从选择弹窗的状态里取草稿（回调里 TS 收窄不了 `picking`，所以单独抽一个空安全的读取） */
   const draftsOf = (state: PickState | null): PrereqDraft[] => state?.drafts ?? [];
@@ -1016,18 +1079,18 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   if (typeof document === "undefined") return null;
   const memory = readMemory();
   /*
-   * 推荐**只在当前库里筛**：记忆目前是跨库共用的，里面可能残留别的库的节点 id
-   * ——那既显示不出标题（只剩 id 前 8 位，看着像乱码），点下去还会把前置挂到**别的库**的节点上
-   * （实测发现：推荐 id 取到了 21 个标题却不在其中）。已取到标题表时就只保留当前库确实存在的。
+   * 推荐**只在当前库里筛**，而且**没确认当前库有哪些节点之前一个都不显示**。
+   *
+   * 实测反馈 ✗：换库之后推荐里出现的是**别的库**的节点（`.git/info/exclude…`、`最短路径算法`、`载噪比` …），
+   * 显示的还是别的库的标题 —— 因为记忆与标题缓存都是跨库的最后值；点下去宿主只会答"找不到节点"。
+   * 所以这里把 `libraryTitles`（当前库的节点表）当**唯一依据**：
+   * `null`（还在读 / 读失败）⇒ 空列表 ✓；有表 ⇒ 只留表里确实有的 ✓。
    */
   const candidates = recommendTargets(
     { recentFocus: memory.recentFocus, recentPrereqTargets: memory.recentPrereqTargets },
     5,
   );
-  const hydratedCount = Object.keys(resolvedTitles).length;
-  const recommended = (
-    hydratedCount === 0 ? candidates : candidates.filter((id) => resolvedTitles[id] !== undefined)
-  ).slice(0, 3);
+  const recommended = keepKnownTargets(candidates, libraryTitles, 3);
 
   return (
     <>
@@ -1117,8 +1180,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   setMultiOpen(false);
                   setError(null);
                   setPicking({ drafts: list });
+                  /*
+                   * **先把"当前库有哪些节点"读回来**（`null` 期间一个推荐都不显示 ✓）：
+                   * 推荐项必须是本库真实存在的节点，否则点下去只会得到"找不到节点" ✗。
+                   */
+                  setLibraryTitles(null);
+                  void loadLibraryNodes();
                   report("open-picker", { count: list.length, from: "multi-modal" });
-                  void hydrateTitles(recommended);
                 }}
               >
                 添加为前置
@@ -1181,6 +1249,18 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           <div className="kn-modal" role="dialog" aria-modal="true" style={{ width: "min(520px, calc(100vw - 48px))" }} onClick={(event) => { event.stopPropagation(); }}>
             <div className="kn-modal-title">{props.copy.pickTitle}</div>
             <div className="kn-modal-body">{props.copy.pickHint}</div>
+
+            {/*
+              * 还没拿到当前库的节点表（`libraryTitles === null`）时**一个推荐都不列**，
+              * 只给一行提示 —— 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
+              */}
+            {libraryTitles === null ? (
+              <div className="kn-modal-hint">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</div>
+            ) : null}
+
+            {libraryTitles !== null && recommended.length === 0 ? (
+              <div className="kn-modal-hint">{props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧"}</div>
+            ) : null}
 
             {recommended.length === 0 ? null : (
               <>

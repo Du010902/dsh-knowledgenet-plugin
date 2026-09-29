@@ -314,6 +314,31 @@ window.__ModuleLoader__.load({
 			for (const id of memory.recentFocus ?? []) push(id);
 			return out;
 		}
+		/**
+		* 从推荐里**只留下当前库确实存在**的节点，并截断到 `limit` 个。
+		*
+		* 为什么必须做这一步（用户实测 ✗）：记忆（MRU）是**跨库共用**的（一个 localStorage 键），
+		* 标题缓存（`knowledgenet.nodeTitles` / 面板发布的"最近一次标题表"）同样是跨库的**最后值** ✗
+		* ⇒ 换一个知识库之后，"推荐"里会冒出**别的库**的节点，而且显示的还是别的库的标题
+		* （看起来完全像本库的节点 ✗），点下去宿主只会答"找不到节点"。
+		*
+		* 所以规矩是：**确认存在才显示**；`known === null`（还不知道当前库有哪些节点）时
+		* **一个都不显示** —— 宁可少显示，也不误显示 ✓。
+		*
+		* @param candidates - 记忆给出的候选 id（已按优先级排好）。
+		* @param known - 当前库的 id→标题 表；`null` = 还不知道。
+		* @param limit - 最多显示几个。
+		* @returns 过滤后的 id 列表。
+		*/
+		function keepKnownTargets(candidates, known, limit = 3) {
+			if (known === null || known === void 0) return [];
+			const out = [];
+			for (const id of candidates) {
+				if (out.length >= limit) break;
+				if (typeof id === "string" && Object.prototype.hasOwnProperty.call(known, id) && !out.includes(id)) out.push(id);
+			}
+			return out;
+		}
 		/** 记忆的存储键 */
 		const MRU_KEY = "knowledgenet.targetMemory";
 		/**
@@ -605,10 +630,14 @@ window.__ModuleLoader__.load({
 			const [pendingCandidates, setPendingCandidates] = (0, react.useState)(null);
 			const [error, setError] = (0, react.useState)(null);
 			/**
-			* 推荐项的标题：浮条拿不到图谱数据，而面板发布的标题表未必对得上会话（实测推荐只剩 id 前 8 位）。
-			* 所以打开弹窗时**自己按当前会话取一次**图谱，把 id→标题补上；仍取不到才退化成 id。
+			* **当前库**的节点表（id → 标题）。`null` = 还不知道（正在读 / 读失败）。
+			*
+			* 它同时承担两件事：① 推荐项显示真名；② **充当"哪些节点真的存在"的唯一依据** ——
+			* 记忆（MRU）与标题缓存都是跨库的，不能拿它们判断"存在" ✗（否则推荐里会列出别的库的节点 ✓）。
 			*/
-			const [resolvedTitles, setResolvedTitles] = (0, react.useState)({});
+			const [libraryTitles, setLibraryTitles] = (0, react.useState)(null);
+			/** 这份节点表属于哪个库根（换库即作废，避免把上一个库的表当成本库的） */
+			const libraryKeyRef = (0, react.useRef)("");
 			const collecting = (0, react.useRef)(false);
 			const latest = (0, react.useRef)(props);
 			latest.current = props;
@@ -762,7 +791,21 @@ window.__ModuleLoader__.load({
 						})
 					})).json();
 					if (body.ok !== true) {
-						report("add-failed", { message: body.error?.message ?? "" });
+						const code = body.error?.code ?? "";
+						if (code === "node_not_found") {
+							forgetTarget(fromId);
+							setLibraryTitles((prev) => {
+								if (prev === null || prev[fromId] === void 0) return prev;
+								const next = { ...prev };
+								delete next[fromId];
+								return next;
+							});
+							report("add-stale-target", { fromId: fromId.slice(0, 8) });
+						}
+						report("add-failed", {
+							code,
+							message: body.error?.message ?? ""
+						});
 						return {
 							kind: "error",
 							message: body.error?.message ?? props.copy.failed
@@ -1233,29 +1276,59 @@ window.__ModuleLoader__.load({
 					document.removeEventListener("mousedown", onMouseDown);
 				};
 			}, []);
-			/** 调宿主：拉一次当前会话的图谱，补齐推荐项标题（只在需要时请求） */
-			const hydrateTitles = async (ids) => {
-				if (ids.filter((id) => resolvedTitles[id] === void 0 && titleOf(id) === id.slice(0, 8)).length === 0) return;
+			/**
+			* 调宿主：读一次**当前库**的节点表（id → 标题）。
+			*
+			* 与旧实现的区别（真实 bug ✗）：旧代码叫 `hydrateTitles`，会先判断
+			* 「这个 id 是不是只有前 8 位」，而**跨库的标题缓存**让它以为"标题已经有了" ⇒ 直接 `return`，
+			* 于是一次请求都不发、`resolvedTitles` 一直是空的 ⇒ 下面的过滤被跳过
+			* ⇒ 推荐里列出别的库的节点（用户实测：推荐项全是当前库里没有的 ✗）。
+			*
+			* 现在无条件按**当前库**取一次，并把结果当成"什么存在"的**唯一依据** ✓；
+			* 取不到就置 `null`，此时一个推荐都不显示 ✓。
+			*/
+			const loadLibraryNodes = async () => {
 				try {
-					const root = readLastWorkspacePath();
 					const sessionId = domSessionOf();
+					const root = ((() => {
+						try {
+							return readCurrentContext(sessionId);
+						} catch {
+							return null;
+						}
+					})()?.libraryRoot ?? "").trim() || readLastWorkspacePath().trim();
 					const url = root !== "" ? `${GRAPH_API_ROUTE}?root=${encodeURIComponent(root)}` : sessionId === null ? GRAPH_API_ROUTE : `${GRAPH_API_ROUTE}?sessionId=${encodeURIComponent(sessionId)}`;
 					const body = await (await fetch(url, {
 						headers: { accept: "application/json" },
 						credentials: "same-origin"
 					})).json();
-					if (body.ok !== true) return;
+					if (body.ok !== true) {
+						setLibraryTitles(null);
+						report("library-nodes", "not-ok");
+						return;
+					}
 					const map = {};
 					for (const node of body.nodes ?? []) if (typeof node.id === "string" && typeof node.title === "string") map[node.id] = node.title;
-					setResolvedTitles((prev) => ({
-						...prev,
-						...map
-					}));
-					report("titles-hydrated", { count: Object.keys(map).length });
-				} catch {}
+					libraryKeyRef.current = String(body.library?.root ?? root ?? "");
+					setLibraryTitles(map);
+					report("library-nodes", { count: Object.keys(map).length });
+				} catch {
+					setLibraryTitles(null);
+				}
 			};
-			/** 推荐项显示用：优先自己补的标题 → 发布/缓存 → id */
-			const labelOf = (id) => resolvedTitles[id] ?? titleOf(id);
+			/** 推荐项显示用：**当前库**的标题优先 → 发布/缓存 → id */
+			const labelOf = (id) => libraryTitles?.[id] ?? titleOf(id);
+			/**
+			* 把某个 id 从记忆里彻底删掉（跨库残留的推荐：宿主答 `node_not_found` 时自愈 ✓）。
+			* @param id - 要忘掉的节点 id。
+			*/
+			const forgetTarget = (id) => {
+				const memory = readMemory();
+				writeMemory({
+					recentFocus: memory.recentFocus.filter((item) => item !== id),
+					recentPrereqTargets: memory.recentPrereqTargets.filter((item) => item !== id)
+				});
+			};
 			/** 从选择弹窗的状态里取草稿（回调里 TS 收窄不了 `picking`，所以单独抽一个空安全的读取） */
 			const draftsOf = (state) => state?.drafts ?? [];
 			/** 调宿主：搜索可选目标节点 */
@@ -1288,11 +1361,10 @@ window.__ModuleLoader__.load({
 			};
 			if (typeof document === "undefined") return null;
 			const memory = readMemory();
-			const candidates = recommendTargets({
+			const recommended = keepKnownTargets(recommendTargets({
 				recentFocus: memory.recentFocus,
 				recentPrereqTargets: memory.recentPrereqTargets
-			}, 5);
-			const recommended = (Object.keys(resolvedTitles).length === 0 ? candidates : candidates.filter((id) => resolvedTitles[id] !== void 0)).slice(0, 3);
+			}, 5), libraryTitles, 3);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				bar === null || gateAllowedRef.current !== true ? null : (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "kn-sel-bar",
@@ -1380,11 +1452,12 @@ window.__ModuleLoader__.load({
 											setMultiOpen(false);
 											setError(null);
 											setPicking({ drafts: list });
+											setLibraryTitles(null);
+											loadLibraryNodes();
 											report("open-picker", {
 												count: list.length,
 												from: "multi-modal"
 											});
-											hydrateTitles(recommended);
 										},
 										children: "添加为前置"
 									}),
@@ -1445,6 +1518,14 @@ window.__ModuleLoader__.load({
 								className: "kn-modal-body",
 								children: props.copy.pickHint
 							}),
+							libraryTitles === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-modal-hint",
+								children: props.copy.loadingNodes ?? "正在读取当前知识库…"
+							}) : null,
+							libraryTitles !== null && recommended.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-modal-hint",
+								children: props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧"
+							}) : null,
 							recommended.length === 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "kn-pick-section",
 								children: props.copy.recommended
@@ -40985,7 +41066,9 @@ void main() {
 				reuse: zh ? "复用" : "Reuse",
 				createAnyway: zh ? "仍然新建" : "Create anyway",
 				candidatesTitle: zh ? "已经有相近的知识点" : "Similar node exists",
-				candidatesMessage: zh ? "库里已有相近节点，建议复用而不是新建" : "A similar node exists; reuse it instead of creating a duplicate"
+				candidatesMessage: zh ? "库里已有相近节点，建议复用而不是新建" : "A similar node exists; reuse it instead of creating a duplicate",
+				loadingNodes: zh ? "正在读取当前知识库…" : "Reading the current library…",
+				noRecommend: zh ? "这个库里暂时没有可推荐的最近节点，直接搜索吧" : "No recent nodes in this library yet — search instead"
 			});
 			ctx.slots.inject("tool.call.toolview", function* registerViews() {
 				for (const view of VIEWS) yield ctx.slots.register(withLocale({

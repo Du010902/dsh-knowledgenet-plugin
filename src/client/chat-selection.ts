@@ -151,6 +151,36 @@ export function recommendTargets(memory: TargetMemory, limit = 3): string[] {
   return out;
 }
 
+/**
+ * 从推荐里**只留下当前库确实存在**的节点，并截断到 `limit` 个。
+ *
+ * 为什么必须做这一步（用户实测 ✗）：记忆（MRU）是**跨库共用**的（一个 localStorage 键），
+ * 标题缓存（`knowledgenet.nodeTitles` / 面板发布的"最近一次标题表"）同样是跨库的**最后值** ✗
+ * ⇒ 换一个知识库之后，"推荐"里会冒出**别的库**的节点，而且显示的还是别的库的标题
+ * （看起来完全像本库的节点 ✗），点下去宿主只会答"找不到节点"。
+ *
+ * 所以规矩是：**确认存在才显示**；`known === null`（还不知道当前库有哪些节点）时
+ * **一个都不显示** —— 宁可少显示，也不误显示 ✓。
+ *
+ * @param candidates - 记忆给出的候选 id（已按优先级排好）。
+ * @param known - 当前库的 id→标题 表；`null` = 还不知道。
+ * @param limit - 最多显示几个。
+ * @returns 过滤后的 id 列表。
+ */
+export function keepKnownTargets(
+  candidates: readonly string[],
+  known: Record<string, string> | null | undefined,
+  limit = 3,
+): string[] {
+  if (known === null || known === undefined) return [];
+  const out: string[] = [];
+  for (const id of candidates) {
+    if (out.length >= limit) break;
+    if (typeof id === "string" && Object.prototype.hasOwnProperty.call(known, id) && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 /** 记忆的存储键 */
 export const MRU_KEY = "knowledgenet.targetMemory";
 /** 每类记忆最多保留多少条 */

@@ -12,6 +12,7 @@ import {
   defaultTitle,
   draftPrereqs,
   joinSnippets,
+  keepKnownTargets,
   MAX_SNIPPETS,
   normalizeSnippet,
   recommendTargets,
@@ -124,6 +125,33 @@ describe("多行 → 每条各自的标题（回归：曾把所有行建成同�
 
   it("空输入 → 空队列（调用方据此不发请求）", () => {
     assert.deepEqual(draftPrereqs(["", "   ", "\n"]), []);
+  });
+});
+
+describe("推荐只显示当前库确实存在的节点（回归：推荐里冒出别的库的节点）", () => {
+  it("还不知道当前库有哪些节点（null）→ 一个都不显示", () => {
+    assert.deepEqual(keepKnownTargets(["a", "b"], null), []);
+    assert.deepEqual(keepKnownTargets(["a", "b"], undefined), []);
+  });
+
+  it("把别的库残留的 id 全部滤掉，只留本库存在的", () => {
+    const known = { n1: "注意力机制", n2: "信噪比" };
+    assert.deepEqual(keepKnownTargets(["n9", "n1", "n8", "n2"], known), ["n1", "n2"]);
+  });
+
+  it("顺序保持（当前 → 最近加过前置的 → 最近聚焦的），最多 3 个", () => {
+    const known = { a: "甲", b: "乙", c: "丙", d: "丁" };
+    assert.deepEqual(keepKnownTargets(["a", "b", "c", "d"], known), ["a", "b", "c"]);
+    assert.deepEqual(keepKnownTargets(["a", "b"], known, 5), ["a", "b"]);
+  });
+
+  it("空表 / 重复 id 都不算数", () => {
+    assert.deepEqual(keepKnownTargets(["a", "a"], {}), []);
+    assert.deepEqual(keepKnownTargets(["a", "a", "b"], { a: "甲", b: "乙" }), ["a", "b"]);
+  });
+
+  it("原型链上的键不算「存在」（脏 id 不炸）", () => {
+    assert.deepEqual(keepKnownTargets(["toString", "__proto__"], { a: "甲" }), []);
   });
 });
 

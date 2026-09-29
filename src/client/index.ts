@@ -171,6 +171,10 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
     createAnyway: zh ? "仍然新建" : "Create anyway",
     candidatesTitle: zh ? "已经有相近的知识点" : "Similar node exists",
     candidatesMessage: zh ? "库里已有相近节点，建议复用而不是新建" : "A similar node exists; reuse it instead of creating a duplicate",
+    loadingNodes: zh ? "正在读取当前知识库…" : "Reading the current library…",
+    noRecommend: zh
+      ? "这个库里暂时没有可推荐的最近节点，直接搜索吧"
+      : "No recent nodes in this library yet — search instead",
   });
   // 对话里的工具卡片（图谱本体不在这里——它在右侧栏；这里只有写入回执）
   ctx.slots.inject("tool.call.toolview", function* registerViews() {
