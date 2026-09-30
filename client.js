@@ -241,22 +241,6 @@ window.__ModuleLoader__.load({
 			return raw.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/^\s*(?:[-*+>]|\d+[.)])\s*/, "").trim()).filter((line) => line !== "").join(" ").replace(/\s+/g, " ").trim().slice(0, 600);
 		}
 		/**
-		* 追加一个片段（按归一化文本去重，超出上限丢弃）。
-		* @param list - 已有片段。
-		* @param raw - 新选区原文。
-		* @param messageId - 来源消息 id（可选）。
-		* @returns 新数组（不修改入参）。
-		*/
-		function appendSnippet(list, raw, messageId) {
-			const text = normalizeSnippet(raw);
-			if (text === "") return [...list];
-			if (list.some((item) => item.text === text)) return [...list];
-			if (list.length >= 8) return [...list];
-			const next = { text };
-			if (messageId !== void 0 && messageId !== null && messageId !== "") next.messageId = messageId;
-			return [...list, next];
-		}
-		/**
 		* 默认标题：取原文开头的若干字，遇到句读就停。
 		* @param snippet - 归一化后的原文。
 		* @returns 建议标题。
@@ -266,30 +250,6 @@ window.__ModuleLoader__.load({
 			if (text === "") return "";
 			const cut = text.search(/[。！？!?；;：:，,、]/);
 			return (cut > 0 && cut <= 24 ? text.slice(0, cut) : text.slice(0, 24)).trim();
-		}
-		/**
-		* 把「弹窗里的每一行」变成各自的草稿（一行为一个节点）。
-		*
-		* 为什么必须分开算标题（真实 bug ✗）：界面上只有**一个**标题输入框，
-		* 多行时如果所有行都用它，点「添加为前置」就会拿同一个标题发 N 次请求 ——
-		* 第 1 次建点，后面 N-1 次精确命中同一个节点、又被关系去重吃掉
-		* （`addEdge` 对同 (from,to,type) 直接返回已有边）⇒ **除了第一行，其余全丢，还没有任何提示** ✗。
-		*
-		* 规则：**单行**才用用户改过的标题（空则回落到默认标题）；**多行**每行各用自己的默认标题。
-		*
-		* @param lines - 弹窗文本切出来的行（未归一化，内部会归一化 + 去重 + 截断）。
-		* @param editedTitle - 用户在标题框里改过的标题（只在单行时有意义）。
-		* @returns 草稿列表（顺序与首次出现顺序一致）。
-		*/
-		function draftPrereqs(lines, editedTitle) {
-			let list = [];
-			for (const line of lines) list = appendSnippet(list, line);
-			const edited = normalizeSnippet(editedTitle ?? "");
-			const single = list.length === 1;
-			return list.map((item) => ({
-				text: item.text,
-				title: single && edited !== "" ? edited : defaultTitle(item.text)
-			}));
 		}
 		/**
 		* 推荐目标节点：当前节点 → 最近被加过前置的 → 最近聚焦的，去重后取前 n 个。
@@ -532,6 +492,10 @@ window.__ModuleLoader__.load({
 				"  background: transparent; color: inherit; font: inherit; }",
 				".kn-ms-new::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
 				".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+				".kn-ms-details[role='radiogroup'] { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 10px 0 0; }",
+				".kn-ms-radio { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: inherit; font-size: 12px; }",
+				".kn-ms-radio input { margin: 0; accent-color: var(--dsw-alias-button-primary-fill, #24786b); cursor: pointer; }",
+				".kn-ms-radio:hover { color: var(--dsw-alias-label-primary, #192523); }",
 				".kn-ms-note { margin-top: 8px; font-size: 12px; }",
 				".kn-pick-dialog {",
 				"  box-sizing: border-box; width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto;",
@@ -543,12 +507,6 @@ window.__ModuleLoader__.load({
 				".kn-pick-title { font-size: 15px; font-weight: 500; }",
 				".kn-pick-subtitle { margin-top: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
 				".kn-pick-content { padding: 0 22px 15px; }",
-				".kn-pick-chips { display: flex; flex-wrap: wrap; gap: 7px; }",
-				".kn-pick-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 30px; padding: 3px 11px;",
-				"  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; cursor: text; }",
-				".kn-pick-chip:focus-within { border-color: #819b91; }",
-				".kn-pick-chip input { width: 150px; min-width: 60px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
-				".kn-pick-chip-mark { color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 11px; }",
 				".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
 				".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
 				".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
@@ -667,7 +625,16 @@ window.__ModuleLoader__.load({
 		*/
 		function ChatSelectionBar(props) {
 			const [bar, setBar] = (0, react.useState)(null);
-			const [picking, setPicking] = (0, react.useState)(null);
+			/**
+			* 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
+			*
+			* - `false`（默认）= 创建独立节点：底部主按钮就是「创建独立节点」；
+			* - `true` = 添加为前置：同一个按钮变成「添加为前置」，并**在下面展开**目标选择区。
+			*
+			* 合并之前这里是两个弹窗（收集弹窗 → 选择弹窗），用户要来回切换、还会丢掉上下文；
+			* 现在一个弹窗里切换，标签、搜索词、选中的目标都留在同一份 state 里 ✓。
+			*/
+			const [asPrereq, setAsPrereq] = (0, react.useState)(false);
 			const [query, setQuery] = (0, react.useState)("");
 			const [results, setResults] = (0, react.useState)([]);
 			const [searching, setSearching] = (0, react.useState)(false);
@@ -834,6 +801,9 @@ window.__ModuleLoader__.load({
 				setMultiOpen(false);
 				setChips([]);
 				setNewName("");
+				setAsPrereq(false);
+				setSelectedTarget(null);
+				setError(null);
 			};
 			/**
 			* 把**一条草稿**真正写到某个目标节点下（一次请求）。
@@ -922,8 +892,8 @@ window.__ModuleLoader__.load({
 			/** 队列全部落地后的收尾：通知面板刷新 + 关掉这一轮的所有界面 ✓ */
 			const finishQueue = () => {
 				setError(null);
-				setPicking(null);
 				setSelectedTarget(null);
+				setAsPrereq(false);
 				setMultiOpen(false);
 				setChips([]);
 				setNewName("");
@@ -989,6 +959,13 @@ window.__ModuleLoader__.load({
 				const outcome = await postAdd(pending.fromId, draft, create);
 				if (outcome.kind === "error") {
 					setError(outcome.message);
+					setMultiOpen(true);
+					setAsPrereq(true);
+					collecting.current = true;
+					setSelectedTarget({
+						id: pending.fromId,
+						title: titleOf(pending.fromId)
+					});
 					return;
 				}
 				if (outcome.kind === "candidates") {
@@ -1439,8 +1416,20 @@ window.__ModuleLoader__.load({
 					recentPrereqTargets: memory.recentPrereqTargets.filter((item) => item !== id)
 				});
 			};
-			/** 从选择弹窗的状态里取草稿（回调里 TS 收窄不了 `picking`，所以单独抽一个空安全的读取） */
-			const draftsOf = (state) => state?.drafts ?? [];
+			/**
+			* 把弹窗里的**标签**变成写入用的草稿队列。
+			*
+			* 合并成一层之后 `chips`（界面上看得见的标签）就是唯一事实来源 ✓ —— 不再有第二份草稿副本
+			* （两份副本一旦不同步，就会出现"界面上改了名字、写进去的还是旧标题"✗）。
+			* 标题为空时回落到 `defaultTitle(text)`，与 `postAdd` 的回落**同一套规则** ✓。
+			*
+			* @param list - 弹窗里当前的标签（每条标签本身就是它的标题）。
+			* @returns 每条草稿：原文 + 标题。
+			*/
+			const draftsOf = (list) => list.map((text) => ({
+				text,
+				title: text.trim() === "" ? defaultTitle(text) : text
+			}));
 			/** 调宿主：搜索可选目标节点 */
 			const doSearch = async (text) => {
 				if (text.trim() === "") {
@@ -1479,31 +1468,48 @@ window.__ModuleLoader__.load({
 				id,
 				title: labelOf(id)
 			})) : results;
-			/** 「添加为前置…」：把标签变成草稿，打开「添加为谁的前置」弹窗 ✓ */
-			const openPickerFromChips = () => {
-				const list = draftPrereqs(chips);
-				if (list.length === 0) return;
-				collecting.current = false;
-				setMultiOpen(false);
+			/**
+			* 切回「创建独立节点」：把上一次的报错清掉 ✓。
+			* 不主动清目标选择 —— 用户可能只是来回比较一下模式，切回来时选择还在更省事 ✓。
+			*/
+			const chooseStandaloneMode = () => {
+				setAsPrereq(false);
 				setError(null);
-				setPicking({
-					drafts: list,
-					fromMulti: true
-				});
-				setSelectedTarget(null);
-				setLibraryTitles(null);
-				loadLibraryNodes();
-				report("open-picker", {
-					count: list.length,
-					from: "multi-modal"
+				report("prereq-mode", {
+					on: false,
+					chips: chips.length
 				});
 			};
-			/** 「添加为谁的前置」上点「取消」：从收集弹窗进来的就**退回收集弹窗** ✓（原样保留标签与位置） */
-			const cancelPicking = () => {
-				const back = picking?.fromMulti === true;
-				setPicking(null);
-				if (back) setMultiOpen(true);
-				report("picker-cancel", { back });
+			/**
+			* 勾选「添加为前置」时先把**当前库的节点表**读回来 ✓。
+			*
+			* 为什么在切换那一刻读而不是打开弹窗就读：没勾之前推荐区是折叠的，没必要为它多打一次宿主请求 ✓；
+			* `libraryTitles` 为 `null` 期间一个推荐都不列（避免把别的库残留的 id 当成本库的推荐 ✗）。
+			*/
+			const choosePrereqMode = () => {
+				setAsPrereq(true);
+				setError(null);
+				setLibraryTitles(null);
+				loadLibraryNodes();
+				report("prereq-mode", {
+					on: true,
+					chips: chips.length
+				});
+			};
+			/**
+			* 「添加为前置」：把这一批标签挂到**选中的目标**下 ✓。
+			*
+			* 与旧的"先选、再确认添加"是同一条纪律：没选目标就什么都不发（按钮此时也是置灰的 ✓）；
+			* 点下去才真的写 `runQueue(target.id, draftsOf(chips), 0)` ✓。
+			*/
+			const confirmPrereq = () => {
+				const target = selectedTarget;
+				if (target === null) return;
+				report("confirm-prereq", {
+					count: chips.length,
+					target: target.id.slice(0, 8)
+				});
+				runQueue(target.id, draftsOf(chips), 0);
 			};
 			/**
 			* 「创建独立节点」：逐个建，**提示留在弹窗里**（先建、后关 ✗→✓：关闭后再报错就是"点了没反应" ✗）；
@@ -1653,242 +1659,175 @@ window.__ModuleLoader__.load({
 											}
 										})]
 									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "kn-ms-details",
-										children: props.copy.multiDetails ?? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁"
+										role: "radiogroup",
+										"aria-label": props.copy.multiAsPrereq ?? "是否添加为前置",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+											className: "kn-ms-radio",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+												type: "radio",
+												name: "kn-ms-mode",
+												checked: !asPrereq,
+												onChange: chooseStandaloneMode
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: props.copy.addStandalone ?? "创建独立节点" })]
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+											className: "kn-ms-radio",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+												type: "radio",
+												name: "kn-ms-mode",
+												checked: asPrereq,
+												onChange: choosePrereqMode
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: props.copy.multiAsPrereq ?? "添加为另一个知识点的前置" })]
+										})]
 									}),
 									note === null ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "kn-ms-note",
 										style: { opacity: 1 },
 										children: note
-									})
+									}),
+									asPrereq ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "kn-pick-target",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "kn-pick-section",
+												children: props.copy.targetSection ?? "添加为谁的前置"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+												className: "kn-pick-label",
+												htmlFor: PICK_SEARCH_ID,
+												children: props.copy.searchLabel ?? props.copy.searchHint
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "kn-search-wrap",
+												style: {
+													display: "flex",
+													alignItems: "center",
+													gap: 8,
+													height: 36,
+													boxSizing: "border-box",
+													padding: "0 11px",
+													border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
+													borderRadius: 7,
+													background: "var(--dsw-alias-bg-layer-1, #ffffff)"
+												},
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+													viewBox: "0 0 24 24",
+													fill: "none",
+													width: 16,
+													height: 16,
+													"aria-hidden": "true",
+													style: {
+														flex: "none",
+														width: 16,
+														height: 16,
+														color: "var(--dsw-alias-label-secondary, #8a8a8a)"
+													},
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+														cx: "10.5",
+														cy: "10.5",
+														r: "6.5",
+														stroke: "currentColor",
+														strokeWidth: "1.7"
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+														d: "m16 16 4.5 4.5",
+														stroke: "currentColor",
+														strokeWidth: "1.7",
+														strokeLinecap: "round"
+													})]
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+													id: PICK_SEARCH_ID,
+													className: "kn-search-input",
+													type: "search",
+													value: query,
+													placeholder: props.copy.searchPlaceholder ?? "输入名称搜索",
+													style: {
+														flex: 1,
+														minWidth: 0,
+														height: "100%",
+														padding: 0,
+														border: 0,
+														outline: 0,
+														background: "transparent",
+														color: "inherit",
+														font: "inherit"
+													},
+													onChange: (event) => {
+														setQuery(event.target.value);
+														doSearch(event.target.value);
+													}
+												})]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "kn-pick-group",
+												children: query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果"
+											}),
+											query.trim() === "" && libraryTitles === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "kn-pick-empty",
+												children: props.copy.loadingNodes ?? "正在读取当前知识库…"
+											}) : null,
+											searching ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "kn-pick-empty",
+												children: props.copy.searching
+											}) : null,
+											pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+												className: "kn-pick-empty",
+												children: query.trim() === "" ? props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧" : props.copy.noResult ?? "没有匹配的知识点"
+											}) : null,
+											pickRows.length === 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "kn-pick-results",
+												"aria-label": query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果",
+												children: pickRows.map((row) => {
+													const active = selectedTarget?.id === row.id;
+													return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+														type: "button",
+														className: "kn-pick-row",
+														"aria-pressed": active,
+														onClick: () => {
+															setSelectedTarget({
+																id: row.id,
+																title: row.title
+															});
+														},
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+															className: "kn-pick-row-name",
+															children: row.title
+														}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+															className: "kn-pick-row-mark",
+															children: active ? "✓" : props.copy.selectMark ?? "选择"
+														})]
+													}, row.id);
+												})
+											})
+										]
+									}) : null
 								]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "kn-pick-foot",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "kn-pick-status",
-									children: props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kn-pick-actions",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											className: "kn-pick-btn",
-											onClick: () => {
-												closeMulti();
-												report("multi-cancel", null);
-											},
-											children: props.copy.cancel
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											className: "kn-pick-btn",
-											disabled: chips.length === 0,
-											onClick: createStandaloneAll,
-											children: props.copy.addStandalone ?? "创建独立节点"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											className: "kn-pick-btn is-primary",
-											disabled: chips.length === 0 || knownNodeCountRef.current === 0,
-											title: knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「创建独立节点」建一个" : void 0,
-											onClick: openPickerFromChips,
-											children: props.copy.addPrereq ?? "添加为前置…"
-										})
-									]
-								})]
-							})
-						]
-					})
-				}), document.body) : null,
-				picking !== null ? (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "kn-modal-backdrop",
-					role: "presentation",
-					onClick: () => {
-						setPicking(null);
-					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "kn-pick-dialog",
-						role: "dialog",
-						"aria-modal": "true",
-						"aria-labelledby": "kn-pick-title",
-						onClick: (event) => {
-							event.stopPropagation();
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "kn-pick-head",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "kn-pick-title",
-									id: "kn-pick-title",
-									children: props.copy.pickTitle
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "kn-pick-subtitle",
-									children: props.copy.pickHint
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "kn-pick-content",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "kn-pick-chips",
-									children: picking.drafts.map((draft, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-										className: "kn-pick-chip",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-											value: draft.title,
-											"aria-label": draft.text.slice(0, 40),
-											title: draft.text.slice(0, 120),
-											onChange: (event) => {
-												const value = event.target.value;
-												setPicking((prev) => prev === null ? null : { drafts: prev.drafts.map((item, i) => i === index ? {
-													...item,
-													title: value
-												} : item) });
-											}
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "kn-pick-chip-mark",
-											"aria-hidden": "true",
-											children: "✎"
-										})]
-									}, `${index}:${draft.text.slice(0, 24)}`))
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kn-pick-target",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "kn-pick-section",
-											children: props.copy.targetSection ?? "添加为谁的前置"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
-											className: "kn-pick-label",
-											htmlFor: PICK_SEARCH_ID,
-											children: props.copy.searchLabel ?? props.copy.searchHint
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "kn-search-wrap",
-											style: {
-												display: "flex",
-												alignItems: "center",
-												gap: 8,
-												height: 36,
-												boxSizing: "border-box",
-												padding: "0 11px",
-												border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
-												borderRadius: 7,
-												background: "var(--dsw-alias-bg-layer-1, #ffffff)"
-											},
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
-												viewBox: "0 0 24 24",
-												fill: "none",
-												width: 16,
-												height: 16,
-												"aria-hidden": "true",
-												style: {
-													flex: "none",
-													width: 16,
-													height: 16,
-													color: "var(--dsw-alias-label-secondary, #8a8a8a)"
-												},
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-													cx: "10.5",
-													cy: "10.5",
-													r: "6.5",
-													stroke: "currentColor",
-													strokeWidth: "1.7"
-												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
-													d: "m16 16 4.5 4.5",
-													stroke: "currentColor",
-													strokeWidth: "1.7",
-													strokeLinecap: "round"
-												})]
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-												id: PICK_SEARCH_ID,
-												className: "kn-search-input",
-												type: "search",
-												value: query,
-												placeholder: props.copy.searchPlaceholder ?? "输入名称搜索",
-												style: {
-													flex: 1,
-													minWidth: 0,
-													height: "100%",
-													padding: 0,
-													border: 0,
-													outline: 0,
-													background: "transparent",
-													color: "inherit",
-													font: "inherit"
-												},
-												onChange: (event) => {
-													setQuery(event.target.value);
-													doSearch(event.target.value);
-												}
-											})]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "kn-pick-group",
-											children: query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果"
-										}),
-										query.trim() === "" && libraryTitles === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-											className: "kn-pick-empty",
-											children: props.copy.loadingNodes ?? "正在读取当前知识库…"
-										}) : null,
-										searching ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-											className: "kn-pick-empty",
-											children: props.copy.searching
-										}) : null,
-										pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
-											className: "kn-pick-empty",
-											children: query.trim() === "" ? props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧" : props.copy.noResult ?? "没有匹配的知识点"
-										}) : null,
-										pickRows.length === 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "kn-pick-results",
-											"aria-label": query.trim() === "" ? props.copy.recommended : props.copy.resultsLabel ?? "搜索结果",
-											children: pickRows.map((row) => {
-												const active = selectedTarget?.id === row.id;
-												return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-													type: "button",
-													className: "kn-pick-row",
-													"aria-pressed": active,
-													onClick: () => {
-														setSelectedTarget({
-															id: row.id,
-															title: row.title
-														});
-													},
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "kn-pick-row-name",
-														children: row.title
-													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "kn-pick-row-mark",
-														children: active ? "✓" : props.copy.selectMark ?? "选择"
-													})]
-												}, row.id);
-											})
-										})
-									]
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "kn-pick-foot",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "kn-pick-status",
-									children: selectedTarget === null ? props.copy.statusPick ?? "请选择要添加到的知识点" : props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`
+									children: asPrereq ? selectedTarget === null ? props.copy.statusPick ?? "请选择要添加到的知识点" : props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置` : props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`
 								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "kn-pick-actions",
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										type: "button",
 										className: "kn-pick-btn",
-										onClick: cancelPicking,
+										onClick: () => {
+											closeMulti();
+											report("multi-cancel", null);
+										},
 										children: props.copy.cancel
 									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										type: "button",
 										className: "kn-pick-btn is-primary",
-										disabled: selectedTarget === null,
+										disabled: chips.length === 0 || asPrereq && selectedTarget === null,
+										title: chips.length === 0 ? "先添加至少一个知识点" : asPrereq && libraryTitles !== null && Object.keys(libraryTitles).length === 0 ? "这个知识库还没有任何节点：请先创建独立节点" : void 0,
 										onClick: () => {
-											const target = selectedTarget;
-											if (target === null) return;
-											runQueue(target.id, draftsOf(picking), 0);
+											if (asPrereq) confirmPrereq();
+											else createStandaloneAll();
 										},
-										children: props.copy.confirm
+										children: asPrereq ? props.copy.addPrereq ?? "添加为前置…" : props.copy.addStandalone ?? "创建独立节点"
 									})]
 								})]
 							}),
@@ -41351,6 +41290,7 @@ void main() {
 				multiDetails: zh ? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁" : "Each tag becomes a node. Pick “Add as prerequisite…” to choose their parent",
 				multiCount: (count) => zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`,
 				addStandalone: zh ? "创建独立节点" : "Create standalone",
+				multiAsPrereq: zh ? "添加为另一个知识点的前置" : "Add as a prerequisite of another node",
 				pickTitle: zh ? "被添加的知识点" : "Nodes to add",
 				pickHint: zh ? "将这些知识点添加为另一个知识点的前置" : "Add these nodes as prerequisites of another node",
 				recommended: zh ? "推荐" : "Recommended",

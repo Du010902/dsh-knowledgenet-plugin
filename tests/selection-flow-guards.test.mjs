@@ -29,9 +29,16 @@ const code = source
 
 describe("划词添加前置：三条回归的守门", () => {
   it("多行按每条草稿各自的标题发请求（不再共用一个标题状态）", () => {
-    assert.ok(code.includes("draftPrereqs("), "必须用 draftPrereqs 生成每条的标题");
+    assert.ok(code.includes("draftsOf("), "必须把标签逐条变成草稿（每条一个标题）");
     assert.ok(code.includes("title: nodeTitle"), "请求体里的 title 必须来自这条草稿");
     assert.equal(/\bsetTitle\(/.test(code), false, "共用的 title 状态必须已经删掉");
+    /*
+     * 两条本应在宿主侧做的兜底，都必须在**这一侧**沿同一条路走：
+     * ① 标题为空按原文取默认标题（`draftsOf` 里 `defaultTitle(text)`）；
+     * ② 请求体里的标题就是 `draftsOf` 给的那个（`confirmPrereq` → `runQueue`）。
+     */
+    assert.ok(code.includes("defaultTitle(text)"), "标题为空时要回落到默认标题");
+    assert.ok(code.includes("void runQueue(target.id, draftsOf(chips), 0)"), "点按钮才真的写");
   });
 
   it("命中相近候选时走 resolveCandidate（不再用旧闭包标题重发）", () => {
@@ -63,20 +70,23 @@ describe("划词添加前置：三条回归的守门", () => {
   });
 
   /*
-   * 形态按设计稿 `knowledgenet-picker-design.html`：被添加的知识点（可编辑 chip）+
-   * 「添加为谁的前置」搜索区（带放大镜的输入框、推荐/搜索结果切换、可选中行）+ 底部状态行与确认。
+   * 形态按设计稿 `knowledgenet-picker-design.html`：被添加的知识点（标签）+「添加为谁的前置」搜索区
+   * （带放大镜的输入框、推荐/搜索结果切换、可选中行）+ 底部状态行与动作按钮。
+   *
+   * 注意：2026-09 起这一区**不再单独成弹窗**，而是挂在「收集知识点」弹窗里、由「添加为前置」勾选后展开
+   * （见下面那条合并守门）；但**区块内部的形态与交互一个字都没改** ✓ —— 所以这里继续钉设计稿元素。
    */
-  it("「设为前置」弹窗保持设计稿的形态与交互", () => {
-    for (const token of ["kn-pick-dialog", "kn-pick-chip", "kn-search-wrap", "kn-pick-row", "kn-pick-foot"]) {
+  it("前置选择区保持设计稿的形态与交互（合并进收集弹窗后仍然如此）", () => {
+    for (const token of ["kn-pick-dialog", "kn-search-wrap", "kn-pick-row", "kn-pick-foot", "kn-pick-target"]) {
       assert.ok(code.includes(token), `设计稿元素缺失：${token}`);
     }
     assert.ok(code.includes("PICK_SEARCH_ID"), "搜索框要有 id（<label htmlFor> 指向它）");
     assert.ok(code.includes('cx="10.5"'), "搜索框里要有放大镜图标");
     assert.ok(/aria-pressed=\{active\}/.test(code), "结果行要用 aria-pressed 表达选中（设计稿的高亮态）");
     assert.ok(code.includes("setSelectedTarget({ id: row.id, title: row.title })"), "点结果行 = 选中该目标");
-    assert.ok(code.includes("void runQueue(target.id, draftsOf(picking), 0)"), "「确认添加」才真的写");
+    assert.ok(code.includes("void runQueue(target.id, draftsOf(chips), 0)"), "「添加为前置」才真的写");
     assert.equal(
-      /onClick=\{\(\) => \{ void runQueue\(id, draftsOf\(picking\), 0\); \}\}/.test(code),
+      /onClick=\{\(\) => \{ void runQueue\(id, draftsOf\(/.test(code),
       false,
       "点结果行不应再直接添加（设计稿是先选后确认）",
     );
@@ -97,48 +107,71 @@ describe("划词添加前置：三条回归的守门", () => {
   });
 
   /*
-   * 回归（用户反馈 2026-09）：「添加为谁的前置」弹窗里点「取消」**整个弹窗直接消失** ✗，
-   * 而用户刚从「收集知识点」弹窗点「添加为前置…」进来 —— 收集好的标签还在里面，
-   * 取消应当是**返回上一级**（收集弹窗原样回来）✓。
+   * 回归（用户反馈 2026-09，第二次迭代）：**两层弹窗串行**仍然不好用 ——
+   * 进第二层要先把第一层关掉，取消/返回又要再退回来，上下文来回丢。
    *
-   * 钉住三件事：① 取消按钮走 `cancelPicking`；② 退回时**不调用** `closeMulti()`
-   * （那会把标签清空 ✗）；③ 退回只在"从收集弹窗进来"时发生，其它入口仍退化为关闭 ✓。
-   * 另外用户明确要求：Esc / 点遮罩**不跟着改**，所以这里同时钉住遮罩仍是直接置空 ✓。
+   * 用户要求的最终形态：**合并成一层** ✓
+   * ① 第一层说明行处放一个「是否添加为前置」的选择；
+   * ② 底部**只有一个动作按钮**：没勾 ⇒「创建独立节点」，勾了 ⇒「添加为前置」；
+   * ③ 勾了之后，说明行下面**展开**「添加为谁的前置」这一块，没勾就收起来。
    */
-  it("「添加为谁的前置」点「取消」= 返回上一级（收集弹窗原样回来，标签不丢）", () => {
-    /*
-     * 按**那一行**钉，而不是按"文件里有没有出现"钉：遮罩上合法地还有一处 `setPicking(null)` ✓，
-     * 用全局 includes 去否会误判（也正是这个 bug 的写法 ✓）。
-     */
-    const cancelButton = code.split("\n").find((line) => line.includes("props.copy.cancel") && line.includes("<button"));
-    assert.ok(cancelButton !== undefined, "找不到「取消」按钮那一行");
-    assert.ok(cancelButton.includes("onClick={cancelPicking}"), "「取消」必须走 cancelPicking（返回上一级）");
+  it("「收集知识点」与「选前置目标」合并成一层（开关 + 一个按钮 + 展开区）", () => {
+    /* ① 两层弹窗的痕迹必须彻底消失：不再有第二份"被添加的知识点"弹窗 */
+    for (const gone of ["picking", "PickState", "cancelPicking", "openPickerFromChips", "kn-pick-chips"]) {
+      assert.equal(code.includes(gone), false, `两层弹窗的残留必须删掉：${gone}`);
+    }
     assert.equal(
-      cancelButton.includes("setPicking(null)"),
-      false,
-      "取消按钮不许再直接把 picking 置空（那样整个流程一起消失 ✗）",
+      (code.match(/createPortal\(/g) ?? []).length,
+      2,
+      "只应剩两个 portal（浮条 + 唯一的弹窗），出现第三个就说明弹窗又分叉了",
     );
-    assert.ok(code.includes("fromMulti: true"), "打开选择层时要记下来源是「收集知识点」弹窗");
-    assert.ok(code.includes("if (back) setMultiOpen(true)"), "取消后要把收集弹窗重新打开");
+
+    /* ② 说明行变成两个互斥选项（原生 radio：语义与键盘操作都对） */
+    assert.ok(code.includes('role="radiogroup"'), "开关要是一组互斥选项");
+    assert.ok(code.includes('name="kn-ms-mode"'), "两个选项必须同组（radio 才能互斥）");
+    for (const token of ["kn-ms-radio", "checked={!asPrereq}", "checked={asPrereq}"]) {
+      assert.ok(code.includes(token), `开关元素缺失：${token}`);
+    }
+    assert.ok(code.includes("onChange={chooseStandaloneMode}"), "选「创建独立节点」要回到建点模式");
+    assert.ok(code.includes("onChange={choosePrereqMode}"), "选「添加为前置」要进入前置模式");
+
+    /* ③ 展开区由开关控制：勾了才渲染那 60 行前置选择区 */
+    assert.ok(code.includes("{asPrereq ? ("), "前置选择区必须由开关控制（勾了才展开）");
+    assert.ok(code.includes('className="kn-pick-target"'), "展开区要复用设计稿那套 kn-pick-target 形态");
+
+    /* ④ 底部只剩一个动作按钮，文字与动作都跟着开关走 */
+    const actionButton = code.slice(code.indexOf("disabled={chips.length === 0"));
+    const untilFootEnd = actionButton.slice(0, 1800);
+    assert.ok(untilFootEnd.includes("disabled={chips.length === 0"), "动作按钮要按标签数置灰");
     assert.ok(
-      /setPicking\(null\);\s*if \(back\) setMultiOpen\(true\);/.test(code),
-      "退回动作必须长在 cancelPicking 里（便于审阅）",
+      /asPrereq \? \(props\.copy\.addPrereq[\s\S]{0,120}props\.copy\.addStandalone/.test(untilFootEnd),
+      "按钮文字要随开关在「添加为前置」/「创建独立节点」之间切换",
+    );
+    assert.ok(untilFootEnd.includes("if (asPrereq) confirmPrereq();"), "勾了前置时按钮走 confirmPrereq");
+    assert.ok(untilFootEnd.includes("else createStandaloneAll();"), "没勾时按钮走 createStandaloneAll");
+    /*
+     * 合并后只剩**两个**底部按钮（取消 + 跟着开关走的那个）：
+     * 出现三个就说明"创建独立节点 / 添加为前置"又被拆成两个按钮了 ✗。
+     */
+    const foot = code.slice(code.indexOf('className="kn-pick-foot"'), code.indexOf("error === null ? null"));
+    assert.equal(
+      (foot.match(/className="kn-pick-btn/g) ?? []).length,
+      2,
+      "底部只应有「取消」与合并后的那一个动作按钮",
     );
     /*
-     * 退回**不能**走 `closeMulti()`：它会把 `chips` 清空 ⇒ 用户收集的知识点全丢 ✗。
+     * 合并后**不能再有"先把弹窗关掉再进第二层"**那一步（`openPickerFromChips` 的老写法 ✗）：
+     * 前置模式下按钮必须保持弹窗开着，只做一次写入 ✓。
      */
     assert.equal(
-      /cancelPicking[\s\S]{0,300}closeMulti\(/.test(code),
+      /asPrereq[\s\S]{0,240}setMultiOpen\(false\)/.test(code),
       false,
-      "退回上一级绝不能顺手清空标签（不许在 cancelPicking 里调 closeMulti）",
+      "勾了前置之后不许再把弹窗关掉（那就又变成两层了）",
     );
-    /* 不是从收集弹窗进来的（将来别的入口）⇒ 退化为"直接关掉"，行为保持不变 ✓ */
-    assert.ok(code.includes("picking?.fromMulti"), "退回必须按来源判断，不能无条件重开收集弹窗");
-    /* 用户确认：Esc / 点遮罩仍然整个关掉，不跟着改 ✓ */
-    assert.ok(
-      code.includes("onClick={() => { setPicking(null); }}"),
-      "遮罩点击保持原样（整个关掉）",
-    );
+
+    /* ⑤ 目标没选时按钮可点但也**不会写**（confirmPrereq 自己挡住） */
+    assert.ok(code.includes("const confirmPrereq = (): void => {"), "合并后要有一个明确的确认函数");
+    assert.ok(code.includes("if (target === null) return;"), "没选目标时 confirmPrereq 必须直接返回");
   });
 
   /*

@@ -167,6 +167,8 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
       : "Each tag becomes a node. Pick “Add as prerequisite…” to choose their parent",
     multiCount: (count: number) => (zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`),
     addStandalone: zh ? "创建独立节点" : "Create standalone",
+    /* 合并成一层之后弹窗里的两个互斥选项（radio）：建独立节点 ↔ 加为别人的前置 ✓ */
+    multiAsPrereq: zh ? "添加为另一个知识点的前置" : "Add as a prerequisite of another node",
     pickTitle: zh ? "被添加的知识点" : "Nodes to add",
     pickHint: zh
       ? "将这些知识点添加为另一个知识点的前置"

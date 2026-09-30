@@ -18,7 +18,6 @@ import { pickWorkspacePath } from "./workspace-path.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import {
   defaultTitle,
-  draftPrereqs,
   keepKnownTargets,
   MAX_SNIPPETS,
   normalizeSnippet,
@@ -50,19 +49,30 @@ export interface ChatSelectionBarProps {
     multiLabel?: string;
     /** 可选：标签组右侧的说明（点击标签可修改名称） */
     multiHint?: string;
-    /** 可选：标签组下方的说明（一个标签 = 一个知识点） */
+    /**
+     * 以下四项是**旧的第二层弹窗**留下的文案（`pickTitle` / `pickHint` / `titleLabel`）
+     * 与旧的说明行（`multiDetails`）：两层弹窗合并成一层之后界面上不再用到 ✓。
+     *
+     * 这里先保留声明（宿主仍在传，删掉会牵动 `index.ts` 与文案文件）；
+     * 真正清理时**三处一起删**：本接口、`src/client/index.ts` 的 copy、以及重建后的 `client.js`。
+     */
     multiDetails?: string;
+    /** @deprecated 旧第二层弹窗的标题（合并后不再渲染） */
+    pickTitle?: string;
+    /** @deprecated 旧第二层弹窗的副标题（合并后不再渲染） */
+    pickHint?: string;
+    /** @deprecated 旧弹窗的"前置名称"输入框标签（合并后不再渲染） */
+    titleLabel?: string;
+    /** 可选：弹窗里「添加为前置」那个选项的文字（与 `addStandalone` 二选一） */
+    multiAsPrereq?: string;
     multi: string;
     selected: (count: number) => string;
     done: string;
     cancel: string;
-    pickTitle: string;
-    pickHint: string;
     recommended: string;
     searchHint: string;
     searching: string;
     noResult: string;
-    titleLabel: string;
     confirm: string;
     added: string;
     failed: string;
@@ -147,6 +157,16 @@ function ensureStyle(): void {
     "  background: transparent; color: inherit; font: inherit; }",
     ".kn-ms-new::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
     ".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /*
+     * 「是否添加为前置」这一行：**两个互斥选项**（创建独立节点 / 添加为前置）✓。
+     *
+     * 用原生 radio：语义准确（不是"可同时勾选"的复选框）、键盘（方向键 / Space）与读屏天然可用 ✓；
+     * 样式上把行做成可点区域，radio 本体保持浏览器默认外观（不自己画控件 = 不会在亮暗主题里跑偏 ✓）。
+     */
+    ".kn-ms-details[role='radiogroup'] { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 10px 0 0; }",
+    ".kn-ms-radio { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: inherit; font-size: 12px; }",
+    ".kn-ms-radio input { margin: 0; accent-color: var(--dsw-alias-button-primary-fill, #24786b); cursor: pointer; }",
+    ".kn-ms-radio:hover { color: var(--dsw-alias-label-primary, #192523); }",
     ".kn-ms-note { margin-top: 8px; font-size: 12px; }",
     /*
      * 「设为前置」弹窗（形态照设计稿 `knowledgenet-picker-design.html`）：
@@ -166,14 +186,11 @@ function ensureStyle(): void {
     ".kn-pick-title { font-size: 15px; font-weight: 500; }",
     ".kn-pick-subtitle { margin-top: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
     ".kn-pick-content { padding: 0 22px 15px; }",
-    /* 被添加的知识点：每条一个 chip，就地可编辑 */
-    ".kn-pick-chips { display: flex; flex-wrap: wrap; gap: 7px; }",
-    ".kn-pick-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 30px; padding: 3px 11px;",
-    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; cursor: text; }",
-    ".kn-pick-chip:focus-within { border-color: #819b91; }",
-    ".kn-pick-chip input { width: 150px; min-width: 60px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
-    ".kn-pick-chip-mark { color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 11px; }",
-    /* 「添加为谁的前置」：与上面的 chip 区隔开 */
+    /*
+     * 注：`.kn-pick-chip*`（第二层弹窗里那排"被添加的知识点"）已随**两层弹窗合并**一起删掉 ✓ ——
+     * 现在标签只有一份（`.kn-ms-chip*`），不会再出现"两个弹窗各有一套标签"的重复形态 ✓。
+     */
+    /* 「添加为谁的前置」：与上面的标签区隔开（展开时才有） */
     ".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
     ".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
     ".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
@@ -316,19 +333,6 @@ function domSessionOf(): string | null {
   }
 }
 
-interface PickState {
-  /** 每行一条草稿（标题可以在这里改） */
-  drafts: PrereqDraft[];
-  /**
-   * 这个「添加为谁的前置」弹窗是不是从**「收集知识点」弹窗**点出来的 ✓。
-   *
-   * 用户要求（2026-09）：这种入口下点「取消」应当是**返回上一级**（收集弹窗原样回来），
-   * 而不是把整条流程一起关掉 ✗。收集弹窗的标签本来就留在 `chips` 里没动过，
-   * 所以这里只需要记一个来源，不必另外复制一份状态 ✓。
-   */
-  fromMulti?: boolean;
-}
-
 /**
  * 划词浮条 + 片段收集 + 目标选择。
  * @param props - 文案与上报回调。
@@ -336,7 +340,16 @@ interface PickState {
  */
 export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const [bar, setBar] = useState<{ x: number; y: number; text: string } | null>(null);
-  const [picking, setPicking] = useState<PickState | null>(null);
+  /**
+   * 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
+   *
+   * - `false`（默认）= 创建独立节点：底部主按钮就是「创建独立节点」；
+   * - `true` = 添加为前置：同一个按钮变成「添加为前置」，并**在下面展开**目标选择区。
+   *
+   * 合并之前这里是两个弹窗（收集弹窗 → 选择弹窗），用户要来回切换、还会丢掉上下文；
+   * 现在一个弹窗里切换，标签、搜索词、选中的目标都留在同一份 state 里 ✓。
+   */
+  const [asPrereq, setAsPrereq] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ id: string; title: string }>>([]);
   const [searching, setSearching] = useState(false);
@@ -533,6 +546,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     setMultiOpen(false);
     setChips([]);
     setNewName("");
+    /*
+     * 动作模式与目标选择一起复位 ✓：下次打开弹窗必须回到"创建独立节点"的干净状态，
+     * 不能把上一次勾过的「添加为前置」和选中的目标带给下一个知识点 ✗。
+     */
+    setAsPrereq(false);
+    setSelectedTarget(null);
+    setError(null);
   };
 
   /**
@@ -608,8 +628,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   /** 队列全部落地后的收尾：通知面板刷新 + 关掉这一轮的所有界面 ✓ */
   const finishQueue = (): void => {
     setError(null);
-    setPicking(null);
     setSelectedTarget(null);
+    setAsPrereq(false);
     setMultiOpen(false);
     setChips([]);
     setNewName("");
@@ -670,6 +690,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     const outcome = await postAdd(pending.fromId, draft, create);
     if (outcome.kind === "error") {
       setError(outcome.message);
+      /*
+       * 失败后弹窗必须回来 ✓（合并成一层后只有一个弹窗，"关掉再报错"就是"点了没反应" ✗）：
+       * 恢复成"前置模式 + 目标已选"的现场，用户能直接看到错误、再点一次按钮重试 ✓。
+       */
+      setMultiOpen(true);
+      setAsPrereq(true);
+      collecting.current = true;
+      setSelectedTarget({ id: pending.fromId, title: titleOf(pending.fromId) });
       return;
     }
     if (outcome.kind === "candidates") {
@@ -957,6 +985,24 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           && element.closest('[data-row-key^="session:"], [data-row-key^="workspace:"]') !== null) {
           return { ok: false, reason: "in-sidebar" };
         }
+        /*
+         * **在自己弹窗里选中文字不算划词** ✓（用户反馈 2026-09）。
+         *
+         * 现象：在「收集知识点」弹窗里按住鼠标划一段文字（哪怕只是想复制），
+         * 松手就被当成一次划词 ⇒ 那段文字被追加成一个"待建知识点" ✗（用户明确说这不合理）。
+         *
+         * 期望的语义（用户原话）：**只有对话正文里的选中**才等于"要添加的知识点" ✓。
+         * 所以这里按"选区祖先落在自己的弹窗/浮条里"排除 ——
+         * 弹窗本体与浮条都是 portal 到 `document.body` 的 **light DOM**，
+         * 选区锚点节点一定在它们内部 ⇒ `closest` 直接可用 ✓（不需要 `composedPath` 那套 Shadow 处理）。
+         *
+         * 注意：`.kn-pick-dialog` 是唯一弹窗的外壳（两层弹窗已合并），
+         * 里面标签、说明、推荐行、按钮的文字都被这一条覆盖 ✓；输入框另有上面的 `in-editable` ✓。
+         */
+        if (element !== null && typeof element.closest === "function"
+          && element.closest(".kn-pick-dialog, .kn-sel-bar") !== null) {
+          return { ok: false, reason: "in-own-ui" };
+        }
         const rect = selection.getRangeAt(0).getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return { ok: false, reason: "no-rect" };
         return { ok: true, text, x: rect.left + rect.width / 2, y: rect.top };
@@ -1240,8 +1286,18 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     });
   };
 
-  /** 从选择弹窗的状态里取草稿（回调里 TS 收窄不了 `picking`，所以单独抽一个空安全的读取） */
-  const draftsOf = (state: PickState | null): PrereqDraft[] => state?.drafts ?? [];
+  /**
+   * 把弹窗里的**标签**变成写入用的草稿队列。
+   *
+   * 合并成一层之后 `chips`（界面上看得见的标签）就是唯一事实来源 ✓ —— 不再有第二份草稿副本
+   * （两份副本一旦不同步，就会出现"界面上改了名字、写进去的还是旧标题"✗）。
+   * 标题为空时回落到 `defaultTitle(text)`，与 `postAdd` 的回落**同一套规则** ✓。
+   *
+   * @param list - 弹窗里当前的标签（每条标签本身就是它的标题）。
+   * @returns 每条草稿：原文 + 标题。
+   */
+  const draftsOf = (list: readonly string[]): PrereqDraft[] =>
+    list.map((text) => ({ text, title: text.trim() === "" ? defaultTitle(text) : text }));
 
   /** 调宿主：搜索可选目标节点 */
   const doSearch = async (text: string): Promise<void> => {
@@ -1291,36 +1347,41 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     ? recommended.map((id) => ({ id, title: labelOf(id) }))
     : results;
 
-  /** 「添加为前置…」：把标签变成草稿，打开「添加为谁的前置」弹窗 ✓ */
-  const openPickerFromChips = (): void => {
-    const list = draftPrereqs(chips);
-    if (list.length === 0) return;
-    collecting.current = false;
-    setMultiOpen(false);
+  /**
+   * 切回「创建独立节点」：把上一次的报错清掉 ✓。
+   * 不主动清目标选择 —— 用户可能只是来回比较一下模式，切回来时选择还在更省事 ✓。
+   */
+  const chooseStandaloneMode = (): void => {
+    setAsPrereq(false);
     setError(null);
-    /*
-     * 带上 `fromMulti`：点「取消」时据此**回到收集弹窗** ✓（用户要求：返回上一级，而不是整个关掉 ✓）。
-     * 收集弹窗的标签在 `chips` 里原封不动 —— 只是不再渲染 —— 所以退回去时就是原样 ✓。
-     */
-    setPicking({ drafts: list, fromMulti: true });
-    setSelectedTarget(null);
-    /* 先把"当前库有哪些节点"读回来（`null` 期间一个推荐都不显示 ✓） */
-    setLibraryTitles(null);
-    void loadLibraryNodes();
-    report("open-picker", { count: list.length, from: "multi-modal" });
+    report("prereq-mode", { on: false, chips: chips.length });
   };
 
-  /** 「添加为谁的前置」上点「取消」：从收集弹窗进来的就**退回收集弹窗** ✓（原样保留标签与位置） */
-  const cancelPicking = (): void => {
-    const back = picking?.fromMulti === true;
-    /*
-     * 两个状态在**同一次事件里**一起设（React 会把它们合成一次渲染 ✓）：
-     * `picking` 置空 ⇒ 选择层消失；`multiOpen` 置真 ⇒ 收集弹窗当场回来 ✓
-     * —— 中间不会出现"两个都不在"的那一帧（用户要求：返回上一级，不是闪一下 ✓）。
-     */
-    setPicking(null);
-    if (back) setMultiOpen(true);
-    report("picker-cancel", { back });
+  /**
+   * 勾选「添加为前置」时先把**当前库的节点表**读回来 ✓。
+   *
+   * 为什么在切换那一刻读而不是打开弹窗就读：没勾之前推荐区是折叠的，没必要为它多打一次宿主请求 ✓；
+   * `libraryTitles` 为 `null` 期间一个推荐都不列（避免把别的库残留的 id 当成本库的推荐 ✗）。
+   */
+  const choosePrereqMode = (): void => {
+    setAsPrereq(true);
+    setError(null);
+    setLibraryTitles(null);
+    void loadLibraryNodes();
+    report("prereq-mode", { on: true, chips: chips.length });
+  };
+
+  /**
+   * 「添加为前置」：把这一批标签挂到**选中的目标**下 ✓。
+   *
+   * 与旧的"先选、再确认添加"是同一条纪律：没选目标就什么都不发（按钮此时也是置灰的 ✓）；
+   * 点下去才真的写 `runQueue(target.id, draftsOf(chips), 0)` ✓。
+   */
+  const confirmPrereq = (): void => {
+    const target = selectedTarget;
+    if (target === null) return;
+    report("confirm-prereq", { count: chips.length, target: target.id.slice(0, 8) });
+    void runQueue(target.id, draftsOf(chips), 0);
   };
 
   /**
@@ -1483,15 +1544,161 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 />
               </div>
 
-              <div className="kn-ms-details">
-                {props.copy.multiDetails ?? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁"}
+              {/*
+                * 「是否添加为前置」开关（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
+                *
+                * 用**整行 label + 单选按钮**，不是 checkbox：这两个选项是互斥的两种结果
+                * （建独立节点 ↔ 加为前置），radio 的语义比"勾选/不勾选"更准 ✓；
+                * 而且原生 radio 自动带方向键与 Space 操作，键盘可达性不用自己补 ✓。
+                */}
+              <div className="kn-ms-details" role="radiogroup" aria-label={props.copy.multiAsPrereq ?? "是否添加为前置"}>
+                <label className="kn-ms-radio">
+                  <input
+                    type="radio"
+                    name="kn-ms-mode"
+                    checked={!asPrereq}
+                    onChange={chooseStandaloneMode}
+                  />
+                  <span>{props.copy.addStandalone ?? "创建独立节点"}</span>
+                </label>
+                <label className="kn-ms-radio">
+                  <input
+                    type="radio"
+                    name="kn-ms-mode"
+                    checked={asPrereq}
+                    onChange={choosePrereqMode}
+                  />
+                  <span>{props.copy.multiAsPrereq ?? "添加为另一个知识点的前置"}</span>
+                </label>
               </div>
               {note === null ? null : <div className="kn-ms-note" style={{ opacity: 1 }}>{note}</div>}
+
+              {/*
+                * 选中「添加为前置」后才展开（未选中时这一整块不渲染 ⇒ 收起来 ✓）。
+                * 里面的形态与交互沿用设计稿 `knowledgenet-picker-design.html` 那一套：
+                * 搜索框（带放大镜）→ 推荐/搜索结果 → 可选中行 ✓。
+                */}
+              {asPrereq ? (
+                <div className="kn-pick-target">
+                  <div className="kn-pick-section">{props.copy.targetSection ?? "添加为谁的前置"}</div>
+
+                  <label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>
+                    {props.copy.searchLabel ?? props.copy.searchHint}
+                  </label>
+                  <div
+                    className="kn-search-wrap"
+                    /* 行内也写一份：边框/底色/内边距长在外层，图标与输入框是同一行的 flex 兄弟 ✓ */
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      height: 36,
+                      boxSizing: "border-box",
+                      padding: "0 11px",
+                      border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
+                      borderRadius: 7,
+                      background: "var(--dsw-alias-bg-layer-1, #ffffff)",
+                    }}
+                  >
+                    {/*
+                      * 放大镜（设计稿：图标在输入框内部左侧）。
+                      * **尺寸写死成属性 + 行内样式**：宿主页面里有大量 `… svg { width: … }` 规则，
+                      * 只靠类选择器一旦被压过去，svg 会按 viewBox 撑满整行（实测变成巨型放大镜 ✗）。
+                      */}
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      width={16}
+                      height={16}
+                      aria-hidden="true"
+                      style={{ flex: "none", width: 16, height: 16, color: "var(--dsw-alias-label-secondary, #8a8a8a)" }}
+                    >
+                      <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+                      <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                    </svg>
+                    <input
+                      id={PICK_SEARCH_ID}
+                      className="kn-search-input"
+                      type="search"
+                      value={query}
+                      placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
+                      /* 输入框自己不画框（框在外层），也不依赖任何外部样式表 ✓ */
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        height: "100%",
+                        padding: 0,
+                        border: 0,
+                        outline: 0,
+                        background: "transparent",
+                        color: "inherit",
+                        font: "inherit",
+                      }}
+                      onChange={(event) => {
+                        setQuery(event.target.value);
+                        void doSearch(event.target.value);
+                      }}
+                    />
+                  </div>
+
+                  {/* 有输入 → 「搜索结果」；没输入 → 「推荐」（与设计稿一致） */}
+                  <div className="kn-pick-group">
+                    {query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}
+                  </div>
+
+                  {/*
+                    * 还没拿到当前库的节点表（`libraryTitles === null`）时**一个推荐都不列** ——
+                    * 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
+                    */}
+                  {query.trim() === "" && libraryTitles === null ? (
+                    <p className="kn-pick-empty">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</p>
+                  ) : null}
+
+                  {searching ? <p className="kn-pick-empty">{props.copy.searching}</p> : null}
+
+                  {pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? (
+                    <p className="kn-pick-empty">
+                      {query.trim() === ""
+                        ? (props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧")
+                        : (props.copy.noResult ?? "没有匹配的知识点")}
+                    </p>
+                  ) : null}
+
+                  {pickRows.length === 0 ? null : (
+                    <div className="kn-pick-results" aria-label={query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}>
+                      {pickRows.map((row) => {
+                        const active = selectedTarget?.id === row.id;
+                        return (
+                          <button
+                            key={row.id}
+                            type="button"
+                            className="kn-pick-row"
+                            aria-pressed={active}
+                            onClick={() => { setSelectedTarget({ id: row.id, title: row.title }); }}
+                          >
+                            <span className="kn-pick-row-name">{row.title}</span>
+                            <span className="kn-pick-row-mark">{active ? "✓" : (props.copy.selectMark ?? "选择")}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <div className="kn-pick-foot">
               <div className="kn-pick-status">
-                {props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`}
+                {/*
+                  * 底部状态行两用（设计稿）：
+                  * 建独立节点时说明"有几个知识点"；勾了前置时就说明"挂到哪个节点下" ✓
+                  * —— 合并成一层之后只剩这一条状态行，信息必须随模式切换 ✓。
+                  */}
+                {asPrereq
+                  ? (selectedTarget === null
+                    ? (props.copy.statusPick ?? "请选择要添加到的知识点")
+                    : (props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`))
+                  : (props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`)}
               </div>
               <div className="kn-pick-actions">
                 <button
@@ -1503,215 +1710,46 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 </button>
                 <button
                   type="button"
-                  className="kn-pick-btn"
-                  disabled={chips.length === 0}
-                  onClick={createStandaloneAll}
-                >
-                  {props.copy.addStandalone ?? "创建独立节点"}
-                </button>
-                <button
-                  type="button"
                   className="kn-pick-btn is-primary"
-                  /* 空库（已知节点数为 0）时置灰 ✓；未知(-1)时保持可点 ✓（避免误灰 ✓） */
-                  disabled={chips.length === 0 || knownNodeCountRef.current === 0}
-                  title={knownNodeCountRef.current === 0 ? "这个知识库还没有任何节点：请先用「创建独立节点」建一个" : undefined}
-                  onClick={openPickerFromChips}
-                >
-                  {props.copy.addPrereq ?? "添加为前置…"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      ) : null}
-
-
-      {picking !== null ? createPortal(
-        /*
-         * 遮罩这一层保持原样：点弹窗外面 = **整个流程关掉** ✓
-         * （用户确认：只有「取消」按钮是"返回上一级"，Esc / 点遮罩都不变 ✓）。
-         */
-        <div className="kn-modal-backdrop" role="presentation" onClick={() => { setPicking(null); }}>
-          {/*
-            * 「设为前置」弹窗 —— 形态按设计稿（`knowledgenet-picker-design.html`）：
-            * 头部标题/副标题 → 被添加的知识点（每条一个可编辑 chip）→ 「添加为谁的前置」搜索区
-            * → 底部状态行 + 取消/确认添加。样式自带一份（portal 在 light DOM，Shadow 样式管不到 ✓）。
-            */}
-          <div className="kn-pick-dialog" role="dialog" aria-modal="true" aria-labelledby="kn-pick-title" onClick={(event) => { event.stopPropagation(); }}>
-            <div className="kn-pick-head">
-              <div className="kn-pick-title" id="kn-pick-title">{props.copy.pickTitle}</div>
-              <div className="kn-pick-subtitle">{props.copy.pickHint}</div>
-            </div>
-
-            <div className="kn-pick-content">
-              {/*
-                * **被添加的知识点**：一条草稿一个 chip，标题可以就地改 ✎
-                * （旧实现只有一个输入框 ⇒ 多行时全部行共用一个标题、后面的行被静默丢掉 ✗）。
-                */}
-              <div className="kn-pick-chips">
-                {picking.drafts.map((draft, index) => (
-                  <label className="kn-pick-chip" key={`${index}:${draft.text.slice(0, 24)}`}>
-                    <input
-                      value={draft.title}
-                      aria-label={draft.text.slice(0, 40)}
-                      title={draft.text.slice(0, 120)}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setPicking((prev) => prev === null ? null : {
-                          drafts: prev.drafts.map((item, i) => (i === index ? { ...item, title: value } : item)),
-                        });
-                      }}
-                    />
-                    <span className="kn-pick-chip-mark" aria-hidden="true">✎</span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="kn-pick-target">
-                <div className="kn-pick-section">{props.copy.targetSection ?? "添加为谁的前置"}</div>
-
-                <label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>
-                  {props.copy.searchLabel ?? props.copy.searchHint}
-                </label>
-                <div
-                  className="kn-search-wrap"
-                  /* 行内也写一份：边框/底色/内边距长在外层，图标与输入框是同一行的 flex 兄弟 ✓ */
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    height: 36,
-                    boxSizing: "border-box",
-                    padding: "0 11px",
-                    border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
-                    borderRadius: 7,
-                    background: "var(--dsw-alias-bg-layer-1, #ffffff)",
-                  }}
-                >
-                  {/*
-                    * 放大镜（设计稿：图标在输入框内部左侧）。
-                    * **尺寸写死成属性 + 行内样式**：宿主页面里有大量 `… svg { width: … }` 规则，
-                    * 只靠类选择器一旦被压过去，svg 会按 viewBox 撑满整行（实测变成巨型放大镜 ✗）。
-                    */}
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    width={16}
-                    height={16}
-                    aria-hidden="true"
-                    style={{ flex: "none", width: 16, height: 16, color: "var(--dsw-alias-label-secondary, #8a8a8a)" }}
-                  >
-                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
-                    <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                  <input
-                    id={PICK_SEARCH_ID}
-                    className="kn-search-input"
-                    type="search"
-                    value={query}
-                    placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
-                    /* 输入框自己不画框（框在外层），也不依赖任何外部样式表 ✓ */
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      height: "100%",
-                      padding: 0,
-                      border: 0,
-                      outline: 0,
-                      background: "transparent",
-                      color: "inherit",
-                      font: "inherit",
-                    }}
-                    onChange={(event) => {
-                      setQuery(event.target.value);
-                      void doSearch(event.target.value);
-                    }}
-                  />
-                </div>
-
-                {/* 有输入 → 「搜索结果」；没输入 → 「推荐」（与设计稿一致） */}
-                <div className="kn-pick-group">
-                  {query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}
-                </div>
-
-                {/*
-                  * 还没拿到当前库的节点表（`libraryTitles === null`）时**一个推荐都不列** ——
-                  * 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
-                  */}
-                {query.trim() === "" && libraryTitles === null ? (
-                  <p className="kn-pick-empty">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</p>
-                ) : null}
-
-                {searching ? <p className="kn-pick-empty">{props.copy.searching}</p> : null}
-
-                {pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? (
-                  <p className="kn-pick-empty">
-                    {query.trim() === ""
-                      ? (props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧")
-                      : (props.copy.noResult ?? "没有匹配的知识点")}
-                  </p>
-                ) : null}
-
-                {pickRows.length === 0 ? null : (
-                  <div className="kn-pick-results" aria-label={query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}>
-                    {pickRows.map((row) => {
-                      const active = selectedTarget?.id === row.id;
-                      return (
-                        <button
-                          key={row.id}
-                          type="button"
-                          className="kn-pick-row"
-                          aria-pressed={active}
-                          onClick={() => { setSelectedTarget({ id: row.id, title: row.title }); }}
-                        >
-                          <span className="kn-pick-row-name">{row.title}</span>
-                          <span className="kn-pick-row-mark">{active ? "✓" : (props.copy.selectMark ?? "选择")}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="kn-pick-foot">
-              {/* 状态行（设计稿：左侧一句话说明"添加为谁的前置"） */}
-              <div className="kn-pick-status">
-                {selectedTarget === null
-                  ? (props.copy.statusPick ?? "请选择要添加到的知识点")
-                  : (props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`)}
-              </div>
-              <div className="kn-pick-actions">
-                {/*
-                  * 「取消」= **返回上一级** ✓（用户要求 2026-09）。
-                  *
-                  * 这个弹窗目前唯一的入口就是收集弹窗的「添加为前置…」⇒ 取消后应当退回**收集弹窗**
-                  * （标签原样、位置不动），而不是把用户刚才收集的知识点一起丢弃 ✗。
-                  * 走 `cancelPicking()`：从收集弹窗进来才退回，其它入口退化为"直接关掉" ✓。
-                  */}
-                <button type="button" className="kn-pick-btn" onClick={cancelPicking}>{props.copy.cancel}</button>
-                <button
-                  type="button"
-                  className="kn-pick-btn is-primary"
-                  disabled={selectedTarget === null}
+                  /*
+                   * **合并后的唯一动作按钮**（用户要求 2026-09）：
+                   * 没勾「添加为前置」⇒「创建独立节点」；勾了 ⇒「添加为前置」，
+                   * 且只有**选了目标**才可点 ✓（避免误点就把前置挂到别的节点上 ✗）。
+                   *
+                   * 置灰理由写在 title 里：空标签 / 空库 / 还没选目标，三种情况用户都该知道为什么点不动 ✓。
+                   */
+                  disabled={chips.length === 0 || (asPrereq && selectedTarget === null)}
+                  title={
+                    chips.length === 0 ? "先添加至少一个知识点"
+                      : asPrereq && libraryTitles !== null && Object.keys(libraryTitles).length === 0
+                        ? "这个知识库还没有任何节点：请先创建独立节点"
+                        : undefined
+                  }
                   onClick={() => {
-                    const target = selectedTarget;
-                    if (target === null) return;
-                    /* 点「确认添加」才真的写：选中的目标 + 这一批草稿 ✓（设计稿的交互） */
-                    void runQueue(target.id, draftsOf(picking), 0);
+                    /*
+                     * 点按钮才真的写（纪律不变 ✓）：
+                     * - 勾了「添加为前置」⇒ 走 `confirmPrereq()`（选中目标 + 这一批标签，每条用自己的标题 ✓）；
+                     * - 没勾 ⇒ 走 `createStandaloneAll()`（逐个建独立节点，提示留在弹窗里 ✓）。
+                     */
+                    if (asPrereq) confirmPrereq();
+                    else createStandaloneAll();
                   }}
                 >
-                  {props.copy.confirm}
+                  {asPrereq ? (props.copy.addPrereq ?? "添加为前置…") : (props.copy.addStandalone ?? "创建独立节点")}
                 </button>
               </div>
             </div>
 
+            {/*
+              * 写入失败的提示留在**这个弹窗里**（不能只在底部状态行里闪一下）：
+              * 合并成一层之后弹窗不会再被别的层顶掉，所以这条错误看得见、也等得到用户处理 ✓。
+              */}
             {error === null ? null : <div className="kn-pick-error">{error}</div>}
           </div>
         </div>,
         document.body,
       ) : null}
+
 
       {pendingCandidates === null ? null : (
         <ConfirmDialog
