@@ -319,6 +319,14 @@ function domSessionOf(): string | null {
 interface PickState {
   /** 每行一条草稿（标题可以在这里改） */
   drafts: PrereqDraft[];
+  /**
+   * 这个「添加为谁的前置」弹窗是不是从**「收集知识点」弹窗**点出来的 ✓。
+   *
+   * 用户要求（2026-09）：这种入口下点「取消」应当是**返回上一级**（收集弹窗原样回来），
+   * 而不是把整条流程一起关掉 ✗。收集弹窗的标签本来就留在 `chips` 里没动过，
+   * 所以这里只需要记一个来源，不必另外复制一份状态 ✓。
+   */
+  fromMulti?: boolean;
 }
 
 /**
@@ -1290,12 +1298,29 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     collecting.current = false;
     setMultiOpen(false);
     setError(null);
-    setPicking({ drafts: list });
+    /*
+     * 带上 `fromMulti`：点「取消」时据此**回到收集弹窗** ✓（用户要求：返回上一级，而不是整个关掉 ✓）。
+     * 收集弹窗的标签在 `chips` 里原封不动 —— 只是不再渲染 —— 所以退回去时就是原样 ✓。
+     */
+    setPicking({ drafts: list, fromMulti: true });
     setSelectedTarget(null);
     /* 先把"当前库有哪些节点"读回来（`null` 期间一个推荐都不显示 ✓） */
     setLibraryTitles(null);
     void loadLibraryNodes();
     report("open-picker", { count: list.length, from: "multi-modal" });
+  };
+
+  /** 「添加为谁的前置」上点「取消」：从收集弹窗进来的就**退回收集弹窗** ✓（原样保留标签与位置） */
+  const cancelPicking = (): void => {
+    const back = picking?.fromMulti === true;
+    /*
+     * 两个状态在**同一次事件里**一起设（React 会把它们合成一次渲染 ✓）：
+     * `picking` 置空 ⇒ 选择层消失；`multiOpen` 置真 ⇒ 收集弹窗当场回来 ✓
+     * —— 中间不会出现"两个都不在"的那一帧（用户要求：返回上一级，不是闪一下 ✓）。
+     */
+    setPicking(null);
+    if (back) setMultiOpen(true);
+    report("picker-cancel", { back });
   };
 
   /**
@@ -1503,6 +1528,10 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
 
       {picking !== null ? createPortal(
+        /*
+         * 遮罩这一层保持原样：点弹窗外面 = **整个流程关掉** ✓
+         * （用户确认：只有「取消」按钮是"返回上一级"，Esc / 点遮罩都不变 ✓）。
+         */
         <div className="kn-modal-backdrop" role="presentation" onClick={() => { setPicking(null); }}>
           {/*
             * 「设为前置」弹窗 —— 形态按设计稿（`knowledgenet-picker-design.html`）：
@@ -1654,7 +1683,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   : (props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`)}
               </div>
               <div className="kn-pick-actions">
-                <button type="button" className="kn-pick-btn" onClick={() => { setPicking(null); }}>{props.copy.cancel}</button>
+                {/*
+                  * 「取消」= **返回上一级** ✓（用户要求 2026-09）。
+                  *
+                  * 这个弹窗目前唯一的入口就是收集弹窗的「添加为前置…」⇒ 取消后应当退回**收集弹窗**
+                  * （标签原样、位置不动），而不是把用户刚才收集的知识点一起丢弃 ✗。
+                  * 走 `cancelPicking()`：从收集弹窗进来才退回，其它入口退化为"直接关掉" ✓。
+                  */}
+                <button type="button" className="kn-pick-btn" onClick={cancelPicking}>{props.copy.cancel}</button>
                 <button
                   type="button"
                   className="kn-pick-btn is-primary"

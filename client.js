@@ -1486,7 +1486,10 @@ window.__ModuleLoader__.load({
 				collecting.current = false;
 				setMultiOpen(false);
 				setError(null);
-				setPicking({ drafts: list });
+				setPicking({
+					drafts: list,
+					fromMulti: true
+				});
 				setSelectedTarget(null);
 				setLibraryTitles(null);
 				loadLibraryNodes();
@@ -1494,6 +1497,13 @@ window.__ModuleLoader__.load({
 					count: list.length,
 					from: "multi-modal"
 				});
+			};
+			/** 「添加为谁的前置」上点「取消」：从收集弹窗进来的就**退回收集弹窗** ✓（原样保留标签与位置） */
+			const cancelPicking = () => {
+				const back = picking?.fromMulti === true;
+				setPicking(null);
+				if (back) setMultiOpen(true);
+				report("picker-cancel", { back });
 			};
 			/**
 			* 「创建独立节点」：逐个建，**提示留在弹窗里**（先建、后关 ✗→✓：关闭后再报错就是"点了没反应" ✗）；
@@ -1867,9 +1877,7 @@ window.__ModuleLoader__.load({
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										type: "button",
 										className: "kn-pick-btn",
-										onClick: () => {
-											setPicking(null);
-										},
+										onClick: cancelPicking,
 										children: props.copy.cancel
 									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										type: "button",

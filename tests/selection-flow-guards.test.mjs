@@ -97,6 +97,51 @@ describe("划词添加前置：三条回归的守门", () => {
   });
 
   /*
+   * 回归（用户反馈 2026-09）：「添加为谁的前置」弹窗里点「取消」**整个弹窗直接消失** ✗，
+   * 而用户刚从「收集知识点」弹窗点「添加为前置…」进来 —— 收集好的标签还在里面，
+   * 取消应当是**返回上一级**（收集弹窗原样回来）✓。
+   *
+   * 钉住三件事：① 取消按钮走 `cancelPicking`；② 退回时**不调用** `closeMulti()`
+   * （那会把标签清空 ✗）；③ 退回只在"从收集弹窗进来"时发生，其它入口仍退化为关闭 ✓。
+   * 另外用户明确要求：Esc / 点遮罩**不跟着改**，所以这里同时钉住遮罩仍是直接置空 ✓。
+   */
+  it("「添加为谁的前置」点「取消」= 返回上一级（收集弹窗原样回来，标签不丢）", () => {
+    /*
+     * 按**那一行**钉，而不是按"文件里有没有出现"钉：遮罩上合法地还有一处 `setPicking(null)` ✓，
+     * 用全局 includes 去否会误判（也正是这个 bug 的写法 ✓）。
+     */
+    const cancelButton = code.split("\n").find((line) => line.includes("props.copy.cancel") && line.includes("<button"));
+    assert.ok(cancelButton !== undefined, "找不到「取消」按钮那一行");
+    assert.ok(cancelButton.includes("onClick={cancelPicking}"), "「取消」必须走 cancelPicking（返回上一级）");
+    assert.equal(
+      cancelButton.includes("setPicking(null)"),
+      false,
+      "取消按钮不许再直接把 picking 置空（那样整个流程一起消失 ✗）",
+    );
+    assert.ok(code.includes("fromMulti: true"), "打开选择层时要记下来源是「收集知识点」弹窗");
+    assert.ok(code.includes("if (back) setMultiOpen(true)"), "取消后要把收集弹窗重新打开");
+    assert.ok(
+      /setPicking\(null\);\s*if \(back\) setMultiOpen\(true\);/.test(code),
+      "退回动作必须长在 cancelPicking 里（便于审阅）",
+    );
+    /*
+     * 退回**不能**走 `closeMulti()`：它会把 `chips` 清空 ⇒ 用户收集的知识点全丢 ✗。
+     */
+    assert.equal(
+      /cancelPicking[\s\S]{0,300}closeMulti\(/.test(code),
+      false,
+      "退回上一级绝不能顺手清空标签（不许在 cancelPicking 里调 closeMulti）",
+    );
+    /* 不是从收集弹窗进来的（将来别的入口）⇒ 退化为"直接关掉"，行为保持不变 ✓ */
+    assert.ok(code.includes("picking?.fromMulti"), "退回必须按来源判断，不能无条件重开收集弹窗");
+    /* 用户确认：Esc / 点遮罩仍然整个关掉，不跟着改 ✓ */
+    assert.ok(
+      code.includes("onClick={() => { setPicking(null); }}"),
+      "遮罩点击保持原样（整个关掉）",
+    );
+  });
+
+  /*
    * 「收集知识点」弹窗（点浮条后出现的那个）形态按设计稿 `knowledgenet-multiselect-design.html`：
    * 头部可拖动 → 标签组（可改名、可 × 删除）→ 末尾输入框（Enter / 粘贴多行 / 退格删最后一个）
    * → 说明一行 → 底部计数与三个动作。
