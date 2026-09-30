@@ -221,6 +221,41 @@ describe("划词添加前置：三条回归的守门", () => {
   });
 
   /*
+   * 回归（用户反馈 2026-09）：**什么都没做，浮条自己弹出来了**。
+   *
+   * 两个原因都在"选中了哪里 / 这次按下算不算新划词"的判定上：
+   * ① 判据一直是**排除法**（排除输入框 / 侧栏 / 自家弹窗）—— 漏掉的角落照样会弹；
+   *    右侧面板是 **Shadow DOM**，`closest` 跨不过影子边界 ⇒ 那几条排除全失效 ✗；
+   * ② 残留选区还在时，只要按下到松开移动超过 4px，老规则就当成"新划词" ⇒ 浮条被又叫回来 ✗。
+   *
+   * 现在：**白名单**（只认对话内容容器 `[data-conversation-content]` 里的选中；整页找不到容器才退回排除法）
+   * ＋ **按下点在已有选区内且选区没变 ⇒ 不算新划词**（从选区外面重新划同一段仍然算 ✓）。
+   */
+  it("浮条只在「对话正文」里弹出：白名单 + 残留选区不算新划词", () => {
+    /* ① 白名单 */
+    assert.ok(code.includes('document.querySelector("[data-conversation-content]")'), "要按宿主容器做白名单");
+    assert.ok(code.includes('element.closest("[data-conversation-content]")'), "选区必须落在对话内容容器里");
+    assert.ok(code.includes('reason: "outside-conversation"'), "排除要给出可诊断的理由");
+    assert.ok(code.includes("conversation !== null &&"), "找不到容器时要退回排除法（不让功能整个失效）");
+    /* ② 残留选区：按下点是否落在已有选区内 */
+    assert.ok(code.includes("pointInsideSelection"), "要判断按下点是否在已有选区里");
+    assert.ok(code.includes("insideSelection"), "按下现场要记下这一点");
+    assert.ok(
+      code.includes('source: press.insideSelection ? "press-inside-selection" : "click-not-drag"'),
+      "两种拦截要分开上报（便于从诊断里区分）",
+    );
+    assert.ok(
+      /const sameText = press\.text === info\.text/.test(code)
+        && /if \(sameText && \(press\.insideSelection \|\| !moved\)\)/.test(code),
+      "判据：选区文字没变、且（按在选区内 或 没移动）⇒ 不许把浮条弹回来",
+    );
+    /* 原有拦截不能被顶掉 */
+    for (const kept of ["press-inside-bar", "click-not-drag", "draggingRef.current"]) {
+      assert.ok(code.includes(kept), `原有拦截被删了：${kept}`);
+    }
+  });
+
+  /*
    * 「收集知识点」弹窗（点浮条后出现的那个）形态按设计稿 `knowledgenet-multiselect-design.html`：
    * 头部可拖动 → 标签组（可改名、可 × 删除）→ 底部计数与动作按钮。
    *

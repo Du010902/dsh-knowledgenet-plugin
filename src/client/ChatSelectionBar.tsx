@@ -468,7 +468,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
    * 按下那一刻的现场（在**捕获阶段**记下）：松开时用它判断"这一按到底是不是划词"。
    * `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）。
    */
-  const pressRef = useRef<{ x: number; y: number; text: string; inside: boolean } | null>(null);
+  const pressRef = useRef<{ x: number; y: number; text: string; inside: boolean; insideSelection: boolean } | null>(null);
   /** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
   const [multiPos, setMultiPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -1006,6 +1006,25 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           && element.closest(".kn-pick-dialog, .kn-sel-bar") !== null) {
           return { ok: false, reason: "in-own-ui" };
         }
+        /*
+         * **白名单：只有「对话正文」里的选中才算划词** ✓（用户两次强调的语义）。
+         *
+         * 之前一直是"排除法"（排除输入框 / 侧栏 / 自家弹窗），排除不到的角落就会**凭空弹出浮条** ✗：
+         * 用户实测"我什么都没做，它怎么自己弹出来了"—— 例如在右侧面板里选中一段文字，
+         * 而面板是 **Shadow DOM**：`closest` 跨不过影子边界，前面几条排除全部判不中 ✗。
+         *
+         * 宿主在对话内容容器上给了稳定属性（`ConversationContent.tsx:192-194`）：
+         * `data-conversation-content` / `data-conversation-region="chat"` / `data-conversation-session`。
+         * 对话正文在 **light DOM** ⇒ `closest` 直接可用 ✓；面板/侧栏在 Shadow DOM ⇒ 天然判不中 ✓。
+         *
+         * **兜底**：整页找不到这个容器时（宿主改了结构、或不是对话页）退回"只用排除法"，
+         * 不让功能整个失效 ✗。
+         */
+        const conversation = document.querySelector("[data-conversation-content]");
+        if (conversation !== null && (element === null || typeof element.closest !== "function"
+          || element.closest("[data-conversation-content]") === null)) {
+          return { ok: false, reason: "outside-conversation" };
+        }
         const rect = selection.getRangeAt(0).getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return { ok: false, reason: "no-rect" };
         return { ok: true, text, x: rect.left + rect.width / 2, y: rect.top };
@@ -1051,8 +1070,19 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           return;
         }
         const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
-        if (!moved && press.text === info.text) {
-          report("blocked-by-gate", { source: "click-not-drag" });
+        const sameText = press.text === info.text;
+        /*
+         * 两种"不是在选新东西"的情况都不许把浮条弹回来：
+         *  ① **没移动 + 选区没变** ⇒ 那只是一次点击（老规则 ✓）；
+         *  ② **按下点落在已有选区里面 + 选区没变** ⇒ 用户只是在那段**已经选中的文字**上点了一下、
+         *     或手抖蹭了几像素（>4px 就会绕过老规则 ✗）—— 用户实测的原话就是
+         *     "我什么都没做，它怎么自己弹出来了"：残留选区还在，浮条被这次 `mouseup` 又叫了回来 ✗。
+         *
+         * 反过来：从选区**外面**起手重新划同一段文字（`sameText` 但 `!insideSelection`）仍然算新划词 ✓，
+         * 所以"选一遍 → 点掉 → 再选同一段"这条路没有断 ✓。
+         */
+        if (sameText && (press.insideSelection || !moved)) {
+          report("blocked-by-gate", { source: press.insideSelection ? "press-inside-selection" : "click-not-drag" });
           setBar(null);
           return;
         }
@@ -1152,6 +1182,23 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
      *    `按下（收浮条）→ 松开（又弹回来）` ✗ —— 用户实测：选中文字后点右侧栏的放大按钮，浮条又冒出来了。
      *    所以【没移动 + 选区文字没变】就不许再弹（那只是一次点击，不是划词）✓。
      */
+    /**
+     * 这个点（视口坐标）是否落在**当前选区**的包围盒里？
+     *
+     * 用来区分两种长得一样但意图相反的序列（见 `onMouseUp` 里那条判据）：
+     * 在"已经选中的文字"上点一下（`true`）≠ 从选区外面起手重新划一段（`false`）✓。
+     */
+    const pointInsideSelection = (x: number, y: number): boolean => {
+      try {
+        const selection = window.getSelection();
+        if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return false;
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      } catch {
+        return false;
+      }
+    };
+
     const onPressCapture = (event: MouseEvent): void => {
       const inside = insideBar(event);      /* 用户开始新的交互 ⇒ 解除"切换后禁止弹出"（这是新的一次划词机会 ✓） */
       suppressBarRef.current = false;
@@ -1160,6 +1207,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         y: event.clientY,
         text: inside ? "" : normalizeSnippet(window.getSelection()?.toString() ?? "").trim(),
         inside,
+        /* 按下那一刻光标是不是已经在**已有选区**里（两种序列的意图完全不同，见 `onMouseUp`）✓ */
+        insideSelection: inside ? false : pointInsideSelection(event.clientX, event.clientY),
       };
       if (!inside) setBar(null);
     };

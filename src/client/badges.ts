@@ -37,10 +37,18 @@ function reportFailure(topic: string, error: unknown): void {
   }
 }
 
+/** 划词浮窗要的那份文案表的类型（由组件自己的 props 反推，避免两处各写一份） */
+export type ChatSelectionCopy = Parameters<typeof ChatSelectionBar>[0]["copy"];
+
 /** 注册换字形注入器；失败返回 false 并说明原因 */
 export function registerChatSelectionBar(
   ctx: { slots?: SlotsFace },
-  copy: Parameters<typeof ChatSelectionBar>[0]["copy"],
+  /*
+   * 传**生成函数**而不是一份常量：宿主切换语言时槽位出口会重渲染（`useLocaleRevision`），
+   * 每次渲染现取一份文案 ⇒ 弹窗立刻跟着宿主设置走 ✓。
+   * 旧写法是注册时按一个 `zh` 布尔量钉死一份，既可能判错语言、切语言也要刷新页面才生效 ✗。
+   */
+  copy: () => ChatSelectionCopy,
 ): boolean {
   const slots = ctx.slots;
   if (slots === undefined) {
@@ -61,7 +69,7 @@ export function registerChatSelectionBar(
        */
       (slotProps: Record<string, unknown>) => createElement(ChatSelectionBar, {
         ...slotProps,
-        copy,
+        copy: copy(),
         report: (step: string, detail?: Record<string, unknown> | null) => { void reportDiag("chat-selection", step, detail ?? null); },
       } as never),
     ));

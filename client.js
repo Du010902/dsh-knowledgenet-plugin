@@ -1224,6 +1224,10 @@ window.__ModuleLoader__.load({
 							ok: false,
 							reason: "in-own-ui"
 						};
+						if (document.querySelector("[data-conversation-content]") !== null && (element === null || typeof element.closest !== "function" || element.closest("[data-conversation-content]") === null)) return {
+							ok: false,
+							reason: "outside-conversation"
+						};
 						const rect = selection.getRangeAt(0).getBoundingClientRect();
 						if (rect.width === 0 && rect.height === 0) return {
 							ok: false,
@@ -1256,8 +1260,9 @@ window.__ModuleLoader__.load({
 							report("blocked-by-gate", { source: "press-inside-bar" });
 							return;
 						}
-						if (!(Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4) && press.text === info.text) {
-							report("blocked-by-gate", { source: "click-not-drag" });
+						const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
+						if (press.text === info.text && (press.insideSelection || !moved)) {
+							report("blocked-by-gate", { source: press.insideSelection ? "press-inside-selection" : "click-not-drag" });
 							setBar(null);
 							return;
 						}
@@ -1318,6 +1323,22 @@ window.__ModuleLoader__.load({
 					const target = event.target;
 					return target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
 				};
+				/**
+				* 这个点（视口坐标）是否落在**当前选区**的包围盒里？
+				*
+				* 用来区分两种长得一样但意图相反的序列（见 `onMouseUp` 里那条判据）：
+				* 在"已经选中的文字"上点一下（`true`）≠ 从选区外面起手重新划一段（`false`）✓。
+				*/
+				const pointInsideSelection = (x, y) => {
+					try {
+						const selection = window.getSelection();
+						if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return false;
+						const rect = selection.getRangeAt(0).getBoundingClientRect();
+						return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+					} catch {
+						return false;
+					}
+				};
 				const onPressCapture = (event) => {
 					const inside = insideBar(event);
 					suppressBarRef.current = false;
@@ -1325,7 +1346,8 @@ window.__ModuleLoader__.load({
 						x: event.clientX,
 						y: event.clientY,
 						text: inside ? "" : normalizeSnippet(window.getSelection()?.toString() ?? "").trim(),
-						inside
+						inside,
+						insideSelection: inside ? false : pointInsideSelection(event.clientX, event.clientY)
 					};
 					if (!inside) setBar(null);
 				};
@@ -1913,7 +1935,7 @@ window.__ModuleLoader__.load({
 					order: 60
 				}, (slotProps) => (0, react.createElement)(ChatSelectionBar, {
 					...slotProps,
-					copy,
+					copy: copy(),
 					report: (step, detail) => {
 						reportDiag("chat-selection", step, detail ?? null);
 					}
@@ -2440,6 +2462,30 @@ window.__ModuleLoader__.load({
 					})
 				]
 			});
+		}
+		//#endregion
+		//#region src/client/locale-choice.ts
+		/**
+		* 快照是不是中文。
+		* @param snapshot - 宿主 locale 快照（允许为空或形状不认识）。
+		* @returns `true` = 中文；`false` = 明确不是中文；`undefined` = 拿不到 id（交给调用方兜底）。
+		*/
+		function isZhSnapshot(snapshot) {
+			const active = typeof snapshot?.active === "string" ? snapshot.active.trim() : "";
+			if (active === "") return void 0;
+			return active.toLowerCase().startsWith("zh");
+		}
+		/**
+		* 问宿主 locale 服务"当前是不是中文"。
+		* @param service - `ctx.get("locale")` 拿到的服务（缺失/API 变了/抛错都算拿不到）。
+		* @returns 同 {@link isZhSnapshot}：`true` / `false` / `undefined`。
+		*/
+		function readZh(service) {
+			try {
+				return isZhSnapshot(service?.getLocale?.());
+			} catch {
+				return;
+			}
 		}
 		//#endregion
 		//#region src/client/tab-definition.ts
@@ -41343,52 +41389,82 @@ void main() {
 				locale: ns
 			};
 			registerGraphTab(ctx, ns);
-			const zh = (() => {
+			/**
+			* 现读宿主 locale 服务。
+			*
+			* 语言判据走它，**不靠 `document.documentElement.lang` 猜** —— 实测那个值在插件 apply 时可能还是 `en`，
+			* 于是中文界面里弹窗变成英文（用户反馈过 ✗）。
+			*
+			* 字段名提醒：宿主 `LocaleSnapshot` 上是 **`active`**；我先前写的 `.id` 不存在 ⇒ 判定永远失败
+			* （细节与兜底约定见 `locale-choice.ts`）。用 Inspect 的 client `Service` 契约可直接核对：
+			* `getLocale(): LocaleSnapshot`，而 `LocaleSnapshot = { active, locales, revision }` ✓。
+			*
+			* **刻意不缓存服务**：本插件可能先于 locale 插件 apply（`inject: ["slots"]` 只保证槽位就绪），
+			* 那时 `ctx.get("locale")` 还是 undefined；缓存下来就永远拿不到 ⇒ 一直走兜底 ✗。
+			* `ctx.get(...)` 只是一次属性查找，按需调用完全够便宜 ✓。
+			*/
+			const localeServiceNow = () => {
 				try {
-					const id = (ctx.get?.("locale"))?.getLocale?.()?.id;
-					if (typeof id === "string" && id !== "") return id.toLowerCase().startsWith("zh");
-				} catch {}
-				return !prefersEnglish();
-			})();
-			registerChatSelectionBar(ctx, {
-				addPrereq: zh ? "添加为前置…" : "Add as prerequisite…",
-				multi: zh ? "多选" : "Multi-select",
-				selected: (count) => zh ? `已选 ${count} 段` : `${count} selected`,
-				done: zh ? "完成" : "Done",
-				cancel: zh ? "取消" : "Cancel",
-				multiTitle: zh ? "收集知识点" : "Collect nodes",
-				multiSubtitle: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
-				multiLabel: zh ? "被添加的知识点" : "Nodes to add",
-				multiHint: zh ? "点击标签可修改名称" : "Click a tag to rename it",
-				multiPlaceholder: zh ? "输入后按 Enter 添加，或粘贴多行" : "Type and press Enter, or paste multiple lines",
-				multiDetails: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
-				multiCount: (count) => zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`,
-				addStandalone: zh ? "创建独立节点" : "Create standalone",
-				multiAsPrereq: zh ? "添加为另一个知识点的前置" : "Add as a prerequisite of another node",
-				pickTitle: zh ? "被添加的知识点" : "Nodes to add",
-				pickHint: zh ? "将这些知识点添加为另一个知识点的前置" : "Add these nodes as prerequisites of another node",
-				recommended: zh ? "推荐" : "Recommended",
-				searchHint: zh ? "搜索知识点…" : "Search nodes…",
-				searching: zh ? "搜索中…" : "Searching…",
-				noResult: zh ? "没有找到相关知识点" : "No matching node",
-				titleLabel: zh ? "前置知识点的名称" : "Prerequisite title",
-				confirm: zh ? "确认添加" : "Confirm",
-				targetSection: zh ? "添加为谁的前置" : "Add as a prerequisite of",
-				searchLabel: zh ? "搜索知识点" : "Search nodes",
-				searchPlaceholder: zh ? "输入名称搜索" : "Type a name to search",
-				resultsLabel: zh ? "搜索结果" : "Search results",
-				selectMark: zh ? "选择" : "Select",
-				statusPick: zh ? "请选择要添加到的知识点" : "Pick the node to add to",
-				statusSelected: (title) => zh ? `添加为「${title}」的前置` : `Add as a prerequisite of “${title}”`,
-				added: zh ? "已添加" : "Added",
-				failed: zh ? "添加失败" : "Add failed",
-				reuse: zh ? "复用" : "Reuse",
-				createAnyway: zh ? "仍然新建" : "Create anyway",
-				candidatesTitle: zh ? "已经有相近的知识点" : "Similar node exists",
-				candidatesMessage: zh ? "库里已有相近节点，建议复用而不是新建" : "A similar node exists; reuse it instead of creating a duplicate",
-				loadingNodes: zh ? "正在读取当前知识库…" : "Reading the current library…",
-				noRecommend: zh ? "这个库里暂时没有可推荐的最近节点，直接搜索吧" : "No recent nodes in this library yet — search instead"
-			});
+					return ctx.get?.("locale") ?? void 0;
+				} catch {
+					return;
+				}
+			};
+			/**
+			* 当前语言是否中文 —— **每次要用的时候现算** ✓。
+			*
+			* 为什么不是一个常量：宿主在设置里切换语言时，槽位出口会整体重渲染（`useLocaleRevision`），
+			* 只要这里现读快照，弹窗文案就会**立刻跟着变** ✓；注册时钉死一份的老写法要刷新页面才生效 ✗。
+			* 宿主服务拿不到（老版本/组合里没有 locale 插件）时才回落到 `prefersEnglish()` 那个猜测。
+			*/
+			const zhNow = () => readZh(localeServiceNow()) ?? !prefersEnglish();
+			/**
+			* 划词浮窗的文案：**按次生成**（注册处每次渲染调一次）⇒ 语言跟随宿主设置 ✓。
+			* @returns 这一版语言下的文案表。
+			*/
+			const selectionCopy = () => {
+				const zh = zhNow();
+				return {
+					addPrereq: zh ? "添加为前置…" : "Add as prerequisite…",
+					multi: zh ? "多选" : "Multi-select",
+					selected: (count) => zh ? `已选 ${count} 段` : `${count} selected`,
+					done: zh ? "完成" : "Done",
+					cancel: zh ? "取消" : "Cancel",
+					multiTitle: zh ? "收集知识点" : "Collect nodes",
+					multiSubtitle: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
+					multiLabel: zh ? "被添加的知识点" : "Nodes to add",
+					multiHint: zh ? "点击标签可修改名称" : "Click a tag to rename it",
+					multiPlaceholder: zh ? "输入后按 Enter 添加，或粘贴多行" : "Type and press Enter, or paste multiple lines",
+					multiDetails: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
+					multiCount: (count) => zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`,
+					addStandalone: zh ? "创建独立节点" : "Create standalone",
+					multiAsPrereq: zh ? "添加为另一个知识点的前置" : "Add as a prerequisite of another node",
+					pickTitle: zh ? "被添加的知识点" : "Nodes to add",
+					pickHint: zh ? "将这些知识点添加为另一个知识点的前置" : "Add these nodes as prerequisites of another node",
+					recommended: zh ? "推荐" : "Recommended",
+					searchHint: zh ? "搜索知识点…" : "Search nodes…",
+					searching: zh ? "搜索中…" : "Searching…",
+					noResult: zh ? "没有找到相关知识点" : "No matching node",
+					titleLabel: zh ? "前置知识点的名称" : "Prerequisite title",
+					confirm: zh ? "确认添加" : "Confirm",
+					targetSection: zh ? "添加为谁的前置" : "Add as a prerequisite of",
+					searchLabel: zh ? "搜索知识点" : "Search nodes",
+					searchPlaceholder: zh ? "输入名称搜索" : "Type a name to search",
+					resultsLabel: zh ? "搜索结果" : "Search results",
+					selectMark: zh ? "选择" : "Select",
+					statusPick: zh ? "请选择要添加到的知识点" : "Pick the node to add to",
+					statusSelected: (title) => zh ? `添加为「${title}」的前置` : `Add as a prerequisite of “${title}”`,
+					added: zh ? "已添加" : "Added",
+					failed: zh ? "添加失败" : "Add failed",
+					reuse: zh ? "复用" : "Reuse",
+					createAnyway: zh ? "仍然新建" : "Create anyway",
+					candidatesTitle: zh ? "已经有相近的知识点" : "Similar node exists",
+					candidatesMessage: zh ? "库里已有相近节点，建议复用而不是新建" : "A similar node exists; reuse it instead of creating a duplicate",
+					loadingNodes: zh ? "正在读取当前知识库…" : "Reading the current library…",
+					noRecommend: zh ? "这个库里暂时没有可推荐的最近节点，直接搜索吧" : "No recent nodes in this library yet — search instead"
+				};
+			};
+			registerChatSelectionBar(ctx, selectionCopy);
 			ctx.slots.inject("tool.call.toolview", function* registerViews() {
 				for (const view of VIEWS) yield ctx.slots.register(withLocale({
 					name: "tool.call.toolview",

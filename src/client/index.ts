@@ -10,9 +10,10 @@
  * 客户端半不读磁盘、不写库，也不 import 任何 Harness Client 包（含 ui-primitives）。
  */
 
-import { registerChatSelectionBar } from "./badges.ts";
+import { registerChatSelectionBar, type ChatSelectionCopy } from "./badges.ts";
 import { NodeCard } from "./NodeCard.tsx";
 import { PrereqCard } from "./PrereqCard.tsx";
+import { readZh, type LocaleServiceLike } from "./locale-choice.ts";
 import { prefersEnglish } from "./tab-definition.ts";
 import { registerGraphTab } from "./tab.ts";
 
@@ -131,25 +132,44 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
   // 左侧栏：知识库工作区的那一行把文件夹字形换成知识库字形（工作区行没有插槽，故只注入样式）
 
   // 左侧栏：「工作区」表头上加一个「添加知识库」按钮（表头没有插槽，故注入一个真实按钮）
-  /*
-   * 语言：**优先问宿主的 locale 服务**（`ctx.locale.getLocale()`），而不是靠 `document.documentElement.lang`
-   * 猜——实测后者可能还是 `en`，于是中文界面里我的弹窗变成英文（用户反馈过）。
+  /**
+   * 现读宿主 locale 服务。
+   *
+   * 语言判据走它，**不靠 `document.documentElement.lang` 猜** —— 实测那个值在插件 apply 时可能还是 `en`，
+   * 于是中文界面里弹窗变成英文（用户反馈过 ✗）。
+   *
+   * 字段名提醒：宿主 `LocaleSnapshot` 上是 **`active`**；我先前写的 `.id` 不存在 ⇒ 判定永远失败
+   * （细节与兜底约定见 `locale-choice.ts`）。用 Inspect 的 client `Service` 契约可直接核对：
+   * `getLocale(): LocaleSnapshot`，而 `LocaleSnapshot = { active, locales, revision }` ✓。
+   *
+   * **刻意不缓存服务**：本插件可能先于 locale 插件 apply（`inject: ["slots"]` 只保证槽位就绪），
+   * 那时 `ctx.get("locale")` 还是 undefined；缓存下来就永远拿不到 ⇒ 一直走兜底 ✗。
+   * `ctx.get(...)` 只是一次属性查找，按需调用完全够便宜 ✓。
    */
-  const zh = (() => {
+  const localeServiceNow = (): LocaleServiceLike | undefined => {
     try {
-      const service = (ctx as unknown as {
-        get?: (key: string) => { getLocale?: () => { id?: string } | undefined } | undefined;
-      }).get?.("locale");
-      const id = service?.getLocale?.()?.id;
-      if (typeof id === "string" && id !== "") return id.toLowerCase().startsWith("zh");
+      return (ctx.get?.("locale") ?? undefined) as LocaleServiceLike | undefined;
     } catch {
-      // 拿不到服务就退回原来的猜测
+      return undefined;
     }
-    return !prefersEnglish();
-  })();
+  };
 
-  // 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）
-  registerChatSelectionBar(ctx as never, {
+  /**
+   * 当前语言是否中文 —— **每次要用的时候现算** ✓。
+   *
+   * 为什么不是一个常量：宿主在设置里切换语言时，槽位出口会整体重渲染（`useLocaleRevision`），
+   * 只要这里现读快照，弹窗文案就会**立刻跟着变** ✓；注册时钉死一份的老写法要刷新页面才生效 ✗。
+   * 宿主服务拿不到（老版本/组合里没有 locale 插件）时才回落到 `prefersEnglish()` 那个猜测。
+   */
+  const zhNow = (): boolean => readZh(localeServiceNow()) ?? !prefersEnglish();
+
+  /**
+   * 划词浮窗的文案：**按次生成**（注册处每次渲染调一次）⇒ 语言跟随宿主设置 ✓。
+   * @returns 这一版语言下的文案表。
+   */
+  const selectionCopy = (): ChatSelectionCopy => {
+    const zh = zhNow();
+    return {
     addPrereq: zh ? "添加为前置…" : "Add as prerequisite…",
     multi: zh ? "多选" : "Multi-select",
     selected: (count: number) => (zh ? `已选 ${count} 段` : `${count} selected`),
@@ -197,7 +217,11 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
     noRecommend: zh
       ? "这个库里暂时没有可推荐的最近节点，直接搜索吧"
       : "No recent nodes in this library yet — search instead",
-  });
+    };
+  };
+
+  // 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）
+  registerChatSelectionBar(ctx as never, selectionCopy);
   // 对话里的工具卡片（图谱本体不在这里——它在右侧栏；这里只有写入回执）
   ctx.slots.inject("tool.call.toolview", function* registerViews() {
     for (const view of VIEWS) {
