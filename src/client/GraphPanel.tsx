@@ -714,6 +714,41 @@ function GraphPanelInner(props: {
                 }
               }}
             />
+
+            {/*
+              * 候选列表：**列出来让用户选** ✓（不再替他挑一个直接飞过去）。
+              * `role="listbox"` + 每行 `role="option"`：输入框用 `aria-activedescendant` 指过来，
+              * 读屏能念出"当前"是哪一条 ✓。
+              *
+              * **挂在输入框里面**（不是挂在整块 `.kn-search` 上）：这样浮层左右边界
+              * 与输入框**完全等宽** ✓ —— 用户反馈过：挂在外层时它会一直伸到右侧箭头那边、
+              * 还盖住状态文字，太长了 ✗。
+              */}
+            {searchOpen ? (
+              <div className="kn-search-list" id={SEARCH_LIST_ID} role="listbox" aria-label={t("searchResults")}>
+                {searchMissed ? (
+                  <div className="kn-search-empty">{t("searchMiss")}</div>
+                ) : searchMatches.map((hit, index) => (
+                  <button
+                    key={hit.node.id}
+                    id={`${SEARCH_LIST_ID}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === searchActive}
+                    className={index === searchActive ? "kn-search-item is-active" : "kn-search-item"}
+                    /* 悬停即高亮（与键盘高亮同一个状态，避免"看到的是这条、回车飞的是那条"✗） */
+                    onMouseEnter={() => { setSearchActive(index); }}
+                    /* 按下别把输入框的焦点抢走：抢走会触发 blur ⇒ 候选先被收起来，click 就落空了 ✗ */
+                    onMouseDown={(event) => { event.preventDefault(); }}
+                    onClick={() => { focusSearchResult(index); }}
+                  >
+                    <span className="kn-search-item-title">{hit.node.title}</span>
+                    {/* 别名命中时把命中的那段别名也显示出来，用户才知道"为什么它会被列出来"✓ */}
+                    {hit.via === "alias" ? <span className="kn-search-item-alias">{hit.matched}</span> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <button
             type="submit"
@@ -724,37 +759,6 @@ function GraphPanelInner(props: {
           >
             <SubmitArrowIcon />
           </button>
-
-          {/*
-            * 候选列表：**列出来让用户选** ✓（不再替他挑一个直接飞过去）。
-            * `role="listbox"` + 每行 `role="option"`：输入框用 `aria-activedescendant` 指过来，
-            * 读屏能念出"当前"是哪一条 ✓。
-            */}
-          {searchOpen ? (
-            <div className="kn-search-list" id={SEARCH_LIST_ID} role="listbox" aria-label={t("searchResults")}>
-              {searchMissed ? (
-                <div className="kn-search-empty">{t("searchMiss")}</div>
-              ) : searchMatches.map((hit, index) => (
-                <button
-                  key={hit.node.id}
-                  id={`${SEARCH_LIST_ID}-${index}`}
-                  type="button"
-                  role="option"
-                  aria-selected={index === searchActive}
-                  className={index === searchActive ? "kn-search-item is-active" : "kn-search-item"}
-                  /* 悬停即高亮（与键盘高亮同一个状态，避免"看到的是这条、回车飞的是那条"✗） */
-                  onMouseEnter={() => { setSearchActive(index); }}
-                  /* 按下别把输入框的焦点抢走：抢走会触发 blur ⇒ 候选先被收起来，click 就落空了 ✗ */
-                  onMouseDown={(event) => { event.preventDefault(); }}
-                  onClick={() => { focusSearchResult(index); }}
-                >
-                  <span className="kn-search-item-title">{hit.node.title}</span>
-                  {/* 别名命中时把命中的那段别名也显示出来，用户才知道"为什么它会被列出来"✓ */}
-                  {hit.via === "alias" ? <span className="kn-search-item-alias">{hit.matched}</span> : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </form>
 
       </div>

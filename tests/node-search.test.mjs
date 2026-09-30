@@ -212,7 +212,7 @@ describe("面板接线：搜索框 → 模糊匹配 → 聚焦（静态守门）
     assert.ok(panel.indexOf("<RefreshRingIcon />") < searchAt, "并且排在那颗刷新按钮**后面**");
   });
 
-  it("候选浮层不能被头部行的 overflow 裁掉", () => {
+  it("候选浮层不能被头部行的 overflow 裁掉，且与输入框等宽", () => {
     /*
      * 实测踩过：`.kn-root-fill .kn-head-panel` 带 `overflow: hidden` ⇒ 绝对定位的候选列表
      * 会被整行裁掉，渲染出来**什么都看不见** ✗（这条是渲染预览时才发现的）。
@@ -220,9 +220,20 @@ describe("面板接线：搜索框 → 模糊匹配 → 聚焦（静态守门）
      */
     assert.ok(panel.includes('className={searchOpen ? "kn-head kn-head-panel is-search-open"'), "搜索打开时头部要加修饰类");
     assert.match(css, /\.kn-root-fill \.kn-head-panel\.is-search-open \{\s*overflow: visible;\s*\}/, "修饰类要把 overflow 打开");
-    assert.match(css, /\.kn-search \{[\s\S]{0,400}position: relative/, "候选浮层的定位上下文在搜索块上");
     assert.match(css, /\.kn-search-list \{[\s\S]{0,300}position: absolute/, "候选列表是浮层");
     assert.match(css, /\.kn-search-list \{[\s\S]{0,300}z-index: \d/, "浮层要盖在画布上方");
+
+    /*
+     * **宽度与输入框一致**（用户反馈 2026-10："可选列表尺寸太长了，让它和搜索栏保持一样长"）：
+     * 之前浮层挂在整块 `.kn-search` 上 ⇒ 它会一直伸到右侧箭头那边、还盖住状态文字 ✗。
+     * 现在挂在**输入框那一格**（`.kn-search-box`）里面，左右贴 0 ⇒ 天然等宽 ✓。
+     */
+    const boxAt = panel.indexOf('className="kn-search-box"');
+    const listAt = panel.indexOf('className="kn-search-list"');
+    const submitAt = panel.indexOf('type="submit"');
+    assert.ok(boxAt > 0 && listAt > boxAt && listAt < submitAt, "候选列表要在输入框那一格内、提交按钮之前");
+    assert.match(css, /\.kn-search-box \{[\s\S]{0,700}position: relative/, "定位上下文在输入框那一格上");
+    assert.match(css, /\.kn-search-list \{[\s\S]{0,200}left: 0;[\s\S]{0,80}right: 0;/, "左右都贴 0 ⇒ 与输入框等宽");
   });
 
   it("回车与点箭头同一条路；只有提交才动镜头", () => {

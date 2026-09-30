@@ -309,8 +309,6 @@
   align-self: center;
   gap: 4px;
   min-width: 0;
-  /* 候选列表绝对定位在它下面 ⇒ 这里必须是定位上下文 ✓ */
-  position: relative;
 }
 
 .kn-search-box {
@@ -325,6 +323,8 @@
   border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);
   border-radius: var(--dsw-radius-sm, 6px);
   background: var(--dsw-alias-bg-layer-1, #ffffff);
+  /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */
+  position: relative;
 }
 
 .kn-search-box:focus-within {
@@ -352,10 +352,11 @@
 }
 
 /* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）
-   绝对定位在搜索块下面，浮在图上方；层级只要高过画布即可（画布没有 z-index）✓ */
+   绝对定位在**输入框那一格**下面（`left/right: 0` ⇒ 与输入框等宽 ✓），浮在图上方；
+   层级只要高过画布即可（画布没有 z-index）✓ */
 .kn-search-list {
   position: absolute;
-  top: 32px;
+  top: 30px;
   left: 0;
   right: 0;
   z-index: 5;
