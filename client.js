@@ -2528,6 +2528,60 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/**
+		* 「重新整理」图标：**设计稿那枚"层级树"字形**（用户 2026-09 给的 HTML 里那颗）。
+		*
+		* 几何**原样照抄**设计稿（三个圆角方块 + 一条分叉干线）：
+		* ```
+		* <rect x="6" y="1.5" width="4" height="3" rx=".7"/>   上节点
+		* <rect x="1" y="11.5" width="4" height="3" rx=".7"/>  左下节点
+		* <rect x="11" y="11.5" width="4" height="3" rx=".7"/> 右下节点
+		* <path d="M8 4.5v3M3 11.5v-4h10v4"/>                  主干 + 分叉
+		* ```
+		* 画法沿用面板其它图标那一套（`fill="none"` + `currentColor` + 线宽 1 + round 端点/圆角）——
+		* 设计稿页面里那个 `stroke-width: 1.5` 是它**整页**的统一样式（连标签页里的文件夹/地球也一起套），
+		* 不是这一枚的专属参数；这里保持与右边那颗刷新（宿主原版，线宽 1、15px）同一粗细 ✓。
+		*
+		* @param size - 边长（px），默认 16（网格尺寸；按钮里按 15px 渲染，与宿主图标一致）。
+		*/
+		function RelayoutTreeIcon({ size = 16 }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+				width: size,
+				height: size,
+				viewBox: "0 0 16 16",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 1,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				focusable: "false",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "6",
+						y: "1.5",
+						width: "4",
+						height: "3",
+						rx: ".7"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "1",
+						y: "11.5",
+						width: "4",
+						height: "3",
+						rx: ".7"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "11",
+						y: "11.5",
+						width: "4",
+						height: "3",
+						rx: ".7"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M8 4.5v3M3 11.5v-4h10v4" })
+				]
+			});
+		}
+		/**
 		* 「刷新」图标：**直接抄 harness 产品图标集的原版**（用户要求 2026-09）。
 		*
 		* 来源：`packages/client/ui-primitives/src/icons/index.tsx` 的 `IconRefreshOutlineArtwork`
@@ -40649,6 +40703,7 @@ void main() {
 			refresh: "刷新",
 			refreshHint: "重新从磁盘读取知识库（绕过宿主的库缓存）",
 			relayout: "重新整理",
+			relayoutHint: "重排布局，并把旋转中心复位到整张图",
 			loading: "正在解析当前工作区…",
 			failed: "读取知识库失败",
 			noNodes: "这个知识库里还没有知识点。",
@@ -40722,6 +40777,24 @@ void main() {
 			/** 相机命令（新节点建好后发 fitAll，把所有节点收进视野 ✓） */
 			const [cameraCommand, setCameraCommand] = (0, react.useState)(null);
 			const fitSeqRef = (0, react.useRef)(0);
+			/**
+			* 发一条 `fitAll` 相机命令：把**环绕中心**（旋转中心）与距离复位到**整张图的包围盒**。
+			*
+			* 上游 `navigation.fitAll()` 取的是**全部节点**的 bounds.center，所以它天然"不认"某个聚焦节点 ✓。
+			* 两处用它：
+			*  1. 新建节点后 ⇒ 把新节点收进视野；
+			*  2. 点「重新整理」⇒ **把旋转中心收回来**（用户要求 2026-09）。
+			*     —— 上游 `engine.relayout()` 是"只重排布局、相机保持不动"（注释里写明了是刻意的），
+			*     于是聚焦过某个节点后，环绕中心会一直钉在那个节点上 ✗；这里补上归位那一步 ✓。
+			*/
+			const fitWholeGraph = (0, react.useCallback)(() => {
+				fitSeqRef.current += 1;
+				setCameraCommand({
+					seq: fitSeqRef.current,
+					type: "fitAll",
+					source: "toolbar"
+				});
+			}, []);
 			const [spaceNotice, setSpaceNotice] = (0, react.useState)(null);
 			const [attempt, setAttempt] = (0, react.useState)(0);
 			const identity = (0, react.useMemo)(() => (snapshot) => snapshot, []);
@@ -40876,18 +40949,13 @@ void main() {
 				const onLibraryChanged = () => {
 					load({ refresh: true });
 					setRelayoutToken((value) => value + 1);
-					fitSeqRef.current += 1;
-					setCameraCommand({
-						seq: fitSeqRef.current,
-						type: "fitAll",
-						source: "toolbar"
-					});
+					fitWholeGraph();
 				};
 				window.addEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged);
 				return () => {
 					window.removeEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged);
 				};
-			}, [load]);
+			}, [load, fitWholeGraph]);
 			const graph = (0, react.useMemo)(() => {
 				if (payload === null) return null;
 				return {
@@ -40965,9 +41033,14 @@ void main() {
 						className: "kn-head kn-head-panel",
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
-							className: "kn-btn",
-							onClick: () => setRelayoutToken((value) => value + 1),
-							children: t("relayout")
+							className: "kn-btn kn-icon-btn",
+							"aria-label": t("relayout"),
+							title: t("relayoutHint"),
+							onClick: () => {
+								setRelayoutToken((value) => value + 1);
+								fitWholeGraph();
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelayoutTreeIcon, {})
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							className: "kn-btn kn-icon-btn",

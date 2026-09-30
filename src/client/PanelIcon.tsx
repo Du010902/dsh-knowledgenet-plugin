@@ -30,6 +30,44 @@ export function GraphPanelIcon({ size = 16 }: { size?: number }) {
 }
 
 /**
+ * 「重新整理」图标：**设计稿那枚"层级树"字形**（用户 2026-09 给的 HTML 里那颗）。
+ *
+ * 几何**原样照抄**设计稿（三个圆角方块 + 一条分叉干线）：
+ * ```
+ * <rect x="6" y="1.5" width="4" height="3" rx=".7"/>   上节点
+ * <rect x="1" y="11.5" width="4" height="3" rx=".7"/>  左下节点
+ * <rect x="11" y="11.5" width="4" height="3" rx=".7"/> 右下节点
+ * <path d="M8 4.5v3M3 11.5v-4h10v4"/>                  主干 + 分叉
+ * ```
+ * 画法沿用面板其它图标那一套（`fill="none"` + `currentColor` + 线宽 1 + round 端点/圆角）——
+ * 设计稿页面里那个 `stroke-width: 1.5` 是它**整页**的统一样式（连标签页里的文件夹/地球也一起套），
+ * 不是这一枚的专属参数；这里保持与右边那颗刷新（宿主原版，线宽 1、15px）同一粗细 ✓。
+ *
+ * @param size - 边长（px），默认 16（网格尺寸；按钮里按 15px 渲染，与宿主图标一致）。
+ */
+export function RelayoutTreeIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="6" y="1.5" width="4" height="3" rx=".7" />
+      <rect x="1" y="11.5" width="4" height="3" rx=".7" />
+      <rect x="11" y="11.5" width="4" height="3" rx=".7" />
+      <path d="M8 4.5v3M3 11.5v-4h10v4" />
+    </svg>
+  );
+}
+
+/**
  * 「刷新」图标：**直接抄 harness 产品图标集的原版**（用户要求 2026-09）。
  *
  * 来源：`packages/client/ui-primitives/src/icons/index.tsx` 的 `IconRefreshOutlineArtwork`

@@ -24,7 +24,7 @@ import { rememberSessionId } from "./chat-selection.ts";
 import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } from "./current-context.ts";
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
-import { RefreshRingIcon } from "./PanelIcon.tsx";
+import { RefreshRingIcon, RelayoutTreeIcon } from "./PanelIcon.tsx";
 import { ShadowPanel } from "./shadow.tsx";
 import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
 
@@ -48,6 +48,7 @@ const LITERAL: Record<string, string> = {
   refresh: "刷新",
   refreshHint: "重新从磁盘读取知识库（绕过宿主的库缓存）",
   relayout: "重新整理",
+  relayoutHint: "重排布局，并把旋转中心复位到整张图",
   loading: "正在解析当前工作区…",
   failed: "读取知识库失败",
   noNodes: "这个知识库里还没有知识点。",
@@ -151,6 +152,20 @@ function GraphPanelInner(props: {
   /** 相机命令（新节点建好后发 fitAll，把所有节点收进视野 ✓） */
   const [cameraCommand, setCameraCommand] = useState<{ seq: number; type: "fitAll"; source: "toolbar" } | null>(null);
   const fitSeqRef = useRef(0);
+  /**
+   * 发一条 `fitAll` 相机命令：把**环绕中心**（旋转中心）与距离复位到**整张图的包围盒**。
+   *
+   * 上游 `navigation.fitAll()` 取的是**全部节点**的 bounds.center，所以它天然"不认"某个聚焦节点 ✓。
+   * 两处用它：
+   *  1. 新建节点后 ⇒ 把新节点收进视野；
+   *  2. 点「重新整理」⇒ **把旋转中心收回来**（用户要求 2026-09）。
+   *     —— 上游 `engine.relayout()` 是"只重排布局、相机保持不动"（注释里写明了是刻意的），
+   *     于是聚焦过某个节点后，环绕中心会一直钉在那个节点上 ✗；这里补上归位那一步 ✓。
+   */
+  const fitWholeGraph = useCallback((): void => {
+    fitSeqRef.current += 1;
+    setCameraCommand({ seq: fitSeqRef.current, type: "fitAll", source: "toolbar" });
+  }, []);
   const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -398,12 +413,11 @@ function GraphPanelInner(props: {
     const onLibraryChanged = (): void => {
       void load({ refresh: true });
       setRelayoutToken((value) => value + 1);
-      fitSeqRef.current += 1;
-      setCameraCommand({ seq: fitSeqRef.current, type: "fitAll", source: "toolbar" });
+      fitWholeGraph();
     };
     window.addEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged);
     return () => { window.removeEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged); };
-  }, [load]);
+  }, [load, fitWholeGraph]);
 
   const graph = useMemo<GraphSnapshot | null>(() => {
     if (payload === null) return null;
@@ -526,12 +540,31 @@ function GraphPanelInner(props: {
        * 「聚焦视图」按用户要求整体去掉 ✓。
        */}
       <div className="kn-head kn-head-panel">
-        <button type="button" className="kn-btn" onClick={() => setRelayoutToken((value) => value + 1)}>
-          {t("relayout")}
+        {/*
+          * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
+          * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。
+          */}
+        <button
+          type="button"
+          className="kn-btn kn-icon-btn"
+          aria-label={t("relayout")}
+          title={t("relayoutHint")}
+          onClick={() => {
+            /*
+             * 两件事一起做（用户要求 2026-09）：
+             *  ① `relayoutToken` +1 ⇒ 丢掉缓存的坐标、从确定性初始分布重排一轮；
+             *  ② 发一条 `fitAll` ⇒ **把旋转中心初始化**（回到整张图的包围盒中心）✓
+             *     —— 之前上游只重排布局、相机原地不动，聚焦过节点的话环绕中心就一直钉在那个节点上 ✗。
+             * 注意：只复位"中心与距离"，**不动用户当前的旋转姿态**（角度/俯仰/自由四元数由使用者决定）✓。
+             */
+            setRelayoutToken((value) => value + 1);
+            fitWholeGraph();
+          }}
+        >
+          <RelayoutTreeIcon />
         </button>
         {/*
-          * 「刷新」按用户要求改成**浏览器那颗圆环刷新按钮**的形态 ✓：
-          * 无边框、无底色、尺寸正方 —— 远看就是一个圆环。
+          * 「刷新」按用户要求改成**浏览器那颗圆环刷新按钮**的形态 ✓（字形直接抄 harness 产品图标集）。
           *
           * 文字改由 `aria-label` 承担：可见文字去掉后，读屏仍念得出"刷新" ✓；
           * `title` 上的说明（重新从磁盘读取知识库）保持不变 ✓。
