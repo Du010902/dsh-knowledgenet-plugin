@@ -297,6 +297,128 @@
   outline-offset: 1px;
 }
 
+/* ---------------- 搜索框（照浏览器那条工具行） ----------------
+   用户要求 2026-10：搜索框要**和刷新按钮同一行、排在它后面**（浏览器就是 `[←][→][⟳] [地址栏] [↗]`）✓。
+   所以这里不再自己占一行：`.kn-search` 只是头部 flex 行里的一个**可伸缩子项**，
+   高度/内边距/分隔线都沿用 `.kn-root-fill .kn-head-panel` 那一套 ✓。
+   形态与宿主地址栏对齐：28px 高、0.5px 边框、`--dsw-radius-sm`、focus 时描一圈 ✓。 */
+.kn-search {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  min-width: 0;
+  /* 候选列表绝对定位在它下面 ⇒ 这里必须是定位上下文 ✓ */
+  position: relative;
+}
+
+.kn-search-box {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);
+  border-radius: var(--dsw-radius-sm, 6px);
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+}
+
+.kn-search-box:focus-within {
+  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);
+  outline-offset: -1px;
+}
+
+.kn-search-box svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-label-secondary, #526663);
+}
+
+.kn-search-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+/* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）
+   绝对定位在搜索块下面，浮在图上方；层级只要高过画布即可（画布没有 z-index）✓ */
+.kn-search-list {
+  position: absolute;
+  top: 32px;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 264px;
+  overflow: auto;
+  padding: 4px;
+  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);
+  border-radius: var(--dsw-radius-sm, 6px);
+  background: var(--dsw-alias-bg-layer-2, #1b1b1b);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.kn-search-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kn-search-item.is-active {
+  background: var(--dsw-alias-interactive-bg-hover, #292929);
+}
+
+.kn-search-item-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 别名命中时补一句"是哪个别名命中的"，并靠右显示 ✓ */
+.kn-search-item-alias {
+  flex: none;
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  font-size: 11px;
+}
+
+.kn-search-empty {
+  padding: 6px 8px;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  font-size: 11px;
+}
+
+/*
+ * 候选列表在头部行里做**浮层**，而 `.kn-root-fill .kn-head-panel` 是 `overflow: hidden`
+ * ⇒ 不加这一条，下拉会被头部那一行直接裁掉（实测：渲染出来什么都看不见 ✗）。
+ * 类名写在元素上（`.kn-head-panel.is-search-open`）比特异性：两个类 > 一个类，与顺序无关 ✓。
+ */
+.kn-root-fill .kn-head-panel.is-search-open {
+  overflow: visible;
+}
+
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
 
 .kn-warn-inline {

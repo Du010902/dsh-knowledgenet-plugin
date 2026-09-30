@@ -79,7 +79,15 @@ export function prefersEnglish(): boolean {
 
 /** 组装 tab type 定义；`english` 显式传入以便测试与运行期一致 */
 export function graphTabDefinition(english: boolean, icon?: unknown): GraphTabDefinition {
-  const title = english ? "Knowledge graph" : "知识库图谱";
+  /*
+   * **两个名字，用途不同**（照抄宿主「文件 / 工作区文件」那套）：
+   * - 标签芯片要**短**（"图谱"）—— 芯片是窄条，全名会把别的标签挤掉 ✗；
+   * - 「开始」页入口卡片用**全名**（"知识库图谱"）—— 那里有整行宽度，写清楚更好 ✓。
+   * 宿主那边：`definition.title` 是"打开标签时记进 layout 记录的芯片文字"，`guide[].title` 才是卡片标题
+   * （`ui-sidebar-files` 就是 `type.label`= 文件 与 `guide.title`= 工作区文件 两份）✓。
+   */
+  const tabTitle = english ? "Graph" : "图谱";
+  const guideTitle = english ? "Knowledge graph" : "知识库图谱";
   const description = english
     ? "Focus and space views of the knowledge library, docked beside the conversation"
     : "在右侧栏里看知识库的聚焦视图与空间视图";
@@ -98,15 +106,21 @@ export function graphTabDefinition(english: boolean, icon?: unknown): GraphTabDe
      * （不可见时不取数、不渲染三维 ⇒ rAF 一起停 ✓）。
      */
     keepMounted: false,
-    // 标签芯片的文字：在打开时被捕获一次
-    title: () => title,
+    // 标签芯片的文字：在打开时被捕获一次（**短名** ✓）
+    title: () => tabTitle,
     ...(icon === undefined ? {} : { icon }),
-    // 「开始」页上的入口卡片（数组！每条要 id）
+    // 「开始」页上的入口卡片（数组！每条要 id）—— 这里用**全名** ✓
     guide: [{
       id: GRAPH_GUIDE_ENTRY_ID,
       order: GRAPH_GUIDE_ORDER,
-      title: () => title,
+      title: () => guideTitle,
       description: () => description,
+      /*
+       * **同一个字形也要给卡片**（用户要求标签页与「开始」页图标一致 ✓）。
+       * 宿主的逻辑是 `entry.icon ?? CubeGlyph`（`GuideBody.tsx:54`）—— 不给就回落到
+       * 那个灰色的占位立方体，两处看起来就不是同一个东西 ✗（实测截图就是这样）。
+       */
+      ...(icon === undefined ? {} : { icon }),
     }],
   };
 }

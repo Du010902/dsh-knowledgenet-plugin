@@ -27,6 +27,8 @@ const CSS = path.join(HERE, "..", "src", "client", "panel.css");
 const panel = await readFile(PANEL, "utf8");
 const icon = await readFile(ICON, "utf8");
 const css = await readFile(CSS, "utf8");
+const tab = await readFile(path.join(HERE, "..", "src", "client", "tab.ts"), "utf8");
+const tabDefinition = await readFile(path.join(HERE, "..", "src", "client", "tab-definition.ts"), "utf8");
 
 /** 取某个图标按钮的 JSX 片段（从 className 到对应的 </button>） */
 function buttonOf(marker) {
@@ -91,11 +93,64 @@ describe("面板头部图标按钮：共同形态", () => {
   });
 });
 
+/**
+ * 取某个图标函数的源码片段。
+ *
+ * **必须按"到下一个 export 为止"切**：这个文件里图标是一个个往后追加的，
+ * 早先写成"从它到文件末尾"⇒ 后面新增图标（搜索放大镜、提交箭头）会被算进这一段，
+ * 于是这条守门测试因为"多出来两条 path"而误报 ✗（实测踩过）。
+ */
+function glyphOf(name) {
+  const start = icon.indexOf(`export function ${name}`);
+  assert.ok(start > 0, `找不到 ${name}`);
+  const nextExport = icon.indexOf("export function", start + 1);
+  if (nextExport < 0) return icon.slice(start);
+  /*
+   * 往前退到下一个函数**自己的 JSDoc 之前**：它的说明文字里会出现 `stroke="currentColor"`
+   * 这类字样，算进来的话"几条 path 带 currentColor"就会被数多 ✗。
+   */
+  const docStart = icon.lastIndexOf("/**", nextExport);
+  return icon.slice(start, docStart > start ? docStart : nextExport);
+}
+
+describe("图谱标签图标：照抄用户给的那枚（三个节点 + 三条连线）", () => {
+  /*
+   * 用户要求 2026-10：把标签页与「开始」页卡片前面的图标换成 `dsh-graph-tab.html` 里的
+   * `<symbol id="graph">`，而且**两处一致** ✓。这里钉"照抄"这件事本身：
+   * 几何（24 网格、三个 r=3 的节点、一条三段的连线）与画法（线宽 1.5、圆头圆角、currentColor）都不许改。
+   */
+  it("几何与画法逐字照抄（24 网格 / 线宽 1.5 / 三个节点 + 三段连线）", () => {
+    const glyph = glyphOf("GraphPanelIcon");
+    assert.match(glyph, /viewBox="0 0 24 24"/, "用原版的 24 网格");
+    assert.match(glyph, /strokeWidth=\{1\.5\}/, "用原版的线宽 1.5（24 网格换算到 16px 渲染 ≈ 1.0，与邻居同粗细）");
+    assert.match(glyph, /stroke="currentColor"/, "单色，跟随主题与选中态");
+    assert.match(glyph, /strokeLinecap="round"/, "圆头");
+    assert.match(glyph, /strokeLinejoin="round"/, "圆角");
+    assert.equal(
+      glyph.includes('<path d="M8.2 6.8 15.8 10.2M7.5 8.5l2 7M15.8 13.8l-4.4 3.4" />'),
+      true,
+      "连线必须与原版一致",
+    );
+    for (const circle of ['<circle cx="6" cy="6" r="3" />', '<circle cx="19" cy="12" r="3" />', '<circle cx="10" cy="19" r="3" />']) {
+      assert.ok(glyph.includes(circle), `节点必须与原版一致：${circle}`);
+    }
+    assert.equal((glyph.match(/<circle /g) ?? []).length, 3, "正好三个节点");
+  });
+
+  it("两处都用它：标签页（tab.ts）与「开始」页卡片（guide 条目）", () => {
+    assert.ok(tab.includes("graphTabDefinition(prefersEnglish(), GraphPanelIcon as unknown)"), "标签页传入这枚图标");
+    /* guide 条目必须把图标也带上 —— 宿主是 `entry.icon ?? CubeGlyph`，漏了就变成灰色占位方块 ✗ */
+    assert.match(
+      tabDefinition,
+      /guide: \[\{[\s\S]{0,400}\.\.\.\(icon === undefined \? \{\} : \{ icon \}\)/,
+      "guide 条目也要带上同一个图标",
+    );
+  });
+});
+
 describe("刷新按钮：harness 原版圆环字形", () => {
   it("几何与画法都与原版一致（不许自己改）", () => {
-    const start = icon.indexOf("export function RefreshRingIcon");
-    assert.ok(start > 0, "找不到 RefreshRingIcon");
-    const glyph = icon.slice(start);
+    const glyph = glyphOf("RefreshRingIcon");
     assert.match(glyph, /viewBox="0 0 16 16"/, "与宿主同网格（16）");
     assert.match(glyph, /strokeWidth=\{1\}/, "与宿主同线宽（ICON_REGULAR_STROKE = 1）");
     /*
@@ -117,9 +172,7 @@ describe("刷新按钮：harness 原版圆环字形", () => {
 
 describe("重新整理按钮：设计稿的层级树字形", () => {
   it("三个圆角方块 + 一条分叉干线，几何逐字照抄设计稿", () => {
-    const start = icon.indexOf("export function RelayoutTreeIcon");
-    assert.ok(start > 0, "找不到 RelayoutTreeIcon");
-    const glyph = icon.slice(start);
+    const glyph = glyphOf("RelayoutTreeIcon");
     /* 设计稿原样：上节点 / 左下节点 / 右下节点 + 主干与分叉 */
     assert.ok(glyph.includes('<rect x="6" y="1.5" width="4" height="3" rx=".7" />'), "上节点方块");
     assert.ok(glyph.includes('<rect x="1" y="11.5" width="4" height="3" rx=".7" />'), "左下节点方块");
@@ -129,7 +182,7 @@ describe("重新整理按钮：设计稿的层级树字形", () => {
   });
 
   it("画法跟随面板约定：16 网格 + 线宽 1 + currentColor + round 端点", () => {
-    const glyph = icon.slice(icon.indexOf("export function RelayoutTreeIcon"));
+    const glyph = glyphOf("RelayoutTreeIcon");
     assert.match(glyph, /viewBox="0 0 16 16"/, "与面板其它图标同网格");
     assert.match(glyph, /stroke="currentColor"/, "单色描边，跟随主题");
     assert.match(glyph, /strokeWidth=\{1\}/, "线宽与右边那颗刷新一致（设计稿页面的 1.5 是整页样式，不是这一枚的参数）");

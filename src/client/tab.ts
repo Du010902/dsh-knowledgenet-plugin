@@ -19,6 +19,7 @@ import {
 } from "./tab-definition.ts";
 import { reportDiag } from "./diag.ts";
 import { GraphPanelIcon } from "./PanelIcon.tsx";
+import { GraphTabTitle } from "./GraphTabTitle.tsx";
 import { GraphPanel } from "./GraphPanel.tsx";
 
 interface SlotsFace {
@@ -56,6 +57,18 @@ function registerIn(scoped: TabContext, locale: string | undefined): string | un
   slots.inject("sidebar.right.pane.tab", () => slots.register(
     withLocale({ name: "sidebar.right.pane.tab", key: definition.id }),
     GraphPanel,
+  ));
+  /*
+   * **芯片里的标题也要自己注册**（否则芯片只有纯文字、没有图标 ✗）。
+   *
+   * 宿主 `SidebarRight.tsx:246` 的 `titlesFor` 会先找这个座位；找不到就回落到
+   * "打开标签时记下的那串文字"。所以"把 definition.icon 换成图谱图标"这件事
+   * **不会**改变芯片的外观 —— 用户实测反馈"这里没变啊"就是这个原因 ✓。
+   * 写法照抄 shipped 的 `ui-sidebar-files/src/client/index.ts:76`。
+   */
+  slots.inject("sidebar.right.pane.tab.title", () => slots.register(
+    withLocale({ name: "sidebar.right.pane.tab.title", key: definition.id }),
+    GraphTabTitle,
   ));
   /*
    * 自己画入口卡片（保留"只有知识库工作区才显示"的能力），但**与宿主 `.entry` 同规格**：

@@ -24,9 +24,12 @@ import { rememberSessionId } from "./chat-selection.ts";
 import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } from "./current-context.ts";
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
-import { RefreshRingIcon, RelayoutTreeIcon } from "./PanelIcon.tsx";
+import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
+import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
 import { ShadowPanel } from "./shadow.tsx";
 import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
+/** 相机命令类型取自上游（`focusNode` / `fitAll` 都在里面），别在本地再写一份窄的 */
+import type { CameraCommand } from "../vendor/upstream/graph3d/types.ts";
 
 interface PanelPayload {
   ok?: boolean;
@@ -42,6 +45,12 @@ interface PanelPayload {
   error?: { code?: string; message?: string; createPath?: string };
 }
 
+/** 搜索候选最多列几条（再多就不是"挑一个"而是"翻列表"了 ✓） */
+const SEARCH_LIMIT = 8;
+
+/** 候选列表的 id（输入框用 `aria-controls` / `aria-activedescendant` 指过来 ✓） */
+const SEARCH_LIST_ID = "kn-search-results";
+
 const LITERAL: Record<string, string> = {
   focus: "聚焦",
   space: "空间",
@@ -49,6 +58,11 @@ const LITERAL: Record<string, string> = {
   refreshHint: "重新从磁盘读取知识库（绕过宿主的库缓存）",
   relayout: "重新整理",
   relayoutHint: "重排布局，并把旋转中心复位到整张图",
+  /* 搜索框（2026-10）：模糊匹配后**列候选**，由用户挑一个聚焦 ✓ */
+  searchPlaceholder: "搜索知识点，回车聚焦",
+  searchGo: "搜索并聚焦",
+  searchResults: "匹配结果",
+  searchMiss: "没有匹配的节点",
   loading: "正在解析当前工作区…",
   failed: "读取知识库失败",
   noNodes: "这个知识库里还没有知识点。",
@@ -149,9 +163,11 @@ function GraphPanelInner(props: {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [relayoutToken, setRelayoutToken] = useState(0);
-  /** 相机命令（新节点建好后发 fitAll，把所有节点收进视野 ✓） */
-  const [cameraCommand, setCameraCommand] = useState<{ seq: number; type: "fitAll"; source: "toolbar" } | null>(null);
+  /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
+  const [cameraCommand, setCameraCommand] = useState<CameraCommand | null>(null);
   const fitSeqRef = useRef(0);
+  /** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
+  const [searchQuery, setSearchQuery] = useState("");
   /**
    * 发一条 `fitAll` 相机命令：把**环绕中心**（旋转中心）与距离复位到**整张图的包围盒**。
    *
@@ -165,6 +181,21 @@ function GraphPanelInner(props: {
   const fitWholeGraph = useCallback((): void => {
     fitSeqRef.current += 1;
     setCameraCommand({ seq: fitSeqRef.current, type: "fitAll", source: "toolbar" });
+  }, []);
+
+  /**
+   * 飞到某个节点：**选中 + 取景**两件事一起做（搜索命中后用它 ✓）。
+   *
+   * - `setFocusId` ⇒ 高亮这个节点，并触发既有的"记住聚焦 / 上报 / 发布标题"副作用 ✓；
+   * - 再发一条 `focusNode` 相机命令 ⇒ 镜头对上去（与**双击节点、按 F** 是同一条路 ✓）。
+   *
+   * 为什么不能只 `setFocusId`：上游把"选择"与"定位"严格分开了 —— `engine.setFocus()` 只改高亮，
+   * **不动相机**（`navigation.focusOn` 才是取景）✓。
+   */
+  const focusNodeById = useCallback((id: string): void => {
+    setFocusId(id);
+    fitSeqRef.current += 1;
+    setCameraCommand({ seq: fitSeqRef.current, type: "focusNode", nodeId: id, source: "toolbar" });
   }, []);
   const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -435,6 +466,55 @@ function GraphPanelInner(props: {
   const edgeCount = payload?.counts?.edges ?? graph?.edges.length ?? 0;
 
   /*
+   * 搜索候选：**列出所有命中的节点，让用户自己挑** ✓（用户反馈 2026-10）。
+   *
+   * 之前是"算出匹配度最高的那个，回车直接飞过去" ✗ —— 查「车」时"回车""回车聚焦"都命中，
+   * 界面却替用户选了其中一个并动了镜头，用户原话："我们不应该替用户做决定"。
+   * 现在这里给出**候选列表**（按匹配度排序），键盘 ↑↓ 或鼠标点选，回车聚焦当前高亮那条 ✓。
+   * 节点上限 400，纯字符串打分，每次渲染算一遍开销可忽略 ✓。
+   */
+  const searchMatches = useMemo<Array<NodeMatch<SearchableNode>>>(() => {
+    if (graph === null) return [];
+    return rankNodes(graph.nodes as SearchableNode[], searchQuery, SEARCH_LIMIT);
+  }, [graph, searchQuery]);
+
+  /** 关键词非空、一个都没命中 ⇒ 候选框里给一句"没有匹配的节点" ✓（图谱没载入时不说这话） */
+  const searchMissed = graph !== null && searchQuery.trim() !== "" && searchMatches.length === 0;
+
+  /** 搜索块有没有焦点：只有聚焦时才弹候选（点别处就收起来，不常驻挡着图 ✓） */
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchOpen = searchQuery.trim() !== "" && searchFocused;
+  /** 当前高亮第几条候选（↑↓ 移动、鼠标悬停也会高亮；回车聚焦的就是它 ✓） */
+  const [searchActive, setSearchActive] = useState(0);
+  /*
+   * 关键词一变，高亮回到第一条。
+   * 少了这一步，候选从 5 条变成 1 条时高亮可能停在下标 4 ⇒ 回车什么都不发生（"点了没反应" ✗）。
+   */
+  useEffect(() => { setSearchActive(0); }, [searchQuery]);
+
+  /**
+   * 聚焦候选里的第 `index` 条（用户点它，或回车时聚焦当前高亮那条 ✓）。
+   * 做完就把关键词清空、候选收起 —— 镜头已经飞过去了，界面回到干净状态 ✓。
+   */
+  const focusSearchResult = (index: number): void => {
+    const hit = searchMatches[index];
+    if (hit === undefined) return;
+    void reportDiag("graph-panel", "search-focus", `${hit.via}:${hit.score}`);
+    focusNodeById(hit.node.id);
+    setSearchQuery("");
+  };
+
+  /** 回车 / 点右侧箭头：聚焦**当前高亮**那条候选（高亮在界面上是可见的，所以不是"替你决定"✓） */
+  const submitSearch = (): void => {
+    if (searchQuery.trim() === "") return;
+    if (searchMatches.length === 0) {
+      void reportDiag("graph-panel", "search-miss", "no-match");
+      return;
+    }
+    focusSearchResult(searchActive);
+  };
+
+  /*
    * 面板是 session 作用域（拿得到 sessionId），把它记下来供 **root 作用域**的组件用：
    * 「对话里划词 → 添加前置」的浮条挂在 sidebar.footer.action，拿不到 sessionId，
    * 没有它就判断不出"当前工作区是不是知识库"（实测：门禁一律拒绝 → 浮条永远不出现）。
@@ -539,7 +619,7 @@ function GraphPanelInner(props: {
        * 那行是冗余信息 ✗）。面板顶部只留操作按钮；视图也只保留**空间视图**——
        * 「聚焦视图」按用户要求整体去掉 ✓。
        */}
-      <div className="kn-head kn-head-panel">
+      <div className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
         {/*
           * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
           * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。
@@ -579,6 +659,103 @@ function GraphPanelInner(props: {
         >
           <RefreshRingIcon />
         </button>
+
+        {/*
+          * 搜索框（用户要求 2026-10）：和上面两颗按钮**同一行**，排在那颗刷新**后面** ——
+          * 与浏览器那条工具行一致（`[←][→][⟳] [地址栏] [↗]`）✓。
+          *
+          * 行为：边打字边算出**候选列表**（最多 8 条，按匹配度排序），
+          * **由用户自己挑**（↑↓ 或鼠标点，回车聚焦当前高亮那条）✓ ——
+          * 用户明确要求过：命中多个时不要替用户决定聚焦哪一个 ✗。
+          *
+          * 两个刻意的取舍：
+          *  1. 只有**聚焦（回车/点候选）**才动镜头；边打字只弹候选 ✓；
+          *  2. 用 `<form onSubmit>`：回车与点右侧箭头是**同一条路** ✓。
+          */}
+        <form
+          className="kn-search"
+          role="search"
+          onSubmit={(event) => { event.preventDefault(); submitSearch(); }}
+          onFocus={() => { setSearchFocused(true); }}
+          onBlur={(event) => {
+            /* 焦点还在搜索块内部（点到候选行、或点输入框）就别收起 ✓ */
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            setSearchFocused(false);
+          }}
+        >
+          <div className="kn-search-box">
+            <SearchGlyphIcon />
+            <input
+              className="kn-search-field"
+              type="search"
+              value={searchQuery}
+              aria-label={t("searchPlaceholder")}
+              placeholder={t("searchPlaceholder")}
+              spellCheck={false}
+              aria-expanded={searchOpen}
+              aria-controls={SEARCH_LIST_ID}
+              aria-activedescendant={searchOpen && searchMatches.length > 0 ? `${SEARCH_LIST_ID}-${searchActive}` : undefined}
+              onChange={(event) => { setSearchQuery(event.currentTarget.value); }}
+              onKeyDown={(event) => {
+                /* ↑↓ 在候选间移动；Esc 收起（清空关键词）。回车交给 form 的 submit ✓ */
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSearchActive((index) => (searchMatches.length === 0 ? 0 : Math.min(searchMatches.length - 1, index + 1)));
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSearchActive((index) => Math.max(0, index - 1));
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setSearchQuery("");
+                }
+              }}
+            />
+          </div>
+          <button
+            type="submit"
+            className="kn-icon-btn"
+            aria-label={t("searchGo")}
+            title={t("searchGo")}
+            disabled={searchQuery.trim() === ""}
+          >
+            <SubmitArrowIcon />
+          </button>
+
+          {/*
+            * 候选列表：**列出来让用户选** ✓（不再替他挑一个直接飞过去）。
+            * `role="listbox"` + 每行 `role="option"`：输入框用 `aria-activedescendant` 指过来，
+            * 读屏能念出"当前"是哪一条 ✓。
+            */}
+          {searchOpen ? (
+            <div className="kn-search-list" id={SEARCH_LIST_ID} role="listbox" aria-label={t("searchResults")}>
+              {searchMissed ? (
+                <div className="kn-search-empty">{t("searchMiss")}</div>
+              ) : searchMatches.map((hit, index) => (
+                <button
+                  key={hit.node.id}
+                  id={`${SEARCH_LIST_ID}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === searchActive}
+                  className={index === searchActive ? "kn-search-item is-active" : "kn-search-item"}
+                  /* 悬停即高亮（与键盘高亮同一个状态，避免"看到的是这条、回车飞的是那条"✗） */
+                  onMouseEnter={() => { setSearchActive(index); }}
+                  /* 按下别把输入框的焦点抢走：抢走会触发 blur ⇒ 候选先被收起来，click 就落空了 ✗ */
+                  onMouseDown={(event) => { event.preventDefault(); }}
+                  onClick={() => { focusSearchResult(index); }}
+                >
+                  <span className="kn-search-item-title">{hit.node.title}</span>
+                  {/* 别名命中时把命中的那段别名也显示出来，用户才知道"为什么它会被列出来"✓ */}
+                  {hit.via === "alias" ? <span className="kn-search-item-alias">{hit.matched}</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </form>
 
       </div>
 

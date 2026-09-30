@@ -32,10 +32,17 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 const DICT_ZH: Record<string, string> = {
   // 面板
   panel: "知识库图谱",
+  /* 标签芯片上的短名（芯片窄，用全名会把别的标签挤掉）✓ */
+  tabShort: "图谱",
   focus: "聚焦",
   space: "空间",
   refresh: "刷新",
   relayout: "重新整理",
+  /* 搜索框（2026-10）：模糊匹配 → **列候选让用户挑** ✓ */
+  searchPlaceholder: "搜索知识点，回车聚焦",
+  searchGo: "搜索并聚焦",
+  searchResults: "匹配结果",
+  searchMiss: "没有匹配的节点",
   counts: "节点 {n} · 依赖 {e}",
   noNodes: "这个知识库里还没有知识点。",
   spaceFailed: "三维视图不可用，已回到二维聚焦。",
@@ -68,10 +75,15 @@ const DICT_ZH: Record<string, string> = {
 
 const DICT_EN: Record<string, string> = {
   panel: "Knowledge graph",
+  tabShort: "Graph",
   focus: "Focus",
   space: "Space",
   refresh: "Refresh",
   relayout: "Re-layout",
+  searchPlaceholder: "Search nodes, Enter to focus",
+  searchGo: "Search and focus",
+  searchResults: "Matches",
+  searchMiss: "No matching node",
   counts: "{n} nodes · {e} links",
   noNodes: "This library has no knowledge nodes yet.",
   spaceFailed: "The 3D view is unavailable; switched back to focus.",

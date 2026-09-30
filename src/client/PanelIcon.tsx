@@ -1,30 +1,38 @@
 /**
- * 侧栏面板图标。
+ * 「知识库图谱」的图标：**三个节点 + 三条连线**（用户 2026-10 指定的那枚）。
  *
- * **坐标系与线宽对齐宿主**（`ui-primitives/src/icons/index.tsx`）：
- * 宿主的图标统一是 `viewBox="0 0 16 16"` + `ICON_REGULAR_STROKE = 1`。
- * 我先前用 24 网格、线宽 1.6，换算成实际渲染是 `1.6 × 16/24 ≈ 1.07`，和旁边几颗图标粗细对不上。
- * 用 `currentColor` 描边：图标是单色的，跟随宿主主题与激活态。
+ * 来源：用户给的 `dsh-graph-tab.html` 里 `<symbol id="graph" viewBox="0 0 24 24">` ——
+ * **几何与画法逐字照抄**（24 网格 + 线宽 1.5 + 圆头/圆角 + `currentColor`），不自己改 ✓。
+ *
+ * 为什么 24 网格 / 1.5 线宽在这里正好：宿主机图标是 16 网格 + 线宽 1，而实际渲染尺寸是 16px，
+ * 于是 1.5 × 16/24 = 1.0 —— 与旁边几颗图标**同一粗细** ✓（我上一版自己换算过，效果一致）。
+ *
+ * 两处必须用**同一个字形**（用户要求"一致"）：
+ * 1. 右侧栏标签页芯片（`tab.ts` 把本组件交给 `graphTabDefinition`）；
+ * 2. 「开始」页入口卡片（guide 条目的 `icon`；宿主 `GuideBody` 的逻辑是 `entry.icon ?? CubeGlyph`）✓。
+ *
+ * @param props.size - 边长（px），默认 16；宿主卡片会按 22 / 26 传。
+ * @param props.className - 宿主可能加的类名，原样透传 ✓。
  */
-export function GraphPanelIcon({ size = 16 }: { size?: number }) {
+export function GraphPanelIcon({ size = 16, className }: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 16 16"
+      className={className}
+      viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1}
+      strokeWidth={1.5}
       strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
     >
-      <path d="M8 5.3v5.4" />
-      <path d="M8 10.7 4.3 13.4" />
-      <path d="M8 10.7 11.7 13.4" />
-      <circle cx="8" cy="3.6" r="1.7" />
-      <circle cx="3.4" cy="14.4" r="1.5" />
-      <circle cx="12.6" cy="14.4" r="1.5" />
+      <path d="M8.2 6.8 15.8 10.2M7.5 8.5l2 7M15.8 13.8l-4.4 3.4" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="19" cy="12" r="3" />
+      <circle cx="10" cy="19" r="3" />
     </svg>
   );
 }
@@ -96,6 +104,64 @@ export function RefreshRingIcon({ size = 15 }: { size?: number }) {
         stroke="currentColor"
       />
       <path d="M14.4999 1.5V5.1H10.8999" stroke="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * 搜索框里的**放大镜**：同样抄自 harness 产品图标集
+ * （`packages/client/ui-primitives/src/icons/index.tsx` 的 `IconSearchOutlineArtwork`）。
+ *
+ * 几何与画法逐字复制（16 网格 + 每条 path 自带 `stroke="currentColor"` + 线宽 1）。
+ *
+ * @param size - 边长（px），默认 14（输入框里的小图标）。
+ */
+export function SearchGlyphIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+      strokeWidth={1}
+    >
+      <path
+        d="M6.58727 11.8586C9.55061 11.8586 11.9529 9.45637 11.9529 6.49304C11.9529 3.5297 9.55061 1.12744 6.58727 1.12744C3.62394 1.12744 1.22168 3.5297 1.22168 6.49304C1.22168 9.45637 3.62394 11.8586 6.58727 11.8586Z"
+        stroke="currentColor"
+      />
+      <path d="M10.2991 10.3933L14.7783 14.8725" stroke="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * 搜索框右侧的**提交箭头**：抄自 harness 的 `IconRightUpOutlineArtwork`
+ * （浏览器面板里那颗"在外部打开"用的就是它；这里借来做"搜过去"的动作图标）。
+ *
+ * 注意原版是"一条填充 path + 一条描边 path"，`fill="currentColor"` 那条要**保持填充** ✓。
+ *
+ * @param size - 边长（px），默认 14。
+ */
+export function SubmitArrowIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+      strokeWidth={1}
+    >
+      <path
+        d="M11.7256 2.77441C12.5538 2.77469 13.2256 3.44616 13.2256 4.27441V10.1416H12.2256V4.27441C12.2256 3.99844 12.0015 3.77469 11.7256 3.77441H5.7207V2.77441H11.7256Z"
+        fill="currentColor"
+      />
+      <path d="M2.77441 13.2255L12.3756 3.62427" stroke="currentColor" />
     </svg>
   );
 }
