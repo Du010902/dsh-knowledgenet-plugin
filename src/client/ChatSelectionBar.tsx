@@ -40,23 +40,26 @@ export interface ChatSelectionBarProps {
     createLibraryFailed?: string;
     noWorkspace?: string;
     nothingSelected?: string;
-    multiTitle?: string;
-    multiPlaceholder?: string;
+    /* 注：`multiTitle` / `multiSubtitle` / `multiPlaceholder` 的声明见下面的 @deprecated 区块 */
     multiCount?: (count: number) => string;
-    /** 可选：收集弹窗的副标题 */
-    multiSubtitle?: string;
     /** 可选：「被添加的知识点」标签 */
     multiLabel?: string;
-    /** 可选：标签组右侧的说明（点击标签可修改名称） */
-    multiHint?: string;
+    /** 可选：标签框下方那行说明（现在只说明"划词会自动追加"） */
+    multiDetails?: string;
     /**
-     * 以下四项是**旧的第二层弹窗**留下的文案（`pickTitle` / `pickHint` / `titleLabel`）
-     * 与旧的说明行（`multiDetails`）：两层弹窗合并成一层之后界面上不再用到 ✓。
+     * 以下三项**已不再渲染** ✓（用户要求：去掉标题、删掉副标题、不许手动输入新标签）。
      *
-     * 这里先保留声明（宿主仍在传，删掉会牵动 `index.ts` 与文案文件）；
+     * 先保留声明（宿主仍在传，删掉会牵动 `index.ts` 与文案文件）；
      * 真正清理时**三处一起删**：本接口、`src/client/index.ts` 的 copy、以及重建后的 `client.js`。
      */
-    multiDetails?: string;
+    /** @deprecated 弹窗标题「收集知识点」（用户要求去掉） */
+    multiTitle?: string;
+    /** @deprecated 标题下的副标题（用户要求删除） */
+    multiSubtitle?: string;
+    /** @deprecated 手动输入新标签的占位符（输入框已移除） */
+    multiPlaceholder?: string;
+    /** @deprecated 标签组右侧的「点击标签可修改名称」（已删除） */
+    multiHint?: string;
     /** @deprecated 旧第二层弹窗的标题（合并后不再渲染） */
     pickTitle?: string;
     /** @deprecated 旧第二层弹窗的副标题（合并后不再渲染） */
@@ -143,7 +146,6 @@ function ensureStyle(): void {
      */
     ".kn-ms-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }",
     ".kn-ms-label-row .kn-pick-label { margin: 0; }",
-    ".kn-ms-hint { font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
     ".kn-ms-composer { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 7px; min-height: 90px; padding: 10px; box-sizing: border-box;",
     "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
     ".kn-ms-composer:focus-within { border-color: #819b91; }",
@@ -153,9 +155,12 @@ function ensureStyle(): void {
     ".kn-ms-remove { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;",
     "  background: transparent; color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 16px; line-height: 1; cursor: pointer; }",
     ".kn-ms-remove:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); color: inherit; }",
-    ".kn-ms-new { flex: 1 1 190px; min-width: 120px; height: 30px; padding: 0 5px; border: 0; outline: 0;",
-    "  background: transparent; color: inherit; font: inherit; }",
-    ".kn-ms-new::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /*
+     * 注：`.kn-ms-new`（末尾那个"手动输入新标签"的输入框）已按用户要求删掉 ✓ ——
+     * 知识点只能来自对话划词，标签本身仍可就地改名（`.kn-ms-chip input`）。
+     */
+    /* 一个标签都没有时的引导语（只是提示，不是"可以在这里输入"的输入位） */
+    ".kn-ms-placeholder { align-self: center; color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 12px; }",
     ".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
     /*
      * 「是否添加为前置」这一行：**两个互斥选项**（创建独立节点 / 添加为前置）✓。
@@ -163,11 +168,12 @@ function ensureStyle(): void {
      * 用原生 radio：语义准确（不是"可同时勾选"的复选框）、键盘（方向键 / Space）与读屏天然可用 ✓；
      * 样式上把行做成可点区域，radio 本体保持浏览器默认外观（不自己画控件 = 不会在亮暗主题里跑偏 ✓）。
      */
-    ".kn-ms-details[role='radiogroup'] { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 10px 0 0; }",
+    ".kn-ms-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 14px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
     ".kn-ms-radio { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: inherit; font-size: 12px; }",
     ".kn-ms-radio input { margin: 0; accent-color: var(--dsw-alias-button-primary-fill, #24786b); cursor: pointer; }",
     ".kn-ms-radio:hover { color: var(--dsw-alias-label-primary, #192523); }",
     ".kn-ms-note { margin-top: 8px; font-size: 12px; }",
+    ".kn-ms-drag { font-size: 11px; letter-spacing: 4px; line-height: 1; color: var(--dsw-alias-label-secondary, #5c6b66); opacity: .55; }",
     /*
      * 「设为前置」弹窗（形态照设计稿 `knowledgenet-picker-design.html`）：
      * 头部 / 内容 / 底部三段，全出血分隔线；字段与结果行都走宿主 token，亮暗主题自动跟随 ✓。
@@ -182,9 +188,9 @@ function ensureStyle(): void {
     "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 12px;",
     "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523);",
     "  box-shadow: 0 22px 64px rgba(0, 0, 0, .35); font-size: 13px; line-height: 1.5; }",
-    ".kn-pick-head { padding: 20px 22px 15px; }",
-    ".kn-pick-title { font-size: 15px; font-weight: 500; }",
-    ".kn-pick-subtitle { margin-top: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    /* 头部现在只承担"拖动把手"（标题已按用户要求去掉），所以内边距改小、只留拖拽区 ✓ */
+    ".kn-pick-head { padding: 12px 22px 10px; }",
+    /* 注：`.kn-pick-title` / `.kn-pick-subtitle` 已随标题删除一起移除（没有元素再用它们） */
     ".kn-pick-content { padding: 0 22px 15px; }",
     /*
      * 注：`.kn-pick-chip*`（第二层弹窗里那排"被添加的知识点"）已随**两层弹窗合并**一起删掉 ✓ ——
@@ -448,7 +454,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
    */
   const [chips, setChips] = useState<string[]>([]);
   /** 末尾输入框里正在敲的新标签 */
-  const [newName, setNewName] = useState("");
   /** 「创建独立节点」正在跑：避免连点建出重复节点 ✗ */
   const busyRef = useRef(false);
   /** 作用域刚变过：此刻不允许再弹浮条（等下一次真正的按下 ✓）—— 彻底消除"一闪" ✓ */
@@ -540,12 +545,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     return next;
   };
 
-  /** 关掉多选弹窗（顺带清空标签与输入框 ✓） */
+  /** 关掉多选弹窗（顺带清空标签 ✓） */
   const closeMulti = (): void => {
     collecting.current = false;
     setMultiOpen(false);
     setChips([]);
-    setNewName("");
     /*
      * 动作模式与目标选择一起复位 ✓：下次打开弹窗必须回到"创建独立节点"的干净状态，
      * 不能把上一次勾过的「添加为前置」和选中的目标带给下一个知识点 ✗。
@@ -632,7 +636,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     setAsPrereq(false);
     setMultiOpen(false);
     setChips([]);
-    setNewName("");
     collecting.current = false;
     setBar(null);
     setQuery("");
@@ -1439,7 +1442,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
               if (text === "") return;
               /* 打开弹窗：当前这段文字就是第一个标签 ✓（之后继续划词会往后追加 ✓） */
               setChips(appendChips([], text));
-              setNewName("");
               setNote(null);
               setError(null);
               collecting.current = true;
@@ -1465,7 +1467,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
             className="kn-pick-dialog"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="kn-ms-title"
+            /*
+             * 标题已按用户要求去掉 ⇒ 不能再写 `aria-labelledby`（那个 id 已经不存在，
+             * 悬空引用会让读屏念不出弹窗名字 ✗）。
+             */
+            aria-label={props.copy.multiLabel ?? "被添加的知识点"}
             style={multiPos === null ? undefined : { position: "fixed", left: multiPos.x, top: multiPos.y, margin: 0 }}
           >
             <div
@@ -1474,16 +1480,18 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
               onMouseDown={startDragMulti}
               title="按住拖动可以把它挪开，方便继续在对话里选文字"
             >
-              <div className="kn-pick-title" id="kn-ms-title">{props.copy.multiTitle ?? "收集知识点"}</div>
-              <div className="kn-pick-subtitle">
-                {props.copy.multiSubtitle ?? "继续在对话中划词会自动追加，也可以在这里输入"}
-              </div>
+              {/*
+                * 用户要求去掉「收集知识点」这个标题 ✓。
+                * 但**拖拽把手必须留着**：弹窗压住正文时就靠拖开它继续划词 ✓ ——
+                * 所以这里保留一条极简的拖动提示条（`.kn-ms-drag`），而不是留一片空白。
+                */}
+              <div className="kn-ms-drag" aria-hidden="true">⠿ ⠿ ⠿</div>
             </div>
 
             <div className="kn-pick-content">
               <div className="kn-ms-label-row">
                 <span className="kn-pick-label">{props.copy.multiLabel ?? "被添加的知识点"}</span>
-                <span className="kn-ms-hint">{props.copy.multiHint ?? "点击标签可修改名称"}</span>
+                {/* 右侧那行「点击标签可修改名称」用户要求删掉 ✓（标签本身看得出能改，不必写一行说明） */}
               </div>
 
               <div className="kn-ms-composer">
@@ -1515,33 +1523,24 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     </button>
                   </span>
                 ))}
-                <input
-                  className="kn-ms-new"
-                  value={newName}
-                  placeholder={props.copy.multiPlaceholder ?? "输入后按 Enter 添加，或粘贴多行"}
-                  aria-label="添加知识点"
-                  onChange={(event) => { setNewName(event.target.value); }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      setChips((current) => appendChips(current, newName));
-                      setNewName("");
-                      return;
-                    }
-                    /* 空输入时退格删掉最后一个标签（设计稿 ✓） */
-                    if (event.key === "Backspace" && newName === "") {
-                      setChips((current) => (current.length === 0 ? current : current.slice(0, -1)));
-                    }
-                  }}
-                  onPaste={(event) => {
-                    /* 粘贴多行 = 一次加多个 ✓；单行交给默认行为（用户可能只想编辑文字） */
-                    const text = event.clipboardData.getData("text");
-                    if (!/\r|\n/.test(text)) return;
-                    event.preventDefault();
-                    setChips((current) => appendChips(current, text));
-                    setNewName("");
-                  }}
-                />
+                {/*
+                  * **不再提供"手动新增标签"的那个输入框** ✓（用户要求 2026-09）。
+                  *
+                  * 知识点必须来自**对话里的划词**：这样"界面上看到的标签"与"用户真的选过的原文"
+                  * 一一对应，不会出现手打的标题和出处对不上（`text` 才是出处，`title` 只是名字）。
+                  * 标签本身仍然可以就地改名 ✓（见上面的 chip 输入框）—— 用户要求保留这一条。
+                  */}
+                {chips.length === 0 ? (
+                  <span className="kn-ms-placeholder">在对话中划词，选中的文字会出现在这里</span>
+                ) : null}
+              </div>
+
+              {/*
+                * 说明行按用户要求**从头部挪到这里**（标签框下面），文案也简化成一句 ✓。
+                * 位置在框外：不再暗示"可以在这里输入"，只说明划词会自动追加 ✓。
+                */}
+              <div className="kn-ms-details">
+                {props.copy.multiDetails ?? "继续在对话中划词会自动追加"}
               </div>
 
               {/*
@@ -1551,7 +1550,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 * （建独立节点 ↔ 加为前置），radio 的语义比"勾选/不勾选"更准 ✓；
                 * 而且原生 radio 自动带方向键与 Space 操作，键盘可达性不用自己补 ✓。
                 */}
-              <div className="kn-ms-details" role="radiogroup" aria-label={props.copy.multiAsPrereq ?? "是否添加为前置"}>
+              <div className="kn-ms-mode" role="radiogroup" aria-label={props.copy.multiAsPrereq ?? "是否添加为前置"}>
                 <label className="kn-ms-radio">
                   <input
                     type="radio"
@@ -1582,9 +1581,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 <div className="kn-pick-target">
                   <div className="kn-pick-section">{props.copy.targetSection ?? "添加为谁的前置"}</div>
 
-                  <label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>
-                    {props.copy.searchLabel ?? props.copy.searchHint}
-                  </label>
+                  {/*
+                   * 搜索框上方原本还有一行「搜索知识点」文字，用户要求删掉 ✓。
+                   * 去掉可见文字后**可访问性不能跟着掉**：占位符 + `aria-label` 承担搜索框的名字 ✓
+                   * （`<label htmlFor>` 也随之撤掉 —— 没有可见文字就不必再占一行）。
+                   */}
                   <div
                     className="kn-search-wrap"
                     /* 行内也写一份：边框/底色/内边距长在外层，图标与输入框是同一行的 flex 兄弟 ✓ */
@@ -1622,6 +1623,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                       type="search"
                       value={query}
                       placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
+                      /* 可见标签删掉后，名字改由 aria-label 给（读屏仍能念出"搜索知识点"）✓ */
+                      aria-label={props.copy.searchLabel ?? props.copy.searchHint}
                       /* 输入框自己不画框（框在外层），也不依赖任何外部样式表 ✓ */
                       style={{
                         flex: 1,

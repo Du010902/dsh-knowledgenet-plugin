@@ -155,16 +155,17 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
     selected: (count: number) => (zh ? `已选 ${count} 段` : `${count} selected`),
     done: zh ? "完成" : "Done",
     cancel: zh ? "取消" : "Cancel",
+    /*
+     * 用户要求（2026-09）：弹窗**不再显示标题**，说明行改成一句话、并挪到标签框下面；
+     * 底下也不再提供"手动输入新标签"的输入框（知识点只能来自对话划词）。
+     * 被废弃的三项先不删（宿主仍在传），只把还渲染的两项改成新文案 ✓。
+     */
     multiTitle: zh ? "收集知识点" : "Collect nodes",
-    multiSubtitle: zh
-      ? "继续在对话中划词会自动追加，也可以在这里输入"
-      : "Keep selecting text in the chat to append — or type here",
+    multiSubtitle: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
     multiLabel: zh ? "被添加的知识点" : "Nodes to add",
     multiHint: zh ? "点击标签可修改名称" : "Click a tag to rename it",
     multiPlaceholder: zh ? "输入后按 Enter 添加，或粘贴多行" : "Type and press Enter, or paste multiple lines",
-    multiDetails: zh
-      ? "每个标签是一个知识点。选择「添加为前置…」后，再指定它们属于谁"
-      : "Each tag becomes a node. Pick “Add as prerequisite…” to choose their parent",
+    multiDetails: zh ? "继续在对话中划词会自动追加" : "Keep selecting text in the chat to append",
     multiCount: (count: number) => (zh ? `${count} 个知识点` : `${count} node${count === 1 ? "" : "s"}`),
     addStandalone: zh ? "创建独立节点" : "Create standalone",
     /* 合并成一层之后弹窗里的两个互斥选项（radio）：建独立节点 ↔ 加为别人的前置 ✓ */

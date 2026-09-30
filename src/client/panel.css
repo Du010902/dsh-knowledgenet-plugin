@@ -259,6 +259,44 @@
   cursor: default;
 }
 
+/* ---------------- 图标按钮（圆环刷新）：照抄宿主 `.tool` 的圆形图标按钮 ----------------
+   用户要求（2026-09）：把「刷新」从"文字胶囊"改成浏览器里那种圆环箭头。
+   尺寸直接沿用宿主产品里那颗（`ui-sidebar-files/src/client/FilesBody.module.css` 的 `.tool`：
+   28×28 圆 + `padding: 6px` + 15px 字形 + `--dsw-radius-sm` + 透明底、hover 只换底色/字色）✓。
+   注意：`.kn-root-fill .kn-btn` 那几条响应式规则会给按钮写死高度与左右内边距，
+   所以这些"形状"属性统一放在文件**末尾**（同优先级、后出现者胜）—— 见文末那组覆盖。 */
+.kn-icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm, 6px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #526663);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kn-icon-btn:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary, #192523);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+.kn-icon-btn svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.kn-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
 
 .kn-warn-inline {
@@ -586,3 +624,23 @@
   border: 0.5px solid rgba(229, 83, 75, 0.5);
 }
 .kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }
+
+/* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------
+   `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），
+   它们是 `.kn-btn` 单类选择器、与本组同优先级 ⇒ **后出现者胜**。
+   所以圆环刷新按钮的形状只能放在最后，否则某档尺寸下又会被撑回"文字胶囊"✗。 */
+.kn-root-fill .kn-btn.kn-icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm, 6px);
+  background: transparent;
+  line-height: 1;
+  flex: none;
+}
+.kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {
+  border: none;
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--dsw-alias-label-primary, #192523);
+}

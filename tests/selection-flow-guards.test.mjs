@@ -175,17 +175,62 @@ describe("划词添加前置：三条回归的守门", () => {
   });
 
   /*
+   * 回归（用户反馈 2026-09）：**在弹窗里按住鼠标划一段文字**（哪怕只是想复制），
+   * 松手时被 `mouseup` 当成一次划词 ⇒ 那段文字被追加成一个"待建知识点" ✗。
+   *
+   * 用户要求的语义：**只有对话正文里的选中**才等于"要添加的知识点" ✓。
+   * 所以 `selectionInfo()` 必须把"选区落在自己的弹窗/浮条里"直接判成不算数。
+   */
+  it("在自己弹窗里选中的文字不算划词（只有对话正文才算知识点）", () => {
+    assert.ok(
+      code.includes('element.closest(".kn-pick-dialog, .kn-sel-bar")'),
+      "选区落在自家弹窗/浮条里必须排除（否则选中说明文字就会变成知识点）",
+    );
+    assert.ok(code.includes('reason: "in-own-ui"'), "排除要给出可诊断的理由（上报里能看出来）");
+    assert.ok(
+      code.includes("const selectionInfo = ()"),
+      "排除必须长在 selectionInfo 里（浮条、追加标签两条路共用同一个判据）",
+    );
+    /* 队友判据不能被这条改动顶掉：输入框、侧栏、空选区仍然照旧排除 ✓ */
+    for (const kept of ['"input, textarea, [contenteditable=\'true\']"', "in-sidebar", "no-selection"]) {
+      assert.ok(code.includes(kept), `原有排除条件被删了：${kept}`);
+    }
+  });
+
+  /*
+   * 用户要求：删掉弹窗里两处多余文字 ——
+   * ① 标签组右侧的「点击标签可修改名称」；② 搜索框上方的「搜索知识点」。
+   * 删文字不能把**可访问性**一起删掉：搜索框改由 `aria-label` 承担名字 ✓。
+   */
+  it("弹窗里不显示多余的说明文字，但搜索框仍有可访问名字", () => {
+    assert.equal(code.includes("点击标签可修改名称"), false, "「点击标签可修改名称」必须删掉");
+    assert.equal(
+      code.includes("props.copy.searchLabel ?? props.copy.searchHint}</label>"),
+      false,
+      "搜索框上方那行「搜索知识点」必须删掉",
+    );
+    assert.equal(
+      code.includes('<label className="kn-pick-label" htmlFor={PICK_SEARCH_ID}>'),
+      false,
+      "没有可见文字之后不该再留一个空的 <label htmlFor>",
+    );
+    assert.ok(
+      code.includes("aria-label={props.copy.searchLabel ?? props.copy.searchHint}"),
+      "搜索框要用 aria-label 补上名字（读屏仍能念出来）",
+    );
+  });
+
+  /*
    * 「收集知识点」弹窗（点浮条后出现的那个）形态按设计稿 `knowledgenet-multiselect-design.html`：
-   * 头部可拖动 → 标签组（可改名、可 × 删除）→ 末尾输入框（Enter / 粘贴多行 / 退格删最后一个）
-   * → 说明一行 → 底部计数与三个动作。
+   * 头部可拖动 → 标签组（可改名、可 × 删除）→ 底部计数与动作按钮。
+   *
+   * 2026-09 用户又提了三条（见下面那条测试）：**去掉标题**、说明行挪到标签框下面、
+   * **不再提供手动输入新标签的输入框**（知识点只能来自对话划词）✓。
    */
   it("「收集知识点」弹窗保持设计稿的形态与交互", () => {
-    for (const token of ["kn-ms-composer", "kn-ms-chip", "kn-ms-remove", "kn-ms-new", "kn-pick-foot"]) {
+    for (const token of ["kn-ms-composer", "kn-ms-chip", "kn-ms-remove", "kn-pick-foot"]) {
       assert.ok(code.includes(token), `设计稿元素缺失：${token}`);
     }
-    assert.ok(code.includes('event.key === "Enter"'), "Enter 添加标签");
-    assert.ok(code.includes("onPaste"), "粘贴多行要一次加多个标签");
-    assert.ok(code.includes('event.key === "Backspace"'), "空输入时退格删掉最后一个标签");
     assert.ok(code.includes("multiCount"), "底部要显示「N 个知识点」");
     assert.ok(code.includes("appendChips("), "标签追加要走去重 + 上限那套逻辑");
     assert.equal(code.includes("kn-sel-textarea"), false, "旧的 textarea 形态必须撤掉（连样式一起）");
@@ -197,6 +242,42 @@ describe("划词添加前置：三条回归的守门", () => {
       /kn-pick-dialog \{[\s\S]{0,400}pointer-events: auto/.test(code),
       "弹窗本体必须显式 pointer-events: auto，否则按钮和标签全都点不动",
     );
+  });
+
+  /*
+   * 回归（用户反馈 2026-09，第三条迭代）：弹窗里那套"手动输入"整体撤掉 ✓
+   * ① 标题「收集知识点」不再显示；
+   * ② 说明挪到「被添加的知识点」框**下面**，文案简化成"继续在对话中划词会自动追加"；
+   * ③ **不能手动新增知识点**（输入框连同 Enter / 粘贴多行 / 退格删最后一个一起撤掉），
+   *    但**已选中的标签仍可就地改内容**（用户明确要求保留这一条）。
+   */
+  it("弹窗去掉标题、说明挪到标签框下、且不能手动新增知识点（仍可改名）", () => {
+    assert.equal(code.includes("kn-ms-new"), false, "手动新增标签的输入框必须撤掉（连样式一起）");
+    assert.equal(code.includes("newName"), false, "配合输入框的状态必须一起删掉");
+    assert.equal(code.includes('aria-labelledby="kn-ms-title"'), false, "标题删了就不能再指向它（悬空引用）");
+    assert.equal(code.includes("kn-ms-title"), false, "标题元素与 id 都要撤掉");
+    /* 标题区块仍在，但只承担"拖动把手" */
+    assert.ok(code.includes("kn-pick-head"), "头部要保留（拖开弹窗才能继续在对话里划词）");
+    assert.ok(code.includes("onMouseDown={startDragMulti}"), "头部仍是拖动把手");
+    /* 说明行的位置：必须写在标签框（composer）结束之后 */
+    const composerEnd = code.indexOf("kn-ms-placeholder");
+    const detailsAt = code.indexOf('className="kn-ms-details"');
+    const modeAt = code.indexOf('role="radiogroup"');
+    assert.ok(composerEnd > 0 && detailsAt > composerEnd, "说明行要在「被添加的知识点」框下面");
+    assert.ok(modeAt > detailsAt, "开关要排在说明行之后（说明属于标签框，不属于开关）");
+    assert.ok(
+      code.includes('{props.copy.multiDetails ?? "继续在对话中划词会自动追加"}'),
+      "说明文案要简化成一句",
+    );
+    /* 仍可就地改名：chip 里那个受控 input 必须是可写的 */
+    assert.ok(code.includes("className=\"kn-ms-chip\""), "标签形态要在");
+    assert.ok(
+      /kn-ms-chip input[\s\S]{0,200}onChange/.test(code) || code.includes("(i === index ? value : item)"),
+      "标签内容仍要能就地修改",
+    );
+    /* 划词追加这条路不能断：弹窗开着时继续划词要能进来 */
+    assert.ok(code.includes("collecting.current"), "划词自动追加的开关必须在");
+    assert.ok(code.includes("appendChips(current, text)"), "划词追加仍要走 appendChips");
   });
 
   it("点浮条之外的任何地方都要收掉浮条，而且不许被 mouseup 弹回来", () => {

@@ -24,6 +24,7 @@ import { rememberSessionId } from "./chat-selection.ts";
 import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } from "./current-context.ts";
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
+import { RefreshRingIcon } from "./PanelIcon.tsx";
 import { ShadowPanel } from "./shadow.tsx";
 import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
 
@@ -528,8 +529,22 @@ function GraphPanelInner(props: {
         <button type="button" className="kn-btn" onClick={() => setRelayoutToken((value) => value + 1)}>
           {t("relayout")}
         </button>
-        <button type="button" className="kn-btn" title={t("refreshHint")} onClick={() => { setRefreshing(true); void load({ refresh: true }).finally(() => { setRefreshing(false); }); }} disabled={refreshing}>
-          {t("refresh")}
+        {/*
+          * 「刷新」按用户要求改成**浏览器那颗圆环刷新按钮**的形态 ✓：
+          * 无边框、无底色、尺寸正方 —— 远看就是一个圆环。
+          *
+          * 文字改由 `aria-label` 承担：可见文字去掉后，读屏仍念得出"刷新" ✓；
+          * `title` 上的说明（重新从磁盘读取知识库）保持不变 ✓。
+          */}
+        <button
+          type="button"
+          className="kn-btn kn-icon-btn"
+          aria-label={t("refresh")}
+          title={t("refreshHint")}
+          onClick={() => { setRefreshing(true); void load({ refresh: true }).finally(() => { setRefreshing(false); }); }}
+          disabled={refreshing}
+        >
+          <RefreshRingIcon />
         </button>
 
       </div>
