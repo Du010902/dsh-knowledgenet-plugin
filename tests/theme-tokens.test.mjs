@@ -237,10 +237,12 @@ describe("主题 token", () => {
     const editor = readFileSync(path.join(CLIENT, "NodeDocumentEditor.tsx"), "utf8");
     const panel = readFileSync(path.join(CLIENT, "panel.css"), "utf8");
     const overrides = readFileSync(path.join(CLIENT, "editor-overrides.css"), "utf8");
-    /* 顶部：标题 + 模式切换 + 详情 + 关闭，都在同一行 ✓ */
+    /* 顶部：标题（含未保存标记）+ 模式切换 + 关闭，都在同一行 ✓；底栏与「⋯ 详情」已撤掉 ✗ */
     assert.ok(editor.includes('className="kn-editor-heading"'), "头部是紧凑标题栏 ✓");
-    assert.ok(editor.includes('className="kn-editor-more"'), "路径/修订号/快捷键收进「详情」✓");
-    assert.ok(editor.includes('className="kn-editor-details"'), "详情面板按需展开 ✓");
+    assert.ok(editor.includes('className="kn-editor-dirty"'), "未保存标记在标题右上角 ✓");
+    for (const gone of ["kn-editor-more", "kn-editor-details", "kn-editor-foot", "kn-editor-save"]) {
+      assert.ok(!editor.includes(gone), `${gone} 已撤掉 ⇒ 不许长回来 ✗`);
+    }
     assert.ok(!editor.includes("kn-editor-tag"), "常驻「节点笔记」徽标要撤掉 ✗（占高度 ✓）");
     /* 纵向滚动：只有 .kn-editor-body ✓；富容器不再自己滚 ✓ */
     assert.ok(

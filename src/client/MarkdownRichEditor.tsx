@@ -15,14 +15,35 @@
  *    `markdownUpdated` 一律忽略 ✓（初始化解析出的规范化文本**不算**用户修改 ✓）；
  * 4. **卸载取消按实例** ✗（P1-1）：每次挂载用自己的 `cancelled` 标志 ✓，
  *    晚完成的实例立刻销毁 ✓，绝不附着到新节点上 ✓；
- * 5. 失败要**可见** ✗（P2-6）：`onStatus` 上报 ready/failed，父面板显示错误并可切源码 ✓。
+ * 5. 失败要**可见** ✗（P2-6）：`onStatus` 上报 ready/failed，父面板显示错误并自动改用纯文本 ✓。
  */
-import { useEffect, useImperativeHandle, useRef, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
+import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
+import type { Ctx } from "@milkdown/kit/ctx";
+import {
+  addColAfterCommand,
+  addColBeforeCommand,
+  addRowAfterCommand,
+  addRowBeforeCommand,
+  setAlignCommand,
+} from "@milkdown/kit/preset/gfm";
+import { deleteColumn, deleteRow } from "@milkdown/kit/prose/tables";
+import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
 import { replaceAll } from "@milkdown/kit/utils";
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+
+import { makeTranslator } from "./card-model.ts";
+import { TableMenu } from "./TableMenu.tsx";
+import {
+  TABLE_LITERAL,
+  menuPosition,
+  readTableContext,
+  type TableAlignment,
+  type TableMenuAction,
+} from "./table-menu.ts";
 
 /**
  * **代码/公式源码区的 CodeMirror 主题**（`design/code-and-math-block-redesign.md` ✓）。
@@ -95,6 +116,13 @@ export interface MarkdownRichEditorStatus {
   composing: boolean;
 }
 
+/** 表格菜单在正文容器里的锚点（**内容坐标** ✓；`null` = 不显示 ✓） */
+interface TableMenuAnchor {
+  top: number;
+  right: number;
+  alignment: TableAlignment;
+}
+
 /**
  * 渲染富文本编辑区。
  * @param props.markdown - 初始正文（**只在挂载时**使用 ✓，之后由用户编辑或 syncToken 驱动 ✓）。
@@ -104,6 +132,7 @@ export interface MarkdownRichEditorStatus {
  * @param props.handleRef - 拿到 flush / replaceMarkdown / focus / isReady ✓。
  * @param props.onStatus - 就绪 / 失败 / 组合状态上报 ✓。
  * @param props.report - 诊断上报（可选 ✓）。
+ * @param props.t - 宿主 locale 函数（表格菜单文案用 ✓）。
  * @returns 编辑区容器。
  */
 export function MarkdownRichEditor(props: {
@@ -114,9 +143,20 @@ export function MarkdownRichEditor(props: {
   handleRef?: RefObject<MarkdownRichEditorHandle | null> | undefined;
   onStatus?: ((status: MarkdownRichEditorStatus) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
+  t?: unknown;
 }): ReactNode {
+  const t = useMemo(() => makeTranslator(props.t, TABLE_LITERAL), [props.t]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
+  /** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
+  const viewRef = useRef<ProseMirrorView | null>(null);
+  /**
+   * 表格菜单当前该在哪（`null` = 不显示 ✓）。
+   * 只由**编辑器 selection** 决定 ✓（不靠鼠标悬停推断 ✗，文档第 3 节 ✓）。
+   */
+  const [menu, setMenu] = useState<TableMenuAnchor | null>(null);
+  /** rAF 合并：选区变化会连续触发，没必要每条都重算 ✓ */
+  const menuFrameRef = useRef<number | null>(null);
   const readyRef = useRef(false);
   const failedRef = useRef(false);
   const composingRef = useRef(false);
@@ -152,6 +192,111 @@ export function MarkdownRichEditor(props: {
       composing: composingRef.current,
     });
   };
+
+  /**
+   * 重算表格菜单：**只看编辑器 selection** ✓。
+   * 不在表格里 / 未就绪 / 失败 / 只读 ⇒ 一律收起 ✓（保存期间菜单也不该还在 ✓）。
+   * 位置用"表格块的视口矩形 − 正文滚动容器的视口矩形 + scrollTop"换算成**内容坐标** ✓，
+   * 于是菜单跟着正文一起滚，不需要在滚动时重算 ✓。
+   */
+  const syncMenu = useCallback((): void => {
+    const view = viewRef.current;
+    const host = hostRef.current;
+    if (view === null || host === null || !readyRef.current || failedRef.current || readOnlyRef.current) {
+      setMenu(null);
+      return;
+    }
+    const context = readTableContext(view.state);
+    if (!context.inTable) {
+      setMenu(null);
+      return;
+    }
+    const container = host.closest<HTMLElement>(".kn-editor-body");
+    const anchor = view.domAtPos(view.state.selection.from).node;
+    const element = anchor.nodeType === 1 ? (anchor as HTMLElement) : anchor.parentElement;
+    const block = element?.closest<HTMLElement>(".milkdown-table-block") ?? null;
+    if (container === null || block === null) {
+      setMenu(null);
+      return;
+    }
+    const position = menuPosition(
+      block.getBoundingClientRect(),
+      container.getBoundingClientRect(),
+      container.scrollTop,
+    );
+    /* 位置与高亮都没变就**复用原对象** ⇒ React 不重渲染 ✓（选区一直在变 ✓） */
+    setMenu((previous: TableMenuAnchor | null) => {
+      if (previous !== null && previous.top === position.top && previous.right === position.right) {
+        return previous.alignment === context.alignment ? previous : { ...previous, alignment: context.alignment };
+      }
+      return { ...position, alignment: context.alignment };
+    });
+  }, []);
+
+  /** 合并到下一帧再算 ✓（点击、方向键、输入、输入法结束、窗口尺寸都会走这里 ✓） */
+  const scheduleMenu = useCallback((): void => {
+    if (menuFrameRef.current !== null) return;
+    menuFrameRef.current = requestAnimationFrame(() => {
+      menuFrameRef.current = null;
+      syncMenu();
+    });
+  }, [syncMenu]);
+
+  /**
+   * 执行一个表格动作 ✓。
+   *
+   * 为什么必须走 `editor.action`：命令要拿**编辑器自己的 ctx**（`commandsCtx` 的命令表、
+   * `editorViewCtx` 的当前视图 ✓），另建一套等于对着另一个编辑器下命令 ✗。
+   * - 插行/插列/对齐用 Milkdown 的表格命令 ✓（插行会带上本列的 alignment ✓）；
+   * - 删行/删列用 prosemirror-tables 的 `deleteRow` / `deleteColumn` ✓ ——
+   *   它按**当前选区**定位，不需要我们先"选中整行再删" ✓。
+   */
+  const runTableAction = useCallback((action: TableMenuAction): void => {
+    const crepe = crepeRef.current;
+    const view = viewRef.current;
+    /*
+     * **动手前再确认一次** ✓：菜单位置/显隐是"下一帧"才算出来的 ⇒ 这一拍选区可能已经跑掉了。
+     * `deleteRow` / `addColumnBefore` 这类命令在表格外会抛 `RangeError` ✗
+     * ⇒ 与其把异常丢进事件处理器（ErrorBoundary 只接渲染错误 ✗），不如查一次并安静收起 ✓。
+     */
+    if (
+      crepe === null || view === null || !readyRef.current || failedRef.current
+      || !readTableContext(view.state).inTable
+    ) {
+      setMenu(null);
+      return;
+    }
+    try {
+      crepe.editor.action((ctx: Ctx) => {
+        const commands = ctx.get(commandsCtx);
+        switch (action) {
+          case "row-before": commands.call(addRowBeforeCommand.key); break;
+          case "row-after": commands.call(addRowAfterCommand.key); break;
+          case "col-before": commands.call(addColBeforeCommand.key); break;
+          case "col-after": commands.call(addColAfterCommand.key); break;
+          case "align-left": commands.call(setAlignCommand.key, "left"); break;
+          case "align-center": commands.call(setAlignCommand.key, "center"); break;
+          case "align-right": commands.call(setAlignCommand.key, "right"); break;
+          case "row-delete": {
+            const view = ctx.get(editorViewCtx) as ProseMirrorView;
+            deleteRow(view.state, view.dispatch);
+            break;
+          }
+          case "col-delete": {
+            const view = ctx.get(editorViewCtx) as ProseMirrorView;
+            deleteColumn(view.state, view.dispatch);
+            break;
+          }
+        }
+      });
+    } catch (error) {
+      /* 命令自己拒绝（例如选区在两次读取之间变了）⇒ 收起菜单、把原因留给诊断 ✓ */
+      reportRef.current?.("table-action-failed", `${action}: ${String(error)}`);
+      setMenu(null);
+    }
+    /* 动作改了文档与选区 ⇒ 下一帧重算位置与对齐高亮 ✓ */
+    scheduleMenu();
+  }, [scheduleMenu]);
 
   useEffect(() => {
     const root = hostRef.current;
@@ -240,6 +385,20 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("compositionstart", onCompositionStart, true);
     root.addEventListener("compositionend", onCompositionEnd, true);
 
+    /*
+     * **表格菜单的触发条件**：选区变了就重算 ✓ ——
+     * 点击、方向键、输入、输入法结束、窗口尺寸都会走到 `scheduleMenu` ✓（rAF 合并 ✓）。
+     * 刻意**不**监听 `.kn-editor-body` 的滚动 ✗：菜单位于该容器的内容坐标系里，
+     * 跟着内容一起滚 ⇒ 滚动不影响它的相对位置 ✓。
+     */
+    const onSelectionChanged = (): void => { scheduleMenu(); };
+    root.addEventListener("pointerup", onSelectionChanged, true);
+    root.addEventListener("keyup", onSelectionChanged, true);
+    root.addEventListener("focusin", onSelectionChanged, true);
+    root.addEventListener("compositionend", onSelectionChanged, true);
+    document.addEventListener("selectionchange", onSelectionChanged);
+    window.addEventListener("resize", onSelectionChanged);
+
     syncingRef.current = true;
     void crepe.create().then(
       () => {
@@ -251,6 +410,8 @@ export function MarkdownRichEditor(props: {
         crepeRef.current = crepe;
         readyRef.current = true;
         crepe.setReadonly(readOnlyRef.current);
+        /* 拿住 ProseMirror 视图：表格菜单要按它的 selection 判断显隐与定位 ✓ */
+        viewRef.current = crepe.editor.action((ctx: Ctx) => ctx.get(editorViewCtx) as ProseMirrorView);
         /*
          * **补上初始化期间攒下的同步** ✗（P1-1）：这期间 reducer 可能已经换了正文
          * （恢复草稿、重试读取、确认采用最新版 ✓）⇒ 这里用**最新**那份整体替换 ✓。
@@ -264,6 +425,7 @@ export function MarkdownRichEditor(props: {
         syncingRef.current = false;
         syncTokenRef.current = props.syncToken ?? 0;
         emitStatus();
+        scheduleMenu();
         reportRef.current?.("markdown-editor-ready", { bytes: pending.length });
       },
       (error: unknown) => {
@@ -271,6 +433,7 @@ export function MarkdownRichEditor(props: {
         if (cancelled || disposedRef.current) return;
         failedRef.current = true;
         emitStatus();
+        setMenu(null);
         reportRef.current?.("markdown-editor-failed", String(error));
       },
     );
@@ -280,18 +443,32 @@ export function MarkdownRichEditor(props: {
       disposedRef.current = true;
       readyRef.current = false;
       crepeRef.current = null;
+      viewRef.current = null;
+      if (menuFrameRef.current !== null) {
+        cancelAnimationFrame(menuFrameRef.current);
+        menuFrameRef.current = null;
+      }
+      setMenu(null);
       root.removeEventListener("compositionstart", onCompositionStart, true);
       root.removeEventListener("compositionend", onCompositionEnd, true);
+      root.removeEventListener("pointerup", onSelectionChanged, true);
+      root.removeEventListener("keyup", onSelectionChanged, true);
+      root.removeEventListener("focusin", onSelectionChanged, true);
+      root.removeEventListener("compositionend", onSelectionChanged, true);
+      document.removeEventListener("selectionchange", onSelectionChanged);
+      window.removeEventListener("resize", onSelectionChanged);
       void crepe.destroy();
     };
     /* 只在挂载时建一次 ✓（后续内容变化由 sync effect 处理 ✓） */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* 只读开关：保存期间**整块**不可编辑 ✓（不是只禁用工具栏 ✗） */
+  /* 只读开关：保存期间**整块**不可编辑 ✓（不是只禁用工具栏 ✗）⇒ 表格菜单也一起收起 ✓ */
   useEffect(() => {
     crepeRef.current?.setReadonly(props.readOnly);
-  }, [props.readOnly]);
+    if (props.readOnly) setMenu(null);
+    else scheduleMenu();
+  }, [props.readOnly, scheduleMenu]);
 
   /*
    * **外部替换**（token 变化）⇒ 整体替换 ✓；未就绪就先记账，等 `create()` 成功后补上 ✓（P1-1）。
@@ -313,7 +490,9 @@ export function MarkdownRichEditor(props: {
     crepe.editor.action(replaceAll(next));
     syncingRef.current = false;
     pendingRef.current = null;
-  }, [props.syncToken]);
+    /* 整篇换掉了 ⇒ 表格可能已经不在（或换了一个）✓ */
+    scheduleMenu();
+  }, [props.syncToken, scheduleMenu]);
 
   useImperativeHandle(props.handleRef, () => ({
     flush: (): string | null => {
@@ -335,12 +514,32 @@ export function MarkdownRichEditor(props: {
       crepe.editor.action(replaceAll(markdown));
       syncingRef.current = false;
       pendingRef.current = null;
+      scheduleMenu();
     },
     focus: () => {
       hostRef.current?.querySelector<HTMLElement>(".ProseMirror, [contenteditable='true']")?.focus();
     },
     isReady: () => readyRef.current && !failedRef.current,
-  }), []);
+  }), [scheduleMenu]);
 
-  return <div className="kn-editor-rich" ref={hostRef} data-testid="kn-markdown-rich" />;
+  /*
+   * 渲染：Milkdown 挂载点 + （光标在表格里才有的）表格菜单 ✓。
+   * 菜单是**正文滚动容器的绝对定位子元素** ✓（`.kn-editor-body` 是 `position: relative` ✓）
+   * ⇒ 与 ProseMirror 的 DOM 完全分离 ✗（不往 node view 里塞外来节点 ✓），
+   * 也不占正文高度 ✓（文档要求"结构工具只在主动操作表格时出现" ✓）。
+   */
+  return (
+    <>
+      <div className="kn-editor-rich" ref={hostRef} data-testid="kn-markdown-rich" />
+      {menu === null ? null : (
+        <TableMenu
+          top={menu.top}
+          right={menu.right}
+          alignment={menu.alignment}
+          t={t}
+          onAction={runTableAction}
+        />
+      )}
+    </>
+  );
 }

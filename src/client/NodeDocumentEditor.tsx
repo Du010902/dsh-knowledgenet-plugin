@@ -29,8 +29,11 @@ import {
 import {
   EDITOR_LITERAL,
   canSave,
+  commitSavedDraft,
   createLatestGuard,
   createSaveGate,
+  diffLines,
+  draftKey,
   editorReducer,
   scanUnsupportedSyntax,
   failureKey,
@@ -39,7 +42,8 @@ import {
   isDirty,
   recallDraft,
   rememberDraft,
-  statusText,
+  saveCommit,
+  type DiffLine,
 } from "./node-document-state.ts";
 
 /**
@@ -85,6 +89,14 @@ export function NodeDocumentEditor(props: {
   const [confirmAdopt, setConfirmAdopt] = useState(false);
   /** 复制草稿的反馈（null = 还没复制过 ✓） */
   const [copyState, setCopyState] = useState<"done" | "failed" | null>(null);
+  /**
+   * **当下这份状态**（每次渲染都刷新 ✓）。
+   *
+   * 为什么需要 ✗：保存是异步的，回调里能看到的 `state` 是**发起保存那一刻**的闭包值 ✗ ——
+   * 而"提交之后还有没有新修改"必须按**当下**这份判断 ✓（`saveCommit` 要用它 ✓）。
+   */
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   /*
    * **稳定的依赖**（复查 P1-1）：回调用 ref 保管、目标对象用"键"参与依赖 ✓，
@@ -134,17 +146,21 @@ export function NodeDocumentEditor(props: {
    */
   const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | null>(null);
   /**
-   * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 默认停在源码模式 ✓。
-   * 必须跟着 draft 走 ✗：只看载入基线的话，用户在源码里新加 HTML/脚注/指令后
-   * 警告不会更新，切回正文也不会被拦 ✗（第二次复查 P2-3 ✓）。
+   * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 自动改用纯文本兜底 ✓。
+   * 必须跟着 draft 走 ✗：只看载入基线的话，用户在纯文本里新加 HTML/脚注/指令后
+   * 提示与"回正文要显式点一次"都不会更新 ✗（第二次复查 P2-3 ✓）。
    */
   const unsupported = useMemo(() => scanUnsupportedSyntax(state.draft).reasons, [state.draft]);
-  /** 已经为哪个节点做过"载入即判源码"的判定 ✓（每节点只判定一次 ✓） */
+  /*
+   * 比较区的逐行差异：**只在真的展开比较时**才算 ✓（纯函数 + useMemo：不在每次输入时重算整篇 ✗）。
+   * 超过上限（超大文档）会退化成"整篇标为不同"，不给编辑器制造卡顿 ✓（见 `diffLines` ✓）。
+   */
+  const conflictDiff = useMemo(() => {
+    if (!state.conflicted || !state.comparing || state.latest === null) return null;
+    return diffLines(state.draft, state.latest.text);
+  }, [state.conflicted, state.comparing, state.latest, state.draft]);
+  /** 已经为哪个节点做过"载入即判纯文本"的判定 ✓（每节点只判定一次 ✓） */
   const autoSourceRef = useRef<string | null>(null);
-  /** 用户显式点过"仍要用正文模式打开" ⇒ 允许这次有损风险 ✓（每次换节点重置 ✓） */
-  const [richOverride, setRichOverride] = useState(false);
-  /** 详情面板是否展开 ✓（路径 / 修订号 / 快捷键按需查看 ✓） */
-  const [details, setDetails] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
 
   const fetcher = useMemo<FetchLike>(
@@ -195,9 +211,20 @@ export function NodeDocumentEditor(props: {
     const cached = recallDraft(cacheKeyRef.current);
     if (cached !== undefined) {
       dispatch({ type: "restore-draft", draft: cached.draft, base: cached.base, hash: cached.hash });
+      /* 留痕：重开时到底恢复了什么（**不含正文** ✓，只看脏不脏 / 有没有指纹 ✓） */
+      reportRef.current?.("node-document-draft-recall", {
+        nodeId: props.nodeId,
+        dirty: cached.draft !== cached.base,
+        hasHash: cached.hash !== "",
+      });
     }
     void load();
     return () => {
+      /* 留痕：编辑器何时因关闭/切换被卸载（与"缓存提交""通知离开"对照 ✓，不含正文 ✓） */
+      reportRef.current?.("node-document-unmount", {
+        nodeId: props.nodeId,
+        dirty: stateRef.current.draft !== stateRef.current.base,
+      });
       /* 卸载：让在飞的请求全部失效（成功与失败分支都过不去 ✓），草稿则留在缓存里 ✓ */
       seqRef.current += 1;
       abortRef.current?.abort();
@@ -221,10 +248,28 @@ export function NodeDocumentEditor(props: {
 
   /* 有未保存修改就报给父面板（只影响"要不要拦"，不会触发重读 ✓） */
   const dirty = isDirty(state);
+  /** 节点身份标题（空标题回落到 id ✓）：头部与悬停提示共用 ✓ */
+  const title = state.title === "" ? props.nodeId : state.title;
   useEffect(() => {
     onDirtyChangeRef.current?.(dirty);
   }, [dirty]);
   useEffect(() => () => { onDirtyChangeRef.current?.(false); }, []);
+
+  /*
+   * **冲突判定留痕**：只在状态**变化**时上报一次 ✓（不含正文 ✗；文档要求只记"指纹是否相等"这类事实 ✓）。
+   * 排查"保存并关闭后重开怎么又冲突了"时，把 `node-document-cache-commit` / `node-document-leave-notify` /
+   * `node-document-unmount` / `node-document-draft-recall` 与这两条按时间线对起来看 ✓。
+   */
+  const conflictRef = useRef(state.conflicted);
+  useEffect(() => {
+    if (state.conflicted === conflictRef.current) return;
+    conflictRef.current = state.conflicted;
+    reportRef.current?.(state.conflicted ? "node-document-conflict-detected" : "node-document-conflict-cleared", {
+      nodeId: props.nodeId,
+      draftEqualsBase: state.draft === state.base,
+      hasLatest: state.latest !== null,
+    });
+  }, [state.conflicted, state.draft, state.base, state.latest, props.nodeId]);
 
   /*
    * 把"现在能不能保存"报给父面板 ✓：父面板据此**提前禁用**离开弹窗里的「保存并继续」✗
@@ -239,27 +284,40 @@ export function NodeDocumentEditor(props: {
   }, [saveable]);
 
   /*
-   * 复查 P1-4：**不支持语法默认留在源码模式** ✗ —— 富编辑器不能表示原始 HTML、
-   * 自定义指令、脚注、引用式链接定义等，用户动一个普通段落后整篇会被重新序列化 ⇒
-   * 那些内容可能被规范化甚至丢掉 ✗。这里在正文到位后嗅探一次，命中就默认切源码 ✓
-   * （源码模式是同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
+   * **纯文本兜底**（用户不要「正文 / 源码」切换 ⇒ 模式不再由用户挑 ✓）。
+   *
+   * 复查 P1-4：富编辑器不能表示原始 HTML、自定义指令、脚注、引用式链接定义等，
+   * 用户动一个普通段落后整篇会被重新序列化 ⇒ 那些内容可能被规范化甚至丢掉 ✗。
+   * 所以命中这些语法时**自动**改用纯文本编辑（同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
    */
   useEffect(() => {
     if (state.phase !== "ready") return;
     /*
      * **只在这个节点载入时判定一次** ✗（第三次复查 P2-2）：
-     * 之前依赖 `unsupported.length` ⇒ 用户编辑中途新出现一个潜在语法就会被**突然踢出正文** ✗。
-     * 编辑途中的变化只走"提示 + 进正文前的校验"✓，不主动切模式 ✓。
+     * 之前依赖 `unsupported.length` ⇒ 用户编辑途中新出现一个潜在语法就会被**突然踢出正文** ✗。
      */
     if (autoSourceRef.current === props.nodeId) return;
     autoSourceRef.current = props.nodeId;
     if (unsupported.length > 0) setTab("source");
   }, [state.phase, props.nodeId, unsupported.length]);
 
-  /* 换节点 ⇒ 重新给一次"仍要用正文模式打开"的机会 ✓ */
+  /*
+   * 富编辑器**起不来**（初始化失败）⇒ 自动落到纯文本 ✓：
+   * 没有「源码」按钮之后，这是那份草稿在面板里唯一还能改、能存的出口 ✗（不许让它变成只读 ✓）。
+   */
   useEffect(() => {
-    setRichOverride(false);
-  }, [props.nodeId]);
+    if (tab === "rich" && richStatus.failed) setTab("source");
+  }, [tab, richStatus.failed]);
+
+  /*
+   * 停在纯文本是因为**语法**，而用户已经把那些语法删干净了 ⇒ 自动回正文 ✓
+   * （否则他会被永远留在纯文本里，可这个模式从来不是他自己选的 ✗）。
+   * 富编辑器失败时不回（回去也起不来 ✓）；已经在正文时什么都不做 ✓。
+   */
+  useEffect(() => {
+    if (tab !== "source" || richStatus.failed || unsupported.length > 0) return;
+    setTab("rich");
+  }, [tab, richStatus.failed, unsupported.length]);
 
   /* 读取完成后把焦点给正文（设计稿要求 ✓） */
   useEffect(() => {
@@ -314,22 +372,46 @@ export function NodeDocumentEditor(props: {
       );
       if (outcome === undefined) return false;
       if (outcome.ok === true) {
-        /* `submitted` 用来把宿主**规范化后的正文**同步回草稿 ⇒ 不会一直显示"未保存" ✓ */
+        /*
+         * **顺序就是这次要修的东西** ✓（`design/save-and-close-reopen-conflict-optimization.md`）：
+         * ① 先算"保存确认"（草稿/基线/指纹/身份，与 reducer 同一套规则 ✓）；
+         * ② 再**同步**落缓存 —— 父面板接下来会立刻卸载编辑器，靠 effect 就来不及了 ✗；
+         * ③ 然后更新界面状态；
+         * ④ 最后才通知父面板去关闭/切换 ✓。
+         *
+         * 少了 ② 就会出现：刚点"保存并关闭"，重开却看到星号 + "文件在外部发生了变化"✗
+         * —— 那是**自己的保存**被残留的旧草稿缓存误判成外部修改 ✓。
+         */
+        const commit = saveCommit(stateRef.current.draft, outcome.document, text);
+        /*
+         * 键要取**组件实际在用的那个** ✓（别自己拼：调用方可以用 `draftKey` 自定义键 ✗）；
+         * 自定义键不含节点身份 ⇒ 身份被采用后仍然用同一个键 ✓。
+         */
+        const previousKey = cacheKeyRef.current;
+        const nextKey = props.draftKey === undefined
+          ? draftKey(props.libraryKey ?? "", outcome.document.nodeId)
+          : previousKey;
+        const cached = commitSavedDraft(previousKey, nextKey, commit);
         dispatch({ type: "save-ok", document: outcome.document, submitted: text });
-        /* 身份被"采用"（adopted-* → ULID）⇒ 草稿搬到新键、**旧键删掉** ✓（复查 P2-4 ✓） */
-        if (outcome.document.nodeId !== props.nodeId) {
-          forgetDraft(`${props.libraryKey ?? ""}::${props.nodeId}`);
-          rememberDraft(`${props.libraryKey ?? ""}::${outcome.document.nodeId}`, {
-            draft: outcome.document.text,
-            base: outcome.document.text,
-            hash: outcome.document.hash,
-          });
-        }
+        reportRef.current?.("node-document-cache-commit", {
+          nodeId: outcome.document.nodeId,
+          kept: cached.kept,
+          adopted: outcome.document.nodeId !== props.nodeId,
+          hashSame: outcome.document.hash === hash,
+        });
         reportRef.current?.("node-document-saved", {
           nodeId: outcome.document.nodeId,
           revision: outcome.document.revision,
         });
-        saveOutcomeRef.current?.(false, "saved");
+        /*
+         * 提交之后**还有新修改** ⇒ 报一个不同的 outcome ✓：父面板收到非 "saved" 会清掉待办与弹窗
+         * ⇒ **留在编辑区**，不把用户没保存的字藏起来 ✗（文档「保存确认成功但仍有新草稿」那一行 ✓）。
+         */
+        saveOutcomeRef.current?.(false, commit.dirty ? "saved-dirty" : "saved");
+        reportRef.current?.(
+          commit.dirty ? "node-document-saved-stay" : "node-document-leave-notify",
+          { nodeId: outcome.document.nodeId },
+        );
         onSavedRef.current?.(outcome.document);
         return true;
       }
@@ -354,12 +436,12 @@ export function NodeDocumentEditor(props: {
 
   /**
    * **统一取出"当前正文快照"**（复查 P1-2/P1-3；第二次复查 P1-1 补上**按模式取值** ✓）。
-   * 普通保存、重试、保存并继续、合并保存、切到源码、关闭 —— 全都必须先经过这里 ✓。
+   * 普通保存、重试、保存并继续、合并保存、退回纯文本、关闭 —— 全都必须先经过这里 ✓。
    *
    * **按当前模式读** ✗（这是我上一版最大的错 ✗）：
-   * - **源码模式**：富编辑器**根本没挂载** ⇒ 直接读受控 textarea 的最新草稿（就是 `state.draft`）✓；
-   *   绝不能因为"富实例不在"就判定"取不到正文" ✗ —— 那会让源码模式、以及
-   *   "不支持语法自动转源码""初始化失败回退源码"三条路**全部无法保存** ✗✗；
+   * - **纯文本兜底**（`tab === "source"`）：富编辑器**根本没挂载** ⇒ 直接读受控 textarea 的最新草稿（就是 `state.draft`）✓；
+   *   绝不能因为"富实例不在"就判定"取不到正文" ✗ —— 那会让纯文本兜底、以及
+   *   "不支持语法自动转纯文本""初始化失败回退纯文本"两条路**全部无法保存** ✗✗；
    * - **正文模式**：必须有就绪实例；`flush()` 返回 null（未就绪 / 失败 / 组合中）**才**报错 ✓。
    *
    * @returns 取到的 Markdown；正文模式下实例不可用时返回 null ✗。
@@ -382,7 +464,7 @@ export function NodeDocumentEditor(props: {
   const save = useCallback((): Promise<boolean> => {
     /*
      * 输入法正在组合 ⇒ **等它结束再存** ✗（P2-7）：直接取会拿到半成品、或打断输入 ✓。
-     * 这条只对**正文模式**成立 ✗ —— 源码模式的 textarea 由我们自己受控，随时可读 ✓。
+     * 这条只对**正文模式**成立 ✗ —— 纯文本兜底的 textarea 由我们自己受控，随时可读 ✓。
      */
     if (tab === "rich" && richStatus.composing) {
       pendingActionRef.current = { kind: "save" };
@@ -399,7 +481,7 @@ export function NodeDocumentEditor(props: {
   }, [saveWith, snapshotDraft, state.hash, tab, richStatus.composing, richStatus.failed]);
 
   /*
-   * **统一待办**：保存、切源码、关闭**共用一份** pending ✓ ——
+   * **统一待办**：保存、退回纯文本、关闭**共用一份** pending ✓ ——
    * 组合结束后在这里补跑，不再各维护互相冲突的标志 ✓（第二次复查 P1-2 要求 ✓）。
    */
   useEffect(() => {
@@ -503,7 +585,7 @@ export function NodeDocumentEditor(props: {
 
   /**
    * **离开富编辑器的统一入口**（复查 P1-2）：先取正文快照，再执行动作 ✓。
-   * 用于切到源码、关闭编辑器 —— 不能只 `setTab` / 只调 `onClose` ✗（会丢最后一笔 ✓）。
+   * 用于退回纯文本、关闭编辑器 —— 不能只 `setTab` / 只调 `onClose` ✗（会丢最后一笔 ✓）。
    */
   const leaveRich = useCallback((kind: "source" | "close"): void => {
     /**
@@ -514,7 +596,7 @@ export function NodeDocumentEditor(props: {
       if (kind === "source") setTab("source");
       else props.onClose(dirty);
     };
-    /* 源码模式：草稿本身就是权威，直接执行 ✓ */
+    /* 纯文本兜底：草稿本身就是权威，直接执行 ✓ */
     if (tab === "source") {
       if (kind === "close") act(state.draft !== state.base);
       return;
@@ -522,7 +604,7 @@ export function NodeDocumentEditor(props: {
     const rich = richRef.current;
     /*
      * 正文模式但实例**没就绪 / 初始化失败** ⇒ 编辑器里不可能有用户改动 ✓
-     * ⇒ 允许动作（"切到源码"正是那条恢复路径 ✓，不能一概禁止回退 ✗）。
+     * ⇒ 允许动作（"退回纯文本"正是那条恢复路径 ✓，不能一概禁止回退 ✗）。
      */
     if (rich === null || rich.isReady() !== true) {
       act(state.draft !== state.base);
@@ -586,148 +668,148 @@ export function NodeDocumentEditor(props: {
       ref={(node) => { rootRef.current = node; }}
     >
       {/*
-       * **紧凑标题栏**（约 44px ✓，`design/editor-content-density-and-scrollbar-design.md`）：
-       * 一行放完"节点标题 + 正文/源码切换 + 详情 + 关闭" ✓ ——
-       * 原来的「节点笔记」徽标、整行路径、独立高标签栏都撤掉 ✗（它们占了近 1/3 的正文高度 ✓）。
+       * **紧凑标题栏**（约 44px ✓，`design/editor-content-density-and-scrollbar-design.md`
+       * + `design/editor-chrome-minimal-design.md`）：
+       * 一行放完"节点标题 + 未保存标记 + 关闭" ✓ ——
+       * 底部的单行状态栏（保存状态 + 保存按钮）、「⋯ 详情」入口、**以及「正文 / 源码」切换**
+       * 全部撤掉 ✗：省下的高度与宽度都给正文 ✓；保存只走 Ctrl / ⌘ + S
+       * （提示挂在标题栏的 title 上 ✓）；"有没有未保存的改动"由**节点名右上角的 `*`**表示 ✓。
+       * 模式不再由用户挑 ✓：正常就是正文，只有"富编辑器保不住的语法 / 起不来"才自动落到纯文本 ✓
+       * （见下面的 `unsupported` 与通知条 ✓）。
        * 注意：这里的标题是**节点身份**（导航上下文 ✓），正文里的 Markdown 标题照旧按层级显示 ✓。
        */}
-      <div className="kn-editor-heading">
-        <h2 className="kn-editor-title" title={state.title === "" ? props.nodeId : state.title}>
-          {state.title === "" ? props.nodeId : state.title}
-        </h2>
-        <div className="kn-editor-tabs" role="tablist" title={t("editorHint")}>
+      <div className="kn-editor-heading" title={`${t("editorHint")} · ${t("saveShortcut")}`}>
+        <h2 className="kn-editor-title" title={title}>
+          <span className="kn-editor-title-text">{title}</span>
           {/*
-           * **正文 / 源码**（不再是"编辑/预览"✗）：正文模式就是可直接编辑的格式化内容 ✓，
-           * 两者编辑**同一份草稿、基线与指纹** ✓，只是显示方式不同 ✓。
+           * **未保存 = 标题右上角一个 `*`** ✓（底部那行提示撤掉之后，这是唯一的"未保存"标记 ✓）。
+           * 保存中改在同一个位置显示"正在保存…" ✓：那是唯一会改变用户下一步动作的短时状态 ✓
+           * （冲突与保存失败另有整条提示，不靠这里 ✓）。
            */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "rich"}
-            className={tab === "rich" ? "is-active" : ""}
-            onClick={() => {
-              /*
-               * 第二次复查 P2-3：进正文前必须按**当前草稿**再校验一次 ✗ ——
-               * 用户在源码里新加了 HTML/脚注/指令时，直接切过去会在富模式里被改写 ✗。
-               */
-              if (unsupported.length > 0 && !richOverride) {
-                setTab("source");
-                return;
-              }
-              /* 进正文只是换显示方式：草稿/基线/指纹都不变 ✓ ⇒ 不需要"离开快照"✓ */
-              setTab("rich");
-            }}
-          >
-            {t("tabRich")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "source"}
-            className={tab === "source" ? "is-active" : ""}
-            onClick={() => { leaveRich("source"); }}
-          >
-            {t("tabSource")}
-          </button>
-        </div>
-        <button
-          type="button"
-          className="kn-editor-more"
-          aria-label={t("details")}
-          aria-expanded={details}
-          title={t("details")}
-          onClick={() => { setDetails((value) => !value); }}
-        >
-          ⋯
-        </button>
+          {state.saving ? (
+            <span className="kn-editor-saving" title={t("statusSaving")}>{t("statusSaving")}</span>
+          ) : dirty ? (
+            <sup className="kn-editor-dirty" title={t("statusDirty")}>
+              <span aria-hidden="true">*</span>
+              <span className="sr-only">{t("statusDirty")}</span>
+            </sup>
+          ) : null}
+        </h2>
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>
       </div>
 
-      {/*
-       * **详情**（按需展开 ✓）：路径、修订号、快捷键、Markdown 说明都搬到这里 ✓ ——
-       * 平时不占正文高度 ✓，但需要时一条不少 ✓（文档要求"移入详情"，不是删掉 ✗）。
-       */}
-      {details ? (
-        <div className="kn-editor-details">
-          <div className="kn-editor-row kn-editor-sub">
-            <span>{t("detailPath")}</span>
-            <span className="kn-editor-path" title={state.path}>{state.path}</span>
-          </div>
-          <div className="kn-editor-row kn-editor-sub">
-            <span>{t("detailRevision")}</span>
-            <span>{state.revision > 0 ? `rev ${state.revision}` : "—"}</span>
-          </div>
-          <div className="kn-editor-row kn-editor-sub">
-            <span>{t("detailShortcut")}</span>
-            <span>{t("saveShortcut")}</span>
-          </div>
-          <div className="kn-editor-dim">{t("editorHint")}</div>
-        </div>
-      ) : null}
-
       {state.conflicted ? (
-        <div className="kn-editor-notice" role="alert">
-          <div>{t("conflictNotice")}</div>
-          {state.refreshing ? <div className="kn-editor-dim">{t("refreshingLatest")}</div> : null}
-          <div className="kn-editor-notice-actions">
-            {/* ① 只展开/收起比较 ✓（**绝不**替换草稿 ✗） */}
-            <button type="button" disabled={state.saving || state.refreshing} onClick={() => dispatch({ type: "toggle-compare" })}>
-              {state.comparing ? t("hideLatest") : t("compareLatest")}
-            </button>
-            {/* ② 合并后保存：换基线、保留草稿 ✓ */}
-            <button type="button" disabled={state.saving || state.refreshing} onClick={() => { void mergeAndSave(); }}>{t("mergeAndSave")}</button>
-            {state.latest === null ? <span className="kn-editor-dim">{t("mergeNeedsReview")}</span> : null}
-            {/* ③ 放弃草稿：明确按钮 + 二次确认 ✓ */}
-            <button type="button" className="is-danger" disabled={state.saving || state.refreshing} onClick={() => setConfirmAdopt(true)}>
-              {t("adoptLatest")}
-            </button>
-            {state.latest === null ? (
-              <button type="button" disabled={state.saving || state.refreshing} onClick={() => { void refreshLatest(); }}>{t("refreshBaseline")}</button>
-            ) : null}
+        /*
+         * **真实冲突**的轻量呈现 ✓（`design/save-and-close-reopen-conflict-optimization.md`）：
+         * 默认只有一句话 + 三个动作 ✗（不再自动摊开整篇源码、也不铺满黄色背景 ✓）；
+         * 用户点「比较修改」才展开两个并排区块：「我的修改」/「文件最新版本」，
+         * 背景是正常正文色，**只对差异行做局部标注** ✓。
+         */
+        <div className="kn-editor-conflict" role="alert">
+          <div className="kn-editor-conflict-bar">
+            <span className="kn-editor-conflict-text">{t("conflictNotice")}</span>
+            <div className="kn-editor-conflict-actions">
+              {/* ① 比较：没读到最新版本就顺手读一次 ✓；展开与否**由用户点**决定 ✗（不再自动展开 ✓） */}
+              <button
+                type="button"
+                disabled={state.saving || state.refreshing}
+                onClick={() => {
+                  if (state.latest === null) void refreshLatest();
+                  if (!state.comparing) dispatch({ type: "toggle-compare" });
+                }}
+              >
+                {state.comparing ? t("hideCompare") : t("compareChanges")}
+              </button>
+              {/* ② 保存合并结果：**看过文件最新版本之后**才可用 ✓（不替用户承担合并 ✗） */}
+              <button
+                type="button"
+                disabled={state.saving || state.refreshing || state.latest === null || !state.comparing}
+                title={state.latest === null || !state.comparing ? t("mergeNeedsReview") : undefined}
+                onClick={() => { void mergeAndSave(); }}
+              >
+                {t("mergeAndSave")}
+              </button>
+              {/* ③ 使用文件最新版本 = 放弃修改 ⇒ 仍要二次确认 ✓ */}
+              <button
+                type="button"
+                className="is-danger"
+                disabled={state.saving || state.refreshing}
+                onClick={() => setConfirmAdopt(true)}
+              >
+                {t("adoptLatest")}
+              </button>
+            </div>
           </div>
-          {state.comparing && state.latest !== null ? (
-            <pre className="kn-editor-latest" aria-label={t("latestText")}>{state.latest.text}</pre>
+          {state.refreshing ? <div className="kn-editor-dim">{t("refreshingLatest")}</div> : null}
+          {state.latest === null || !state.comparing ? (
+            <div className="kn-editor-dim">{t("mergeNeedsReview")}</div>
           ) : null}
+          {conflictDiff === null ? null : (
+            <div className="kn-editor-compare">
+              {conflictDiff.identical ? <div className="kn-editor-dim">{t("compareIdentical")}</div> : null}
+              <div className="kn-editor-compare-pane">
+                <div className="kn-editor-compare-head">{t("myDraft")}</div>
+                <div className="kn-editor-compare-body" aria-label={t("myDraft")}>
+                  {conflictDiff.left.map((line: DiffLine, index: number) => (
+                    <div
+                      key={`left-${index}`}
+                      className={line.changed ? "kn-editor-diff-line is-changed" : "kn-editor-diff-line"}
+                    >
+                      {line.text === "" ? " " : line.text}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="kn-editor-compare-pane">
+                <div className="kn-editor-compare-head">{t("latestText")}</div>
+                <div className="kn-editor-compare-body" aria-label={t("latestText")}>
+                  {conflictDiff.right.map((line: DiffLine, index: number) => (
+                    <div
+                      key={`right-${index}`}
+                      className={line.changed ? "kn-editor-diff-line is-changed" : "kn-editor-diff-line"}
+                    >
+                      {line.text === "" ? " " : line.text}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
       {/*
        * 复查 P1-4 / P2-6：两条**必须让用户看见**的提示 ——
-       * ① 正文里有富编辑器无法原样保留的语法 ⇒ 默认停在源码模式 ✓（并说明命中了什么 ✓）；
-       * ② 富编辑器初始化失败 ⇒ 明说、并指引去源码页继续编辑/复制 ✓（不许假装还能保存 ✗）。
+       * ① 正文里有富编辑器无法原样保留的语法 ⇒ 自动改用**纯文本**编辑 ✓（并说明命中了什么 ✓）；
+       * ② 富编辑器初始化失败 ⇒ 明说"已改用纯文本、内容不会丢" ✓（不许假装还能保存 ✗）。
+       * 两条都不给"挑模式"的入口 ✗：正常只有正文；纯文本只是这两条路上不丢内容的兜底 ✓。
        */}
       {unsupported.length > 0 ? (
         <div className="kn-editor-notice" role="alert">
           <div>{t("unsupportedNotice")}</div>
           <div className="kn-editor-dim">{unsupported.join(" · ")}</div>
-          {tab === "rich" ? <div className="kn-editor-dim">{t("unsupportedRisk")}</div> : null}
+          <div className="kn-editor-dim">{t("unsupportedRisk")}</div>
           <div className="kn-editor-notice-actions">
-            <button
-              type="button"
-              onClick={() => {
-                if (tab === "rich") {
-                  leaveRich("source");
-                  return;
-                }
-                /* 用户明确承担改写风险 ⇒ 记下显式确认，再进正文 ✓ */
-                setRichOverride(true);
-                setTab("rich");
-              }}
-            >
-              {tab === "rich" ? t("tabSource") : t("openRichAnyway")}
-            </button>
+            {tab === "rich" ? (
+              /* 已经在正文里 ⇒ 给一条"退回纯文本、不改写语法"的路 ✓（回来随时可以 ✓） */
+              <button type="button" onClick={() => { leaveRich("source"); }}>{t("backToPlainText")}</button>
+            ) : (
+              /*
+               * 想回正文必须**显式点一次**（这是有损转换 ✓）：风险说明就在上面一行 ✓。
+               * 用户把语法删干净之后，这个条子本身会消失、并自动回正文 ✓（见上面第三条 effect ✓）。
+               */
+              <button type="button" onClick={() => { setTab("rich"); }}>{t("openRichAnyway")}</button>
+            )}
           </div>
         </div>
       ) : null}
 
-      {tab === "rich" && richStatus.failed ? (
+      {/* 富编辑器起不来：已经自动落到纯文本 ⇒ 这里只说明原因与"照常能存" ✓（没有可点的切换 ✗） */}
+      {richStatus.failed ? (
         <div className="kn-editor-error" role="alert">
           <div>{t("richFailed")}</div>
-          <div className="kn-editor-notice-actions">
-            <button type="button" onClick={() => { setTab("source"); }}>{t("tabSource")}</button>
-          </div>
         </div>
       ) : null}
 
@@ -768,6 +850,7 @@ export function NodeDocumentEditor(props: {
                 syncToken={richSyncToken}
                 readOnly={state.saving || state.frozen || state.phase !== "ready"}
                 handleRef={richRef}
+                t={props.t}
                 onChange={(markdown) => {
                   lastEditorDraftRef.current = markdown;
                   dispatch({ type: "edit", text: markdown });
@@ -776,7 +859,10 @@ export function NodeDocumentEditor(props: {
                 report={reportRef.current}
               />
             ) : (
-              /* **源码模式**：同一份草稿的另一种编辑方式 ✓（处理精确语法与保留未知扩展 ✓） */
+              /*
+               * **纯文本兜底**（只有两条自动路径会到这里 ✓，用户不挑模式 ✗）：
+               * 同一份草稿的另一种编辑方式 ✓ —— 保留未知扩展、逐字不改写原文 ✓。
+               */
               <textarea
                 ref={textareaRef}
                 className="kn-editor-text"
@@ -801,25 +887,6 @@ export function NodeDocumentEditor(props: {
             ) : null}
           </>
         )}
-      </div>
-
-      {/*
-       * **单行状态栏**（约 36px ✓）：左保存状态、右保存按钮 ✓；
-       * 快捷键与修订号已经在「详情」里 ✓ ⇒ 这里不再占一整行 ✗。
-       */}
-      <div className="kn-editor-foot">
-        <span className={state.conflicted ? "kn-editor-status is-conflict" : "kn-editor-status"}>
-          {statusText(state, t)}
-        </span>
-        <button
-          type="button"
-          className="kn-editor-save"
-          disabled={!canSave(state)}
-          title={t("saveShortcut")}
-          onClick={() => { void save(); }}
-        >
-          {t("saveNote")}
-        </button>
       </div>
 
       {confirmAdopt ? (

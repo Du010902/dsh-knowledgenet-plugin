@@ -34,7 +34,6 @@ import {
   canOpenRich,
   recallDraft,
   rememberDraft,
-  statusText,
 } from "../src/client/node-document-state.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -180,20 +179,19 @@ describe("客户端请求契约", () => {
 
 describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
   const fresh = () => editorReducer(initialEditorState("n1"), { type: "load-ok", document: DOC });
-  const t = (key) => key;
 
-  it("基础：dirty / canSave / 状态文字 ✓", () => {
+  it("基础：dirty / canSave ✓", () => {
     const ready = fresh();
     assert.equal(isDirty(ready), false);
     assert.equal(canSave(ready), false, "没改动就不能保存 ✓");
     const dirty = editorReducer(ready, { type: "edit", text: "我改了一点" });
     assert.equal(isDirty(dirty), true);
     assert.equal(canSave(dirty), true);
-    assert.equal(statusText(dirty, t), "statusDirty");
-    assert.equal(statusText(ready, t), "statusSaved");
-    assert.equal(statusText({ ...dirty, saving: true }, t), "statusSaving");
-    assert.equal(statusText({ ...dirty, conflicted: true }, t), "statusConflict");
-    assert.equal(statusText({ ...dirty, saveErrorKey: "saveFailed" }, t), "statusSaveFailed");
+    /* 撤掉底栏后**没有 statusText**：状态只剩标题右上角的 `*` 与保存中标记 ✓ */
+    assert.ok(
+      !stateSource.includes("export function statusText"),
+      "底部那行状态文字已经撤掉 ⇒ statusText 不许留着 ✗",
+    );
     /* 复查补充：载入中不许保存（否则会拿旧基线提交 ✗） */
     assert.equal(canSave({ ...dirty, phase: "loading" }), false);
     assert.equal(canSave({ ...dirty, hash: "" }), false, "没有指纹不许保存 ✓");
@@ -209,8 +207,12 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
     });
     assert.equal(reloaded.draft, "我刚敲的字", "草稿必须原样保留 ✗");
     assert.equal(reloaded.conflicted, true, "盘上变了 ⇒ 标成冲突，让用户决定 ✓");
-    assert.equal(reloaded.latest.text, "磁盘上的正文", "把最新正文摊出来比较 ✓");
-    assert.equal(reloaded.comparing, true, "顺手展开比较区 ✓");
+    assert.equal(reloaded.latest.text, "磁盘上的正文", "把最新正文留着，供用户主动比较 ✓");
+    assert.equal(
+      reloaded.comparing,
+      false,
+      "**默认不展开比较区** ✓（保存并关闭后重开时，把异常处理铺成主界面是最刺眼的那条 ✓）",
+    );
     /* 干净的时候照旧采纳 ✓ */
     const clean = editorReducer(fresh(), { type: "load-ok", document: { ...DOC, text: "新的", hash: "h9" } });
     assert.equal(clean.draft, "新的");
@@ -423,18 +425,19 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
 });
 
 describe("与设计稿对应的部件与入口", () => {
-  it("编辑器部件齐：标题 / 实际路径 / **正文·源码** / 保存状态 / 冲突条 / 快捷键 / 提示行 ✓", () => {
+  it("编辑器部件齐：标题 / 未保存标记 / 正文 / 冲突条 / 快捷键 / 提示行 ✓", () => {
     for (const piece of [
       "kn-editor-title",
-      "kn-editor-path",
-      "kn-editor-tabs",
       "kn-editor-notice",
-      "kn-editor-latest",
+      /* 真实冲突：紧凑提示条 + 按需展开的比较区 ✓（不再常驻一整块源码 ✗） */
+      "kn-editor-conflict",
+      "kn-editor-conflict-bar",
+      "kn-editor-compare",
+      "kn-editor-compare-body",
       "kn-editor-text",
       "kn-editor-rich",
-      "kn-editor-status",
-      "kn-editor-save",
-      "kn-editor-sub",
+      /* 底栏撤掉后，"未保存"只剩标题右上角这个标记 ✓ */
+      "kn-editor-dirty",
     ]) {
       /* 富文本容器类名在 MarkdownRichEditor 里 ✓，其余在 NodeDocumentEditor ✓ */
       const haystack = editorSource + richSource;
@@ -442,16 +445,86 @@ describe("与设计稿对应的部件与入口", () => {
       assert.ok(css.includes(`.${piece}`), `${piece} 要有样式 ✓`);
     }
     assert.ok(editorSource.includes('event.key.toLowerCase() !== "s"'), "Ctrl/⌘ + S 要接上 ✓");
-    assert.ok(editorSource.includes('role="tablist"'), "正文 / 源码是标签 ✓");
+    assert.ok(!editorSource.includes('role="tablist"'), "模式切换标签已撤掉 ⇒ 不许长回来 ✗");
     assert.ok(
-      editorSource.includes('className="kn-editor-tabs" role="tablist" title={t("editorHint")}'),
-      "「支持 Markdown」这类说明改挂在标签栏 title 上 ⇒ 不再常驻占正文高度 ✓（文档要求 ✓）",
+      editorSource.includes('className="kn-editor-heading" title={`${t("editorHint")} · ${t("saveShortcut")}`}'),
+      "「支持 Markdown」与保存快捷键改挂在标题栏 title 上 ⇒ 不再常驻占正文高度 ✓（文档要求 ✓）",
     );
   });
 
-  it("**Typora 式即时编辑**：正文直接编辑格式化内容，源码是同一份草稿的替代编辑方式 ✓", () => {
-    /* ① 两个模式 + 富编辑器接入 ✓ */
-    assert.ok(editorSource.includes('t("tabRich")') && editorSource.includes('t("tabSource")'), "标签是正文 / 源码 ✓");
+  it("**极简外壳**：底栏、「⋯ 详情」与「正文 / 源码」切换全撤掉，高度归正文；未保存只在标题右上角一个 `*` ✓", () => {
+    /*
+     * 用户要求（`design/editor-chrome-minimal-design.md`）：
+     * ① 「保存笔记」按钮撤掉，只留 Ctrl / ⌘ + S ✓；
+     * ② 底部"有未保存修改"那行撤掉，改用**节点名右上角的 `*`** ✓；
+     * ③ 「⋯」与它展开的内容（路径 / 修订 / 快捷键说明）一起去掉 ✓；
+     * ④ **「正文 / 源码」也不再给用户挑**：正常只有正文 ✓（第二批要求）。
+     * 反向断言同样重要 ✗：这些东西一个都不许悄悄长回来 ✓。
+     */
+    for (const gone of [
+      "kn-editor-foot", "kn-editor-save", "kn-editor-status", "kn-editor-more", "kn-editor-details", "kn-editor-tabs",
+    ]) {
+      assert.ok(!editorSource.includes(gone), `编辑器里不许再有 ${gone} ✗`);
+      assert.ok(!css.includes(`.${gone}`), `样式里不许再有 .${gone} ✗`);
+    }
+    assert.ok(!dictSource.includes("saveNote"), "「保存笔记」按钮与文案一起撤掉 ✗（中英词典都不留 ✓）");
+    assert.ok(!dictSource.includes("tabRich") && !dictSource.includes("tabSource"), "模式切换的文案一起撤掉 ✗");
+    assert.ok(
+      /\.kn-editor-body \{[^}]*flex: 1/s.test(css),
+      "正文视口是唯一吃剩余高度的主体 ⇒ 底栏腾出的高度全归正文 ✓",
+    );
+    /*
+     * 标记本身：`*` 挂在标题行里、贴着文字右上角 ✓；标题文字单独一层
+     * ⇒ 长标题被省略号截断时标记不会被裁掉 ✗。
+     */
+    assert.ok(editorSource.includes('className="kn-editor-title-text"'), "标题文字要单独一层（省略号只作用在它身上 ✓）");
+    assert.ok(editorSource.includes('className="kn-editor-dirty"'), "未保存要有 `*` 标记 ✓");
+    assert.ok(editorSource.includes('title={t("statusDirty")}'), "标记要有悬停说明 ✓");
+    assert.ok(editorSource.includes('className="sr-only"'), "`*` 要让读屏也能理解 ✓");
+    assert.ok(
+      /\.kn-editor-dirty \{[^}]*align-self: flex-start/s.test(css),
+      "标记要贴在标题右上角 ✓",
+    );
+    assert.ok(editorSource.includes('void save();'), "Ctrl / ⌘ + S 仍走统一的 save() ✓");
+    assert.ok(!editorSource.includes("kn-editor-tag"), "常驻「节点笔记」徽标要撤掉 ✗（占高度 ✓）");
+  });
+
+  it("**没有模式切换**：正常只有正文；纯文本只在「保不住的语法 / 起不来」时自动兜底 ✓", () => {
+    /*
+     * 用户明确说"我不需要看源码"⇒ 不给「正文 / 源码」按钮 ✓。但**内容安全不能丢** ✗：
+     * ① 命中富编辑器保不住的语法 ⇒ 自动改用纯文本（并可显式点回正文、随时退回 ✓）；
+     * ② 富编辑器初始化失败 ⇒ 同样自动落到纯文本，那份草稿仍然可改可存 ✓；
+     * ③ 语法被删干净 ⇒ 自动回正文（纯文本从来不是用户选的，不许把他留在那儿 ✗）。
+     */
+    assert.ok(editorSource.includes('if (unsupported.length > 0) setTab("source");'), "语法命中要自动落到纯文本 ✓");
+    assert.ok(
+      editorSource.includes('if (tab === "rich" && richStatus.failed) setTab("source");'),
+      "富编辑器起不来要自动落到纯文本 ⇒ 草稿不会变成只读 ✓",
+    );
+    assert.ok(
+      editorSource.includes('if (tab !== "source" || richStatus.failed || unsupported.length > 0) return;'),
+      "语法删干净后要自动回正文 ✓（富编辑器失败时不回 ✗）",
+    );
+    /* 退回纯文本要走统一入口（先取正文快照 ✓ —— 否则最后一笔会丢 ✗） */
+    assert.ok(
+      editorSource.includes('onClick={() => { leaveRich("source"); }}>{t("backToPlainText")}'),
+      "「改回纯文本」必须先取快照再切 ✓",
+    );
+    assert.ok(
+      editorSource.includes('onClick={() => { setTab("rich"); }}>{t("openRichAnyway")}'),
+      "回正文要**显式点一次**（有损转换要有同意 ✓）",
+    );
+    assert.ok(editorSource.includes('t("unsupportedNotice")') && editorSource.includes('t("unsupportedRisk")'), "两条提示都在 ✓");
+    /* 提示条里不许再出现"切到源码"这类让用户自己挑模式的说法 ✓ */
+    for (const key of ["tabRich", "tabSource"]) {
+      assert.ok(!editorSource.includes(`t("${key}")`), `${key} 已撤掉 ✗`);
+    }
+  });
+
+
+  it("**Typora 式即时编辑**：正文直接编辑格式化内容，纯文本只是同一份草稿的兜底写法 ✓", () => {
+    /* ① 富编辑器接入 + 默认就在正文（没有模式切换 ✓） */
+    assert.ok(!editorSource.includes('t("tabRich")') && !editorSource.includes('t("tabSource")'), "不再有模式切换标签 ✓");
     assert.ok(editorSource.includes('useState<"rich" | "source">("rich")'), "默认进正文（可视化）模式 ✓");
     assert.ok(editorSource.includes("<MarkdownRichEditor"), "正文模式用富文本编辑器 ✓");
     assert.ok(richSource.includes('from "@milkdown/crepe"'), "用 Milkdown / Crepe ✓");
@@ -461,7 +534,7 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(editorSource.includes('tab === "rich" ?'), "正文 / 源码只是显示方式切换 ✓");
     assert.ok(
       (editorSource.match(/value=\{state\.draft\}/g) ?? []).length === 1,
-      "源码模式仍绑同一份 draft ✓（不是另一份内容 ✗）",
+      "纯文本兜底仍绑同一份 draft ✓（不是另一份内容 ✗）",
     );
     /* ③ 草稿变化**不**整体回写编辑器（只在外部替换时用 syncToken ✓） */
     assert.ok(richSource.includes("syncToken"), "要有显式的整体同步开关 ✓");
@@ -488,7 +561,7 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(buildSource.includes("codeSplitting: false"), "不许留动态分块（自包含单文件 ✓）");
   });
 
-  it("**复查（富编辑器）**：不支持语法嗅探 —— 命中就默认留在源码模式 ✓", () => {
+  it("**复查（富编辑器）**：不支持语法嗅探 —— 命中就自动改用纯文本 ✓", () => {
     assert.deepEqual(scanUnsupportedSyntax("## 标题\n\n- 列表\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n$e=mc^2$\n").reasons, []);
     assert.equal(canOpenRich("# 普通 Markdown ✓"), true);
     /* **水平分隔线与 Setext 标题都是标准 Markdown** ✗（第三次复查 P2-2）：不许再判成未知语法 ✓ */
@@ -549,11 +622,12 @@ describe("与设计稿对应的部件与入口", () => {
   it("**复查 P1-4/P2-6**：不支持语法与初始化失败都要有可见提示与出口 ✓", () => {
     assert.ok(
       editorSource.includes("scanUnsupportedSyntax(state.draft)"),
-      "要按**当前草稿**嗅探（只看 base 会漏掉源码里新加的内容 ✗）",
+      "要按**当前草稿**嗅探（只看 base 会漏掉纯文本里新加的内容 ✗）",
     );
     assert.ok(editorSource.includes("useMemo(() => scanUnsupportedSyntax"), "每次草稿变化都重新算 ✓");
-    assert.ok(editorSource.includes('t("unsupportedNotice")'), "要说明为什么停在源码 ✓");
-    assert.ok(editorSource.includes('t("unsupportedRisk")'), "切回正文时要说清风险 ✓");
+    assert.ok(editorSource.includes('t("unsupportedNotice")'), "要说明为什么改用纯文本 ✓");
+    assert.ok(editorSource.includes('t("unsupportedRisk")'), "回正文前要说清风险 ✓");
+    assert.ok(editorSource.includes('t("backToPlainText")'), "还要给一条退回纯文本的路 ✓");
     assert.ok(editorSource.includes('t("richFailed")') && editorSource.includes('t("richLoading")'), "初始化失败/加载中要可见 ✓");
     assert.ok(editorSource.includes("onStatus={setRichStatus}"), "编辑器要上报状态 ✓");
     assert.ok(richSource.includes("onCompositionEnd"), "组合结束要上报并补一次用户改动 ✓");
@@ -566,21 +640,21 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(buildSource.includes("一个都没内联成功"), "一个都没内联也要失败 ✓");
   });
 
-  it("**复查（第二次）P1-1**：源码模式必须能保存（不许因为没有富实例就判「取不到正文」✗）", () => {
+  it("**复查（第二次）P1-1**：纯文本兜底必须能保存（不许因为没有富实例就判「取不到正文」✗）", () => {
     const snapshot = editorSource.slice(
       editorSource.indexOf("const snapshotDraft = useCallback"),
       editorSource.indexOf("const save = useCallback"),
     );
-    assert.ok(snapshot.includes('if (tab === "source")'), "源码模式要直接读草稿 ✓");
-    assert.ok(snapshot.includes("live = state.draft;"), "源码模式的权威就是受控 textarea 的草稿 ✓");
+    assert.ok(snapshot.includes('if (tab === "source")'), "纯文本要直接读草稿 ✓");
+    assert.ok(snapshot.includes("live = state.draft;"), "纯文本的权威就是受控 textarea 的草稿 ✓");
     assert.ok(snapshot.includes("richRef.current?.flush() ?? null"), "正文模式才要求有效实例 ✓");
-    /* 组合推迟只对正文模式成立 ✓（源码模式不归富实例管 ✓） */
+    /* 组合推迟只对正文模式成立 ✓（纯文本不归富实例管 ✓） */
     assert.ok(
       editorSource.includes('if (tab === "rich" && richStatus.composing)'),
-      "组合检查要带模式条件 ✗（否则源码模式也会被卡住 ✗）",
+      "组合检查要带模式条件 ✗（否则纯文本兜底也会被卡住 ✗）",
     );
-    /* 三种"自动进源码"的路径因此都能保存 ✓ */
-    assert.ok(editorSource.includes('setTab("source")'), "不支持语法 / 初始化失败都要能停在源码并保存 ✓");
+    /* 两条"自动落到纯文本"的路径因此都能保存 ✓ */
+    assert.ok(editorSource.includes('setTab("source")'), "不支持语法 / 初始化失败都要能落到纯文本并保存 ✓");
   });
 
   it("**复查（第二次）P1-2**：输入法组合期间不许卸载编辑器（统一待办，等组合结束再执行）✓", () => {
@@ -588,7 +662,7 @@ describe("与设计稿对应的部件与入口", () => {
       editorSource.indexOf("const leaveRich = useCallback"),
       editorSource.indexOf("/** 放弃草稿并用最新正文"),
     );
-    assert.ok(leaveRich.includes('if (tab === "source")'), "源码模式直接执行 ✓");
+    assert.ok(leaveRich.includes('if (tab === "source")'), "纯文本兜底直接执行 ✓");
     assert.ok(leaveRich.includes("rich.isReady() !== true"), "未就绪/失败允许动作（切源码是恢复路径 ✓）");
     assert.ok(leaveRich.includes("if (richStatus.composing)"), "组合中要挡住会卸载编辑器的动作 ✓");
     assert.ok(
@@ -611,19 +685,25 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(editorSource.includes('if (pending.kind === "save") void save();'), "组合结束后按待办类型补跑 ✓");
   });
 
-  it("**复查（第二次）P2-3**：进正文前按**当前草稿**校验；代码块与公式不算不支持语法 ✓", () => {
+  it("**复查（第二次）P2-3**：按**当前草稿**判是否兜底；代码块与公式不算不支持语法 ✓", () => {
     /* 扫描器先挖掉代码与公式 ✓ */
     const codeDoc = "说明：\n\n```html\n<div class=\"x\">代码里的 HTML</div>\n```\n\n以及行内 `<span>` 与公式 $\\{a\\}$。\n";
     assert.deepEqual(scanUnsupportedSyntax(codeDoc).reasons, [], "代码块/行内代码/公式里的内容不该触发 ✗");
     /* 但普通上下文里的 HTML 仍然命中 ✓ */
     assert.equal(canOpenRich("正文\n\n<div>块级</div>\n"), false);
-    /* 进正文前要拿当前草稿校验，并且要显式确认才允许有损转换 ✓ */
-    assert.ok(editorSource.includes("if (unsupported.length > 0 && !richOverride)"), "进正文前按当前草稿拦一次 ✓");
-    assert.ok(editorSource.includes("setRichOverride(true)"), "用户显式确认才放行 ✓");
-    assert.ok(editorSource.includes("setRichOverride(false)"), "换节点要重置确认 ✓");
+    /*
+     * 判据必须是**当前草稿**（`state.draft`）而不是载入基线 ✗（第二次复查 P2-3）：
+     * 用户在纯文本里新加一段 HTML 后，提示与"回正文要显式点一次"都得跟着变 ✓。
+     */
+    assert.ok(editorSource.includes("useMemo(() => scanUnsupportedSyntax(state.draft)"), "按当前草稿嗅探 ✓");
+    /* 回正文仍然要一次显式同意（有损转换 ✓）—— 现在那一次就是通知条上的按钮本身 ✓ */
+    assert.ok(
+      editorSource.includes('<button type="button" onClick={() => { setTab("rich"); }}>{t("openRichAnyway")}</button>'),
+      "只有显式点「仍要用正文编辑」才允许有损转换 ✓",
+    );
   });
 
-  it("**复查（br/叠层）**：安全 <br> 变体不该退回源码；其它 HTML 继续保护 ✓", () => {
+  it("**复查（br/叠层）**：安全 <br> 变体不该落到纯文本；其它 HTML 继续保护 ✓", () => {
     /*
      * 实测（Crepe 7.22.2，真实浏览器往返）：下列写法**无操作与编辑别的段落后都逐字保留** ✓
      * ⇒ 它们必须能留在正文模式 ✗（截图里整篇退回源码正是被它触发的 ✗）。
@@ -684,19 +764,19 @@ describe("与设计稿对应的部件与入口", () => {
       editorSource.includes('if (tab === "rich" && richStatus.composing) return;'),
       "组合中先不补跑 ✓",
     );
-    /* 载入判定只做一次：不再依赖 unsupported.length ⇒ 编辑途中不会被踢出正文 ✓ */
+    /* 载入判定只做一次：编辑途中不会被踢出正文 ✓（"语法删干净后回正文"是另一条、方向相反 ✓） */
     assert.ok(editorSource.includes("autoSourceRef.current === props.nodeId"), "每节点只判定一次 ✓");
+    assert.ok(
+      editorSource.includes("if (autoSourceRef.current === props.nodeId) return;"),
+      "自动落到纯文本只能发生在**载入判定**那一次 ✓（编辑途中发现潜在语法只提示 ✓）",
+    );
   });
 
   it("**复查（第三次）P2-2**：水平分隔线 / Setext 标题不算未知语法，且不再编辑途中切模式 ✓", () => {
     for (const sample of ["正文\n\n---\n\n尾巴", "标题\n===\n\n正文", "| a | b |\n| --- | --- |", "***"]) {
-      assert.equal(canOpenRich(sample), true, `标准 Markdown 不该被锁进源码：${sample}`);
+      assert.equal(canOpenRich(sample), true, `标准 Markdown 不该被锁进纯文本：${sample}`);
     }
     assert.ok(!stateSource.includes('"疑似 front-matter 分隔线"'), "旧的 --- 启发式必须删掉 ✗");
-    assert.ok(
-      editorSource.includes("if (autoSourceRef.current === props.nodeId) return;"),
-      "自动切源码只能发生在**载入判定**那一次 ✓（编辑途中发现潜在语法只提示 ✓）",
-    );
   });
 
   it("**两个入口**：选中区按钮 + 右键菜单项，走同一个动作 ✓", () => {
@@ -796,7 +876,7 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(editorSource.includes("root.contains(event.target as Node)"), "焦点不在本编辑器就不拦 ✓");
     assert.ok(editorSource.includes("readOnly={state.saving || state.frozen}"), "保存期间冻结输入 ✓");
     const disabled = (editorSource.match(/disabled=\{state\.saving \|\| state\.refreshing\}/g) ?? []).length;
-    assert.ok(disabled >= 5, `合并/重试/放弃/刷基线等入口在保存期间都要禁用（实际 ${disabled} 处 ✓）`);
+    assert.ok(disabled >= 4, `比较 / 合并 / 放弃等入口在保存期间都要禁用（实际 ${disabled} 处 ✓）`);
   });
 
   it("**复查 P2-7 / P2-4**：身份被采用后编辑目标、选择与草稿键一起换 ✓", () => {
@@ -820,7 +900,11 @@ describe("与设计稿对应的部件与入口", () => {
       latest: { ...DOC, text: "磁盘最新", hash: "h9" },
     });
     assert.equal(refreshed.latest.text, "磁盘最新");
-    assert.equal(refreshed.comparing, true, "顺手把比较区展开给用户看 ✓");
+    assert.equal(
+      refreshed.comparing,
+      conflicted.comparing,
+      "读取最新版本**不顺手改展开状态** ✓（展开与否由用户点「比较修改」决定 ✓）",
+    );
     assert.equal(refreshed.draft, conflicted.draft, "刷新不许动草稿 ✗");
     const merged = editorReducer(refreshed, { type: "merge-and-save" });
     assert.equal(merged.hash, "h9", "看过之后才能以新基线提交 ✓");
@@ -917,9 +1001,10 @@ describe("与设计稿对应的部件与入口", () => {
     /* 结构化的失败与异常也都走 fail ✓ */
     assert.ok(editorSource.includes("return fail(failureKey(outcome.code))"), "结构化失败走统一出口 ✓");
     assert.ok(editorSource.includes('return fail("saveFailed")'), "异常走统一出口 ✓");
-    /* 父面板侧：不可保存时提前禁用确认，并给出指引 ✓ */
+    /* 父面板侧：不可保存时提前禁用确认，并给出指引 ✓（文案抽在 `leaveLabels` 纯函数里 ✓） */
     assert.ok(panelSource.includes("onSaveableChange={setEditorSaveable}"), "面板要接可保存状态 ✓");
-    assert.ok(panelSource.includes('t("leaveBlocked")'), "不可保存时给出「去哪处理」的说明 ✓");
+    assert.ok(panelSource.includes("leaveLabels("), "面板要用纯函数取弹窗文案 ✓");
+    assert.ok(stateSource.includes('t("leaveBlocked")'), "不可保存时给出「去哪处理」的说明 ✓");
   });
 
   it("**复查 P1-5**：不可保存时只禁用「保存」，继续编辑 / 放弃 / Esc / 点背景都必须可用 ✓", () => {
@@ -950,7 +1035,7 @@ describe("与设计稿对应的部件与入口", () => {
       "「继续编辑」只在写盘时禁用 ✓（存不了不该困住用户 ✗）",
     );
     assert.ok(confirmSource.includes("onClick={busy ? undefined : onCancel}"), "点背景只在写盘时失效 ✓");
-    assert.ok(panelSource.includes('t("leaveSaveBlocked")'), "确认按钮文案要解释当前不可保存 ✓");
+    assert.ok(stateSource.includes('t("leaveSaveBlocked")'), "确认按钮文案要解释当前不可保存 ✓");
   });
 
   it("保存成功后**轻量刷新、不重建布局**（图谱视角与转动中心不动 ✓）", () => {
@@ -962,7 +1047,12 @@ describe("与设计稿对应的部件与入口", () => {
   });
 
   it("文案同时进中英词典 ✓；窄面板覆盖、宽面板并排 ✓", () => {
-    for (const key of ["editNote", "notePanelTitle", "saveNote", "conflictNotice", "leaveDiscard"]) {
+    /* `saveNote` 已随保存按钮撤掉 ⇒ 换成仍在使用的那几条 ✓ */
+    for (const key of [
+      "editNote", "notePanelTitle", "statusDirty", "statusSaving", "saveShortcut",
+      "unsupportedNotice", "unsupportedRisk", "openRichAnyway", "backToPlainText",
+      "richFailed", "conflictNotice", "leaveDiscard",
+    ]) {
       const zh = dictSource.slice(dictSource.indexOf("const DICT_ZH"), dictSource.indexOf("const DICT_EN"));
       const en = dictSource.slice(dictSource.indexOf("const DICT_EN"));
       assert.ok(zh.includes(`${key}:`), `中文词典要有 ${key} ✓`);

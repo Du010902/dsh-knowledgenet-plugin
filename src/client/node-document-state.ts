@@ -15,39 +15,40 @@ import type { NodeDocument } from "./node-document-client.ts";
 export const EDITOR_LITERAL: Record<string, string> = {
   notePanelTitle: "节点笔记",
   closeEditor: "关闭编辑区",
-  details: "详情",
-  detailPath: "路径",
-  detailRevision: "修订",
-  detailShortcut: "快捷键",
-  tabRich: "正文",
   richLoading: "正在准备正文编辑器…",
-  richFailed: "正文编辑器初始化失败：请切到「源码」继续编辑或复制内容（此时不会保存 ✗）",
-  unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已停在「源码」模式（原文一字不动 ✓）",
+  richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
+  unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
   /* 换行标签 <br> 是支持写法 ✓（实测可逐字往返 ✓），不进这条提示 ✓ */
-  unsupportedRisk: "在「正文」模式下编辑并保存，可能会改写上面这些语法 ✗",
-  openRichAnyway: "仍要用正文模式打开",
-  tabSource: "源码",
+  unsupportedRisk: "在正文里编辑并保存会改写上面这些语法 ✗",
+  openRichAnyway: "仍要用正文编辑（可能改写上面的语法）",
+  backToPlainText: "改回纯文本（不改写语法）",
   tabEdit: "编辑",
   tabPreview: "预览",
   editorHint: "支持 Markdown · 正文直接保存到这个节点的文档",
-  previewSimplified: "简化预览：只把 `## ` 行显示为小标题，其余按纯文本显示",
-  statusSaved: "已保存",
+  /*
+   * 底部状态栏撤掉之后（`design/editor-chrome-minimal-design.md`）只剩两条状态文字：
+   * `statusDirty` = 标题右上角 `*` 的悬停/读屏文案 ✓；`statusSaving` = 保存中标记 + 离开弹窗 ✓。
+   * `statusSaved` / `statusConflict` / `statusSaveFailed` 随之删除 ✗（冲突与失败另有整条提示 ✓）。
+   */
   statusDirty: "有未保存修改",
-  statusConflict: "草稿未保存 · 文件有更新",
   statusSaving: "正在保存…",
-  statusSaveFailed: "保存失败 · 草稿仍在",
-  saveNote: "保存笔记",
   saveShortcut: "Ctrl / ⌘ + S 保存",
-  conflictNotice: "文件在外部发生了变化，你的草稿仍保留。请先比较最新正文，再决定如何合并。",
-  compareLatest: "查看最新正文",
-  hideLatest: "收起最新正文",
-  latestText: "最新正文",
-  adoptLatest: "放弃草稿，使用最新正文",
-  adoptLatestConfirmTitle: "放弃草稿？",
-  adoptLatestConfirmMessage: "将用磁盘上的最新正文替换你未保存的草稿，此操作不可撤销。",
-  mergeAndSave: "已合并，基于最新版本保存",
-  refreshBaseline: "刷新冲突基线",
-  mergeFailed: "刷新最新正文失败，草稿仍在",
+  /*
+   * **真实冲突**只保留一条紧凑提示 ✓（`design/save-and-close-reopen-conflict-optimization.md`）：
+   * 保存并关闭后重开不该再看到"外部发生变化"✗ —— 那类伪冲突已经在保存确认里修掉（见 `saveCommit` ✓）；
+   * 剩下的是真冲突：默认不摊开整篇正文，用户点「比较修改」再看 ✓。
+   */
+  conflictNotice: "文件已有更新，你的修改已保留。",
+  compareChanges: "比较修改",
+  hideCompare: "收起比较",
+  compareIdentical: "两侧内容一致，直接点「保存合并结果」即可。",
+  myDraft: "我的修改",
+  latestText: "文件最新版本",
+  adoptLatest: "使用文件最新版本",
+  adoptLatestConfirmTitle: "放弃修改？",
+  adoptLatestConfirmMessage: "将用文件里的最新版本替换你未保存的修改，此操作不可撤销。",
+  mergeAndSave: "保存合并结果",
+  mergeFailed: "读取文件最新版本失败，你的修改仍在",
   loadingDocument: "正在读取正文…",
   loadFailed: "读取正文失败",
   retryLoad: "重试读取",
@@ -57,19 +58,24 @@ export const EDITOR_LITERAL: Record<string, string> = {
   copyDraft: "复制草稿",
   copied: "草稿已复制到剪贴板",
   copyFailed: "复制失败，请手动选中内容复制",
-  refreshingLatest: "正在读取最新正文…",
-  mergeNeedsReview: "已读到最新正文，请先查看再点「已合并，基于最新版本保存」",
-  copied: "草稿已复制到剪贴板",
+  refreshingLatest: "正在读取文件最新版本…",
+  mergeNeedsReview: "已读到文件最新版本，请先比较，再点「保存合并结果」",
   nodeMissing: "这个节点已经不在库里了（草稿保留，可复制走）",
   tooLarge: "正文太大，面板编辑器不处理这么大的文档",
   unsupportedFormat: "这个知识库是旧格式（只读兼容），面板里不能编辑正文",
   libraryUnavailable: "找不到知识库",
   missingFingerprint: "这份文档没有可用的版本指纹，出于安全不能编辑",
+  /*
+   * 离开弹窗：**动作说清楚** ✓（文档要求）——关编辑区就是「保存并关闭」，
+   * 切到别的节点就是「保存并切换」，不再用笼统的"保存并继续"✗。
+   */
   leaveTitle: "有尚未保存的笔记",
-  leaveMessage: "先保存当前内容，再继续查看其他节点。",
+  leaveCloseMessage: "当前笔记有未保存修改。保存后关闭编辑区？",
+  leaveSwitchMessage: "当前笔记有未保存修改。保存后切换到另一个节点？",
   leaveStay: "继续编辑",
   leaveDiscard: "放弃修改",
-  leaveSave: "保存并继续",
+  leaveSaveClose: "保存并关闭",
+  leaveSaveSwitch: "保存并切换",
   emptyDocument: "（这个节点还没有正文，直接写就行）",
 };
 
@@ -168,14 +174,6 @@ export function canSave(state: EditorState): boolean {
     && state.saveErrorKey === null;
 }
 
-/** 状态文字（对应设计稿底部那行 ✓） */
-export function statusText(state: EditorState, t: (key: string) => string): string {
-  if (state.saving) return t("statusSaving");
-  if (state.conflicted) return t("statusConflict");
-  if (state.saveErrorKey !== null) return t("statusSaveFailed");
-  return isDirty(state) ? t("statusDirty") : t("statusSaved");
-}
-
 /** 失败 code → 文案 key（宿主给的稳定 code ✓） */
 export function failureKey(code: string): string {
   if (code === "node_missing") return "nodeMissing";
@@ -201,6 +199,174 @@ export function previewBlocks(text: string): Array<{ heading: boolean; text: str
 /** 一份文档能不能拿来编辑（**必须有指纹** ✗：没指纹就保护不了外部修改 ✓） */
 export function documentEditable(document: NodeDocument): boolean {
   return document.hash !== "";
+}
+
+/**
+ * 离开弹窗的文案：**动作说清楚** ✓。
+ *
+ * 文档要求（`design/save-and-close-reopen-conflict-optimization.md`）：
+ * 关闭场景说「保存并关闭」、切节点场景说「保存并切换」✗，不要再笼统地用"保存并继续"✓；
+ * 正在写盘时按钮就是「正在保存…」✓（冻结重复操作 ✓）；存不了时说明"要去处理什么"✓。
+ *
+ * 抽成**纯函数** ⇒ 可以直接单测 ✓（`.tsx` 没法被 Node 直接跑 ✗）。
+ *
+ * @param kind - 待办动作：切节点 / 关闭 ✓。
+ * @param t - 取文案 ✓。
+ * @param state - `saving` = 正在写盘；`saveable` = 当前存得下去吗 ✓。
+ */
+export function leaveLabels(
+  kind: "open" | "close",
+  t: (key: string) => string,
+  state: { saving: boolean; saveable: boolean },
+): { title: string; message: string; confirmLabel: string } {
+  const title = t("leaveTitle");
+  if (state.saving) return { title, message: t("statusSaving"), confirmLabel: t("statusSaving") };
+  if (!state.saveable) return { title, message: t("leaveBlocked"), confirmLabel: t("leaveSaveBlocked") };
+  return {
+    title,
+    message: kind === "close" ? t("leaveCloseMessage") : t("leaveSwitchMessage"),
+    confirmLabel: kind === "close" ? t("leaveSaveClose") : t("leaveSaveSwitch"),
+  };
+}
+
+/** 比较区里的一行 ✓ */
+export interface DiffLine {
+  text: string;
+  /** 这一行在另一侧没有对应（或内容不同）⇒ 局部标注 ✓ */
+  changed: boolean;
+}
+
+/** 两侧逐行比较的结果 ✓ */
+export interface LineDiff {
+  /** 我这边的正文（草稿 ✓） */
+  left: DiffLine[];
+  /** 文件最新版本 ✓ */
+  right: DiffLine[];
+  /** 两侧完全一致 ⇒ 没有差异可标注 ✓ */
+  identical: boolean;
+}
+
+/** 逐行比较的上限：超过就只做"有没有差异"的判断，不再算高亮 ✓（面板里不能卡住 ✓） */
+const DIFF_MAX_LINES = 2000;
+const DIFF_MAX_CELLS = 4_000_000;
+
+/**
+ * **逐行比较**（最长公共子序列 ✓）—— 冲突比较区只做"局部标注" ✓，
+ * 不铺满整块底色 ✗（文档：「仅对差异作局部标注」✓）。
+ *
+ * 纯函数、无 DOM ✓：可以直接单测 ✓。超大文档退化成"无标注"，不给编辑器制造卡顿 ✓。
+ *
+ * @param draft - 我的修改 ✓。
+ * @param latest - 文件里的最新版本 ✓。
+ * @returns 两侧的逐行结果 + 是否完全一致 ✓。
+ */
+export function diffLines(draft: string, latest: string): LineDiff {
+  const left = draft.split("\n");
+  const right = latest.split("\n");
+  if (draft === latest) {
+    return {
+      left: left.map((text) => ({ text, changed: false })),
+      right: right.map((text) => ({ text, changed: false })),
+      identical: true,
+    };
+  }
+  if (left.length > DIFF_MAX_LINES || right.length > DIFF_MAX_LINES || left.length * right.length > DIFF_MAX_CELLS) {
+    return {
+      left: left.map((text) => ({ text, changed: true })),
+      right: right.map((text) => ({ text, changed: true })),
+      identical: false,
+    };
+  }
+  /* LCS 长度表（(n+1)×(m+1) 个整数 ✓） */
+  const n = left.length;
+  const m = right.length;
+  const table = new Uint32Array((n + 1) * (m + 1));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      table[i * (m + 1) + j] = left[i] === right[j]
+        ? table[(i + 1) * (m + 1) + (j + 1)] + 1
+        : Math.max(table[(i + 1) * (m + 1) + j], table[i * (m + 1) + (j + 1)]);
+    }
+  }
+  const leftOut: DiffLine[] = [];
+  const rightOut: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (left[i] === right[j]) {
+      leftOut.push({ text: left[i], changed: false });
+      rightOut.push({ text: right[j], changed: false });
+      i += 1;
+      j += 1;
+      continue;
+    }
+    /* 走 LCS 更长的那一侧 ⇒ 另一侧的那一行就是"这边多出来的" ✓ */
+    if (table[(i + 1) * (m + 1) + j] >= table[i * (m + 1) + (j + 1)]) {
+      leftOut.push({ text: left[i], changed: true });
+      i += 1;
+    } else {
+      rightOut.push({ text: right[j], changed: true });
+      j += 1;
+    }
+  }
+  while (i < n) {
+    leftOut.push({ text: left[i], changed: true });
+    i += 1;
+  }
+  while (j < m) {
+    rightOut.push({ text: right[j], changed: true });
+    j += 1;
+  }
+  return { left: leftOut, right: rightOut, identical: false };
+}
+
+/**
+ * **保存确认**的结果：保存成功后这份草稿/基线/指纹/身份**该长什么样** ✓。
+ *
+ * 为什么单独抽出来 ✗：同一个规则原来要在两处各写一遍（reducer 的 `save-ok` 与保存回调里的缓存写入 ✓），
+ * 两边迟早会算出不同结果 ⇒ 出现"界面干净了、缓存还留着旧草稿"这种自相矛盾 ✓
+ * （`design/save-and-close-reopen-conflict-optimization.md` 的头号问题 ✓）。
+ */
+export interface SaveCommit {
+  nodeId: string;
+  /** 保存确认后的草稿（提交后没再改 ⇒ 用宿主规范化后的正文 ✓） */
+  draft: string;
+  /** 成功保存后的基线 ✓ */
+  base: string;
+  hash: string;
+  revision: number;
+  path: string;
+  title: string;
+  /** 提交之后**还有**没保存的新修改 ⇒ 缓存记录必须留着 ✓（不能无条件删 ✗） */
+  dirty: boolean;
+}
+
+/**
+ * 算出一份"保存确认"。
+ *
+ * 规则（与文档「保存成功必须完成四件事」一致 ✓）：
+ * - 基线 / 指纹 / 身份一律以**宿主返回的文档**为准 ✓；
+ * - 若当前草稿就是本次提交的那份（`submitted`）⇒ 草稿同步成宿主规范化后的正文 ✓，记录变干净 ✓；
+ * - 若提交之后又有了新修改 ⇒ 保留那份新草稿、只更新基线 ✓（只在保存期间被冻结时才会没有新修改 ✓，
+ *   但不能拿"理论上不会有"当理由无条件删缓存 ✗）。
+ *
+ * @param draft - **当前**草稿（调用方要取最新的那份，不是发起保存时的快照 ✗）。
+ * @param document - 宿主确认保存后的文档 ✓。
+ * @param submitted - 本次提交上去的正文 ✓。
+ * @returns 保存确认 ✓。
+ */
+export function saveCommit(draft: string, document: NodeDocument, submitted: string): SaveCommit {
+  const next = draft === submitted ? document.text : draft;
+  return {
+    nodeId: document.nodeId,
+    draft: next,
+    base: document.text,
+    hash: document.hash,
+    revision: document.revision,
+    path: document.path,
+    title: document.title,
+    dirty: next !== document.text,
+  };
 }
 
 /**
@@ -252,13 +418,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             comparing: false,
           };
         }
-        /* ③ 磁盘真的变了 ⇒ 冲突（草稿保留 ✓，把最新正文摊出来 ✓） */
+        /* ③ 磁盘真的变了 ⇒ 冲突（草稿保留 ✓；最新正文按需再摊开 ✓ —— 默认不展开 ✗） */
         return {
           ...state,
           ...common,
           latest: document,
           conflicted: true,
-          comparing: true,
+          comparing: false,
         };
       }
       return {
@@ -288,26 +454,25 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "save-ok": {
       const document = action.document;
       /*
-       * 宿主会把正文**规范化**（去掉前导空行与尾部空白 ✓）之后再落盘，
-       * 并且把那份规范化正文回带给我们 ✓ ⇒ 如果草稿自提交之后没再变过，
-       * 就把 **draft 也同步成规范化正文** ✓ —— 否则草稿与基线永远不相等，
-       * 界面会一直显示"有未保存修改"，而且再点保存也消不掉 ✗（复查 P2-5）。
-       * 若用户在保存期间又敲了字（正常被冻结 ✓），那些字一律保留 ✓。
+       * 宿主会把正文**规范化**（去掉前导空行与尾部空白 ✓）之后再落盘，并把那份规范化正文回带 ✓。
+       * 成功后的"草稿 / 基线 / 指纹 / 身份"由 `saveCommit` 一处算出 ✓ ——
+       * **缓存提交用同一套规则** ✗（两边各算一次迟早会算出不同结果 ✓，
+       * 见 `design/save-and-close-reopen-conflict-optimization.md`）。
        */
-      const draft = state.draft === action.submitted ? document.text : state.draft;
+      const commit = saveCommit(state.draft, document, action.submitted);
       return {
         ...state,
-        draft,
+        draft: commit.draft,
         saving: false,
         frozen: false,
         /* 成功分支也要明确清掉 ✓（复查 P2-1：只作废异步响应、留着"进行中"标记是不完整的 ✓） */
         refreshing: false,
-        nodeId: document.nodeId,
-        base: document.text,
-        hash: document.hash,
-        revision: document.revision,
-        path: document.path,
-        title: document.title,
+        nodeId: commit.nodeId,
+        base: commit.base,
+        hash: commit.hash,
+        revision: commit.revision,
+        path: commit.path,
+        title: commit.title,
         conflicted: false,
         latest: null,
         comparing: false,
@@ -315,13 +480,18 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "save-conflict":
+      /*
+       * **真实冲突**：默认只留一条紧凑提示 ✓（`comparing: false` ✗）——
+       * 自动展开整篇源码会把异常处理变成主界面，还会把正文空间挤走 ✓
+       * （文档「截图中的体验问题」第 2 条 ✓）；用户点「比较修改」才展开 ✓。
+       */
       return {
         ...state,
         saving: false,
         frozen: false,
         refreshing: false,
         conflicted: true,
-        comparing: true,
+        comparing: false,
         latest: action.latest,
       };
     case "save-failed":
@@ -331,14 +501,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, refreshing: true, saveErrorKey: null };
     case "conflict-refresh-ok":
       /*
-       * 只更新"最新正文"与比较区 ✓ —— **绝不**在这里动草稿、也不是"可以覆盖了"的许可 ✗
+       * 只更新"文件最新版本" ✓ —— **绝不**在这里动草稿、也不是"可以覆盖了"的许可 ✗
        * （复查 P1-1：取得 latest 之后必须由用户再独立确认一次才允许写入 ✓）。
+       * 比较区的展开状态**由用户点「比较修改」决定** ✓，这里不许顺手摊开 ✗。
        */
       return {
         ...state,
         refreshing: false,
         conflicted: true,
-        comparing: true,
         latest: action.latest,
         saveErrorKey: null,
       };
@@ -382,17 +552,17 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   }
 }
 
-/* --------------------- 不支持语法：默认留在源码模式 --------------------- */
+/* --------------------- 不支持语法：自动改用纯文本编辑 --------------------- */
 
 /**
  * 富编辑器（Milkdown/Crepe 的 commonmark + GFM + LaTeX）**不能完整往返**的语法特征 ✓。
  *
  * 复查 P1-4：随便把任意 Markdown 送进富编辑器，只要用户动一个普通段落，
  * 整篇就会由 `getMarkdown()` 重新序列化 ⇒ 原始 HTML、自定义指令、脚注、注释这些
- * 可能被规范化甚至丢掉 ✗。所以进富模式之前先**嗅探**，命中就默认停在源码模式 ✓
- * （源码模式是同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
+ * 可能被规范化甚至丢掉 ✗。所以进富模式之前先**嗅探**，命中就自动改用纯文本编辑 ✓
+ * （同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
  *
- * 只做**保守**判断：宁可多留在源码模式，也不要有损改写 ✗。
+ * 只做**保守**判断：宁可多用纯文本，也不要有损改写 ✗。
  *
  * ## 实测（Crepe 7.22.2 + 本插件同一套内联 CSS，真实浏览器探针 ✓）
  *
@@ -409,7 +579,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
  * ⇒ 结论：这一版 Crepe 对 HTML / 指令 / 脚注其实能原样保留 ✓，
  * 但**引用式链接定义会被规范化** ✗、列表与表格分隔行也会被改写 ✓；
  * 而这些"能保留"是**实现现状**、不是库的契约 ✗ ⇒ 仍然按保守口径处理：
- * 命中就默认停在源码模式 ✓，并给一个"仍要用正文模式打开"的明确出口 ✓
+ * 命中就自动改用纯文本编辑 ✓，并在提示条上给一个"仍要用正文编辑"的明确出口 ✓
  * （用户自己承担改写风险，比我们替他决定安全 ✗）。
  */
 export interface UnsupportedScan {
@@ -425,7 +595,7 @@ export interface UnsupportedScan {
 export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
   /*
    * **先把代码与公式挖掉再扫** ✗（第二次复查 P2-3）：正则会（错误地）把
-   * 围栏/行内代码里的 HTML、公式里的花括号当成"文档扩展" ⇒ 无理由地把文档锁在源码模式 ✗。
+   * 围栏/行内代码里的 HTML、公式里的花括号当成"文档扩展" ⇒ 无理由地改用纯文本 ✗。
    * 只对**普通 Markdown 上下文**做判断 ✓。
    */
   const stripped = markdown
@@ -454,7 +624,7 @@ export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
    * 行内 `<br />`、`<br>`、`<br/>`、`<BR />`、连续多个、独立成行、引用里、表格单元格里、
    * 代码块/行内代码里的**字面量**、以及与其他 HTML 混排 ——
    * **无操作打开**与**编辑别的段落后**都**逐字保留** ✓（只有表格单元格会顺带做对齐填充 ✓）。
-   * ⇒ 它们是可保真的常用写法 ✓，不该让整篇退回源码 ✗（截图里正是被它触发的 ✗）。
+   * ⇒ 它们是可保真的常用写法 ✓，不该让整篇改用纯文本 ✗（截图里正是被它触发的 ✗）。
    *
    * 这正是文档要求的顺序 ✓：**先验证往返、再放宽规则** ✓；
    * 不放行任意 HTML ✗，也不对正文做全局字符串替换 ✗（编辑器自己原样保留 ✓）。
@@ -477,7 +647,7 @@ export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
   /*
    * **刻意不判 `---`** ✗（第三次复查 P2-2）：正文里的 `---` 是标准**水平分隔线** ✓
    * （也可以是 Setext 标题的下划线 ✓），而 front-matter 早被宿主分离走了 ✓ ——
-   * 把它当"额外元数据"会让普通文档被无理由锁进源码模式 ✗，
+   * 把它当"额外元数据"会让普通文档被无理由改用纯文本 ✗，
    * 用户编辑时插入一条分隔线更会被突然踢出正文界面 ✗。
    */
   return { reasons };
@@ -509,6 +679,39 @@ export interface DraftRecord {
  */
 const drafts = new Map<string, DraftRecord>();
 const DRAFT_LIMIT = 40;
+
+/**
+ * **保存确认的缓存提交**：把记录同步落成保存后的样子 ✓。
+ *
+ * 为什么必须**同步**、且必须在通知父面板**之前** ✗
+ * （`design/save-and-close-reopen-conflict-optimization.md` 的时序缺口 ✓）：
+ * 父面板收到 `onSaved` 会立刻关掉编辑器 ⇒ 那条"按 isDirty 写/删缓存"的 effect 根本不会跑，
+ * 旧草稿记录（旧 draft/base/hash）就留在缓存里；下次打开先恢复它，而磁盘已经是保存后的新指纹 ⇒
+ * **自己的保存被当成外部修改** ✗ —— 用户刚点了"保存并关闭"，重开却看到冲突与星号 ✓。
+ *
+ * 不用 `setTimeout` / 延迟一帧 / 等某个 effect ✗：正确性不能建立在调度时机上 ✓
+ * （文档明确否掉了这三条路 ✓）。
+ *
+ * @param previousKey - 这次保存**之前**用的缓存键 ✓（取组件实际用的那个键，别自己拼 ✗）。
+ * @param nextKey - 保存后的键 ✓（身份被采用时与 `previousKey` 不同 ✓）。
+ * @param commit - `saveCommit` 的结果 ✓。
+ * @returns 新键与"是否留了记录"（诊断用 ✓；不含正文 ✗）。
+ */
+export function commitSavedDraft(
+  previousKey: string,
+  nextKey: string,
+  commit: SaveCommit,
+): { key: string; kept: boolean } {
+  /* 身份被"采用"（adopted-* → ULID）⇒ 旧键必须删掉，不能复制后保留 ✗（复查 P2-4 ✓） */
+  if (previousKey !== nextKey) forgetDraft(previousKey);
+  if (commit.dirty) {
+    rememberDraft(nextKey, { draft: commit.draft, base: commit.base, hash: commit.hash });
+    return { key: nextKey, kept: true };
+  }
+  /* 干净 ⇒ 立即删记录 ✓：重开时直接显示刚保存的正文，不再要求比较/合并 ✓ */
+  forgetDraft(nextKey);
+  return { key: nextKey, kept: false };
+}
 
 /** 拼草稿键（库身份用面板给的稳定 key ✓） */
 export function draftKey(libraryKey: string, nodeId: string): string {

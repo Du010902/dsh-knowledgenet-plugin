@@ -717,12 +717,6 @@
   padding: 16px 18px 12px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
-.kn-editor-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
 
 .kn-editor-tag {
   padding: 2px 8px;
@@ -743,31 +737,53 @@
   cursor: pointer;
 }
 
-/* 标题：单行省略 ✓（完整标题看 title 提示 ✓）—— 身份标题只占一行 ✓ */
+/*
+ * 标题：单行省略 ✓（完整标题看 title 提示 ✓）—— 身份标题只占一行 ✓。
+ *
+ * 右侧的**未保存标记**（`*`）与"正在保存…"住在同一个 flex 行里 ✓：
+ * 标记贴着标题文字的右上角（`align-self: flex-start` ✓），标题被省略号截断时标记不会被裁掉 ✗
+ * （`text-overflow` 只作用在 `.kn-editor-title-text` 上 ✓）。
+ */
 .kn-editor-title {
+  display: flex;
   flex: 1;
   min-width: 0;
+  gap: 2px;
+  align-items: center;
   margin: 0;
-  overflow: hidden;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* 路径住在「详情」里 ✓（可读的次级色 ✓，不再常驻占高度 ✓） */
-.kn-editor-path {
+.kn-editor-title-text {
   min-width: 0;
   overflow: hidden;
-  color: var(--dsw-alias-label-secondary);
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 头部右侧的小工具组：正文/源码 + 详情 + 关闭 ✓（合计约 44px 高 ✓） */
+/* 未保存：节点名右上角一个 `*` ✓（原底部那行"有未保存修改"已撤掉 ✓） */
+.kn-editor-dirty {
+  flex: none;
+  align-self: flex-start;
+  margin-top: -1px;
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* 保存中：同一个位置的短时状态 ✓（保存结束即消失 ✓） */
+.kn-editor-saving {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* 头部：标题（含未保存标记）+ 关闭 ✓（合计约 44px 高 ✓；没有模式切换 ✗ —— 用户只要正文 ✓） */
 .kn-editor-heading {
   display: flex;
   flex: none;
@@ -777,36 +793,7 @@
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
-.kn-editor-tabs {
-  display: flex;
-  flex: none;
-  gap: 2px;
-  align-items: center;
-}
-
-.kn-editor-tabs button {
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.kn-editor-tabs button:hover {
-  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
-}
-
-.kn-editor-tabs button.is-active {
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-primary);
-  font-weight: 600;
-}
-
-/* 详情按钮与关闭按钮：同一尺寸的小方钮 ✓ */
-.kn-editor-more,
+/* 关闭按钮：右上角的小方钮 ✓（「⋯ 详情」已撤掉 ✗） */
 .kn-editor-close {
   flex: none;
   width: 24px;
@@ -822,18 +809,9 @@
   cursor: pointer;
 }
 
-.kn-editor-more:hover,
 .kn-editor-close:hover {
   background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
   color: var(--dsw-alias-label-primary);
-}
-
-/* 详情面板：按需展开 ✓（默认不占正文高度 ✓） */
-.kn-editor-details {
-  flex: none;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-2);
 }
 
 .kn-editor-notice {
@@ -883,13 +861,109 @@
   font-size: 12px;
 }
 
-.kn-editor-latest {
-  margin: 8px 0 0;
-  max-height: 160px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-family: ui-monospace, monospace;
+/* ============ 真实冲突：紧凑提示 + 按需展开的比较区（`design/save-and-close-reopen-conflict-optimization.md`） ============ */
+
+/*
+ * 冲突**不再**铺一整块黄色背景 + 直接把整篇源码摊开 ✗（那会把异常处理变成主界面 ✓）。
+ * 这里只留一条细的警示边 + 一句话，正文空间还给用户 ✓。
+ */
+.kn-editor-conflict {
+  flex: none;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  border-left: 3px solid var(--dsw-alias-state-warn-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+/* 一行放完：一句话（左）+ 动作（右）✓ */
+.kn-editor-conflict-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kn-editor-conflict-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+}
+
+.kn-editor-conflict-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.kn-editor-conflict-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
   font-size: 11px;
+  cursor: pointer;
+}
+
+.kn-editor-conflict-actions button:hover:not(:disabled) {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+}
+
+.kn-editor-conflict-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 「使用文件最新版本」是**放弃修改** ⇒ 危险色 ✓ */
+.kn-editor-conflict-actions button.is-danger {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/*
+ * 比较区：两个区块「我的修改」/「文件最新版本」✓ ——
+ * **正常正文背景** ✓（文档要求：不在黄色背景上铺整篇正文 ✓），只有差异行局部标注 ✓。
+ */
+.kn-editor-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.kn-editor-compare-pane {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  overflow: hidden;
+}
+
+.kn-editor-compare-head {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.kn-editor-compare-body {
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 10px;
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 差异行：只在这一行上做标注 ✓（不整块变色、不加发光 ✓） */
+.kn-editor-diff-line.is-changed {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
 }
 
 .kn-editor-hint {
@@ -901,8 +975,12 @@
 /*
  * **正文视口——整个编辑器里唯一负责纵向滚动的地方** ✓（文档第 2 节 ✓）。
  * flex 剩余高度 + min-height:0 是必须的 ✗：否则 flex 子项不肯收缩 ⇒ 出现"外层一条、内层一条"两个滚动条 ✓。
+ *
+ * `position: relative` 是给**表格菜单**用的 ✓：菜单是它的绝对定位子元素 ⇒
+ * 用的是"内容坐标"（跟着正文一起滚 ✓），溢出也被这个容器裁掉 ✓（不会跑到编辑器外面 ✗）。
  */
 .kn-editor-body {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -910,6 +988,78 @@
   padding: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* ===================== 表格操作菜单（`design/table-caret-and-interaction-design.md`） ===================== */
+
+/*
+ * **只在光标进了表格时出现** ✓（显隐由 `MarkdownRichEditor` 按编辑器 selection 决定 ✓），
+ * 挂在表格块右上角 ✓；Crepe 那套常驻的十字线/加号/行列抓手已经整块撤掉 ✗
+ * （见 `editor-overrides.css`：连 `pointer-events` 一起停掉 ✓，不允许透明控件继续吃点击 ✗）。
+ */
+.kn-table-menu {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex: none;
+  gap: 1px;
+  align-items: center;
+  padding: 3px 4px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+  /* 轻量：不抢注意力，悬停/键盘进入才完全实体化 ✓ */
+  opacity: 0.92;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.kn-table-menu:hover,
+.kn-table-menu:focus-within {
+  opacity: 1;
+}
+
+.kn-table-menu-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.kn-table-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.kn-table-menu-btn:hover {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 当前列的对齐：点亮（不是"选中整块"那种重反馈 ✓） */
+.kn-table-menu-btn.is-active {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 危险操作（删行/删列）用警示色，且标题已写明对象 ✓ */
+.kn-table-menu-btn.is-danger:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.kn-table-menu-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
 }
 
 .kn-editor-text {
@@ -957,52 +1107,6 @@
   padding: 14px 0;
   color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
-}
-
-/* 底部：**单行**状态栏 ✓（左状态 / 右保存 ✓，合计约 36px） */
-.kn-editor-foot {
-  display: flex;
-  flex: none;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 10px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-}
-
-.kn-editor-status {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  /* 状态文字要**读得清** ✗（原来用 idle 色 ⇒ 淡到看不清 ✓），只有次要提示才用更淡的色 ✓ */
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kn-editor-status.is-conflict {
-  color: var(--dsw-alias-state-warn-primary);
-}
-
-.kn-editor-save {
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 7px;
-  background: var(--dsw-alias-brand-primary);
-  color: #183124;
-  font: inherit;
-  cursor: pointer;
-}
-
-.kn-editor-save:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.kn-editor-sub {
-  margin-top: 10px;
-  color: var(--dsw-alias-state-idle-primary);
-  font-size: 11px;
 }
 
 /* ===================== 富文本编辑区（Milkdown / Crepe） ===================== */

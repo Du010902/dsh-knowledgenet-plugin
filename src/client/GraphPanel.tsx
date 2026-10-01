@@ -30,7 +30,7 @@ import { InteriorMinimap } from "./InteriorMinimap.tsx";
 import { NodeDocumentEditor } from "./NodeDocumentEditor.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { libraryKeyOf } from "./view-cache.ts";
-import { draftKey, forgetDraft } from "./node-document-state.ts";
+import { draftKey, forgetDraft, leaveLabels } from "./node-document-state.ts";
 import { RELAYOUT_EVENT } from "./interior-controller.ts";
 import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
 import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
@@ -110,12 +110,15 @@ const LITERAL: Record<string, string> = {
   addPrerequisite: "添加前置节点…",
   /* 节点笔记编辑器（`design/node-note-editor.html` ✓）；正式文案同时进中英词典 ✓ */
   leaveTitle: "有尚未保存的笔记",
-  leaveMessage: "先保存当前内容，再继续查看其他节点。",
+  /* 动作说清楚：关编辑区 ⇒ 「保存并关闭」；切节点 ⇒ 「保存并切换」✓（不再用笼统的"保存并继续"✗） */
+  leaveCloseMessage: "当前笔记有未保存修改。保存后关闭编辑区？",
+  leaveSwitchMessage: "当前笔记有未保存修改。保存后切换到另一个节点？",
   leaveBlocked: "编辑器里还有问题要处理（见编辑区的提示），处理完再保存并继续。",
   leaveSaveBlocked: "暂时无法保存",
   leaveStay: "继续编辑",
   leaveDiscard: "放弃修改",
-  leaveSave: "保存并继续",
+  leaveSaveClose: "保存并关闭",
+  leaveSaveSwitch: "保存并切换",
   edgeMenuTitle: "这条依赖",
   removeRelation: "删除这条依赖",
   removeNode: "删除当前节点",
@@ -261,18 +264,28 @@ function GraphPanelInner(props: {
   /**
    * 编辑器的保存生命周期（复查 P2-2）。
    *
-   * 关键行为：**保存失败或冲突时收起弹窗、清掉待办** ✓ ——
-   * 否则那个覆盖全屏的三选一弹窗会挡住编辑器里的错误与合并入口 ✗；
+   * 关键行为：**保存失败 / 冲突 / "保存成功但仍有新草稿"时收起弹窗、清掉待办** ✓ ——
+   * 否则那个覆盖全屏的三选一弹窗会挡住编辑器里的错误与合并入口 ✗，
+   * 甚至会把用户还没保存的字一起关掉 ✗；
    * 且旧待办绝不能在后来某次普通保存成功时"意外生效" ✗（所以这里一并清空 ✓）。
    * 用户处理完错误后重新点关闭/切换即可重新发起 ✓。
    */
   const onEditorSaveOutcome = useCallback((saving: boolean, outcome: string | null): void => {
     setEditorSaving(saving);
     if (saving) return;
+    /* 只有干净的 "saved" 才继续执行离开待办 ✓；"saved-dirty" 要留在原地 ✗ */
     if (outcome === "saved") return;
     pendingEditRef.current = null;
     setLeaveDialog(null);
   }, []);
+  /**
+   * 离开弹窗文案：**动作说清楚** ✓（关闭 ⇒「保存并关闭」；切节点 ⇒「保存并切换」）。
+   * 计算放在 `leaveLabels`（纯函数、可单测 ✓）；这里每次渲染直接取（很便宜 ✓，
+   * 而且不把每次都变的 `t` 放进依赖 ✗）。
+   */
+  const leaveCopy = leaveDialog === null
+    ? null
+    : leaveLabels(leaveDialog.kind, t, { saving: editorSaving, saveable: editorSaveable });
   /** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
   const [searchQuery, setSearchQuery] = useState("");
   /**
@@ -1174,16 +1187,12 @@ function GraphPanelInner(props: {
                 report={editorReport}
               />
             ) : null}
-            {/* 未保存时切节点/关闭：三选一（继续编辑 / 放弃修改 / 保存并继续 ✓） */}
-            {leaveDialog !== null ? (
+            {/* 未保存时切节点/关闭：三选一（继续编辑 / 放弃修改 / 保存并关闭·保存并切换 ✓） */}
+            {leaveDialog !== null && leaveCopy !== null ? (
               <ConfirmDialog
-                title={t("leaveTitle")}
-                message={editorSaving
-                  ? t("statusSaving")
-                  : editorSaveable ? t("leaveMessage") : t("leaveBlocked")}
-                confirmLabel={editorSaving
-                  ? t("statusSaving")
-                  : editorSaveable ? t("leaveSave") : t("leaveSaveBlocked")}
+                title={leaveCopy.title}
+                message={leaveCopy.message}
+                confirmLabel={leaveCopy.confirmLabel}
                 cancelLabel={t("leaveStay")}
                 extraLabel={t("leaveDiscard")}
                 /*

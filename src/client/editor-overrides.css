@@ -113,19 +113,55 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 鼠标所在行轻微高亮 ✓（真实 token 派生，亮暗都对 ✓） */
-.kn-root .kn-editor-rich .milkdown tbody tr:hover td {
-  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+/*
+ * 悬停**不点亮整行** ✗（`design/table-caret-and-interaction-design.md` 第 3 节 ✓）：
+ * 表格是文档内容，鼠标划过只是"我在这一行"这种弱信息，整行底色会让表格显得又重又像表单 ✓。
+ */
+
+/*
+ * Crepe 的**表格结构控件整块撤掉** ✗（同一份文档第 1 节 ✓）：
+ * `.line-handle`（横/竖辅助线 + 加号）、`.cell-handle`（行列抓手 + 它的小按钮组）、
+ * 以及拖动时那块 `.drag-preview` —— 它们服务于"插入行列 / 结构拖动"，
+ * 常驻显示会让普通写字看起来像在排版 ✓。
+ *
+ * **必须连 `pointer-events` 一起停掉** ✗：只把线设成 `opacity: 0` 的话，
+ * 透明的绝对定位控件照样命中鼠标 ⇒ 点单元格时会截获点击、落不下文字插入光标 ✓；
+ * `display: none` 同时解决"看不见却吃事件"与"横线伸出可见表格区域"两件事 ✓。
+ *
+ * 撤掉之后结构操作并不是消失了 ✓：光标进表格时从**表格右上角的轻量菜单**里做
+ * （`TableMenu.tsx` / `.kn-table-menu` ✓），而且键盘焦点进表格也能发现它 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .handle,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .line-handle,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .cell-handle,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .add-button,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .drag-preview {
+  display: none !important;
+  pointer-events: none !important;
 }
 
-/* 选中单元格：品牌色半透明 ✓（Crepe 自带的 ::after 太淡 ✗） */
+/*
+ * **单元格不再因为"结构选中"而描边** ✗：Crepe 给 `th/td:has(.ProseMirror-selectednode)`
+ * 加了 1px 主题色 outline ⇒ 点一下空格整格亮起来，看起来像选中了一个块 ✓。
+ * 文字选区由浏览器原生画 ✓；真正的区域选择另有低对比底纹 ✓（见下面 `.selectedCell`）。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th:has(.ProseMirror-selectednode),
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block td:has(.ProseMirror-selectednode) {
+  outline: none;
+}
+
+/*
+ * 区域（多单元格）选择：**低对比** 10% 品牌色 ✓（文档建议 8–12% ✓）。
+ * 原来的 22% 太抢眼 ⇒ 和"点击一个空格"混在一起，分不清是光标还是区域选择 ✓。
+ * 跨单元格复制粘贴仍然看得见反馈 ✓（不是把 `.selectedCell` 全清掉 ✗）。
+ */
 .kn-root .kn-editor-rich .milkdown .selectedCell::after,
 .kn-root .kn-editor-rich .milkdown .milkdown-table-block .selectedCell::after {
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
   opacity: 1;
 }
 
-/* 列宽拖拽手柄可见 ✓ */
+/* 列宽拖拽手柄可见 ✓（用户主动拖列宽时才出现的小范围反馈 ✓，不是"点一下就有的竖线" ✗） */
 .kn-root .kn-editor-rich .milkdown .column-resize-handle {
   background: var(--dsw-alias-brand-primary);
   width: 2px;
@@ -263,7 +299,7 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper,
 .kn-root .kn-editor-rich .milkdown pre,
 .kn-root .kn-editor-rich .milkdown .katex-display,
-.kn-root .kn-editor-latest {
+.kn-root .kn-editor-compare-body {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent) transparent;
 }
@@ -273,7 +309,7 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar,
-.kn-root .kn-editor-latest::-webkit-scrollbar {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -284,7 +320,7 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-track,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-track,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-track,
-.kn-root .kn-editor-latest::-webkit-scrollbar-track {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -293,7 +329,7 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-button,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-button,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-button,
-.kn-root .kn-editor-latest::-webkit-scrollbar-button {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-button {
   display: none;
 }
 
@@ -302,7 +338,7 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-thumb,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-thumb,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-thumb,
-.kn-root .kn-editor-latest::-webkit-scrollbar-thumb {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 8px;
   background: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent);
@@ -606,36 +642,7 @@
   gap: 8px;
 }
 .kn-root .kn-editor-title { font-size: 13px; font-weight: 600; }
-.kn-root .kn-editor-tabs {
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--dsw-alias-bg-layer-2);
-}
-.kn-root .kn-editor-tabs button { padding: 4px 7px; font-size: 11px; }
-.kn-root .kn-editor-tabs button.is-active {
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
-}
-.kn-root .kn-editor-more, .kn-root .kn-editor-close { width: 28px; height: 28px; }
-.kn-root .kn-editor-foot { min-height: 40px; box-sizing: border-box; padding: 5px 12px; }
-.kn-root .kn-editor-status { font-size: 11px; }
-.kn-root .kn-editor-save {
-  padding: 5px 11px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  line-height: 18px;
-}
-.kn-root .kn-editor-save:not(:disabled) {
-  border-color: var(--dsw-alias-brand-primary);
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, var(--dsw-alias-bg-layer-1));
-}
-.kn-root .kn-editor-save:not(:disabled):hover {
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, var(--dsw-alias-bg-layer-1));
-}
-.kn-root .kn-editor-save:disabled { opacity: 0.6; }
+.kn-root .kn-editor-close { width: 28px; height: 28px; }
 .kn-root .kn-editor button:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
@@ -663,9 +670,9 @@
 }
 .kn-root .kn-editor-text { box-sizing: border-box; padding: 16px 20px 32px; font-size: 13px; }
 .kn-root .kn-editor-text:focus { padding-left: 20px; box-shadow: none; }
-.kn-root .kn-editor-details { font-size: 12px; padding: 10px 14px; }
-.kn-root .kn-editor-details .kn-editor-row { margin-top: 4px; color: var(--dsw-alias-label-secondary); }
-.kn-root .kn-editor-details .kn-editor-dim { padding: 8px 0 0; }
+/* 未保存标记：与收紧后的标题同高 ✓（底栏撤掉后唯一的"未保存"提示 ✓） */
+.kn-root .kn-editor-dirty { font-size: 12px; }
+.kn-root .kn-editor-saving { font-size: 11px; }
 
 /* Crepe tool buttons are children of tools-button-group, without copy-button classes. */
 .kn-root .kn-editor-rich .milkdown .milkdown-code-block {
