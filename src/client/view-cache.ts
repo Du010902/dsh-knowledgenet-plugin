@@ -1,5 +1,5 @@
 /**
- * 插件自有的**按知识库身份分区**的视图缓存，外加"当前库身份"这个开关。
+ * 插件自有的**按知识库身份分区**的视图缓存。
  *
  * 为什么需要（`design/view-navigation-repair-plan.md` P1）：
  * 上游 `session.ts` 的相机缓存是**模块级单槽位**、没有任何库身份 ✗ ——
@@ -7,10 +7,11 @@
  * 新库还可能因为 `cameraRestored = true` 而**不再自动取景**，
  * 两个图谱面板同时存在时后保存的会覆盖另一个 ✗。
  *
- * 做法：身份**优先用返回数据里的稳定 `libraryId`**，没有才退回库根路径 ✓
- * （两者都没有 ⇒ 空串，等于"不分区"，与上游行为一致 ✓）。
- * 面板在渲染图谱子组件**之前**设置当前身份；引擎在构造时**绑定一次**并全程用它读写缓存
- * ⇒ 两个面板并存也互不干扰 ✓（不依赖"全局身份在读取那一刻是谁"）。
+ * **身份一律由调用方显式传入**（这里没有"当前库"这种全局状态 ✓）：
+ * 插件把身份作为 prop 交给图谱组件、组件交给引擎、引擎在构造时绑定到实例，
+ * 之后每一次读写都用自己的身份 ✓ —— 面板渲染与引擎创建之间的先后顺序不再影响结果 ✓
+ * （曾经用渲染期设置的全局变量 ✗，而 React 的效果是"子先父后"，
+ *  两个面板先后渲染时 A 的引擎会绑到 B 的身份 ✗）。
  */
 import type { CameraState } from "../vendor/upstream/graph3d/types.ts";
 
@@ -22,9 +23,6 @@ interface ViewEntry {
 
 /** 视图缓存：库身份 → 那一份视图。序列化用不上，纯内存 ✓ */
 const views = new Map<string, ViewEntry>();
-
-/** 当前库身份（由面板在渲染图谱前设置；引擎构造时取一次并绑定） */
-let activeKey = "";
 
 /**
  * 从面板载荷里推出**稳定**的库身份。
@@ -43,16 +41,6 @@ export function libraryKeyOf(library: { libraryId?: unknown; root?: unknown } | 
   const root = library?.root;
   if (typeof root === "string" && root.trim() !== "") return `root:${root.trim()}`;
   return "";
-}
-
-/** 设置当前库身份（面板渲染图谱前调用；空串 = 不分区） */
-export function setActiveLibraryKey(key: string | null | undefined): void {
-  activeKey = typeof key === "string" ? key : "";
-}
-
-/** 当前库身份 */
-export function activeLibraryKey(): string {
-  return activeKey;
 }
 
 /** 深复制一份相机状态（含自由姿态与挂在它上面的内部导航状态 ✓） */

@@ -45,7 +45,7 @@ const DICT_ZH: Record<string, string> = {
   searchMiss: "没有匹配的节点",
   counts: "节点 {n} · 依赖 {e}",
   noNodes: "这个知识库里还没有知识点。",
-  spaceFailed: "三维视图不可用，已回到二维聚焦。",
+  spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   // 图谱卡片
   title: "知识库图谱",
@@ -86,7 +86,7 @@ const DICT_EN: Record<string, string> = {
   searchMiss: "No matching node",
   counts: "{n} nodes · {e} links",
   noNodes: "This library has no knowledge nodes yet.",
-  spaceFailed: "The 3D view is unavailable; switched back to focus.",
+  spaceFailed: "The 3D view is unavailable. The data is fine — hit Retry or reload the panel.",
   workspaceHint: "The panel follows the current workspace: open this library directory as a workspace and it shows up here.",
   title: "Knowledge graph",
   loading: "Resolving the current workspace…",

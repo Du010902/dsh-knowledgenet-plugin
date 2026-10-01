@@ -1,15 +1,17 @@
 /**
- * 常驻的知识库面板（中央 `main` 面板 + 左侧栏图标）。
+ * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
  *
  * 数据来自宿主注册的 Fetch 路由（`api/knowledgenet.graph`），与工具结果**同一份构造逻辑**：
  * 面板看到的图与模型看到的 JSON 不会说两套话。
  *
- * 两个视图：
- * - **聚焦**：`GraphSpace`（二维，DOM 卡片 + SVG 连线）；
- * - **空间**：`GraphUniverse`（三维，three.js + Worker 力导向布局；Worker 源码由构建期内联为 Blob）。
+ * 视图只有**空间**（`GraphUniverse`：three.js + Worker 力导向布局，Worker 源码由构建期内联为 Blob）。
+ * 旧的两维视图已经**从产品里去掉了** ✗ —— 因此：
+ * - 面板不再注册任何两维卡片（`GraphCard` 那个文件是遗留死代码）；
+ * - 兜底页也不再出现"回到另一个视图"那种话与按钮（构建期把上游那份文案与按钮一起改掉 ✓）。
  *
- * 三维视图套了错误边界：WebGL/Worker 出问题时退回二维并给一条可读提示，
- * 而不是把整个面板从槽位里摘掉。
+ * 三维视图套了错误边界：WebGL/Worker 出问题时给一条可读提示与「重试」，
+ * 而不是把整个面板从槽位里摘掉；视图**常驻挂载**（不可见只做显隐），
+ * 免得反复重建 WebGL 上下文 ✗。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -25,7 +27,7 @@ import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } fro
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { InteriorMinimap } from "./InteriorMinimap.tsx";
-import { libraryKeyOf, setActiveLibraryKey } from "./view-cache.ts";
+import { libraryKeyOf } from "./view-cache.ts";
 import { RELAYOUT_EVENT } from "./interior-controller.ts";
 import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
 import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
@@ -88,7 +90,7 @@ const LITERAL: Record<string, string> = {
 
   counts: "节点 {n} · 依赖 {e}",
   truncated: "（已截断显示）",
-  spaceFailed: "三维视图不可用，已回到二维聚焦。",
+  spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   nodeMenuTitle: "这个知识点",
   addPrerequisite: "添加前置节点…",
@@ -230,17 +232,14 @@ function GraphPanelInner(props: {
   );
 
   /*
-   * **渲染图谱之前**绑定"当前知识库身份"，供视图缓存分区使用 ✓（文档 P1）。
+   * **知识库身份**：作为 prop **显式**交给图谱组件，再由组件交给引擎（引擎构造时绑定到实例）✓
    *
-   * 为什么必须在渲染期（`useMemo`）：图谱子组件是在它自己的 `useEffect` 里创建引擎的，
-   * 而 React 的效果是**子先父后**⇒ 父组件的 effect 里设置就已经晚了 ✗。
-   * 引擎在构造时会把身份绑定到实例上，之后就不再依赖这个全局值（多面板并存也隔离 ✓）。
-   * 身份优先用稳定的 `libraryId`，没有才退回库根路径 ✓。
+   * 为什么不写成"渲染期设一个全局变量、引擎稍后去读" ✗：
+   * 引擎是在**子组件的 effect 里**创建的，而 React 的效果是"子先父后、按提交顺序"——
+   * 两个面板在同一提交里渲染时，全局变量早已被后渲染的那个面板覆盖 ⇒
+   * A 的引擎会绑到 B 的身份上，缓存就此串库 ✗（文档 P1 复查指出的就是这个）。
    */
-  useMemo(
-    () => setActiveLibraryKey(libraryKeyOf(payload?.library)),
-    [payload?.library],
-  );
+  const libraryKey = useMemo(() => libraryKeyOf(payload?.library), [payload?.library]);
 
   /*
    * 标签页 params 里的 root：用户从左侧栏「知识库」区块点了某个库。
@@ -875,41 +874,49 @@ function GraphPanelInner(props: {
                 <div className="kn-dim">{t("emptyHint")}</div>
               </div>
             ) : null}
-            {/* 不可见时不渲染三维：连 requestAnimationFrame 一起停（收起侧栏也能覆盖） */}
-            {visible ? null : <div className="kn-msg">{t("loading")}</div>}
+            {/*
+              * 三维视图**常驻挂载**，可见性只控制显隐 ✓。
+              *
+              * 原来"不可见就卸载"是拿**WebGL 上下文反复重建**换一点点电 ✗：
+              * 每次重挂都会新建一个上下文与画布，浏览器上下文数量到上限就会丢上下文
+              * —— 那正是「三维绘制已中断」那一页的来源 ✗。
+              * 上游的渲染循环是**按需唤醒**的（静止时不再排帧）⇒ 常驻几乎不耗电 ✓。
+              */}
+            <div className="kn-graph-stage" data-visible={visible ? "true" : "false"}>
+              <ErrorBoundary
+                fallback={<div className="kn-msg">{t("spaceFailed")}</div>}
+                onError={() => { setSpaceNotice(t("spaceFailed")); }}
+              >
+                <GraphUniverse
+                  /*
+                   * **节点集合变化时重建场景**（key 变化 ⇒ React 重新挂载）。
+                   * 不这样做的后果：删掉一个节点后，三维引擎里那个网格不会被移除 ⇒
+                   * 图上留下一个"幽灵圈"（用户实测 ✗）。只按**节点 id 集合**做 key，
+                   * 所以改关系、聚焦等不会触发重建（镜头不会乱跳 ✓）。
+                   */
+                  /*
+                   * key = **库根 + 节点集合**：换库或增删节点时重建场景 ✓。
+                   * 为什么要带库根：上游的相机/布局缓存是**模块级全局单例** ✗（跨库共用），
+                   * 不带库根就会出现"切到另一个库后沿用上一个库的视角"（位置不对）✓。
+                   */
+                  key={`${payload?.library?.root ?? ""}#${graph.nodes.map((node) => node.id).sort().join(",")}`}
+                  graph={graph}
+                  rootId={payload?.focusId ?? null}
+                  focusId={effectiveFocus}
+                  labelDensity="smart"
+                  command={cameraCommand}
+                  relayoutToken={relayoutToken}
+                  libraryKey={libraryKey}
+                  onEnter={(id: string) => setFocusId(id)}
+                />
+              </ErrorBoundary>
+            </div>
             {/*
              * 右下角的实时截面小地图（用户手绘那张图的界面版）：
              * 大圆 = 操作包围球、中心点 = 固定转动中心、眼睛 = 视角当前位置、淡点 = 走过的路径 ✓。
              * 只认自己这块画布广播的事件（`contains` 认领）；`pointer-events: none`，不会吃掉拖动 ✓。
              */}
             <InteriorMinimap hostRef={graphHostRef} active={visible} />
-            {visible ? (<ErrorBoundary
-              fallback={<div className="kn-msg">{t("spaceFailed")}</div>}
-              onError={() => { setSpaceNotice(t("spaceFailed")); }}
-            >
-              <GraphUniverse
-                /*
-                 * **节点集合变化时重建场景**（key 变化 ⇒ React 重新挂载）。
-                 * 不这样做的后果：删掉一个节点后，三维引擎里那个网格不会被移除 ⇒
-                 * 图上留下一个"幽灵圈"（用户实测 ✗）。只按**节点 id 集合**做 key，
-                 * 所以改关系、聚焦等不会触发重建（镜头不会乱跳 ✓）。
-                 */
-                /*
-                 * key = **库根 + 节点集合**：换库或增删节点时重建场景 ✓。
-                 * 为什么要带库根：上游的相机/布局缓存是**模块级全局单例** ✗（跨库共用），
-                 * 不带库根就会出现"切到另一个库后沿用上一个库的视角"（位置不对）✓。
-                 */
-                key={`${payload?.library?.root ?? ""}#${graph.nodes.map((node) => node.id).sort().join(",")}`}
-                graph={graph}
-                rootId={payload?.focusId ?? null}
-                focusId={effectiveFocus}
-                labelDensity="smart"
-                command={cameraCommand}
-                relayoutToken={relayoutToken}
-                onEnter={(id: string) => setFocusId(id)}
-                onFallback={() => { setSpaceNotice(t("spaceFailed")); }}
-              />
-            </ErrorBoundary>) : null}
             {/* 右键菜单：节点加前置 / 连线删依赖（上游两种视图都会派发 window 事件） */}
             <GraphContextMenu
               nodes={graph.nodes}

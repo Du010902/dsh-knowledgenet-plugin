@@ -40,7 +40,6 @@ import {
 } from "./interior-navigation.ts";
 import { pickClippedEdge } from "./edge-picking.ts";
 import { currentQuat, freeBasis, quatMultiply, quatNormalize, type Quat } from "./trackball.ts";
-import { activeLibraryKey } from "./view-cache.ts";
 
 /** 定位动画时长（毫秒）；「减少动态效果」时降为 1ms（与上游一致） */
 const FOCUS_DURATION_MS = 620;
@@ -69,8 +68,11 @@ export const INTERIOR_STATE_EVENT = "kn-interior-state";
  */
 export const RELAYOUT_EVENT = "kn-relayout-request";
 
-/** 重排请求的兜底时限（毫秒）：等不到"布局完成"就用当前包围体兜一次 ✓ */
+/** 重排请求的兜底时限（毫秒）：等不到"布局收敛"就用当前包围体兜一次 ✓ */
 const RELAYOUT_DEADLINE_MS = 2000;
+
+/** 这次取景是**为什么**发生的（引擎显式传入；不能用 `smooth` 猜 ✗） */
+export type FitReason = "initial" | "settle" | "command";
 
 /** 事件负载：相机位置/朝向、固定球心与操作球半径 */
 export interface InteriorStateDetail {
@@ -97,6 +99,11 @@ export interface InteriorNavigationOptions {
   element: HTMLElement;
   initial: CameraState;
   edgeLength: number;
+  /**
+   * 知识库身份（引擎构造时从**显式选项**里带过来 ✓）。
+   * 重新整理事件按它认领：两个图谱面板并存时只响应自己那一个 ✓。
+   */
+  libraryKey?: string;
   getProjected(): ProjectedNode[];
   getEdges(): ReadonlyArray<{ from: number; to: number }>;
   onSelect(index: number | null): void;
@@ -168,8 +175,8 @@ export class InteriorNavigation {
   private relayoutDeadline = 0;
   /** 重排期间用户自己操作过 ⇒ 不再自动取景覆盖他的视角 ✓ */
   private interactedSinceRelayout = false;
-  /** 本实例绑定的知识库身份（构造时取一次；重新整理事件按它认领 ✓） */
-  private readonly libraryKey = activeLibraryKey();
+  /** 本实例绑定的知识库身份（**构造选项**里显式带进来；重新整理事件按它认领 ✓） */
+  private readonly libraryKey: string;
   /*
    * 注意：这里**不用**构造参数属性（`constructor(private readonly options…)`）——
    * Node 的 strip-only TS 模式直接拒绝那种写法（ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX），
@@ -179,6 +186,7 @@ export class InteriorNavigation {
 
   constructor(options: InteriorNavigationOptions) {
     this.options = options;
+    this.libraryKey = options.libraryKey ?? "";
     this.state = this.seedState(options.initial);
     this.camera = { ...options.initial } as CameraWithState;
     this.syncCamera();
@@ -343,10 +351,18 @@ export class InteriorNavigation {
       && Number.isFinite(bounds.radius) && bounds.radius > 0) {
       this.state.radius = bounds.radius;
     }
-    /* 重排请求进来后迟迟等不到"布局完成"：到点就用当前包围体兜一次，别一直挂着 ✗ */
-    if (this.relayoutPending && this.relayoutDeadline > 0
+    /*
+     * 重排请求进来后迟迟等不到"布局收敛"：到点就用**当前**包围体兜一次 ✓
+     * （典型情形是布局收敛事件没来；兜底后仍然保留待办 —— 真收敛时再采一次更准的 ✓）。
+     */
+    if (this.pointer === null && this.relayoutPending && this.relayoutDeadline > 0
       && (typeof performance === "undefined" || performance.now() >= this.relayoutDeadline)) {
-      this.adoptRelayoutCenter(bounds, null, 0);
+      this.relayoutDeadline = 0;
+      if (Array.isArray(bounds.center) && bounds.radius > 0) {
+        this.state.center = [...bounds.center];
+        this.state.radius = bounds.radius;
+        this.radiusMeasured = false;
+      }
     }
     this.syncCamera();
   }
@@ -373,34 +389,51 @@ export class InteriorNavigation {
   }
 
   /**
-   * 「适应窗口」：回到球外全局取景、面向球心；保留 C 与 S ✓。
-   *
-   * 球心更新规则（文档 P2：**不复用 `smooth` 推断重排**）：
-   * - 用户还没操作过 ⇒ 采当前布局的包围体中心（初次进入 ✓）；
-   * - 收到过**明确的重新整理请求**（`kn-relayout-request` 事件 ✓）⇒ 在布局完成后采一次 ✓；
-   * - 其它情况（普通适应窗口 / 自动收敛取景）⇒ **球心保持不动** ✓。
+   * 「适应窗口」。
    *
    * @param positions - 节点坐标。
    * @param count - 节点数。
-   * @param smooth - 是否带动画（只决定动画，不再用来推断"是否重排" ✓）。
+   * @param smooth - 是否带动画（**只决定动画**，不再用来推断"是否重排" ✗）。
+   * @param reason - 这次取景的**原因**（引擎显式传入 ✓）：
+   *  - `"initial"`：首次取景；
+   *  - `"settle"`：布局**收敛后**的取景 —— 重新整理请求就是在这里才被兑现 ✓；
+   *  - `"command"`：工具栏/命令触发的取景（**重新整理按钮点下去时也会立刻来一次** ✗，
+   *    它测的还是重排前的坐标 ⇒ 绝不能在这里采球心、更不能消费掉待办标记 ✗）。
    */
-  fitAll(positions: Float32Array, count: number, smooth: boolean): void {
+  fitAll(
+    positions: Float32Array,
+    count: number,
+    smooth: boolean,
+    reason: FitReason = "command",
+  ): void {
     this.positions = positions;
     this.positionCount = count;
     const bounds = boundsOf(positions, count);
     this.bounds = bounds;
-    const newLayout = this.relayoutPending;
-    if ((!this.userInteracted || newLayout) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
-      this.adoptRelayoutCenter(bounds, positions, count);
+    /*
+     * 球心更新时机（文档 P2：**不复用 `smooth`**，改用明确原因 ✓）：
+     * - 用户还没操作过 且 是首次取景 / 布局收敛 ⇒ 采当前布局中心（进入一个库时的初始球心 ✓）；
+     * - 收到过**明确的重新整理请求**、并且这次是**布局收敛后**的取景 ⇒ 采新球心 ✓（承诺兑现 ✓）；
+     * - 其它情况（尤其"命令"那次立即取景）⇒ **什么都不动** ✓。
+     */
+    const adoptCenter = (reason === "initial" && !this.userInteracted)
+      || (reason === "settle" && (this.relayoutPending || !this.userInteracted));
+    if (adoptCenter && Number.isFinite(bounds.radius) && bounds.radius > 0) {
+      this.state.center = [...bounds.center];
+      this.radiusMeasured = false;
+      this.measureRadius(positions, count);
+      /* 只有"布局收敛"这一次才算兑现了重排请求 ✓ */
+      if (reason === "settle") {
+        this.relayoutPending = false;
+        this.relayoutDeadline = 0;
+      }
     } else {
       /* 球心不动，但半径始终按"以 C 为中心"量 ✓（操作球 / 取景 / 小地图共用它 ✓） */
       this.measureRadius(positions, count);
     }
     /* 用户在重排期间自己操作过 ⇒ 别再自动取景覆盖他的视角（文档要求）✓ */
-    const skipFraming = newLayout && this.interactedSinceRelayout;
-    this.relayoutPending = false;
-    this.relayoutDeadline = 0;
-    this.interactedSinceRelayout = false;
+    const skipFraming = this.relayoutPending && this.interactedSinceRelayout;
+    if (reason === "settle") this.interactedSinceRelayout = false;
     if (skipFraming) {
       this.syncCamera();
       this.options.onCameraChange();
@@ -418,14 +451,7 @@ export class InteriorNavigation {
     this.animateTo(from, this.fitTarget(framingRadius, distance), smooth);
   }
 
-  /** 采用新的球心，并把操作球半径按"以新球心为中心"重量一次 ✓ */
-  private adoptRelayoutCenter(bounds: Bounds, positions: Float32Array | null, count: number): void {
-    if (!Array.isArray(bounds.center) || !(bounds.radius > 0)) return;
-    this.state.center = [...bounds.center];
-    this.radiusMeasured = false;
-    if (positions !== null && count > 0) this.measureRadius(positions, count);
-    else this.state.radius = bounds.radius;
-  }
+  /** 采用新的球心（只由"首次取景 / 布局收敛"触发 ✓） */
 
   /** 以**固定球心 C** 为基准量半径：`max|X − C|` ✓（文档 P2） */
   private measureRadius(positions: Float32Array, count: number): void {

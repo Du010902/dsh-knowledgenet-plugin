@@ -300,7 +300,100 @@ const NAV_IMPORT_PATCHED = [
 ].join("\n");
 
 /** 视图缓存（按库身份分区）的导入：与上面那条导入一起注入 ✓ */
-const VIEW_CACHE_IMPORT = 'import { activeLibraryKey as knActiveLibraryKey, cachedView as knCachedView, storeView as knStoreView } from "../../../client/view-cache.ts";';
+const VIEW_CACHE_IMPORT = 'import { cachedView as knCachedView, storeView as knStoreView } from "../../../client/view-cache.ts";';
+
+/**
+ * `GraphUniverse.tsx`：把库身份从插件**显式**接过来、交给引擎（补丁点）✓
+ * 这样身份不再依赖"渲染期设的全局变量"，A 的引擎绝不会绑到 B 上 ✗。
+ *
+ * 注意：这个组件的 props 是**解构形参** ✗ —— 作用域里**没有** `props` 这个变量，
+ * 所以必须同时改解构列表并使用 `libraryKey`，不能写 `props.libraryKey`。
+ * （踩过：写成 `props.libraryKey` ⇒ 引擎构造抛 `ReferenceError: props is not defined`
+ *  ⇒ 被上游 try/catch 兜住 ⇒ 面板显示成「三维绘制已中断」，看起来像 GPU 丢了上下文 ✗。）
+ */
+const UNIVERSE_PROPS_NEEDLE = "  /** 「重新整理布局」指令：数值变一次执行一次（不是相机命令，相机保持不动） */\n  relayoutToken: number;";
+const UNIVERSE_PROPS_PATCHED = [
+  "  /** 「重新整理布局」指令：数值变一次执行一次（不是相机命令，相机保持不动） */",
+  "  relayoutToken: number;",
+  "  /**",
+  "   * 知识库身份（插件显式传入）。",
+  "   * 视图/布局缓存都按它分区，引擎构造时绑定到实例 ✓。",
+  "   */",
+  "  libraryKey?: string;",
+].join("\n");
+
+/** 解构列表里也要收下它，否则作用域里没有这个变量 ✗ */
+const UNIVERSE_DESTRUCTURE_NEEDLE = "  relayoutToken,\n  onEnter,";
+const UNIVERSE_DESTRUCTURE_PATCHED = "  relayoutToken,\n  libraryKey,\n  onEnter,";
+
+const UNIVERSE_ENGINE_NEEDLE = "      engine = new SpaceEngine({\n        host,";
+const UNIVERSE_ENGINE_PATCHED = [
+  "      engine = new SpaceEngine({",
+  "        host,",
+  "        libraryKey: libraryKey ?? \"\",",
+].join("\n");
+
+/**
+ * 兜底页：**去掉"回到二维聚焦"**（补丁点）。
+ *
+ * 上游组件在渲染失败/上下文丢失时给两条路：重试 + "回到二维聚焦" ✓ ——
+ * 但**本插件早已没有二维聚焦视图** ✗（图谱只挂在右侧栏标签页上）。
+ * 那句话与那颗按钮照搬过来就是误导：用户点了什么也不会发生 ✗。
+ * 这里改成说清"能做什么"（重试 / 刷新面板），并把按钮删掉 ✓。
+ */
+const FALLBACK_COPY_NEEDLE = [
+  "            {lost",
+  "              ? \"图形上下文已经停止。可以重试一次；如果仍然失败，请回到二维聚焦继续使用。\"",
+  "              : \"三维空间视图需要 WebGL 2。回到二维聚焦同样能完成定位与关系核对，那里没有这个限制。\"}",
+].join("\n");
+const FALLBACK_COPY_PATCHED = [
+  "            {lost",
+  "              ? \"三维空间视图的图形上下文已经停止。可以先点「重试」重建；仍然失败时刷新面板或切换标签页后再试一次。\"",
+  "              : initError !== null",
+  "                ? `三维视图初始化时出错：${initError}。可以先点「重试」；若一直失败，请把这条消息反馈给插件作者。`",
+  "                : \"这个环境不支持 WebGL 2，三维知识图无法显示。数据本身没有问题：搜索、右键菜单与对话里的划词都照常可用。\"}",
+].join("\n");
+
+/**
+ * 把「初始化异常」与「上下文丢失」分开显示（补丁点）。
+ *
+ * 上游写的是 `const lost = failure !== "webgl2"` ✗ —— 于是**任何**初始化报错
+ * （例如插件补丁引入的 `ReferenceError`）都会被显示成"三维绘制已中断"，
+ * 看上去像 GPU 丢了上下文，白白把人引到错方向 ✗（我们就这么绕过一次）。
+ * 这里改成三分支：上下文丢失 / 初始化异常（把原因原样显示出来 ✓）/ 不支持 WebGL2 ✓。
+ */
+const FALLBACK_LOST_NEEDLE = "    const lost = failure !== \"webgl2\";";
+const FALLBACK_LOST_PATCHED = [
+  "    /* 三种失败要分开：上下文丢失（lost）/ 初始化异常（initError）/ 环境不支持 WebGL2 ✓ */",
+  "    const lost = failure === \"lost\";",
+  "    const initError = !lost && failure !== \"webgl2\" ? failure : null;",
+].join("\n");
+
+const FALLBACK_TITLE_NEEDLE = "          <h3>{lost ? \"三维绘制已中断\" : \"当前环境未能启动 WebGL 2\"}</h3>";
+const FALLBACK_TITLE_PATCHED = [
+  "          <h3>{lost ? \"三维绘制已中断\" : initError !== null ? \"三维视图初始化失败\" : \"当前环境未能启动 WebGL 2\"}</h3>",
+].join("\n");
+
+/** 初始化异常也要能点「重试」（否则用户没有任何出路 ✗） */
+const FALLBACK_RETRY_NEEDLE = "            {lost && (";
+const FALLBACK_RETRY_PATCHED = "            {(lost || initError !== null) && (";
+
+const FALLBACK_ACTION_NEEDLE = [
+  "            <button type=\"button\" className=\"btn primary\" onClick={onFallback}>",
+  "              <Icon name=\"focus\" />",
+  "              回到二维聚焦",
+  "            </button>",
+].join("\n");
+
+/** `onFallback` 随之变成可选：本插件没有"另一条视图"可回退 ✓ */
+const FALLBACK_PROP_NEEDLE = "  onFallback(): void;";
+const FALLBACK_PROP_PATCHED = [
+  "  /**",
+  "   * 兜底页上的「另一条路」。",
+  "   * 本插件没有二维聚焦视图 ⇒ 兜底页不再渲染那颗按钮，这个回调保留为可选 ✓。",
+  "   */",
+  "  onFallback?(): void;",
+].join("\n");
 
 /**
  * `engine.ts` 的**视图缓存接线**（补丁点）：按知识库身份分区读写。
@@ -315,9 +408,62 @@ const VIEW_CACHE_IMPORT = 'import { activeLibraryKey as knActiveLibraryKey, cach
  */
 const CAMERA_RESTORE_NEEDLE = "    const restored = cachedCamera();";
 const CAMERA_RESTORE_PATCHED = [
-  "    this.knLibraryKey = knActiveLibraryKey();",
+  "    this.knLibraryKey = this.options.libraryKey ?? \"\";",
   "    const restored = knCachedView(this.knLibraryKey);",
 ].join("\n");
+
+/**
+ * 引擎选项里加一个**显式的库身份**（补丁点）。
+ *
+ * 之前身份是从一个插件全局变量里读的 ✗ —— 面板在渲染期设置它、引擎在**子组件 effect 里**
+ * 才创建，而 React 的效果是"子先父后"⇒ 两个面板先后渲染时，A 的引擎会绑定到 B 的身份 ✗
+ * （文档 P1 要求"将身份从 GraphPanel 传入引擎适配层" ✓，不是靠全局约定）。
+ */
+const ENGINE_OPTIONS_FIELD_NEEDLE = "export interface SpaceEngineOptions {\n  host: HTMLElement;";
+const ENGINE_OPTIONS_FIELD_PATCHED = [
+  "export interface SpaceEngineOptions {",
+  "  host: HTMLElement;",
+  "  /**",
+  "   * 知识库身份（由插件**显式**传入，构造时绑定到实例）。",
+  "   * 视图缓存与布局缓存都按它分区 ⇒ 两个面板并存也不会串库 ✓。",
+  "   */",
+  "  libraryKey?: string;",
+].join("\n");
+
+/** 导航也要知道自己的库身份：重新整理事件要按它认领 ✓ */
+const NAV_OPTIONS_NEEDLE = "      element: options.host,\n      initial,";
+const NAV_OPTIONS_PATCHED = [
+  "      element: options.host,",
+  "      initial,",
+  "      libraryKey: this.knLibraryKey,",
+].join("\n");
+
+/** 布局缓存的读写都要带上实例身份 ✓（**逐处显式传参**，不再读全局 ✗） */
+const LAYOUT_KEY_SUBSTITUTIONS = [
+  ["storeLayout(this.graph.ids, this.positions, this.graph.signature, this.layoutSettled);",
+    "storeLayout(this.graph.ids, this.positions, this.graph.signature, this.layoutSettled, this.knLibraryKey);"],
+  ["storeLayout(graph!.ids, this.positions, graph!.signature, this.layoutSettled);",
+    "storeLayout(graph!.ids, this.positions, graph!.signature, this.layoutSettled, this.knLibraryKey);"],
+  ["alignedCachedPositions(graph.ids)", "alignedCachedPositions(graph.ids, this.knLibraryKey)"],
+  ["cachedLayoutReusable(graph.signature)", "cachedLayoutReusable(graph.signature, this.knLibraryKey)"],
+  ["cachedSignature: () => cachedLayoutSignature(),", "cachedSignature: () => cachedLayoutSignature(this.knLibraryKey),"],
+  ["dropLayoutCache();", "dropLayoutCache(this.knLibraryKey);"],
+];
+
+/**
+ * 取景的**原因**显式传给导航（补丁点）。
+ *
+ * 上游在三个不同时机调用 `fitAll`：初次取景、布局**收敛后**取景、以及工具栏的"适应窗口/重新整理"
+ * 立即取景 ✗ —— 只靠 `smooth` 参数区分不了它们（它只表示要不要动画 ✗），
+ * 于是"重新整理"的待办标记会被**按钮那一次立即取景**顺手消费掉，
+ * 新布局真正收敛时就不再重设球心 ✗（文档 P2 复现的正是这个）。
+ */
+const FIT_REASON_SUBSTITUTIONS = [
+  ["      this.navigation.fitAll(this.positions, count, false);",
+    "      this.navigation.fitAll(this.positions, count, false, \"initial\");"],
+  ["      this.navigation.fitAll(this.positions, count, true);",
+    "      this.navigation.fitAll(this.positions, count, true, \"settle\");"],
+];
 
 const CAMERA_FIELD_NEEDLE = "  private layoutSettled = false;";
 const CAMERA_FIELD_PATCHED = [
@@ -356,26 +502,80 @@ const LAYOUT_CACHE_FIELD_PATCHED = [
   "}",
 ].join("\n");
 
-/** session.ts 注入的导入（读、写、校验三处都要用身份 ✓） */
-const SESSION_IMPORT = 'import { activeLibraryKey as knActiveLibraryKey } from "../../../client/view-cache.ts";';
-
-/** 写布局缓存时记下身份 ✓ */
-const LAYOUT_STORE_NEEDLE = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled };";
-const LAYOUT_STORE_PATCHED = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled, key: knActiveLibraryKey() };";
+/** session.ts 的布局缓存：**身份由调用方显式传入**（不再读全局 ✗） */
+const LAYOUT_SIGNATURE_NEEDLE = [
+  "export function cachedLayoutSignature(): string | null {",
+  "  return layoutCache?.signature ?? null;",
+  "}",
+].join("\n");
+const LAYOUT_SIGNATURE_PATCHED = [
+  "export function cachedLayoutSignature(key = \"\"): string | null {",
+  "  /* 别的库留下的坐标不算（按身份分区 ✓） */",
+  "  if ((layoutCache?.key ?? \"\") !== key) return null;",
+  "  return layoutCache?.signature ?? null;",
+  "}",
+].join("\n");
 
 /** 复用判断：签名一致**且**属于同一个库 ✓ */
-const LAYOUT_REUSABLE_NEEDLE = "  return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature;";
+const LAYOUT_REUSABLE_NEEDLE = [
+  "export function cachedLayoutReusable(signature: string): boolean {",
+  "  return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature;",
+  "}",
+].join("\n");
 const LAYOUT_REUSABLE_PATCHED = [
+  "export function cachedLayoutReusable(signature: string, key = \"\"): boolean {",
   "  return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature",
-  "    && (layoutCache.key ?? \"\") === knActiveLibraryKey();",
+  "    && (layoutCache.key ?? \"\") === key;",
+  "}",
 ].join("\n");
 
 /** 坐标对齐：别的库留下的坐标一律不用 ✓ */
-const LAYOUT_ALIGN_NEEDLE = "  if (!layoutCache || ids.length === 0) return null;";
-const LAYOUT_ALIGN_PATCHED = [
+const LAYOUT_ALIGN_NEEDLE = [
+  "export function alignedCachedPositions(ids: string[]): Float32Array | null {",
   "  if (!layoutCache || ids.length === 0) return null;",
-  "  /* 别的库留下的坐标不许拿来对齐（文档 P1：按知识库身份分区）✓ */",
-  "  if ((layoutCache.key ?? \"\") !== knActiveLibraryKey()) return null;",
+].join("\n");
+const LAYOUT_ALIGN_PATCHED = [
+  "export function alignedCachedPositions(ids: string[], key = \"\"): Float32Array | null {",
+  "  if (!layoutCache || ids.length === 0) return null;",
+  "  /* 别的库留下的坐标不许拿来对齐（按身份分区）✓ */",
+  "  if ((layoutCache.key ?? \"\") !== key) return null;",
+].join("\n");
+
+/** 写布局缓存：记下身份 ✓ */
+const LAYOUT_STORE_NEEDLE = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled };";
+const LAYOUT_STORE_PATCHED = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled, key };";
+
+/** storeLayout 的签名要收下身份 ✓ */
+const LAYOUT_STORE_SIGNATURE_NEEDLE = [
+  "export function storeLayout(",
+  "  ids: string[],",
+  "  positions: Float32Array,",
+  "  signature: string,",
+  "  settled: boolean,",
+  "): void {",
+].join("\n");
+const LAYOUT_STORE_SIGNATURE_PATCHED = [
+  "export function storeLayout(",
+  "  ids: string[],",
+  "  positions: Float32Array,",
+  "  signature: string,",
+  "  settled: boolean,",
+  "  key = \"\",",
+  "): void {",
+].join("\n");
+
+/** 丢布局缓存：只丢自己那一份 ✓ */
+const LAYOUT_DROP_NEEDLE = [
+  "/** 只丢布局缓存（「重新整理」用）：相机是使用者的观看状态，不该跟着一起清 */",
+  "export function dropLayoutCache(): void {",
+  "  layoutCache = null;",
+  "}",
+].join("\n");
+const LAYOUT_DROP_PATCHED = [
+  "/** 只丢布局缓存（「重新整理」用）：相机是使用者的观看状态，不该跟着一起清 */",
+  "export function dropLayoutCache(key = \"\"): void {",
+  "  if (key === \"\" || (layoutCache?.key ?? \"\") === key) layoutCache = null;",
+  "}",
 ].join("\n");
 
 
@@ -620,18 +820,15 @@ function freeRotationPatchPlugin() {
     transform(code, id) {
       const clean = String(id).split("?")[0].replaceAll("\\", "/");
       if (clean.endsWith("/vendor/upstream/graph3d/engine.ts")) {
-        /* 换导航实现 + 按库身份分区读写视图缓存 ✓ */
-        if (!code.includes(NAV_IMPORT_NEEDLE)) {
-          throw new Error(
-            "上游 engine.ts 的导航导入写法变了：请同步更新 build.mjs 的补丁点。\n"
-            + `期望片段：\n${NAV_IMPORT_NEEDLE}`,
-          );
-        }
+        /* 换导航实现 + 显式库身份 + 分区缓存 + 取景原因 ✓ */
         for (const [needle, what] of [
-          [CAMERA_RESTORE_NEEDLE, "相机恢复"],
+          [NAV_IMPORT_NEEDLE, "导航导入"],
+          [ENGINE_OPTIONS_FIELD_NEEDLE, "选项接口"],
           [CAMERA_FIELD_NEEDLE, "实例字段"],
+          [CAMERA_RESTORE_NEEDLE, "相机恢复"],
           [CAMERA_STORE_NEEDLE, "相机保存"],
           [FRAME_CONTEXT_NEEDLE, "每帧上下文"],
+          [NAV_OPTIONS_NEEDLE, "导航选项"],
         ]) {
           if (!code.includes(needle)) {
             throw new Error(
@@ -639,23 +836,68 @@ function freeRotationPatchPlugin() {
             );
           }
         }
+        let patched = code
+          .replace(NAV_IMPORT_NEEDLE, `${NAV_IMPORT_PATCHED}\n${VIEW_CACHE_IMPORT}`)
+          .replace(ENGINE_OPTIONS_FIELD_NEEDLE, ENGINE_OPTIONS_FIELD_PATCHED)
+          .replace(CAMERA_FIELD_NEEDLE, CAMERA_FIELD_PATCHED)
+          .replace(CAMERA_RESTORE_NEEDLE, CAMERA_RESTORE_PATCHED)
+          .replace(CAMERA_STORE_NEEDLE, CAMERA_STORE_PATCHED)
+          .replace(FRAME_CONTEXT_NEEDLE, FRAME_CONTEXT_PATCHED)
+          .replace(NAV_OPTIONS_NEEDLE, NAV_OPTIONS_PATCHED);
+        for (const [needle, replacement] of [...LAYOUT_KEY_SUBSTITUTIONS, ...FIT_REASON_SUBSTITUTIONS]) {
+          if (!patched.includes(needle)) {
+            throw new Error(
+              "上游 engine.ts 的缓存/取景调用点写法变了：请同步更新 build.mjs 的补丁点。\n"
+              + `期望片段：\n${needle}`,
+            );
+          }
+          patched = patched.split(needle).join(replacement);
+        }
+        return { code: patched, map: null };
+      }
+      if (clean.endsWith("/vendor/upstream/components/GraphUniverse.tsx")) {
+        /* 库身份从插件显式接进来 + 兜底页去掉"回到二维聚焦" ✓ */
+        for (const [needle, what] of [
+          [UNIVERSE_PROPS_NEEDLE, "props 定义"],
+          [UNIVERSE_DESTRUCTURE_NEEDLE, "props 解构"],
+          [UNIVERSE_ENGINE_NEEDLE, "引擎构造"],
+          [FALLBACK_LOST_NEEDLE, "兜底页失败分类"],
+          [FALLBACK_TITLE_NEEDLE, "兜底页标题"],
+          [FALLBACK_COPY_NEEDLE, "兜底页文案"],
+          [FALLBACK_ACTION_NEEDLE, "兜底页按钮"],
+          [FALLBACK_RETRY_NEEDLE, "重试按钮条件"],
+          [FALLBACK_PROP_NEEDLE, "兜底回调声明"],
+        ]) {
+          if (!code.includes(needle)) {
+            throw new Error(
+              `上游 GraphUniverse.tsx 的${what}写法变了：请同步更新 build.mjs 的补丁点。\n期望片段：\n${needle}`,
+            );
+          }
+        }
         return {
           code: code
-            .replace(NAV_IMPORT_NEEDLE, `${NAV_IMPORT_PATCHED}\n${VIEW_CACHE_IMPORT}`)
-            .replace(CAMERA_FIELD_NEEDLE, CAMERA_FIELD_PATCHED)
-            .replace(CAMERA_RESTORE_NEEDLE, CAMERA_RESTORE_PATCHED)
-            .replace(CAMERA_STORE_NEEDLE, CAMERA_STORE_PATCHED)
-            .replace(FRAME_CONTEXT_NEEDLE, FRAME_CONTEXT_PATCHED),
+            .replace(UNIVERSE_PROPS_NEEDLE, UNIVERSE_PROPS_PATCHED)
+            .replace(UNIVERSE_DESTRUCTURE_NEEDLE, UNIVERSE_DESTRUCTURE_PATCHED)
+            .replace(UNIVERSE_ENGINE_NEEDLE, UNIVERSE_ENGINE_PATCHED)
+            .replace(FALLBACK_LOST_NEEDLE, FALLBACK_LOST_PATCHED)
+            .replace(FALLBACK_TITLE_NEEDLE, FALLBACK_TITLE_PATCHED)
+            .replace(FALLBACK_COPY_NEEDLE, FALLBACK_COPY_PATCHED)
+            .replace(FALLBACK_ACTION_NEEDLE, "")
+            .replace(FALLBACK_RETRY_NEEDLE, FALLBACK_RETRY_PATCHED)
+            .replace(FALLBACK_PROP_NEEDLE, FALLBACK_PROP_PATCHED),
           map: null,
         };
       }
       if (clean.endsWith("/vendor/upstream/graph3d/session.ts")) {
-        /* 布局缓存也按库身份分区（签名相同的两个库不再串坐标）✓ */
+        /* 布局缓存改成**显式传身份**：所有读写都按参数分区，不再依赖全局 ✗ */
         for (const [needle, what] of [
           [LAYOUT_CACHE_FIELD_NEEDLE, "布局缓存结构"],
-          [LAYOUT_STORE_NEEDLE, "写布局缓存"],
-          [LAYOUT_REUSABLE_NEEDLE, "布局复用判断"],
+          [LAYOUT_STORE_SIGNATURE_NEEDLE, "写缓存函数签名"],
+          [LAYOUT_SIGNATURE_NEEDLE, "签名读取"],
+          [LAYOUT_REUSABLE_NEEDLE, "复用判断"],
           [LAYOUT_ALIGN_NEEDLE, "坐标对齐"],
+          [LAYOUT_STORE_NEEDLE, "写布局缓存"],
+          [LAYOUT_DROP_NEEDLE, "丢布局缓存"],
         ]) {
           if (!code.includes(needle)) {
             throw new Error(
@@ -664,11 +906,14 @@ function freeRotationPatchPlugin() {
           }
         }
         return {
-          code: SESSION_IMPORT + "\n" + code
+          code: code
             .replace(LAYOUT_CACHE_FIELD_NEEDLE, LAYOUT_CACHE_FIELD_PATCHED)
-            .replace(LAYOUT_STORE_NEEDLE, LAYOUT_STORE_PATCHED)
+            .replace(LAYOUT_STORE_SIGNATURE_NEEDLE, LAYOUT_STORE_SIGNATURE_PATCHED)
+            .replace(LAYOUT_SIGNATURE_NEEDLE, LAYOUT_SIGNATURE_PATCHED)
             .replace(LAYOUT_REUSABLE_NEEDLE, LAYOUT_REUSABLE_PATCHED)
-            .replace(LAYOUT_ALIGN_NEEDLE, LAYOUT_ALIGN_PATCHED),
+            .replace(LAYOUT_ALIGN_NEEDLE, LAYOUT_ALIGN_PATCHED)
+            .replace(LAYOUT_STORE_NEEDLE, LAYOUT_STORE_PATCHED)
+            .replace(LAYOUT_DROP_NEEDLE, LAYOUT_DROP_PATCHED),
           map: null,
         };
       }

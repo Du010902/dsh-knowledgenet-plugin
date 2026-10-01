@@ -30,6 +30,8 @@ const minimapSource = await readFile(path.join(HERE, "..", "src", "client", "Int
 const panelSource = await readFile(path.join(HERE, "..", "src", "client", "GraphPanel.tsx"), "utf8");
 const controllerSource = await readFile(path.join(HERE, "..", "src", "client", "interior-controller.ts"), "utf8");
 const css = await readFile(path.join(HERE, "..", "src", "client", "panel.css"), "utf8");
+const indexSource = await readFile(path.join(HERE, "..", "src", "client", "index.ts"), "utf8");
+const bundle = await readFile(path.join(HERE, "..", "client.js"), "utf8");
 
 const state = (overrides = {}) => ({
   center: [0, 0, 0],
@@ -138,6 +140,24 @@ describe("接线：控制器广播、面板认领并画在右下角", () => {
     for (const cls of ["kn-minimap-ball", "kn-minimap-center", "kn-minimap-eye-outline", "kn-minimap-pupil", "kn-minimap-trail", "kn-minimap-clamped"]) {
       assert.ok(minimapSource.includes(cls) && css.includes(`.${cls}`), `${cls} 要既有元素也有样式`);
     }
+  });
+
+  it("三维视图常驻挂载：不可见只做显隐（避免反复重建 WebGL 上下文 ✗）", () => {
+    /* 「三维绘制已中断」= 浏览器丢上下文；反复挂载/卸载是常见诱因 ✗ */
+    assert.ok(panelSource.includes('className="kn-graph-stage" data-visible={visible ? "true" : "false"}'), "要有常驻挂载壳");
+    assert.ok(!/visible \? null : <div className="kn-msg">\{t\("loading"\)\}<\/div>/.test(panelSource), "不该再按可见性卸载三维视图 ✗");
+    assert.match(css, /\.kn-graph-stage \{[\s\S]{0,120}position: absolute;[\s\S]{0,80}inset: 0;/, "壳要铺满图区");
+    assert.match(css, /\.kn-graph-stage\[data-visible="false"\] \{[\s\S]{0,80}visibility: hidden;/, "不可见时隐藏（保留布局尺寸）");
+  });
+
+  it("兜底页不再出现「另一个视图」那条路（插件早已没有两维视图 ✗）", () => {
+    /* 只查**用户可见文案**：词典里的 spaceFailed、面板里同一份文案、产物里的按钮字 ✓ */
+    assert.ok(!/spaceFailed: "[^"]*二维/.test(indexSource), "词典里的失败提示不许再提旧视图 ✗");
+    assert.ok(!/spaceFailed: "[^"]*二维/.test(panelSource), "面板里的同一份提示也不许提 ✗");
+    assert.ok(!bundle.includes("回到二维聚焦"), "产物里不许再有那颗按钮 ✗");
+    /* 换上的新文案要在产物里 ✓（说清"能做什么"：重试 / 刷新面板） */
+    assert.ok(bundle.includes("可以先点「重试」重建"), "兜底页文案应换成可操作的说明 ✓");
+    assert.ok(panelSource.includes("kn-graph-stage"), "三维常驻挂载壳要在面板里 ✓");
   });
 
   it("图形比例：球半径与画布尺寸在组件里是常量，眼睛按归一化坐标定位", () => {

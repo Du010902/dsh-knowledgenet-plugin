@@ -25,11 +25,9 @@ import {
 } from "../src/client/interior-navigation.ts";
 import { clippedEdgeSegment, pickClippedEdge } from "../src/client/edge-picking.ts";
 import {
-  activeLibraryKey,
   cachedView,
   clearViewCache,
   libraryKeyOf,
-  setActiveLibraryKey,
   storeView,
   viewCacheKeys,
 } from "../src/client/view-cache.ts";
@@ -53,7 +51,7 @@ const positionsOf = (points) => Float32Array.from(points.flat());
 /* ============================ P1：跨库缓存隔离 ============================ */
 
 describe("P1 视图缓存：按知识库身份分区", () => {
-  afterEach(() => { clearViewCache(); setActiveLibraryKey(""); });
+  afterEach(() => { clearViewCache(); });
 
   it("身份优先用稳定 libraryId，退回库根路径，都没有则为空", () => {
     assert.equal(libraryKeyOf({ libraryId: "01H", root: "/a" }), "id:01H", "id 优先于根路径（换根目录仍沿用视角 ✓）");
@@ -100,19 +98,88 @@ describe("P1 视图缓存：按知识库身份分区", () => {
     assert.deepEqual(navigation.camera.knInterior.center, [0, 0, 0], "恢复出来的球心不能又被当成「还没操作过」✗");
   });
 
-  it("接线：引擎按实例身份读写缓存、每帧交节点坐标；面板交出库身份", () => {
-    assert.ok(buildSource.includes("knCachedView(this.knLibraryKey)"), "恢复要走分区缓存");
-    assert.ok(buildSource.includes("knStoreView(this.knLibraryKey"), "保存要走分区缓存");
+  it("接线：身份**显式**传给实例（面板 → 组件 prop → 引擎选项 → 导航），不再有全局身份", () => {
+    /*
+     * 复查指出的问题：渲染期写全局、引擎稍后读 ⇒ 两个面板先后渲染时 A 的引擎绑到 B ✗。
+     * 现在整条链都是显式参数 ✓：
+     *   面板 useMemo 出 libraryKey → `<GraphUniverse libraryKey=…>` →
+     *   `new SpaceEngine({ libraryKey })` → `this.knLibraryKey` →
+     *   `new SpaceNavigation({ libraryKey })` 与每一次缓存读写 ✓。
+     */
+    assert.ok(panelSource.includes("libraryKey={libraryKey}"), "面板要把身份作为 prop 传下去");
+    assert.ok(panelSource.includes("useMemo(() => libraryKeyOf(payload?.library)"), "身份由载荷算出来（稳定 id 优先 ✓）");
+    assert.ok(!/setActiveLibraryKey|activeLibraryKey/.test(panelSource), "面板不该再写全局身份 ✗");
+    assert.ok(!/setActiveLibraryKey|activeLibraryKey/.test(controllerSource), "控制器不该再读全局身份 ✗");
+    assert.ok(!buildSource.includes("knActiveLibraryKey"), "构建期不该再注入全局身份 ✗");
+    assert.ok(buildSource.includes("libraryKey: this.knLibraryKey,"), "引擎要把身份交给导航（重排事件认领用）");
+    assert.ok(buildSource.includes("libraryKey: libraryKey ??"), "组件要把 prop 交给引擎（用**解构出来的**变量 ✗ 不能写 props.…）");
+    assert.ok(buildSource.includes("  relayoutToken,\\n  libraryKey,\\n  onEnter,"), "解构列表里要收下 libraryKey");
+    /* 注：build.mjs 的**注释**里会引用 `props.libraryKey` 讲这个坑，所以只在产物上断言它不存在 ✓ */
+    assert.ok(buildSource.includes("libraryKey?: string;"), "引擎选项里要有这个字段");
+    /* 每一次缓存读写都带实例身份（布局缓存逐处显式传参 ✓） */
+    for (const call of [
+      "knCachedView(this.knLibraryKey)",
+      "knStoreView(this.knLibraryKey",
+      "alignedCachedPositions(graph.ids, this.knLibraryKey)",
+      "cachedLayoutReusable(graph.signature, this.knLibraryKey)",
+      "this.layoutSettled, this.knLibraryKey)",
+      "cachedLayoutSignature(this.knLibraryKey)",
+      "dropLayoutCache(this.knLibraryKey)",
+    ]) {
+      assert.ok(buildSource.includes(call), `缓存读写要带身份：${call}`);
+    }
+  });
+
+  it("两个控制器各持自己的身份：重排事件只影响对应那一个", () => {
+    const a = makeNavigation({ libraryKey: "id:A" });
+    const b = makeNavigation({ libraryKey: "id:B" });
+    a.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    b.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    const bCenterBefore = [...b.navigation.camera.knInterior.center];
+    /* 只给 A 发重排请求（走 A 自己的事件通道 ✓） */
+    dispatchRelayoutForKey(a.handlers, "id:A");
+    a.navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "settle");
+    b.navigation.fitAll(positionsOf([[700, 0, 0], [800, 0, 0]]), 2, true, "settle");
+    assert.ok(Math.abs(a.navigation.camera.knInterior.center[0] - 150) < 1e-6, "A 应当被重设");
+    assert.deepEqual(
+      [...b.navigation.camera.knInterior.center],
+      bCenterBefore,
+      "B 没被请求 ⇒ 球心不许变（全局身份那套会被 A 的请求带着动 ✗）",
+    );
+  });
+
+  it("构建期补丁不许引用作用域里不存在的标识符（踩过 `props.libraryKey` ✗）", () => {
+    /*
+     * 真实事故：`GraphUniverse` 的 props 是**解构形参**，作用域里没有 `props` 变量 ✗。
+     * 补丁写成 `props.libraryKey` ⇒ 引擎构造抛 `ReferenceError: props is not defined`
+     * ⇒ 被上游 try/catch 兜住 ⇒ 面板显示"三维绘制已中断"，看起来像 GPU 丢上下文 ✗
+     * （排查方向被带偏一次）。这条断言把"引用必须落在解构列表里"钉住 ✓。
+     */
+    assert.ok(!bundle.includes("props.libraryKey"), "产物里不许出现 props.libraryKey ✗");
+    assert.ok(bundle.includes("libraryKey: libraryKey ??"), "引擎构造要用解构出来的变量 ✓");
+    const signature = /function GraphUniverse\(\{([^}]*)\}\)/.exec(bundle);
+    assert.ok(signature !== null, "产物里应能找到 GraphUniverse 的解构形参");
+    assert.ok(
+      signature[1].includes("libraryKey"),
+      "解构列表里必须有 libraryKey，否则上面的引用就是 ReferenceError ✗",
+    );
+  });
+
+  it("兜底页把「初始化异常」与「上下文丢失」分开显示（别把代码错误误诊成 GPU ✗）", () => {
+    assert.ok(bundle.includes("三维视图初始化失败"), "初始化异常要有自己的标题 ✓");
+    assert.ok(bundle.includes("initError"), "要有三分支判定（lost / initError / webgl2）✓");
+    assert.ok(bundle.includes('setFailure("lost")'), "上下文丢失仍走 lost ✓");
+  });
+
+  it("接线：引擎按实例身份读写缓存、每帧交节点坐标", () => {
     assert.ok(
       buildSource.includes("this.navigation.setFrameContext(bounds, this.viewport, this.positions, count)"),
       "每帧交节点坐标（线段拾取要用世界坐标）",
     );
-    assert.ok(buildSource.includes("knActiveLibraryKey()"), "布局缓存也带身份");
-    for (const needle of ["cachedView", "storeView", "activeLibraryKey"]) {
+    for (const needle of ["cachedView", "storeView"]) {
       assert.ok(bundle.includes(needle), `产物里要有分区缓存：${needle}`);
     }
-    assert.ok(panelSource.includes("libraryKeyOf(payload?.library)"), "面板要交出库身份");
-    assert.ok(panelSource.includes("setActiveLibraryKey"), "面板要在渲染图谱前绑定身份");
+    assert.ok(!bundle.includes("knActiveLibraryKey"), "产物里不该再有全局身份 ✗");
   });
 });
 
@@ -150,32 +217,59 @@ describe("P2 球面求交：站在球面上朝内也能抓到空白", () => {
 /* ===================== P2：重新整理必须重设球心 ===================== */
 
 describe("P2 重新整理：球心与半径按新布局重采", () => {
-  it("用户操作过之后，明确重排 ⇒ 采用新布局中心，半径按 max|X−C| 量", () => {
+  it("**完整按钮链路**：立即取景（旧布局）不采球心，等布局收敛才采新中心", () => {
+    /*
+     * 复查指出的漏测：按钮点下去会**立刻**发一条 `fitAll`（测的还是重排前的坐标 ✗），
+     * 旧实现就在那一次把待办标记消费掉了 ⇒ 新布局真正收敛时球心还是旧值 ✗。
+     * 这里把那条链路完整走一遍：先立旧球心 50 → 用户操作 → 请求 → 立即取景 → 收敛取景。
+     */
     const { navigation, element } = makeNavigation();
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 }); /* 用户操作 ⇒ 球心冻结 ✓ */
-    dispatchRelayout("");
-    navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true);
+    /* ① 用户操作之前先形成"旧布局中心 50"（初始取景 ✓） */
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
+    assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6, "前置：旧球心 50");
+    /* ② 用户操作过 ⇒ 球心冻结 ✓ */
+    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+
+    /* ③ 按钮：广播重排请求，并**立刻**发一次取景（仍旧坐标） */
+    dispatchRelayoutForKey(globals.windowHandlers, "");
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "command");
+    assert.ok(
+      Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6,
+      `立即取景测的是旧坐标 ⇒ 球心必须保持 50，实际 ${navigation.camera.knInterior.center[0]}`,
+    );
+
+    /* ④ 新布局收敛后的取景 ⇒ 这时候才采新中心 500 */
+    navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
     const carried = navigation.camera.knInterior;
-    assert.ok(Math.abs(carried.center[0] - 150) < 1e-6, `球心应复位到新布局中心 150，实际 ${carried.center[0]}`);
-    assert.ok(Math.abs(carried.radius - 50) < 1e-6, `半径应是 max|X−C| = 50，实际 ${carried.radius}`);
+    assert.ok(Math.abs(carried.center[0] - 500) < 1e-6, `收敛后应采新中心 500，实际 ${carried.center[0]}`);
+    assert.ok(Math.abs(carried.radius - 100) < 1e-6, `半径应是 max|X−C| = 100，实际 ${carried.radius}`);
   });
 
-  it("普通适应窗口**不动**已冻结的球心", () => {
+  it("首次取景（initial）在用户没操作过时采球心；操作过之后不再动", () => {
+    const fresh = makeNavigation();
+    fresh.navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "initial");
+    assert.ok(Math.abs(fresh.navigation.camera.knInterior.center[0] - 150) < 1e-6, "初次进入按布局中心采一次");
+    fresh.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    fresh.navigation.fitAll(positionsOf([[500, 0, 0], [600, 0, 0]]), 2, true, "initial");
+    assert.ok(Math.abs(fresh.navigation.camera.knInterior.center[0] - 150) < 1e-6, "操作过之后 initial 也不许再挪 ✗");
+  });
+
+  it("普通适应窗口（command）**不动**已冻结的球心", () => {
     const { navigation, element } = makeNavigation();
     element.emit("wheel", { deltaY: -100, deltaMode: 0 });
     const before = [...navigation.camera.knInterior.center];
-    navigation.fitAll(positionsOf([[500, 0, 0], [600, 0, 0]]), 2, true);
+    navigation.fitAll(positionsOf([[500, 0, 0], [600, 0, 0]]), 2, true, "command");
     assert.deepEqual(navigation.camera.knInterior.center, before, "没按重新整理就不该挪球心");
   });
 
   it("重排期间用户又操作了 ⇒ 球心照旧复位，但不再自动取景覆盖他的视角", () => {
-    const { navigation, element } = makeNavigation();
+    const { navigation, element, handlers } = makeNavigation();
     element.emit("wheel", { deltaY: -100, deltaMode: 0 });
-    dispatchRelayout("");
+    dispatchRelayoutForKey(handlers, "");
     element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
     element.emit("pointermove", { pointerId: 1, clientX: 470, clientY: 300 });
     const viewBefore = [...navigation.camera.q];
-    navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true);
+    navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "settle");
     assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 150) < 1e-6, "球心仍按承诺复位");
     assert.deepEqual([...navigation.camera.q], viewBefore, "不该再自动取景");
   });
@@ -188,10 +282,11 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     assert.equal(radiusAbout(Float32Array.from([Number.NaN, 0, 0]), 1, [0, 0, 0]), 0, "非法坐标不参与");
   });
 
-  it("接线：重排走明确事件，不再用 smooth 猜；面板按钮广播它", () => {
+  it("接线：重排走明确事件与明确原因（不再用 smooth 猜），面板按钮两件事一起做", () => {
     assert.ok(controllerSource.includes('RELAYOUT_EVENT = "kn-relayout-request"'), "要有明确的重排事件");
     assert.ok(controllerSource.includes("window.addEventListener(RELAYOUT_EVENT"), "控制器要订阅");
     assert.ok(!controllerSource.includes("const newLayout = !smooth"), "不该再用 smooth 猜重排 ✗");
+    assert.ok(controllerSource.includes('reason: FitReason = "command"'), "取景原因要有明确默认值");
     assert.ok(panelSource.includes("window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT"), "按钮要广播");
   });
 });
@@ -422,6 +517,8 @@ function makeNavigation(options = {}) {
     element,
     initial: options.initial ?? cameraAt([0, 0, 900]),
     edgeLength: 40,
+    /* 身份**显式**传入（不再有全局身份 ✓） */
+    libraryKey: options.libraryKey ?? "",
     getProjected: () => [],
     getEdges: () => [],
     onSelect: () => {},
@@ -434,7 +531,7 @@ function makeNavigation(options = {}) {
     onUserCameraInput: () => { calls.user += 1; },
   });
   navigation.setFrameContext(BOUNDS, VIEWPORT);
-  return { navigation, element, calls };
+  return { navigation, element, calls, handlers: globals.windowHandlers };
 }
 
 /** 从控制器广播的状态事件里取当前相机几何（state 是私有的，事件是官方出口 ✓） */
@@ -451,8 +548,8 @@ function displayBasisOf(navigation) {
   };
 }
 
-function dispatchRelayout(libraryKey) {
-  const handler = globals.windowHandlers.get(RELAYOUT_EVENT);
+function dispatchRelayoutForKey(handlers, libraryKey) {
+  const handler = handlers.get(RELAYOUT_EVENT);
   assert.equal(typeof handler, "function", "控制器要订阅重排事件");
   handler({ type: RELAYOUT_EVENT, detail: { libraryKey } });
 }
