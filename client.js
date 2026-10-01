@@ -2093,7 +2093,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0kn-panel-css
-		const KN_PANEL_CSS = "/* ============================================================================\n   KnowledgeNet 插件面板样式（注入到 Shadow Root 内）\n   ----------------------------------------------------------------------------\n   1) token 桥：把上游 graph.css 用的 KnowledgeNet 变量名，映射到宿主主题 token\n      （--dsw-alias-*，取自 cordis_inspect_query 的 Theme provider）。宿主主题切换时\n      这些自定义属性会随宿主一起变，因此亮/暗色自动跟随。\n   2) 面板自身的少量骨架样式。所有颜色都来自 token，只有阴影与圆角是字面值。\n   注意：本文件不引入任何全局选择器，且只在 Shadow Root 内生效，不会污染宿主页面。\n   ========================================================================== */\n\n.kn-root {\n  --surface: var(--dsw-alias-bg-layer-1, #ffffff);\n  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);\n  --canvas: var(--dsw-alias-bg-base, #f5f8f7);\n  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);\n  --text: var(--dsw-alias-label-primary, #192523);\n  --secondary: var(--dsw-alias-label-secondary, #526663);\n  --muted: var(--dsw-alias-state-idle-primary, #778a87);\n  --border: var(--dsw-alias-border-l2, #d6e0dd);\n  --line: var(--dsw-alias-border-l1, #d6e0dd);\n  --line-soft: var(--dsw-alias-border-l1, #e5ecea);\n  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);\n  --dot: var(--dsw-alias-border-l1, #dbe4e1);\n  --accent: var(--dsw-alias-brand-primary, #167f68);\n  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);\n  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);\n  --accent-text: var(--dsw-alias-brand-primary, #146b58);\n  --success: var(--dsw-alias-state-success-primary, #2f8a70);\n  --warning: var(--dsw-alias-state-warn-primary, #a8762c);\n  --todo: var(--dsw-alias-state-idle-primary, #74878d);\n  --danger: var(--dsw-alias-state-error-primary, #c63e48);\n  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);\n  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);\n  /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */\n  --on-accent: #ffffff;\n  --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);\n  --shadow-soft: 0 5px 24px rgba(0, 0, 0, 0.1);\n  --radius: 12px;\n  --radius-node: 12px;\n\n  display: flex;\n  flex-direction: column;\n  box-sizing: border-box;\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n  line-height: 1.5;\n}\n\n.kn-root *,\n.kn-root *::before,\n.kn-root *::after {\n  box-sizing: border-box;\n}\n\n.kn-head {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 4px 10px;\n  align-items: baseline;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--line);\n  background: var(--surface-raised);\n}\n\n.kn-head-title {\n  font-weight: 600;\n}\n\n.kn-head-meta {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-head-hint {\n  margin-left: auto;\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n}\n\n.kn-graph > .graph {\n  height: 100%;\n}\n\n/* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */\n.kn-graph > .graph-empty {\n  height: 100%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--muted);\n}\n\n.kn-msg {\n  padding: 10px 12px;\n  color: var(--muted);\n}\n\n/* 两个错误类名并存：.kn-error 是新的统一写法，.kn-msg-error 保留给早期卡片 */\n.kn-error,\n.kn-msg-error {\n  color: var(--danger);\n}\n\n.kn-simple {\n  padding: 8px 12px;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n}\n\n/* ------------------------------ 紧凑卡片（节点 / 建前置） ------------------------------ */\n\n/* height: null 的 ShadowPanel 用这个类：按内容自适应，不再撑满父容器 */\n.kn-root-auto {\n  height: auto;\n  max-height: 460px;\n  /*\n   * 关键：auto 模式是「把组件嵌进宿主已有容器」用的（指南页的入口卡片就是），\n   * 所以必须**去掉面板外壳**——否则 .kn-root 的边框/底色会和卡片自己的框叠成两层\n   * （实测就是这样：外面一圈是外壳，里面一圈是卡片）。\n   */\n  border: 0;\n  border-radius: 0;\n  background: none;\n  overflow: visible;\n}\n\n/* height: \"fill\" 的 ShadowPanel 用这个类：撑满宿主给的面板区域 */\n.kn-root-fill {\n  height: 100%;\n}\n\n/* 左侧栏的「知识库」标志不在 Shadow DOM 里：它是一条注入到 head 的数据驱动样式，\n   规则由 src/client/badges-css.ts 生成（工作区行没有插槽，只有稳定的 data-row-key）。 */\n\n/* --------------------- 「开始」页上的入口卡片 --------------------- */\n\n/*\n * 卡片形状**逐项照抄**宿主指南页的胶囊（ui-sidebar-right 的 GuideBody.module.css `.entry`\n * 与 `.entryIcon`/`.entryText`/`.entryTitle`/`.entryDescription`）：尺寸、内边距、边框宽度、\n * 圆角、颜色 token 全部对齐，所以它和 shipped 的三张卡片看起来是同一套东西。\n * 类名与作用域仍然是我自己的（Shadow DOM 里），不 import 任何 Client 包。\n */\n.kn-guide-card {\n  display: flex;\n  gap: 14px;\n  align-items: center;\n  box-sizing: border-box;\n  width: 380px;\n  max-width: 100%;\n  min-height: 56px;\n  padding: 14px 20px;\n  color: var(--dsw-alias-label-primary, #1b1b1b);\n  font: inherit;\n  text-align: left;\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);\n  border-radius: var(--dsl-guide-entry-radius, 16px);\n  cursor: pointer;\n}\n\n.kn-guide-card:hover {\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));\n}\n\n.kn-guide-card:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 2px;\n}\n\n/* 26px 的固定盒子、安静一点的字色：与 shipped 卡片的字形框一致（**不要**填充底） */\n.kn-guide-icon {\n  display: flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 26px;\n  height: 26px;\n  color: var(--dsw-alias-label-secondary, #5c6b66);\n}\n\n.kn-guide-text {\n  display: flex;\n  flex: 1;\n  min-width: 0;\n  flex-direction: column;\n  gap: 3px;\n}\n\n.kn-guide-title {\n  overflow: hidden;\n  font-size: 14px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.kn-guide-desc {\n  overflow: hidden;\n  color: var(--dsw-alias-label-tertiary, #8a9994);\n  font-size: 11px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* ------------------------------ 常驻面板 ------------------------------ */\n\n.kn-head-panel {\n  gap: 6px 10px;\n}\n\n.kn-modes {\n  display: inline-flex;\n  margin-left: auto;\n  gap: 4px;\n}\n\n.kn-btn {\n  padding: 2px 9px;\n  border: 1px solid var(--border);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  color: var(--secondary);\n  font: inherit;\n  font-size: 12px;\n  cursor: pointer;\n}\n\n.kn-btn:hover:not(:disabled) {\n  border-color: var(--accent);\n  color: var(--text);\n}\n\n.kn-btn.is-on {\n  border-color: var(--accent);\n  background: var(--accent-soft);\n  color: var(--accent-text);\n}\n\n.kn-btn:disabled {\n  opacity: 0.5;\n  cursor: default;\n}\n\n/* ---------------- 图标按钮（圆环刷新）：照抄宿主 `.tool` 的圆形图标按钮 ----------------\n   用户要求（2026-09）：把「刷新」从\"文字胶囊\"改成浏览器里那种圆环箭头。\n   尺寸直接沿用宿主产品里那颗（`ui-sidebar-files/src/client/FilesBody.module.css` 的 `.tool`：\n   28×28 圆 + `padding: 6px` + 15px 字形 + `--dsw-radius-sm` + 透明底、hover 只换底色/字色）✓。\n   注意：`.kn-root-fill .kn-btn` 那几条响应式规则会给按钮写死高度与左右内边距，\n   所以这些\"形状\"属性统一放在文件**末尾**（同优先级、后出现者胜）—— 见文末那组覆盖。 */\n.kn-icon-btn {\n  display: inline-flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  color: var(--dsw-alias-label-secondary, #526663);\n  line-height: 1;\n  cursor: pointer;\n}\n\n.kn-icon-btn:hover:not(:disabled) {\n  color: var(--dsw-alias-label-primary, #192523);\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n}\n\n.kn-icon-btn svg {\n  width: 15px;\n  height: 15px;\n  flex: none;\n}\n\n.kn-icon-btn:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 1px;\n}\n\n/* ---------------- 搜索框（照浏览器那条工具行） ----------------\n   用户要求 2026-10：搜索框要**和刷新按钮同一行、排在它后面**（浏览器就是 `[←][→][⟳] [地址栏] [↗]`）✓。\n   所以这里不再自己占一行：`.kn-search` 只是头部 flex 行里的一个**可伸缩子项**，\n   高度/内边距/分隔线都沿用 `.kn-root-fill .kn-head-panel` 那一套 ✓。\n   形态与宿主地址栏对齐：28px 高、0.5px 边框、`--dsw-radius-sm`、focus 时描一圈 ✓。 */\n.kn-search {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  align-self: center;\n  gap: 4px;\n  min-width: 0;\n}\n\n.kn-search-box {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  gap: 8px;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  padding: 0 9px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */\n  position: relative;\n}\n\n.kn-search-box:focus-within {\n  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);\n  outline-offset: -1px;\n}\n\n.kn-search-box svg {\n  flex: none;\n  width: 14px;\n  height: 14px;\n  color: var(--dsw-alias-label-secondary, #526663);\n}\n\n.kn-search-field {\n  flex: 1 1 auto;\n  min-width: 0;\n  height: 100%;\n  padding: 0;\n  border: 0;\n  outline: 0;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n}\n\n/* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）\n   绝对定位在**输入框那一格**下面（`left/right: 0` ⇒ 与输入框等宽 ✓），浮在图上方；\n   层级只要高过画布即可（画布没有 z-index）✓ */\n.kn-search-list {\n  position: absolute;\n  top: 30px;\n  left: 0;\n  right: 0;\n  z-index: 5;\n  display: flex;\n  flex-direction: column;\n  max-height: 264px;\n  overflow: auto;\n  padding: 4px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-2, #1b1b1b);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);\n}\n\n.kn-search-item {\n  display: flex;\n  align-items: baseline;\n  gap: 8px;\n  min-height: 26px;\n  padding: 4px 8px;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  text-align: left;\n  cursor: pointer;\n}\n\n.kn-search-item.is-active {\n  background: var(--dsw-alias-interactive-bg-hover, #292929);\n}\n\n.kn-search-item-title {\n  min-width: 0;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* 别名命中时补一句\"是哪个别名命中的\"，并靠右显示 ✓ */\n.kn-search-item-alias {\n  flex: none;\n  margin-left: auto;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n.kn-search-empty {\n  padding: 6px 8px;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n/*\n * 候选列表在头部行里做**浮层**，而 `.kn-root-fill .kn-head-panel` 是 `overflow: hidden`\n * ⇒ 不加这一条，下拉会被头部那一行直接裁掉（实测：渲染出来什么都看不见 ✗）。\n * 类名写在元素上（`.kn-head-panel.is-search-open`）比特异性：两个类 > 一个类，与顺序无关 ✓。\n */\n.kn-root-fill .kn-head-panel.is-search-open {\n  overflow: visible;\n}\n\n/*\n * **鼠标点画布时去掉那圈焦点环**（用户反馈 2026-10：\"点击之后这个边框会变得高亮，很奇怪\"）。\n *\n * 环来自上游 `graph.css:355` 的 `.universe:focus-visible`：画布必须在指针按下时拿到焦点，\n * F / 方向键才生效（`graph3d/navigation.ts:221` 主动 focus），而浏览器把这次**脚本聚焦**\n * 也算成 `:focus-visible` ✗。这里只压掉\"被标记为鼠标点出来\"的那一次 ✓\n * —— 键盘 Tab 过来时属性不在，环照旧（可访问性不掉）✓。\n * 特异性：`.kn-root` + 属性选择器 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。\n */\n.kn-root .universe[data-pointer-focus=\"true\"]:focus-visible {\n  outline: none;\n}\n\n/* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */\n\n.kn-warn-inline {\n  padding: 6px 12px;\n  border: 0;\n  border-bottom: 1px solid var(--line-soft);\n  border-radius: 0;\n}\n\n.kn-body {\n  display: flex;\n  flex: 1 1 auto;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 0;\n  padding: 8px 12px;\n  overflow: auto;\n}\n\n.kn-sect {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.kn-sect-title {\n  color: var(--secondary);\n  font-weight: 600;\n}\n\n.kn-chips {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n}\n\n.kn-chip {\n  padding: 1px 8px;\n  border: 1px solid var(--line);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  font-size: 12px;\n}\n\n.kn-list {\n  margin: 0;\n  padding-left: 14px;\n}\n\n.kn-list li {\n  margin: 2px 0;\n}\n\n.kn-arrow {\n  color: var(--accent);\n}\n\n.kn-dim {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-tag {\n  margin-left: 6px;\n  padding: 0 6px;\n  border-radius: 999px;\n  background: var(--accent-soft);\n  color: var(--accent-text);\n  font-size: 11px;\n}\n\n.kn-note {\n  margin: 0;\n  max-height: 220px;\n  padding: 8px;\n  overflow: auto;\n  border-radius: 8px;\n  background: var(--canvas-soft);\n  font-size: 12px;\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.kn-warn {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  padding: 8px;\n  border: 1px solid var(--warning);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--warning) 10%, transparent);\n}\n\n/* ---------------- 聚焦视图（胶囊 + 两个矩形框） ---------------- */\n\n\n\n\n/* ---------------- 聚焦视图：收紧空间（覆盖上面的默认值） ---------------- */\n\n\n/* 箭头改成水平（朝右） */\n\n/* 面板很窄时退回纵向（等价于原来那套），避免挤压 */\n@media (max-width: 900px) {\n}\n\n/* ---------------- 标签页模式：去掉卡片外壳，和宿主其它标签页一致（贴边铺满） ---------------- */\n\n.kn-root-fill {\n  border: 0;\n  border-radius: 0;\n  background: transparent;\n  box-shadow: none;\n}\n/* 头部与内容之间只留一条与宿主同风格的分隔线，不再自成一张卡片 */\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-graph { background: transparent; }\n\n/* ---------------- 标签页模式：与宿主其它标签页同一套网格（头行 + 贯通分隔线 + 统一左起点） ---------------- */\n\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 0 12px;\n  min-height: 44px;\n  display: flex;\n  align-items: center;\n  border-radius: 0;\n  border-bottom: 1px solid var(--line-soft);\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n.kn-root-fill .kn-graph { padding: 0; }\n/* 内容区与头行左对齐：聚焦/空间视图不各加一层内边距 */\n.kn-root-fill .kn-msg { padding: 12px; }\n.kn-root-fill .kn-warn-inline { margin: 0 12px; }\n\n/* ---------------- 标签页模式：不再自画头部分隔线（否则永远与宿主的线对不齐） ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 6px 12px;\n  min-height: 0;            /* 不再固定 44px：高度随内容，宿主的线在哪就是哪 */\n  border: 0;                /* 不再画自己的线 */\n  border-bottom: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n\n/* ---------------- 聚焦视图：框改用底色块表达（1px 描边会被误读成\"分隔线\"，且与宿主那条线错位） ---------------- */\n\n\n/* ---------------- 标签页模式：不自己画底色/描边，与宿主内容区一致 ---------------- */\n\n.kn-root-fill .kn-msg,\n.kn-root-fill .kn-warn-inline { background: transparent; }\n\n/* ---------------- 标签页模式：三维/二维画布容器不自绘底色、底纹与分隔线 ---------------- */\n\n.kn-root-fill .graph,\n.kn-root-fill .kn-graph,\n.kn-root-fill .graph-canvas,\n.kn-root-fill canvas {\n  background-color: transparent;\n  background-image: none;\n  border-top: 0;\n}\n\n/* ---------------- 标签页模式：三维视图的自绘 chrome（提示条/状态胶囊）不再画底色与描边 ---------------- */\n\n.kn-root-fill [class^=\"universe-\"],\n.kn-root-fill [class*=\" universe-\"] {\n  background: transparent;\n  border-color: transparent;\n  box-shadow: none;\n  backdrop-filter: none;\n}\n.kn-root-fill .universe-hint { opacity: .55; font-size: 11.5px; }\n.kn-root-fill .graph,\n.kn-root-fill .graph-space,\n.kn-root-fill .universe { border-top: 0; background: transparent; }\n\n/* ---------------- 聚焦视图：两个分组框是必要组件——恢复矩形框（仅描边，不铺底色） ---------------- */\n\n\n/* ---------------- 标签页模式：恢复头行下沿的分隔线（必要组件），用宿主同源 token ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  min-height: 46px;\n  padding: 0 12px;\n  border-bottom: 1px solid var(--line-soft);\n}\n\n/* ---------------- 标签页模式：头部行不换行、按钮收紧，分隔线不再被挤下去 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  flex-wrap: nowrap;           /* 不许换行：换行会把整行撑高、把分隔线推下去 */\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title,\n.kn-root-fill .kn-head-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.kn-root-fill .kn-head-meta { margin-right: auto; }   /* 标题/计数靠左，按钮靠右 */\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn {\n  height: 24px;\n  padding: 0 9px;\n  font-size: 12px;\n  line-height: 22px;\n  white-space: nowrap;\n}\n\n/* ---------------- 标签页模式（B 方案）：不再自画分隔线，头行压成紧凑一行 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 0;          /* 面板里只留宿主那条线 */\n  height: 28px;\n  min-height: 28px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn { height: 22px; padding: 0 8px; font-size: 11.5px; line-height: 20px; }\n\n/* ---------------- 恢复头行分隔线（线是必须的），高度先回到 40px，待与宿主对齐后再微调 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 1px solid var(--line-soft);\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header\n   （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）\n   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  display: flex;\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  align-items: center;\n  flex-wrap: nowrap;\n  gap: 4px;\n  height: 38px;\n  min-height: 38px;\n  padding: 0 6px 0 16px;\n  border-bottom: 0.5px solid var(--dsw-alias-border-l3);\n  overflow: hidden;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 12px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */\n.kn-root-fill .kn-btn {\n  border-color: var(--dsw-alias-border-l3, #d6e0dd);\n  color: var(--dsw-alias-label-secondary, #526663);\n  background: transparent;\n}\n.kn-root-fill .kn-btn:hover:not(:disabled) {\n  border-color: var(--dsw-alias-label-secondary, #526663);\n  color: var(--dsw-alias-label-primary, #192523);\n}\n.kn-root-fill .kn-btn:disabled { opacity: .5; }\n\n/* ---------------- 聚焦视图：分组块内，标签下方加一条分隔线，节点一律在线以下 ---------------- */\n\n\n/* ---------------- agent 提案审阅区 ---------------- */\n\n.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }\n.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }\n.kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }\n.kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }\n.kn-plan-summary { font-size: 12px; opacity: .8; }\n.kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }\n.kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }\n.kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }\n.kn-plan-tag.is-reuse { opacity: .6; }\n.kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }\n.kn-plan-hint { font-size: 11px; opacity: .55; }\n.kn-plan-note { font-size: 12px; opacity: .85; }\n.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }\n\n/* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */\n.kn-empty-hint {\n  position: absolute; left: 0; right: 0; top: 0;\n  padding: 10px 12px; text-align: center;\n  pointer-events: none;\n}\n\n/* 危险按钮（彻底删除）：红字描边，视觉上与\"备份删除\"分得开 */\n.kn-modal-btn.is-danger {\n  color: #e5534b;\n  border: 0.5px solid rgba(229, 83, 75, 0.5);\n}\n.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }\n\n/* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------\n   `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），\n   它们是 `.kn-btn` 单类选择器、与本组同优先级 ⇒ **后出现者胜**。\n   所以圆环刷新按钮的形状只能放在最后，否则某档尺寸下又会被撑回\"文字胶囊\"✗。 */\n.kn-root-fill .kn-btn.kn-icon-btn {\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  line-height: 1;\n  flex: none;\n}\n.kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {\n  border: none;\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n  color: var(--dsw-alias-label-primary, #192523);\n}\n/* ============================================================================\n   KnowledgeNet · 画布：二维聚焦与三维空间视图\n   ----------------------------------------------------------------------------\n   画布：二维聚焦与三维空间视图\n   由 src/styles.css 按小节边界拆分而来：段内内容与顺序都没有改动，\n   导入顺序见 src/main.tsx（响应式那一份排在最后，覆盖才生效）。\n   ========================================================================== */\n\n/* ------------------------------- 画布：图 ------------------------------- */\n\n/*\n * 二维聚焦画布：背景不再是规则点阵，而是「低对比度微尘 + 中心雾光」。\n * 规则点阵会暗示这是一张二维平面，而这里只是**同一张三维网的一个切面**；\n * 微尘与雾光不带方向感，也不与卡片抢注意力。\n */\n.graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n  overflow: hidden;\n  border-top: 1px solid var(--line-soft);\n  background-color: var(--canvas);\n  background-image:\n    radial-gradient(circle at 50% 44%, var(--accent-faint), transparent 38%),\n    radial-gradient(circle at 80% 18%, rgba(93, 113, 168, 0.035), transparent 30%),\n    radial-gradient(var(--dot) 0.7px, transparent 0.7px);\n  background-size: 100% 100%, 100% 100%, 26px 26px;\n}\n\n.graph-scroll {\n  position: absolute;\n  inset: 0;\n  overflow: auto;\n  /*\n   * 稳定预留滚动条的位置。**这一行是必须的，不是优化。**\n   *\n   * 分屏比例算出来的面板宽度经常是小数（例如 1236.75），而 `clientWidth` 会取整（1237）。\n   * 画布平面的尺寸取自 `clientWidth`，于是它比真实内容盒大不到 1px → 出现滚动条 →\n   * `clientWidth` 少掉滚动条那几像素 → ResizeObserver 把平面改小 → 滚动条又消失 → 平面又变大……\n   * 一帧一轮，永不停歇：桌面上看到的就是「图谱视图不停抖动」（WebView2 用经典滚动条，\n   * 必然复现；无头 Chrome 默认 overlay 滚动条，所以自检一直没发现）。\n   *\n   * `scrollbar-gutter: stable` 让 `clientWidth` 与「滚动条在不在」无关，环路从根上断掉：\n   * 平面尺寸不再反复变，滚动条要么一直有、要么一直没有。\n   */\n  scrollbar-gutter: stable;\n}\n\n.graph-plane {\n  position: relative;\n  transform-origin: top center;\n  transition: transform 0.2s;\n}\n\n.graph-lines {\n  position: absolute;\n  inset: 0;\n  width: 100%;\n  height: 100%;\n  pointer-events: none;\n  overflow: visible;\n}\n\n/*\n * 连线：可见层 + 命中层（六项交互修复第 1 条）\n *\n * 可见线只有 1–1.6px，鼠标根本点不准，因此每条边还有一个 12px 宽的**透明命中层**：\n * 它只在描边上命中（`pointer-events: stroke`），不挡住节点卡片，也不改变任何视觉。\n * `vector-effect: non-scaling-stroke` 让命中宽度不随平面缩放变化——\n * 缩到 60% 时命中区不该跟着缩成 7px。\n */\n.graph-edge-hit {\n  pointer-events: stroke;\n  cursor: context-menu;\n}\n\n.graph-edge-hit:focus {\n  outline: none;\n}\n\n/* 悬停与选中都加粗、提亮同一条可见线；命中层不参与视觉 */\n.graph-edge:hover .graph-edge-line,\n.graph-edge:focus-within .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n/*\n * 已选中的关系要**一直**看得出来：它比悬停更持久——\n * 右键菜单关掉之后，用户还得能认出刚才那条线是哪一条。\n */\n.graph-edge[data-selected=\"true\"] .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n.graph-label {\n  position: absolute;\n  left: 24px;\n  font-size: 12px;\n  letter-spacing: 0.02em;\n  color: var(--muted);\n  pointer-events: none;\n}\n\n/*\n * 画布节点：一张轻卡片。\n *\n * 与之前的三处区别：圆角 12px、边框用 `--line-soft`（分组线，不是硬边界）、\n * 状态从彩色胶囊变成「小圆点 + 文字」、选中靠一圈强调色光晕而不是加粗整张卡。\n */\n.graph-node {\n  position: absolute;\n  z-index: 2;\n  display: flex;\n  flex-direction: column;\n  justify-content: center;\n  gap: 9px;\n  width: 172px;\n  min-height: 84px;\n  padding: 13px 15px;\n  transform: translate(-50%, -50%);\n  border: 1px solid var(--line-soft);\n  border-radius: var(--radius-node);\n  background: var(--surface);\n  box-shadow: var(--shadow-soft);\n  text-align: left;\n  transition:\n    background 0.18s,\n    border-color 0.18s,\n    box-shadow 0.18s,\n    transform 0.18s,\n    width 0.18s;\n}\n\n.graph-node:hover {\n  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));\n  box-shadow: var(--shadow);\n  transform: translate(-50%, -50%) translateY(-2px);\n}\n\n.graph-node.selected {\n  z-index: 4;\n  width: 190px;\n  border-color: var(--accent);\n  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-soft);\n}\n\n.graph-node.root:not(.selected) {\n  background: var(--surface-raised);\n}\n\n.graph-node-title {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 600;\n  line-height: 1.45;\n  overflow-wrap: anywhere;\n}\n\n.graph-node.selected .graph-node-title {\n  font-size: 15px;\n}\n\n.graph-node-icon {\n  display: grid;\n  place-items: center;\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  border-radius: 7px;\n  background: var(--canvas-soft);\n  color: var(--secondary);\n}\n\n.graph-node.selected .graph-node-icon {\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-node-icon .icon {\n  width: 14px;\n  height: 14px;\n}\n\n.graph-node-bottom {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n/* 节点状态：小圆点 + 文字，不是胶囊 */\n.graph-node-status {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  font-size: 12px;\n  color: var(--secondary);\n}\n\n.graph-node-status.is-learning {\n  color: var(--warning);\n}\n\n.graph-node-status.is-done {\n  color: var(--success);\n}\n\n.graph-node-info {\n  font-size: 12px;\n  color: var(--muted);\n  white-space: nowrap;\n}\n\n/* 三维空间视图：画布交给 WebGL，不再铺二维底纹 */\n.graph[data-mode=\"space\"] {\n  background-image: none;\n}\n\n/*\n * 画布浮层（缩放 / 图例 / 当前视图说明）：统一成「半透明底 + 模糊」的玻璃片，\n * 而不是三个各自带边框和阴影的小盒子。\n *\n * 参考图里这些浮层**没有边框**（`.space-status`/`.graph-legend`/`.graph-help`\n * 都只有 `--canvas 82%` 的底 + blur），边框是这版实现多出来的结构感；\n * 去掉之后画布更通透，浮层仍然读得清。\n */\n.canvas-controls,\n.graph-legend,\n.selection-label {\n  display: flex;\n  align-items: center;\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.canvas-controls {\n  position: absolute;\n  bottom: 16px;\n  left: 16px;\n  z-index: 6;\n  gap: 2px;\n  padding: 4px;\n}\n\n.canvas-controls .icon-btn {\n  width: 30px;\n  height: 30px;\n}\n\n.canvas-controls output {\n  min-width: 38px;\n  font-size: 12px;\n  color: var(--secondary);\n  text-align: center;\n}\n\n.canvas-controls .sep {\n  width: 1px;\n  height: 16px;\n  margin: 0 3px;\n  background: var(--line-soft);\n}\n\n.graph-legend {\n  position: absolute;\n  right: 16px;\n  bottom: 16px;\n  z-index: 6;\n  gap: 13px;\n  padding: 7px 9px;\n  pointer-events: none;\n}\n\n.graph-legend span {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n\n.graph-legend .status-dot {\n  width: 7px;\n  height: 7px;\n  /* 参考图的图例点带一点内阴影：小圆点因此不是一个纯色贴片 */\n  box-shadow: inset -1px -1px 2px rgba(0, 0, 0, 0.25);\n}\n\n/* 「未开始」用 --todo（#74878d），与参考图的图例一致，而不是文字用的中性灰 */\n.graph-legend .status-dot:not(.is-learning):not(.is-done) {\n  background: var(--todo);\n}\n\n.selection-label {\n  position: absolute;\n  top: 14px;\n  left: 16px;\n  z-index: 6;\n  gap: 7px;\n  padding: 7px 9px;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.selection-label .status-dot {\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 名称密度已收进工具栏的「视图设置」菜单（验收清单 P2-6）：这里的下拉框规则删除 */\n\n/* ------------------------- 三维空间视图（GraphUniverse） ------------------------- */\n\n.universe {\n  position: absolute;\n  inset: 0;\n  overflow: hidden;\n  /* 指针手势全部由相机控制器接管：拖动转向、滚轮缩放，都不要触发页面滚动 */\n  touch-action: none;\n  /*\n   * 平时是普通箭头，**按下左键拖动时**才变成一只手（`data-dragging` 由\n   * `graph3d/navigation.ts` 的指针状态机打上/取下）。\n   * 整块画布常驻 `cursor: grab` 会让人以为「这里有东西可以抓」，\n   * 而它其实只是一个观察视图。\n   */\n  cursor: default;\n  /*\n   * 中心辉光由 CSS 画（不占 GPU 绘制调用）：三维画布本身是透明的，\n   * 底色与辉光都来自这一层，于是「星空 + 雾」与主题切换天然一致。\n   *\n   * 参数照参考图 `drawBackground()`：圆心 (51%, 48%)、半径 58% 视口长边、\n   * 两个 stop（--graph-glow-1 / -2）。二维视图那层蓝色辉光不在这里——\n   * 参考图的空间画布是不透明的，那层压根看不见。\n   */\n  background-image: radial-gradient(\n    circle 58vmax at 51% 48%,\n    var(--graph-glow-1),\n    var(--graph-glow-2) 48%,\n    transparent\n  );\n}\n\n/* 按住左键拖动时才是「抓住」的手型（状态由指针状态机给出） */\n.universe[data-dragging=\"true\"] {\n  cursor: grabbing;\n}\n\n.universe:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n.universe-canvas {\n  position: absolute;\n  inset: 0;\n  display: block;\n  width: 100%;\n  height: 100%;\n}\n\n/* 标题层：有限、自行投影的 HTML 标签，不随全图缩放，也不吃指针事件 */\n.universe-labels {\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n  overflow: hidden;\n}\n\n.universe-label {\n  position: absolute;\n  top: 0;\n  left: 0;\n  max-width: 220px;\n  white-space: nowrap;\n  font-size: 12px;\n  line-height: 1.3;\n  letter-spacing: 0.01em;\n  /*\n   * 文字描边用画布底色：节点背后有连线时仍然读得清。\n   * 参考图是在画布上先 stroke 一圈 4px 的底色再 fill，这里用一圈无模糊的\n   * 阴影近似同一个「光晕」效果——方块字有笔画间隙，模糊版本会糊成一团。\n   */\n  text-shadow:\n    0 0 3px var(--canvas),\n    0 0 3px var(--canvas),\n    1px 0 0 var(--canvas),\n    -1px 0 0 var(--canvas),\n    0 1px 0 var(--canvas),\n    0 -1px 0 var(--canvas);\n  will-change: transform;\n}\n\n/* 三档配色与参考图一致：选中 = accent-strong，相关/悬停 = 正文色，普通 = 次要色 */\n.universe-label.is-selected {\n  color: var(--accent-strong);\n}\n\n.universe-label.is-related {\n  color: var(--text);\n}\n\n.universe-label.is-normal {\n  color: var(--secondary);\n}\n\n/* 画布浮层统一成「玻璃片」：半透明底 + 模糊，不抢星空的视觉 */\n.universe-status,\n.universe-hint,\n.universe-offstage,\n.universe-tooltip {\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n/*\n * 布局状态条放右上角。\n *\n * 左上角已经被「当前视图说明」（`.selection-label`）占住——参考图那里只有\n * 一条状态，这一版有两件事要说，因此把「布局在算什么」移到右上：\n * 两块玻璃片各占一角，不互相压字。\n */\n.universe-status {\n  position: absolute;\n  top: 14px;\n  right: 16px;\n  z-index: 6;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 9px;\n  /* 状态句不许折行：折一次就会在「可自由探索」中间断开，看着像被裁掉 */\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n.universe-status .statuslight {\n  width: 6px;\n  height: 6px;\n  border-radius: 50%;\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 旧的「模式提示横幅」样式已随控制方式开关一起删除：\n   只剩环绕观察一种控制方式时，不需要再提示当前处于哪种模式 */\n\n.universe-offstage {\n  position: absolute;\n  left: 50%;\n  bottom: 58px;\n  transform: translateX(-50%);\n  z-index: 7;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 12px;\n  /* 它是可点的按钮，不是说明条：这里保留一圈强调色边框 */\n  border: 1px solid var(--accent);\n  color: var(--accent-text);\n}\n\n.universe-tooltip {\n  position: absolute;\n  z-index: 8;\n  display: grid;\n  gap: 4px;\n  min-width: 150px;\n  max-width: 230px;\n  padding: 10px 11px;\n  border: 1px solid var(--line);\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);\n  box-shadow: var(--shadow);\n  pointer-events: none;\n}\n\n.universe-tooltip strong {\n  color: var(--text);\n  font-size: 13px;\n  font-weight: 650;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.universe-tooltip span {\n  color: var(--muted);\n  font-size: 12px;\n  white-space: nowrap;\n}\n\n/* 操作提示放左下角：与左下角的缩放控件同一侧，不与图例抢位置 */\n.universe-hint {\n  position: absolute;\n  left: 16px;\n  bottom: 16px;\n  z-index: 5;\n  padding: 7px 9px;\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n/* WebGL 2 不可用或上下文丢失：给明确出路，而不是留一块黑画布 */\n.universe-fallback {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n}\n\n.universe-fallback h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.universe-fallback p {\n  max-width: 380px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n.universe-fallback-actions {\n  display: flex;\n  gap: 10px;\n  margin-top: 6px;\n}\n\n/* 画布空态：没有目标或没有节点时，说明下一步做什么 */\n.graph-empty {\n  position: absolute;\n  inset: 0;\n  z-index: 3;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.graph-empty .empty-mark {\n  display: grid;\n  place-items: center;\n  width: 43px;\n  height: 43px;\n  border-radius: 13px;\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-empty h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.graph-empty p {\n  max-width: 320px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n/* 首屏拉取三维代码时的占位（图谱按需加载，见 WorkspaceShell） */\n.graph-loading {\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 12px;\n  height: 100%;\n  color: var(--muted);\n  font-size: 13px;\n}\n\n.graph-loading .spinner {\n  width: 20px;\n  height: 20px;\n  border-width: 2px;\n}\n\n";
+		const KN_PANEL_CSS = "/* ============================================================================\n   KnowledgeNet 插件面板样式（注入到 Shadow Root 内）\n   ----------------------------------------------------------------------------\n   1) token 桥：把上游 graph.css 用的 KnowledgeNet 变量名，映射到宿主主题 token\n      （--dsw-alias-*，取自 cordis_inspect_query 的 Theme provider）。宿主主题切换时\n      这些自定义属性会随宿主一起变，因此亮/暗色自动跟随。\n   2) 面板自身的少量骨架样式。所有颜色都来自 token，只有阴影与圆角是字面值。\n   注意：本文件不引入任何全局选择器，且只在 Shadow Root 内生效，不会污染宿主页面。\n   ========================================================================== */\n\n.kn-root {\n  --surface: var(--dsw-alias-bg-layer-1, #ffffff);\n  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);\n  --canvas: var(--dsw-alias-bg-base, #f5f8f7);\n  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);\n  --text: var(--dsw-alias-label-primary, #192523);\n  --secondary: var(--dsw-alias-label-secondary, #526663);\n  --muted: var(--dsw-alias-state-idle-primary, #778a87);\n  --border: var(--dsw-alias-border-l2, #d6e0dd);\n  --line: var(--dsw-alias-border-l1, #d6e0dd);\n  --line-soft: var(--dsw-alias-border-l1, #e5ecea);\n  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);\n  --dot: var(--dsw-alias-border-l1, #dbe4e1);\n  --accent: var(--dsw-alias-brand-primary, #167f68);\n  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);\n  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);\n  --accent-text: var(--dsw-alias-brand-primary, #146b58);\n  --success: var(--dsw-alias-state-success-primary, #2f8a70);\n  --warning: var(--dsw-alias-state-warn-primary, #a8762c);\n  --todo: var(--dsw-alias-state-idle-primary, #74878d);\n  --danger: var(--dsw-alias-state-error-primary, #c63e48);\n  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);\n  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);\n  /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */\n  --on-accent: #ffffff;\n  --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);\n  --shadow-soft: 0 5px 24px rgba(0, 0, 0, 0.1);\n  --radius: 12px;\n  --radius-node: 12px;\n\n  display: flex;\n  flex-direction: column;\n  box-sizing: border-box;\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n  line-height: 1.5;\n}\n\n.kn-root *,\n.kn-root *::before,\n.kn-root *::after {\n  box-sizing: border-box;\n}\n\n.kn-head {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 4px 10px;\n  align-items: baseline;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--line);\n  background: var(--surface-raised);\n}\n\n.kn-head-title {\n  font-weight: 600;\n}\n\n.kn-head-meta {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-head-hint {\n  margin-left: auto;\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n}\n\n.kn-graph > .graph {\n  height: 100%;\n}\n\n/* ---------------- 右下角实时截面小地图（用户手绘那张图的界面版） ---------------- */\n\n/*\n * 位置：**右下角**（上游状态灯在上右、提示在下左，这里不撞）✓。\n * `pointer-events: none` 是关键：它只是\"仪表\"，绝不能吃掉画布上的拖动/滚轮 ✗。\n */\n.kn-minimap {\n  position: absolute;\n  right: 12px;\n  bottom: 12px;\n  z-index: 5;\n  pointer-events: none;\n  opacity: 0.9;\n}\n\n.kn-minimap svg {\n  display: block;\n  /* 控件本体 84px（viewBox 是 100，等比缩放，线条依然清晰）✓ */\n  width: 84px;\n  height: 84px;\n}\n\n/* 操作包围球 */\n.kn-minimap-ball {\n  fill: none;\n  stroke: var(--dsw-alias-border-l2, #d6e0dd);\n  stroke-width: 1;\n}\n\n/* 过球心的基线（读出\"深入了多少\"） */\n.kn-minimap-axis {\n  stroke: var(--dsw-alias-border-l1, #e6ece9);\n  stroke-width: 0.7;\n  stroke-dasharray: 2 3;\n}\n\n/* 固定转动中心（黑点） */\n.kn-minimap-center {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 走过的路径 */\n.kn-minimap-trail {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n}\n\n/* 视角当前位置：一只朝球里看的眼睛 */\n.kn-minimap-eye-outline {\n  fill: var(--dsw-alias-bg-layer-1, #ffffff);\n  stroke: var(--dsw-alias-label-primary, #1f2937);\n  stroke-width: 1.1;\n}\n\n.kn-minimap-pupil {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 被夹到框边（真实位置还在更外面）时套一圈虚线 ✓ */\n.kn-minimap-clamped {\n  fill: none;\n  stroke: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke-width: 0.8;\n  stroke-dasharray: 2 2;\n}\n\n/* 到球心的距离读数（单位 = 操作球半径）✓ */\n.kn-minimap-distance {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  font-size: 8px;\n  font-variant-numeric: tabular-nums;\n}\n\n/* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */\n.kn-graph > .graph-empty {\n  height: 100%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--muted);\n}\n\n.kn-msg {\n  padding: 10px 12px;\n  color: var(--muted);\n}\n\n/* 两个错误类名并存：.kn-error 是新的统一写法，.kn-msg-error 保留给早期卡片 */\n.kn-error,\n.kn-msg-error {\n  color: var(--danger);\n}\n\n.kn-simple {\n  padding: 8px 12px;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n}\n\n/* ------------------------------ 紧凑卡片（节点 / 建前置） ------------------------------ */\n\n/* height: null 的 ShadowPanel 用这个类：按内容自适应，不再撑满父容器 */\n.kn-root-auto {\n  height: auto;\n  max-height: 460px;\n  /*\n   * 关键：auto 模式是「把组件嵌进宿主已有容器」用的（指南页的入口卡片就是），\n   * 所以必须**去掉面板外壳**——否则 .kn-root 的边框/底色会和卡片自己的框叠成两层\n   * （实测就是这样：外面一圈是外壳，里面一圈是卡片）。\n   */\n  border: 0;\n  border-radius: 0;\n  background: none;\n  overflow: visible;\n}\n\n/* height: \"fill\" 的 ShadowPanel 用这个类：撑满宿主给的面板区域 */\n.kn-root-fill {\n  height: 100%;\n}\n\n/* 左侧栏的「知识库」标志不在 Shadow DOM 里：它是一条注入到 head 的数据驱动样式，\n   规则由 src/client/badges-css.ts 生成（工作区行没有插槽，只有稳定的 data-row-key）。 */\n\n/* --------------------- 「开始」页上的入口卡片 --------------------- */\n\n/*\n * 卡片形状**逐项照抄**宿主指南页的胶囊（ui-sidebar-right 的 GuideBody.module.css `.entry`\n * 与 `.entryIcon`/`.entryText`/`.entryTitle`/`.entryDescription`）：尺寸、内边距、边框宽度、\n * 圆角、颜色 token 全部对齐，所以它和 shipped 的三张卡片看起来是同一套东西。\n * 类名与作用域仍然是我自己的（Shadow DOM 里），不 import 任何 Client 包。\n */\n.kn-guide-card {\n  display: flex;\n  gap: 14px;\n  align-items: center;\n  box-sizing: border-box;\n  width: 380px;\n  max-width: 100%;\n  min-height: 56px;\n  padding: 14px 20px;\n  color: var(--dsw-alias-label-primary, #1b1b1b);\n  font: inherit;\n  text-align: left;\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);\n  border-radius: var(--dsl-guide-entry-radius, 16px);\n  cursor: pointer;\n}\n\n.kn-guide-card:hover {\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));\n}\n\n.kn-guide-card:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 2px;\n}\n\n/* 26px 的固定盒子、安静一点的字色：与 shipped 卡片的字形框一致（**不要**填充底） */\n.kn-guide-icon {\n  display: flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 26px;\n  height: 26px;\n  color: var(--dsw-alias-label-secondary, #5c6b66);\n}\n\n.kn-guide-text {\n  display: flex;\n  flex: 1;\n  min-width: 0;\n  flex-direction: column;\n  gap: 3px;\n}\n\n.kn-guide-title {\n  overflow: hidden;\n  font-size: 14px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.kn-guide-desc {\n  overflow: hidden;\n  color: var(--dsw-alias-label-tertiary, #8a9994);\n  font-size: 11px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* ------------------------------ 常驻面板 ------------------------------ */\n\n.kn-head-panel {\n  gap: 6px 10px;\n}\n\n.kn-modes {\n  display: inline-flex;\n  margin-left: auto;\n  gap: 4px;\n}\n\n.kn-btn {\n  padding: 2px 9px;\n  border: 1px solid var(--border);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  color: var(--secondary);\n  font: inherit;\n  font-size: 12px;\n  cursor: pointer;\n}\n\n.kn-btn:hover:not(:disabled) {\n  border-color: var(--accent);\n  color: var(--text);\n}\n\n.kn-btn.is-on {\n  border-color: var(--accent);\n  background: var(--accent-soft);\n  color: var(--accent-text);\n}\n\n.kn-btn:disabled {\n  opacity: 0.5;\n  cursor: default;\n}\n\n/* ---------------- 图标按钮（圆环刷新）：照抄宿主 `.tool` 的圆形图标按钮 ----------------\n   用户要求（2026-09）：把「刷新」从\"文字胶囊\"改成浏览器里那种圆环箭头。\n   尺寸直接沿用宿主产品里那颗（`ui-sidebar-files/src/client/FilesBody.module.css` 的 `.tool`：\n   28×28 圆 + `padding: 6px` + 15px 字形 + `--dsw-radius-sm` + 透明底、hover 只换底色/字色）✓。\n   注意：`.kn-root-fill .kn-btn` 那几条响应式规则会给按钮写死高度与左右内边距，\n   所以这些\"形状\"属性统一放在文件**末尾**（同优先级、后出现者胜）—— 见文末那组覆盖。 */\n.kn-icon-btn {\n  display: inline-flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  color: var(--dsw-alias-label-secondary, #526663);\n  line-height: 1;\n  cursor: pointer;\n}\n\n.kn-icon-btn:hover:not(:disabled) {\n  color: var(--dsw-alias-label-primary, #192523);\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n}\n\n.kn-icon-btn svg {\n  width: 15px;\n  height: 15px;\n  flex: none;\n}\n\n.kn-icon-btn:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 1px;\n}\n\n/* ---------------- 搜索框（照浏览器那条工具行） ----------------\n   用户要求 2026-10：搜索框要**和刷新按钮同一行、排在它后面**（浏览器就是 `[←][→][⟳] [地址栏] [↗]`）✓。\n   所以这里不再自己占一行：`.kn-search` 只是头部 flex 行里的一个**可伸缩子项**，\n   高度/内边距/分隔线都沿用 `.kn-root-fill .kn-head-panel` 那一套 ✓。\n   形态与宿主地址栏对齐：28px 高、0.5px 边框、`--dsw-radius-sm`、focus 时描一圈 ✓。 */\n.kn-search {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  align-self: center;\n  gap: 4px;\n  min-width: 0;\n}\n\n.kn-search-box {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  gap: 8px;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  padding: 0 9px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */\n  position: relative;\n}\n\n.kn-search-box:focus-within {\n  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);\n  outline-offset: -1px;\n}\n\n.kn-search-box svg {\n  flex: none;\n  width: 14px;\n  height: 14px;\n  color: var(--dsw-alias-label-secondary, #526663);\n}\n\n.kn-search-field {\n  flex: 1 1 auto;\n  min-width: 0;\n  height: 100%;\n  padding: 0;\n  border: 0;\n  outline: 0;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n}\n\n/* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）\n   绝对定位在**输入框那一格**下面（`left/right: 0` ⇒ 与输入框等宽 ✓），浮在图上方；\n   层级只要高过画布即可（画布没有 z-index）✓ */\n.kn-search-list {\n  position: absolute;\n  top: 30px;\n  left: 0;\n  right: 0;\n  z-index: 5;\n  display: flex;\n  flex-direction: column;\n  max-height: 264px;\n  overflow: auto;\n  padding: 4px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-2, #1b1b1b);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);\n}\n\n.kn-search-item {\n  display: flex;\n  align-items: baseline;\n  gap: 8px;\n  min-height: 26px;\n  padding: 4px 8px;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  text-align: left;\n  cursor: pointer;\n}\n\n.kn-search-item.is-active {\n  background: var(--dsw-alias-interactive-bg-hover, #292929);\n}\n\n.kn-search-item-title {\n  min-width: 0;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* 别名命中时补一句\"是哪个别名命中的\"，并靠右显示 ✓ */\n.kn-search-item-alias {\n  flex: none;\n  margin-left: auto;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n.kn-search-empty {\n  padding: 6px 8px;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n/*\n * 候选列表在头部行里做**浮层**，而 `.kn-root-fill .kn-head-panel` 是 `overflow: hidden`\n * ⇒ 不加这一条，下拉会被头部那一行直接裁掉（实测：渲染出来什么都看不见 ✗）。\n * 类名写在元素上（`.kn-head-panel.is-search-open`）比特异性：两个类 > 一个类，与顺序无关 ✓。\n */\n.kn-root-fill .kn-head-panel.is-search-open {\n  overflow: visible;\n}\n\n/*\n * **鼠标点画布时去掉那圈焦点环**（用户反馈 2026-10：\"点击之后这个边框会变得高亮，很奇怪\"）。\n *\n * 环来自上游 `graph.css:355` 的 `.universe:focus-visible`：画布必须在指针按下时拿到焦点，\n * F / 方向键才生效（`graph3d/navigation.ts:221` 主动 focus），而浏览器把这次**脚本聚焦**\n * 也算成 `:focus-visible` ✗。这里只压掉\"被标记为鼠标点出来\"的那一次 ✓\n * —— 键盘 Tab 过来时属性不在，环照旧（可访问性不掉）✓。\n * 特异性：`.kn-root` + 属性选择器 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。\n */\n.kn-root .universe[data-pointer-focus=\"true\"]:focus-visible {\n  outline: none;\n}\n\n/* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */\n\n.kn-warn-inline {\n  padding: 6px 12px;\n  border: 0;\n  border-bottom: 1px solid var(--line-soft);\n  border-radius: 0;\n}\n\n.kn-body {\n  display: flex;\n  flex: 1 1 auto;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 0;\n  padding: 8px 12px;\n  overflow: auto;\n}\n\n.kn-sect {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.kn-sect-title {\n  color: var(--secondary);\n  font-weight: 600;\n}\n\n.kn-chips {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n}\n\n.kn-chip {\n  padding: 1px 8px;\n  border: 1px solid var(--line);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  font-size: 12px;\n}\n\n.kn-list {\n  margin: 0;\n  padding-left: 14px;\n}\n\n.kn-list li {\n  margin: 2px 0;\n}\n\n.kn-arrow {\n  color: var(--accent);\n}\n\n.kn-dim {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-tag {\n  margin-left: 6px;\n  padding: 0 6px;\n  border-radius: 999px;\n  background: var(--accent-soft);\n  color: var(--accent-text);\n  font-size: 11px;\n}\n\n.kn-note {\n  margin: 0;\n  max-height: 220px;\n  padding: 8px;\n  overflow: auto;\n  border-radius: 8px;\n  background: var(--canvas-soft);\n  font-size: 12px;\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.kn-warn {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  padding: 8px;\n  border: 1px solid var(--warning);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--warning) 10%, transparent);\n}\n\n/* ---------------- 聚焦视图（胶囊 + 两个矩形框） ---------------- */\n\n\n\n\n/* ---------------- 聚焦视图：收紧空间（覆盖上面的默认值） ---------------- */\n\n\n/* 箭头改成水平（朝右） */\n\n/* 面板很窄时退回纵向（等价于原来那套），避免挤压 */\n@media (max-width: 900px) {\n}\n\n/* ---------------- 标签页模式：去掉卡片外壳，和宿主其它标签页一致（贴边铺满） ---------------- */\n\n.kn-root-fill {\n  border: 0;\n  border-radius: 0;\n  background: transparent;\n  box-shadow: none;\n}\n/* 头部与内容之间只留一条与宿主同风格的分隔线，不再自成一张卡片 */\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-graph { background: transparent; }\n\n/* ---------------- 标签页模式：与宿主其它标签页同一套网格（头行 + 贯通分隔线 + 统一左起点） ---------------- */\n\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 0 12px;\n  min-height: 44px;\n  display: flex;\n  align-items: center;\n  border-radius: 0;\n  border-bottom: 1px solid var(--line-soft);\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n.kn-root-fill .kn-graph { padding: 0; }\n/* 内容区与头行左对齐：聚焦/空间视图不各加一层内边距 */\n.kn-root-fill .kn-msg { padding: 12px; }\n.kn-root-fill .kn-warn-inline { margin: 0 12px; }\n\n/* ---------------- 标签页模式：不再自画头部分隔线（否则永远与宿主的线对不齐） ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 6px 12px;\n  min-height: 0;            /* 不再固定 44px：高度随内容，宿主的线在哪就是哪 */\n  border: 0;                /* 不再画自己的线 */\n  border-bottom: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n\n/* ---------------- 聚焦视图：框改用底色块表达（1px 描边会被误读成\"分隔线\"，且与宿主那条线错位） ---------------- */\n\n\n/* ---------------- 标签页模式：不自己画底色/描边，与宿主内容区一致 ---------------- */\n\n.kn-root-fill .kn-msg,\n.kn-root-fill .kn-warn-inline { background: transparent; }\n\n/* ---------------- 标签页模式：三维/二维画布容器不自绘底色、底纹与分隔线 ---------------- */\n\n.kn-root-fill .graph,\n.kn-root-fill .kn-graph,\n.kn-root-fill .graph-canvas,\n.kn-root-fill canvas {\n  background-color: transparent;\n  background-image: none;\n  border-top: 0;\n}\n\n/* ---------------- 标签页模式：三维视图的自绘 chrome（提示条/状态胶囊）不再画底色与描边 ---------------- */\n\n.kn-root-fill [class^=\"universe-\"],\n.kn-root-fill [class*=\" universe-\"] {\n  background: transparent;\n  border-color: transparent;\n  box-shadow: none;\n  backdrop-filter: none;\n}\n.kn-root-fill .universe-hint { opacity: .55; font-size: 11.5px; }\n.kn-root-fill .graph,\n.kn-root-fill .graph-space,\n.kn-root-fill .universe { border-top: 0; background: transparent; }\n\n/* ---------------- 聚焦视图：两个分组框是必要组件——恢复矩形框（仅描边，不铺底色） ---------------- */\n\n\n/* ---------------- 标签页模式：恢复头行下沿的分隔线（必要组件），用宿主同源 token ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  min-height: 46px;\n  padding: 0 12px;\n  border-bottom: 1px solid var(--line-soft);\n}\n\n/* ---------------- 标签页模式：头部行不换行、按钮收紧，分隔线不再被挤下去 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  flex-wrap: nowrap;           /* 不许换行：换行会把整行撑高、把分隔线推下去 */\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title,\n.kn-root-fill .kn-head-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.kn-root-fill .kn-head-meta { margin-right: auto; }   /* 标题/计数靠左，按钮靠右 */\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn {\n  height: 24px;\n  padding: 0 9px;\n  font-size: 12px;\n  line-height: 22px;\n  white-space: nowrap;\n}\n\n/* ---------------- 标签页模式（B 方案）：不再自画分隔线，头行压成紧凑一行 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 0;          /* 面板里只留宿主那条线 */\n  height: 28px;\n  min-height: 28px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn { height: 22px; padding: 0 8px; font-size: 11.5px; line-height: 20px; }\n\n/* ---------------- 恢复头行分隔线（线是必须的），高度先回到 40px，待与宿主对齐后再微调 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 1px solid var(--line-soft);\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header\n   （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）\n   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  display: flex;\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  align-items: center;\n  flex-wrap: nowrap;\n  gap: 4px;\n  height: 38px;\n  min-height: 38px;\n  padding: 0 6px 0 16px;\n  border-bottom: 0.5px solid var(--dsw-alias-border-l3);\n  overflow: hidden;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 12px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */\n.kn-root-fill .kn-btn {\n  border-color: var(--dsw-alias-border-l3, #d6e0dd);\n  color: var(--dsw-alias-label-secondary, #526663);\n  background: transparent;\n}\n.kn-root-fill .kn-btn:hover:not(:disabled) {\n  border-color: var(--dsw-alias-label-secondary, #526663);\n  color: var(--dsw-alias-label-primary, #192523);\n}\n.kn-root-fill .kn-btn:disabled { opacity: .5; }\n\n/* ---------------- 聚焦视图：分组块内，标签下方加一条分隔线，节点一律在线以下 ---------------- */\n\n\n/* ---------------- agent 提案审阅区 ---------------- */\n\n.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }\n.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }\n.kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }\n.kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }\n.kn-plan-summary { font-size: 12px; opacity: .8; }\n.kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }\n.kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }\n.kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }\n.kn-plan-tag.is-reuse { opacity: .6; }\n.kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }\n.kn-plan-hint { font-size: 11px; opacity: .55; }\n.kn-plan-note { font-size: 12px; opacity: .85; }\n.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }\n\n/* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */\n.kn-empty-hint {\n  position: absolute; left: 0; right: 0; top: 0;\n  padding: 10px 12px; text-align: center;\n  pointer-events: none;\n}\n\n/* 危险按钮（彻底删除）：红字描边，视觉上与\"备份删除\"分得开 */\n.kn-modal-btn.is-danger {\n  color: #e5534b;\n  border: 0.5px solid rgba(229, 83, 75, 0.5);\n}\n.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }\n\n/* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------\n   `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），\n   它们是 `.kn-btn` 单类选择器、与本组同优先级 ⇒ **后出现者胜**。\n   所以圆环刷新按钮的形状只能放在最后，否则某档尺寸下又会被撑回\"文字胶囊\"✗。 */\n.kn-root-fill .kn-btn.kn-icon-btn {\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  line-height: 1;\n  flex: none;\n}\n.kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {\n  border: none;\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n  color: var(--dsw-alias-label-primary, #192523);\n}\n/* ============================================================================\n   KnowledgeNet · 画布：二维聚焦与三维空间视图\n   ----------------------------------------------------------------------------\n   画布：二维聚焦与三维空间视图\n   由 src/styles.css 按小节边界拆分而来：段内内容与顺序都没有改动，\n   导入顺序见 src/main.tsx（响应式那一份排在最后，覆盖才生效）。\n   ========================================================================== */\n\n/* ------------------------------- 画布：图 ------------------------------- */\n\n/*\n * 二维聚焦画布：背景不再是规则点阵，而是「低对比度微尘 + 中心雾光」。\n * 规则点阵会暗示这是一张二维平面，而这里只是**同一张三维网的一个切面**；\n * 微尘与雾光不带方向感，也不与卡片抢注意力。\n */\n.graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n  overflow: hidden;\n  border-top: 1px solid var(--line-soft);\n  background-color: var(--canvas);\n  background-image:\n    radial-gradient(circle at 50% 44%, var(--accent-faint), transparent 38%),\n    radial-gradient(circle at 80% 18%, rgba(93, 113, 168, 0.035), transparent 30%),\n    radial-gradient(var(--dot) 0.7px, transparent 0.7px);\n  background-size: 100% 100%, 100% 100%, 26px 26px;\n}\n\n.graph-scroll {\n  position: absolute;\n  inset: 0;\n  overflow: auto;\n  /*\n   * 稳定预留滚动条的位置。**这一行是必须的，不是优化。**\n   *\n   * 分屏比例算出来的面板宽度经常是小数（例如 1236.75），而 `clientWidth` 会取整（1237）。\n   * 画布平面的尺寸取自 `clientWidth`，于是它比真实内容盒大不到 1px → 出现滚动条 →\n   * `clientWidth` 少掉滚动条那几像素 → ResizeObserver 把平面改小 → 滚动条又消失 → 平面又变大……\n   * 一帧一轮，永不停歇：桌面上看到的就是「图谱视图不停抖动」（WebView2 用经典滚动条，\n   * 必然复现；无头 Chrome 默认 overlay 滚动条，所以自检一直没发现）。\n   *\n   * `scrollbar-gutter: stable` 让 `clientWidth` 与「滚动条在不在」无关，环路从根上断掉：\n   * 平面尺寸不再反复变，滚动条要么一直有、要么一直没有。\n   */\n  scrollbar-gutter: stable;\n}\n\n.graph-plane {\n  position: relative;\n  transform-origin: top center;\n  transition: transform 0.2s;\n}\n\n.graph-lines {\n  position: absolute;\n  inset: 0;\n  width: 100%;\n  height: 100%;\n  pointer-events: none;\n  overflow: visible;\n}\n\n/*\n * 连线：可见层 + 命中层（六项交互修复第 1 条）\n *\n * 可见线只有 1–1.6px，鼠标根本点不准，因此每条边还有一个 12px 宽的**透明命中层**：\n * 它只在描边上命中（`pointer-events: stroke`），不挡住节点卡片，也不改变任何视觉。\n * `vector-effect: non-scaling-stroke` 让命中宽度不随平面缩放变化——\n * 缩到 60% 时命中区不该跟着缩成 7px。\n */\n.graph-edge-hit {\n  pointer-events: stroke;\n  cursor: context-menu;\n}\n\n.graph-edge-hit:focus {\n  outline: none;\n}\n\n/* 悬停与选中都加粗、提亮同一条可见线；命中层不参与视觉 */\n.graph-edge:hover .graph-edge-line,\n.graph-edge:focus-within .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n/*\n * 已选中的关系要**一直**看得出来：它比悬停更持久——\n * 右键菜单关掉之后，用户还得能认出刚才那条线是哪一条。\n */\n.graph-edge[data-selected=\"true\"] .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n.graph-label {\n  position: absolute;\n  left: 24px;\n  font-size: 12px;\n  letter-spacing: 0.02em;\n  color: var(--muted);\n  pointer-events: none;\n}\n\n/*\n * 画布节点：一张轻卡片。\n *\n * 与之前的三处区别：圆角 12px、边框用 `--line-soft`（分组线，不是硬边界）、\n * 状态从彩色胶囊变成「小圆点 + 文字」、选中靠一圈强调色光晕而不是加粗整张卡。\n */\n.graph-node {\n  position: absolute;\n  z-index: 2;\n  display: flex;\n  flex-direction: column;\n  justify-content: center;\n  gap: 9px;\n  width: 172px;\n  min-height: 84px;\n  padding: 13px 15px;\n  transform: translate(-50%, -50%);\n  border: 1px solid var(--line-soft);\n  border-radius: var(--radius-node);\n  background: var(--surface);\n  box-shadow: var(--shadow-soft);\n  text-align: left;\n  transition:\n    background 0.18s,\n    border-color 0.18s,\n    box-shadow 0.18s,\n    transform 0.18s,\n    width 0.18s;\n}\n\n.graph-node:hover {\n  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));\n  box-shadow: var(--shadow);\n  transform: translate(-50%, -50%) translateY(-2px);\n}\n\n.graph-node.selected {\n  z-index: 4;\n  width: 190px;\n  border-color: var(--accent);\n  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-soft);\n}\n\n.graph-node.root:not(.selected) {\n  background: var(--surface-raised);\n}\n\n.graph-node-title {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 600;\n  line-height: 1.45;\n  overflow-wrap: anywhere;\n}\n\n.graph-node.selected .graph-node-title {\n  font-size: 15px;\n}\n\n.graph-node-icon {\n  display: grid;\n  place-items: center;\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  border-radius: 7px;\n  background: var(--canvas-soft);\n  color: var(--secondary);\n}\n\n.graph-node.selected .graph-node-icon {\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-node-icon .icon {\n  width: 14px;\n  height: 14px;\n}\n\n.graph-node-bottom {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n/* 节点状态：小圆点 + 文字，不是胶囊 */\n.graph-node-status {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  font-size: 12px;\n  color: var(--secondary);\n}\n\n.graph-node-status.is-learning {\n  color: var(--warning);\n}\n\n.graph-node-status.is-done {\n  color: var(--success);\n}\n\n.graph-node-info {\n  font-size: 12px;\n  color: var(--muted);\n  white-space: nowrap;\n}\n\n/* 三维空间视图：画布交给 WebGL，不再铺二维底纹 */\n.graph[data-mode=\"space\"] {\n  background-image: none;\n}\n\n/*\n * 画布浮层（缩放 / 图例 / 当前视图说明）：统一成「半透明底 + 模糊」的玻璃片，\n * 而不是三个各自带边框和阴影的小盒子。\n *\n * 参考图里这些浮层**没有边框**（`.space-status`/`.graph-legend`/`.graph-help`\n * 都只有 `--canvas 82%` 的底 + blur），边框是这版实现多出来的结构感；\n * 去掉之后画布更通透，浮层仍然读得清。\n */\n.canvas-controls,\n.graph-legend,\n.selection-label {\n  display: flex;\n  align-items: center;\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.canvas-controls {\n  position: absolute;\n  bottom: 16px;\n  left: 16px;\n  z-index: 6;\n  gap: 2px;\n  padding: 4px;\n}\n\n.canvas-controls .icon-btn {\n  width: 30px;\n  height: 30px;\n}\n\n.canvas-controls output {\n  min-width: 38px;\n  font-size: 12px;\n  color: var(--secondary);\n  text-align: center;\n}\n\n.canvas-controls .sep {\n  width: 1px;\n  height: 16px;\n  margin: 0 3px;\n  background: var(--line-soft);\n}\n\n.graph-legend {\n  position: absolute;\n  right: 16px;\n  bottom: 16px;\n  z-index: 6;\n  gap: 13px;\n  padding: 7px 9px;\n  pointer-events: none;\n}\n\n.graph-legend span {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n\n.graph-legend .status-dot {\n  width: 7px;\n  height: 7px;\n  /* 参考图的图例点带一点内阴影：小圆点因此不是一个纯色贴片 */\n  box-shadow: inset -1px -1px 2px rgba(0, 0, 0, 0.25);\n}\n\n/* 「未开始」用 --todo（#74878d），与参考图的图例一致，而不是文字用的中性灰 */\n.graph-legend .status-dot:not(.is-learning):not(.is-done) {\n  background: var(--todo);\n}\n\n.selection-label {\n  position: absolute;\n  top: 14px;\n  left: 16px;\n  z-index: 6;\n  gap: 7px;\n  padding: 7px 9px;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.selection-label .status-dot {\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 名称密度已收进工具栏的「视图设置」菜单（验收清单 P2-6）：这里的下拉框规则删除 */\n\n/* ------------------------- 三维空间视图（GraphUniverse） ------------------------- */\n\n.universe {\n  position: absolute;\n  inset: 0;\n  overflow: hidden;\n  /* 指针手势全部由相机控制器接管：拖动转向、滚轮缩放，都不要触发页面滚动 */\n  touch-action: none;\n  /*\n   * 平时是普通箭头，**按下左键拖动时**才变成一只手（`data-dragging` 由\n   * `graph3d/navigation.ts` 的指针状态机打上/取下）。\n   * 整块画布常驻 `cursor: grab` 会让人以为「这里有东西可以抓」，\n   * 而它其实只是一个观察视图。\n   */\n  cursor: default;\n  /*\n   * 中心辉光由 CSS 画（不占 GPU 绘制调用）：三维画布本身是透明的，\n   * 底色与辉光都来自这一层，于是「星空 + 雾」与主题切换天然一致。\n   *\n   * 参数照参考图 `drawBackground()`：圆心 (51%, 48%)、半径 58% 视口长边、\n   * 两个 stop（--graph-glow-1 / -2）。二维视图那层蓝色辉光不在这里——\n   * 参考图的空间画布是不透明的，那层压根看不见。\n   */\n  background-image: radial-gradient(\n    circle 58vmax at 51% 48%,\n    var(--graph-glow-1),\n    var(--graph-glow-2) 48%,\n    transparent\n  );\n}\n\n/* 按住左键拖动时才是「抓住」的手型（状态由指针状态机给出） */\n.universe[data-dragging=\"true\"] {\n  cursor: grabbing;\n}\n\n.universe:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n.universe-canvas {\n  position: absolute;\n  inset: 0;\n  display: block;\n  width: 100%;\n  height: 100%;\n}\n\n/* 标题层：有限、自行投影的 HTML 标签，不随全图缩放，也不吃指针事件 */\n.universe-labels {\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n  overflow: hidden;\n}\n\n.universe-label {\n  position: absolute;\n  top: 0;\n  left: 0;\n  max-width: 220px;\n  white-space: nowrap;\n  font-size: 12px;\n  line-height: 1.3;\n  letter-spacing: 0.01em;\n  /*\n   * 文字描边用画布底色：节点背后有连线时仍然读得清。\n   * 参考图是在画布上先 stroke 一圈 4px 的底色再 fill，这里用一圈无模糊的\n   * 阴影近似同一个「光晕」效果——方块字有笔画间隙，模糊版本会糊成一团。\n   */\n  text-shadow:\n    0 0 3px var(--canvas),\n    0 0 3px var(--canvas),\n    1px 0 0 var(--canvas),\n    -1px 0 0 var(--canvas),\n    0 1px 0 var(--canvas),\n    0 -1px 0 var(--canvas);\n  will-change: transform;\n}\n\n/* 三档配色与参考图一致：选中 = accent-strong，相关/悬停 = 正文色，普通 = 次要色 */\n.universe-label.is-selected {\n  color: var(--accent-strong);\n}\n\n.universe-label.is-related {\n  color: var(--text);\n}\n\n.universe-label.is-normal {\n  color: var(--secondary);\n}\n\n/* 画布浮层统一成「玻璃片」：半透明底 + 模糊，不抢星空的视觉 */\n.universe-status,\n.universe-hint,\n.universe-offstage,\n.universe-tooltip {\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n/*\n * 布局状态条放右上角。\n *\n * 左上角已经被「当前视图说明」（`.selection-label`）占住——参考图那里只有\n * 一条状态，这一版有两件事要说，因此把「布局在算什么」移到右上：\n * 两块玻璃片各占一角，不互相压字。\n */\n.universe-status {\n  position: absolute;\n  top: 14px;\n  right: 16px;\n  z-index: 6;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 9px;\n  /* 状态句不许折行：折一次就会在「可自由探索」中间断开，看着像被裁掉 */\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n.universe-status .statuslight {\n  width: 6px;\n  height: 6px;\n  border-radius: 50%;\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 旧的「模式提示横幅」样式已随控制方式开关一起删除：\n   只剩环绕观察一种控制方式时，不需要再提示当前处于哪种模式 */\n\n.universe-offstage {\n  position: absolute;\n  left: 50%;\n  bottom: 58px;\n  transform: translateX(-50%);\n  z-index: 7;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 12px;\n  /* 它是可点的按钮，不是说明条：这里保留一圈强调色边框 */\n  border: 1px solid var(--accent);\n  color: var(--accent-text);\n}\n\n.universe-tooltip {\n  position: absolute;\n  z-index: 8;\n  display: grid;\n  gap: 4px;\n  min-width: 150px;\n  max-width: 230px;\n  padding: 10px 11px;\n  border: 1px solid var(--line);\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);\n  box-shadow: var(--shadow);\n  pointer-events: none;\n}\n\n.universe-tooltip strong {\n  color: var(--text);\n  font-size: 13px;\n  font-weight: 650;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.universe-tooltip span {\n  color: var(--muted);\n  font-size: 12px;\n  white-space: nowrap;\n}\n\n/* 操作提示放左下角：与左下角的缩放控件同一侧，不与图例抢位置 */\n.universe-hint {\n  position: absolute;\n  left: 16px;\n  bottom: 16px;\n  z-index: 5;\n  padding: 7px 9px;\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n/* WebGL 2 不可用或上下文丢失：给明确出路，而不是留一块黑画布 */\n.universe-fallback {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n}\n\n.universe-fallback h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.universe-fallback p {\n  max-width: 380px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n.universe-fallback-actions {\n  display: flex;\n  gap: 10px;\n  margin-top: 6px;\n}\n\n/* 画布空态：没有目标或没有节点时，说明下一步做什么 */\n.graph-empty {\n  position: absolute;\n  inset: 0;\n  z-index: 3;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.graph-empty .empty-mark {\n  display: grid;\n  place-items: center;\n  width: 43px;\n  height: 43px;\n  border-radius: 13px;\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-empty h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.graph-empty p {\n  max-width: 320px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n/* 首屏拉取三维代码时的占位（图谱按需加载，见 WorkspaceShell） */\n.graph-loading {\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 12px;\n  height: 100%;\n  color: var(--muted);\n  font-size: 13px;\n}\n\n.graph-loading .spinner {\n  width: 20px;\n  height: 20px;\n  border-width: 2px;\n}\n\n";
 		//#endregion
 		//#region src/client/shadow.tsx
 		/**
@@ -2852,18 +2852,18 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/vendor/upstream/graph3d/camera.ts
 		/** 近裁剪面：世界单位，比最小的节点半径还小 */
-		const NEAR_PLANE = .35;
+		const NEAR_PLANE$1 = .35;
 		function clamp$1(value, min, max) {
 			return Math.max(min, Math.min(max, value));
 		}
-		function sub$1(a, b) {
+		function sub$2(a, b) {
 			return [
 				a[0] - b[0],
 				a[1] - b[1],
 				a[2] - b[2]
 			];
 		}
-		function dot$1(a, b) {
+		function dot$2(a, b) {
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 		}
 		function focalLength(fovDeg) {
@@ -2876,8 +2876,8 @@ window.__ModuleLoader__.load({
 		* 不通过重排节点伪造深度。
 		*/
 		function projectPoint(point, basis, viewport, fovDeg, out) {
-			const d = sub$1(point, basis.position);
-			const depth = dot$1(d, basis.forward);
+			const d = sub$2(point, basis.position);
+			const depth = dot$2(d, basis.forward);
 			if (depth <= .35) {
 				if (out) {
 					out.x = 0;
@@ -2894,8 +2894,8 @@ window.__ModuleLoader__.load({
 				depth: 0,
 				scale: 0
 			};
-			result.x = viewport.width / 2 + dot$1(d, basis.right) * scaleFactor;
-			result.y = viewport.height / 2 - dot$1(d, basis.up) * scaleFactor;
+			result.x = viewport.width / 2 + dot$2(d, basis.right) * scaleFactor;
+			result.y = viewport.height / 2 - dot$2(d, basis.up) * scaleFactor;
 			result.depth = depth;
 			result.scale = scaleFactor;
 			return result;
@@ -2973,7 +2973,7 @@ window.__ModuleLoader__.load({
 				const a = projected[edge.from];
 				const b = projected[edge.to];
 				if (!a || !b || !a.visible || !b.visible) continue;
-				if (distanceToSegment(x, y, a.x, a.y, b.x, b.y) > threshold) continue;
+				if (distanceToSegment$1(x, y, a.x, a.y, b.x, b.y) > threshold) continue;
 				const depth = (a.depth + b.depth) / 2;
 				if (depth < bestDepth) {
 					bestDepth = depth;
@@ -2983,7 +2983,7 @@ window.__ModuleLoader__.load({
 			return hit;
 		}
 		/** 点到线段的最短距离（线段退化成一个点时退化为点距） */
-		function distanceToSegment(px, py, ax, ay, bx, by) {
+		function distanceToSegment$1(px, py, ax, ay, bx, by) {
 			const dx = bx - ax;
 			const dy = by - ay;
 			const lengthSquared = dx * dx + dy * dy;
@@ -3885,22 +3885,22 @@ window.__ModuleLoader__.load({
 		* 于是"布局点 X 用 P_eff 投影" ≡ "显示点 `C + S(X−C)` 用 P 投影" ✓（点积在旋转下不变），
 		* 现有渲染器、标签、连线与拾取**一行都不用改** ✓。
 		*/
-		const add = (a, b) => [
+		const add$1 = (a, b) => [
 			a[0] + b[0],
 			a[1] + b[1],
 			a[2] + b[2]
 		];
-		const sub = (a, b) => [
+		const sub$1 = (a, b) => [
 			a[0] - b[0],
 			a[1] - b[1],
 			a[2] - b[2]
 		];
-		const scale = (a, s) => [
+		const scale$1 = (a, s) => [
 			a[0] * s,
 			a[1] * s,
 			a[2] * s
 		];
-		const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+		const dot$1 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 		const length = (a) => Math.hypot(a[0], a[1], a[2]);
 		const normalize$1 = (a) => {
 			const len = length(a) || 1;
@@ -3964,7 +3964,7 @@ window.__ModuleLoader__.load({
 		]) {
 			const f = normalize$1(forward);
 			let up = referenceUp;
-			if (Math.abs(dot(f, normalize$1(up))) > .999) up = [
+			if (Math.abs(dot$1(f, normalize$1(up))) > .999) up = [
 				0,
 				0,
 				1
@@ -4049,7 +4049,7 @@ window.__ModuleLoader__.load({
 			const inverse = quatConjugate(state.scene);
 			const display = displayBasis(state);
 			return {
-				position: add(state.center, rotateVec(inverse, sub(state.eye, state.center))),
+				position: add$1(state.center, rotateVec(inverse, sub$1(state.eye, state.center))),
 				forward: rotateVec(inverse, display.forward),
 				right: rotateVec(inverse, display.right),
 				up: rotateVec(inverse, display.up)
@@ -4057,22 +4057,29 @@ window.__ModuleLoader__.load({
 		}
 		/** 布局坐标 → 显示坐标：`Xdisplay = C + S(X − C)` */
 		function displayOf(state, point) {
-			return add(state.center, rotateVec(state.scene, sub(point, state.center)));
+			return add$1(state.center, rotateVec(state.scene, sub$1(point, state.center)));
 		}
 		/** 显示坐标 → 布局坐标（反投影锚点用）：`X = C + S⁻¹(A − C)` */
 		function layoutOf(state, point) {
-			return add(state.center, rotateVec(quatConjugate(state.scene), sub(point, state.center)));
+			return add$1(state.center, rotateVec(quatConjugate(state.scene), sub$1(point, state.center)));
 		}
+		/**
+		* 相机空间的**近裁剪距离**：与上游 `projectPoint()` 的 `NEAR_PLANE` 保持一致 ✓。
+		*
+		* 文档 P2：我们自己曾用 1e-6、上游用 0.35 —— 两套阈值会让"渲染可见"与"能被拾取"错位
+		* （近处的内容画着却点不到 ✗）。投影、抓取、线段拾取现在共用这一个 ✓。
+		*/
+		const NEAR_PLANE = .35;
 		/** 像素级投影（与上游 `projectPoint` 同式；这里自带一份，保持本模块可独立测试） */
 		function projectDisplay(state, viewport, fovDeg, point) {
 			const basis = displayBasis(state);
-			const d = sub(point, basis.position);
-			const depth = dot(d, basis.forward);
-			if (!(depth > 1e-6)) return null;
+			const d = sub$1(point, basis.position);
+			const depth = dot$1(d, basis.forward);
+			if (!(depth > .35)) return null;
 			const scaleFactor = 1 / Math.tan(fovDeg * Math.PI / 360) * (viewport.height / 2) / depth;
 			return {
-				x: viewport.width / 2 + dot(d, basis.right) * scaleFactor,
-				y: viewport.height / 2 - dot(d, basis.up) * scaleFactor,
+				x: viewport.width / 2 + dot$1(d, basis.right) * scaleFactor,
+				y: viewport.height / 2 - dot$1(d, basis.up) * scaleFactor,
 				depth
 			};
 		}
@@ -4087,7 +4094,7 @@ window.__ModuleLoader__.load({
 			const tanHalfH = tanHalfV * (width / height);
 			return {
 				origin: basis.position,
-				direction: normalize$1(add(add(basis.forward, scale(basis.right, ndcX * tanHalfH)), scale(basis.up, ndcY * tanHalfV)))
+				direction: normalize$1(add$1(add$1(basis.forward, scale$1(basis.right, ndcX * tanHalfH)), scale$1(basis.up, ndcY * tanHalfV)))
 			};
 		}
 		/**
@@ -4120,7 +4127,7 @@ window.__ModuleLoader__.load({
 			if (best === null) return null;
 			const basis = displayBasis(state);
 			const scaleFactor = 1 / Math.tan(fovDeg * Math.PI / 360) * (viewport.height / 2) / best.node.depth;
-			const display = add(add(basis.position, scale(basis.right, (best.node.x - viewport.width / 2) / scaleFactor)), add(scale(basis.up, (viewport.height / 2 - best.node.y) / scaleFactor), scale(basis.forward, best.node.depth)));
+			const display = add$1(add$1(basis.position, scale$1(basis.right, (best.node.x - viewport.width / 2) / scaleFactor)), add$1(scale$1(basis.up, (viewport.height / 2 - best.node.y) / scaleFactor), scale$1(basis.forward, best.node.depth)));
 			return {
 				layout: layoutOf(state, display),
 				display,
@@ -4158,15 +4165,15 @@ window.__ModuleLoader__.load({
 				}
 			}
 			const ray = cursorRay(state, viewport, fovDeg, px, py);
-			const toCenter = sub(ray.origin, state.center);
-			const b = 2 * dot(toCenter, ray.direction);
-			const c = dot(toCenter, toCenter) - radius * radius;
+			const toCenter = sub$1(ray.origin, state.center);
+			const b = 2 * dot$1(toCenter, ray.direction);
+			const c = dot$1(toCenter, toCenter) - radius * radius;
 			const disc = b * b - 4 * c;
 			if (!(disc >= 0)) return null;
 			const root = Math.sqrt(disc);
-			const t = c < 0 ? (-b + root) / 2 : (-b - root) / 2;
-			if (!(t > 0)) return null;
-			const display = add(ray.origin, scale(ray.direction, t));
+			const forward = [Math.min((-b - root) / 2, (-b + root) / 2), Math.max((-b - root) / 2, (-b + root) / 2)].find((candidate) => candidate > NEAR_PLANE);
+			if (forward === void 0) return null;
+			const display = add$1(ray.origin, scale$1(ray.direction, forward));
 			const screen = projectDisplay(state, viewport, fovDeg, display);
 			return {
 				layout: layoutOf(state, display),
@@ -4180,9 +4187,36 @@ window.__ModuleLoader__.load({
 				}
 			};
 		}
-		/** 建立抓取点：优先节点，其次球面（对应文档"节点优先，其次球面"） */
+		/**
+		* 抓取点离球心够远吗（有旋转杠杆吗）？
+		*
+		* 锚点贴着 C 时杠杆趋近 0：要让它在屏幕上挪 1px 需要巨大的转角 ⇒
+		* 解会被限幅、看起来"拖不动"✗（文档也要求这种情况改用虚拟球面锚点 ✓）。
+		*
+		* @param state - 导航状态（用 `radius` 定阈值）。
+		* @param anchor - 待检查的锚点。
+		* @returns 杠杆是否足够。
+		*/
+		function hasLever(state, anchor) {
+			return length(sub$1(anchor.layout, state.center)) >= Math.max(10, state.radius * .15);
+		}
+		/**
+		* 建立抓取点：**节点优先，其次球面**（文档 §拖动旋转算法）——但节点杠杆不足时改用球面 ✓。
+		*
+		* @param state - 导航状态。
+		* @param viewport - 画布尺寸。
+		* @param fovDeg - 垂直 FOV。
+		* @param projected - 上游 `getProjected()` 的结果。
+		* @param x - 光标 x（画布内）。
+		* @param y - 光标 y（画布内）。
+		* @returns 抓取点；都没有解 ⇒ null。
+		*/
 		function grabAnchor(state, viewport, fovDeg, projected, x, y) {
-			return anchorFromProjected(state, viewport, fovDeg, projected, x, y) ?? anchorFromRay(state, viewport, fovDeg, x, y);
+			const node = anchorFromProjected(state, viewport, fovDeg, projected, x, y);
+			if (node !== null && hasLever(state, node)) return node;
+			const wall = anchorFromRay(state, viewport, fovDeg, x, y);
+			if (wall !== null) return wall;
+			return node;
 		}
 		/**
 		* 抓取点投影约束求解（文档 §拖动旋转算法）：
@@ -4205,7 +4239,7 @@ window.__ModuleLoader__.load({
 		*/
 		function solveDrag(state, viewport, fovDeg, anchor, dx, dy, maxAngle = .12) {
 			const basis = displayBasis(state);
-			const lever = sub(anchor, state.center);
+			const lever = sub$1(anchor, state.center);
 			const identity = [
 				0,
 				0,
@@ -4229,7 +4263,7 @@ window.__ModuleLoader__.load({
 			};
 			const at = (rightAngle, upAngle) => {
 				const rotated = rotateVec(quatMultiply(quatFromAxisAngle(basis.up, upAngle), quatFromAxisAngle(basis.right, rightAngle)), lever);
-				return project(add(state.center, rotated));
+				return project(add$1(state.center, rotated));
 			};
 			const epsilon = .001;
 			const base = at(0, 0);
@@ -4338,6 +4372,83 @@ window.__ModuleLoader__.load({
 				lost: false
 			};
 		}
+		/**
+		* 相机在操作球里的位置 → 小地图（截面图）坐标。
+		*
+		* 用户的截面图要的就是这个：一张平面图，能看出"视角现在在球体的哪个位置"。
+		* 取**过球心、过相机、且沿视线方向**的截面：横轴 = 沿视线的深度（球心在前方为正 ✓），
+		* 纵轴 = **相机上方向上的偏移**（`dot(P−C, up)`）✓。
+		*
+		* 为什么侧向不再取"垂直分量的完整模长"（文档 P2）：那样只有符号由 up 的点积决定，
+		* 当偏移主要沿屏幕右方向时，up 分量从 +0.001 跨到 −0.001 会让侧向值从 +100 跳到 −100 ✗
+		* （实际只移动了 0.002）。现在纵轴就是 up 分量本身 ⇒ **连续、不会跳变** ✓；
+		* 代价是"图上距离 = 真实距离"不再成立，所以另给一个距离读数（见 `distanceRatio`）✓。
+		*
+		* @param input - 球心、相机位置、相机的前向与上方向、操作球半径。
+		* @returns 截面坐标（世界单位）与到球心的真实距离。
+		*/
+		function minimapPoint(input) {
+			const offset = sub$1(input.eye, input.center);
+			const depth = -dot$1(offset, input.forward);
+			const lateral = dot$1(offset, input.up);
+			const distance = length(offset);
+			return {
+				depth,
+				lateral,
+				distance,
+				outside: input.radius > 0 ? distance > input.radius : false
+			};
+		}
+		/**
+		* 到球心的距离相对操作球半径的比值（小地图上的距离读数 ✓）。
+		* @param distance - 到球心的真实距离。
+		* @param radius - 操作球半径。
+		* @returns 比值；半径非法 ⇒ 0。
+		*/
+		function distanceRatio(distance, radius) {
+			return radius > 0 && Number.isFinite(radius) ? distance / radius : 0;
+		}
+		/**
+		* 是否该为小地图轨迹记一个新采样。
+		*
+		* 相机状态事件可能因为别的原因重复广播（同一位置反复派发）✗ ——
+		* 每次都追加就会画出一串没有意义的点 ✓（文档 P2 要求去重）。
+		*
+		* @param previousEye - 上一次采样时的相机位置（没有 ⇒ 记）。
+		* @param eye - 这次的位置。
+		* @param radius - 操作球半径（用于把"位移"归一化成比例）。
+		* @param minRatio - 至少移动这么多倍半径才算新采样。
+		* @returns 是否记录。
+		*/
+		function shouldSampleTrail(previousEye, eye, radius, minRatio = .004) {
+			if (previousEye === null) return true;
+			if (!(radius > 0)) return false;
+			return length(sub$1(eye, previousEye)) / radius > minRatio;
+		}
+		/**
+		* 以**固定球心 C** 为基准测量操作球半径：`max|X − C|`（文档 P2）。
+		*
+		* 为什么不能直接用包围体的 `radius`：那个是绕 `bounds.center` 算的 ✗ ——
+		* 球心冻结在别处时，它未必包得住全部节点，小地图和抓取范围就会失真 ✗。
+		*
+		* @param positions - 节点坐标（xyz 连续存放）。
+		* @param count - 节点数。
+		* @param center - 固定球心 C。
+		* @returns 半径（空图 ⇒ 传入的兜底值）。
+		*/
+		function radiusAbout(positions, count, center) {
+			let maxDistance = 0;
+			for (let index = 0; index < count; index += 1) {
+				const x = positions[index * 3];
+				const y = positions[index * 3 + 1];
+				const z = positions[index * 3 + 2];
+				if (x === void 0 || y === void 0 || z === void 0) continue;
+				if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+				const distance = Math.hypot(x - center[0], y - center[1], z - center[2]);
+				if (distance > maxDistance) maxDistance = distance;
+			}
+			return maxDistance > 0 ? maxDistance : 0;
+		}
 		const DEFAULT_WHEEL = {
 			speed: .5,
 			maxStep: 400,
@@ -4379,10 +4490,25 @@ window.__ModuleLoader__.load({
 				0,
 				-1
 			]);
-			let next = add(state.eye, scale(forward, travel));
-			const offset = sub(next, state.center);
+			const next = add$1(state.eye, scale$1(forward, travel));
+			const offset = sub$1(next, state.center);
 			const distance = length(offset);
-			if (Number.isFinite(maxRange) && maxRange > 0 && distance > maxRange) next = add(state.center, scale(offset, maxRange / distance));
+			if (Number.isFinite(maxRange) && maxRange > 0 && distance > maxRange) {
+				const origin = sub$1(state.eye, state.center);
+				const b = 2 * dot$1(origin, forward);
+				const c = dot$1(origin, origin) - maxRange * maxRange;
+				const disc = b * b - 4 * c;
+				if (disc >= 0) {
+					const root = Math.sqrt(disc);
+					const roots = [(-b - root) / 2, (-b + root) / 2];
+					const usable = travel > 0 ? roots.filter((t) => t > 0 && t <= travel).sort((l, r) => r - l) : roots.filter((t) => t < 0 && t >= travel).sort((l, r) => l - r);
+					if (usable.length > 0) {
+						state.eye = add$1(state.eye, scale$1(forward, usable[0] * .999));
+						return;
+					}
+				}
+				return;
+			}
 			state.eye = next;
 		}
 		/**
@@ -4398,8 +4524,8 @@ window.__ModuleLoader__.load({
 				0,
 				-1
 			]);
-			const eye = sub(display, scale(forward, Math.max(.001, distance)));
-			const toTarget = sub(display, eye);
+			const eye = sub$1(display, scale$1(forward, Math.max(.001, distance)));
+			const toTarget = sub$1(display, eye);
 			state.eye = eye;
 			state.view = quatLookAt(normalize$1(toTarget), rotateVec(state.view, [
 				0,
@@ -4414,19 +4540,207 @@ window.__ModuleLoader__.load({
 		* @param distance - 取景距离（球心到相机）。
 		*/
 		function fitSphere(state, radius, distance) {
-			const outward = sub(state.eye, state.center);
+			const outward = sub$1(state.eye, state.center);
 			const direction = length(outward) < 1e-6 ? [
 				0,
 				0,
 				1
 			] : normalize$1(outward);
-			state.eye = add(state.center, scale(direction, Math.max(distance, radius * 1.05)));
-			state.view = quatLookAt(normalize$1(sub(state.center, state.eye)));
+			state.eye = add$1(state.center, scale$1(direction, Math.max(distance, radius * 1.05)));
+			state.view = quatLookAt(normalize$1(sub$1(state.center, state.eye)));
 		}
 		/** Shift 平移：只改相机位置（右/上方向），朝向与 C/S 不变 ✓ */
 		function panEye(state, dx, dy, unitScale) {
 			const basis = displayBasis(state);
-			state.eye = add(state.eye, add(scale(basis.right, -dx * unitScale), scale(basis.up, dy * unitScale)));
+			state.eye = add$1(state.eye, add$1(scale$1(basis.right, -dx * unitScale), scale$1(basis.up, dy * unitScale)));
+		}
+		//#endregion
+		//#region src/client/edge-picking.ts
+		const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+		const sub = (a, b) => [
+			a[0] - b[0],
+			a[1] - b[1],
+			a[2] - b[2]
+		];
+		const add = (a, b) => [
+			a[0] + b[0],
+			a[1] + b[1],
+			a[2] + b[2]
+		];
+		const scale = (a, s) => [
+			a[0] * s,
+			a[1] * s,
+			a[2] * s
+		];
+		/** 把端点从"布局坐标"换到相机空间（x 右、y 上、z = 沿视线深度） */
+		function toCameraSpace(basis, point) {
+			const d = sub(point, basis.position);
+			return [
+				dot(d, basis.right),
+				dot(d, basis.up),
+				dot(d, basis.forward)
+			];
+		}
+		/** 相机空间 → 屏幕（与上游 `projectPoint` 同式 ✓） */
+		function projectCameraSpace(cameraPoint, viewport, fovDeg) {
+			const depth = cameraPoint[2];
+			const scaleFactor = 1 / Math.tan(fovDeg * Math.PI / 360) * (viewport.height / 2) / depth;
+			return {
+				x: viewport.width / 2 + cameraPoint[0] * scaleFactor,
+				y: viewport.height / 2 - cameraPoint[1] * scaleFactor
+			};
+		}
+		/**
+		* 一条边按近裁剪面裁剪后的屏幕线段。
+		*
+		* @param a - 端点 A（布局坐标）。
+		* @param b - 端点 B（布局坐标）。
+		* @param basis - 有效基向量（与渲染、投影、抓取同一份 ✓）。
+		* @param viewport - 画布尺寸。
+		* @param fovDeg - 垂直 FOV。
+		* @returns 裁剪后的屏幕端点；整条都在近平面之后 ⇒ null。
+		*/
+		function clippedEdgeSegment(a, b, basis, viewport, fovDeg) {
+			let ca = toCameraSpace(basis, a);
+			let cb = toCameraSpace(basis, b);
+			if (!(ca[2] > .35) && !(cb[2] > .35)) return null;
+			if (!(ca[2] > .35) || !(cb[2] > .35)) {
+				const denominator = cb[2] - ca[2];
+				const t = Math.abs(denominator) < 1e-9 ? 0 : (NEAR_PLANE - ca[2]) / denominator;
+				const crossing = add(ca, scale(sub(cb, ca), Math.min(1, Math.max(0, t))));
+				crossing[2] = NEAR_PLANE;
+				if (ca[2] > .35) cb = crossing;
+				else ca = crossing;
+			}
+			return {
+				a: projectCameraSpace(ca, viewport, fovDeg),
+				b: projectCameraSpace(cb, viewport, fovDeg)
+			};
+		}
+		/** 点到线段的距离（像素） */
+		function distanceToSegment(px, py, a, b) {
+			const dx = b.x - a.x;
+			const dy = b.y - a.y;
+			const lengthSq = dx * dx + dy * dy;
+			if (lengthSq <= 1e-9) return Math.hypot(px - a.x, py - a.y);
+			const t = Math.min(1, Math.max(0, ((px - a.x) * dx + (py - a.y) * dy) / lengthSq));
+			return Math.hypot(px - (a.x + dx * t), py - (a.y + dy * t));
+		}
+		/**
+		* 命中哪条关系。
+		*
+		* 与上游的差别：**不再因为某个端点不可见就跳过整条边** ✓——
+		* 而是用裁剪后仍可见的那一段参与命中（这正是"球内看得见却点不到"的修法）。
+		* 重叠时按"屏幕距离更近"取胜；距离相同（理论上不会）保持先出现的 ✓。
+		*
+		* @param positions - 节点坐标（xyz 连续）。
+		* @param edges - 边（`{from, to}` 下标，与 positions 同一套）。
+		* @param basis - 有效基向量。
+		* @param viewport - 画布尺寸。
+		* @param fovDeg - 垂直 FOV。
+		* @param x - 光标 x（画布内）。
+		* @param y - 光标 y（画布内）。
+		* @param tolerance - 命中带宽（像素）。
+		* @returns 边下标；没命中 ⇒ null。
+		*/
+		function pickClippedEdge(positions, edges, basis, viewport, fovDeg, x, y, tolerance = 6) {
+			const pointOf = (index) => {
+				const px = positions[index * 3];
+				const py = positions[index * 3 + 1];
+				const pz = positions[index * 3 + 2];
+				if (px === void 0 || py === void 0 || pz === void 0) return null;
+				if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return null;
+				return [
+					px,
+					py,
+					pz
+				];
+			};
+			let best = null;
+			let bestDistance = tolerance;
+			for (let index = 0; index < edges.length; index += 1) {
+				const edge = edges[index];
+				if (edge === void 0) continue;
+				const a = pointOf(edge.from);
+				const b = pointOf(edge.to);
+				if (a === null || b === null) continue;
+				const segment = clippedEdgeSegment(a, b, basis, viewport, fovDeg);
+				if (segment === null) continue;
+				const distance = distanceToSegment(x, y, segment.a, segment.b);
+				if (distance < bestDistance) {
+					bestDistance = distance;
+					best = index;
+				}
+			}
+			return best;
+		}
+		//#endregion
+		//#region src/client/view-cache.ts
+		/** 视图缓存：库身份 → 那一份视图。序列化用不上，纯内存 ✓ */
+		const views = /* @__PURE__ */ new Map();
+		/** 当前库身份（由面板在渲染图谱前设置；引擎构造时取一次并绑定） */
+		let activeKey = "";
+		/**
+		* 从面板载荷里推出**稳定**的库身份。
+		*
+		* 规则（文档要求"明确根路径变更的复用规则"）：
+		* - 有 `libraryId` ⇒ 只认它：同一个库换了挂载根目录（例如工作区搬家）**仍然沿用**视角 ✓；
+		* - 没有 ⇒ 退回库根路径：至少能区分不同目录下的两个库 ✓；
+		* - 都没有 ⇒ 空串（不分区）✓。
+		*
+		* @param library - 面板载荷里的 `library` 字段。
+		* @returns 库身份键。
+		*/
+		function libraryKeyOf(library) {
+			const id = library?.libraryId;
+			if (typeof id === "string" && id.trim() !== "") return `id:${id.trim()}`;
+			const root = library?.root;
+			if (typeof root === "string" && root.trim() !== "") return `root:${root.trim()}`;
+			return "";
+		}
+		/** 设置当前库身份（面板渲染图谱前调用；空串 = 不分区） */
+		function setActiveLibraryKey(key) {
+			activeKey = typeof key === "string" ? key : "";
+		}
+		/** 当前库身份 */
+		function activeLibraryKey() {
+			return activeKey;
+		}
+		/** 深复制一份相机状态（含自由姿态与挂在它上面的内部导航状态 ✓） */
+		function cloneState(state) {
+			const extra = state;
+			return {
+				target: [...state.target],
+				distance: state.distance,
+				angle: state.angle,
+				pitch: state.pitch,
+				...state.q === void 0 ? {} : { q: [...state.q] },
+				...extra.knInterior === void 0 ? {} : { knInterior: JSON.parse(JSON.stringify(extra.knInterior)) }
+			};
+		}
+		/**
+		* 取出某个库的缓存视图。
+		* 只有「布局已收敛时存下的那一份」才算数（沿用上游规则：未收敛的相机往往只是自动取景 ✗）。
+		*
+		* @param key - 库身份键。
+		* @returns 深复制过的相机状态；没有可用缓存 ⇒ null。
+		*/
+		function cachedView(key) {
+			const entry = views.get(key);
+			if (entry === void 0 || !entry.settled) return null;
+			return cloneState(entry.state);
+		}
+		/**
+		* 存下某个库的视图。
+		* @param key - 库身份键。
+		* @param state - 相机状态（会被深复制，调用方之后改它不影响缓存 ✓）。
+		* @param settled - 存的时候布局是否已收敛。
+		*/
+		function storeView(key, state, settled) {
+			views.set(key, {
+				state: cloneState(state),
+				settled
+			});
 		}
 		//#endregion
 		//#region src/client/interior-controller.ts
@@ -4453,6 +4767,26 @@ window.__ModuleLoader__.load({
 		const FOV_DEG$1 = 50;
 		/** 插在 `camera` 上的内部状态键：让上游的内存相机缓存也能带上完整状态 ✓ */
 		const STATE_KEY = "knInterior";
+		/**
+		* 「相机在球里在哪」的窗口事件名。
+		*
+		* 引擎是在**上游组件内部**创建的（`GraphUniverse.tsx`），插件拿不到它的实例 ✗；
+		* 而相机状态只有这里（内部导航控制器）知道 ✓。
+		* 所以由控制器在每次状态变化后广播一个 `CustomEvent`，面板据此画右下角的小地图 ✓
+		* —— 与插件既有的 `NODE_CONTEXT_MENU_EVENT` 那套 glue 同一种做法，不必改上游 ✓。
+		*/
+		const INTERIOR_STATE_EVENT = "kn-interior-state";
+		/**
+		* 「用户按了重新整理」的窗口事件名。
+		*
+		* 面板按钮在重排布局的同时广播它 ✓；控制器据此：
+		* 取消进行中的抓取 ✓、等新布局完成后再**采一次球心**并取景 ✓
+		* —— 不再用 `smooth` 参数去猜"这是不是重排"（那个参数只表示要不要动画 ✗，文档 P2）。
+		* 负载带库身份：多面板并存时只认自己那一个 ✓。
+		*/
+		const RELAYOUT_EVENT = "kn-relayout-request";
+		/** 重排请求的兜底时限（毫秒）：等不到"布局完成"就用当前包围体兜一次 ✓ */
+		const RELAYOUT_DEADLINE_MS = 2e3;
 		const lerp3 = (a, b, t) => [
 			a[0] + (b[0] - a[0]) * t,
 			a[1] + (b[1] - a[1]) * t,
@@ -4481,6 +4815,20 @@ window.__ModuleLoader__.load({
 			};
 			/** 用户是否已经自己操作过相机：操作过就**冻结球心** ✓ */
 			userInteracted = false;
+			/** 同一帧里的相机变化只在下一帧广播一次 ✓ */
+			stateEventPending = false;
+			/** 节点坐标（引擎每帧交过来；线段拾取需要世界坐标 ✓） */
+			positions = null;
+			positionCount = 0;
+			/** 是否已按"以固定球心 C 为中心"量过半径 ✓（量过就不再被 bounds.radius 覆盖 ✗） */
+			radiusMeasured = false;
+			/** 收到明确的重新整理请求、正等新布局完成 ✓ */
+			relayoutPending = false;
+			relayoutDeadline = 0;
+			/** 重排期间用户自己操作过 ⇒ 不再自动取景覆盖他的视角 ✓ */
+			interactedSinceRelayout = false;
+			/** 本实例绑定的知识库身份（构造时取一次；重新整理事件按它认领 ✓） */
+			libraryKey = activeLibraryKey();
 			options;
 			constructor(options) {
 				this.options = options;
@@ -4498,8 +4846,21 @@ window.__ModuleLoader__.load({
 				element.addEventListener("wheel", this.onWheel, { passive: false });
 				window.addEventListener("keydown", this.onKeyDown);
 				window.addEventListener("blur", this.onWindowBlur);
+				window.addEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);
 				document.addEventListener("visibilitychange", this.onVisibilityChange);
 			}
+			/**
+			* 「重新整理」请求（面板广播）。
+			* @param event - 负载里带库身份；不是本实例的库就忽略 ✓。
+			*/
+			onRelayoutRequest = (event) => {
+				const detail = event.detail;
+				if (detail !== void 0 && detail !== null && typeof detail.libraryKey === "string" && detail.libraryKey !== this.libraryKey) return;
+				this.relayoutPending = true;
+				this.interactedSinceRelayout = false;
+				this.relayoutDeadline = (typeof performance === "undefined" ? 0 : performance.now()) + RELAYOUT_DEADLINE_MS;
+				this.cancelPointer();
+			};
 			/**
 			* 从上游相机状态播种：优先用缓存里带过来的完整状态；
 			* 没有（老缓存 / 首次打开）⇒ 按文档的兼容做法：
@@ -4507,13 +4868,16 @@ window.__ModuleLoader__.load({
 			*/
 			seedState(initial) {
 				const carried = initial[STATE_KEY];
-				if (carried !== void 0 && Array.isArray(carried.center) && Array.isArray(carried.eye)) return {
-					center: [...carried.center],
-					eye: [...carried.eye],
-					view: [...carried.view],
-					scene: [...carried.scene],
-					radius: Number.isFinite(carried.radius) && carried.radius > 0 ? carried.radius : 20
-				};
+				if (carried !== void 0 && Array.isArray(carried.center) && Array.isArray(carried.eye)) {
+					this.userInteracted = carried.frozen === true;
+					return {
+						center: [...carried.center],
+						eye: [...carried.eye],
+						view: [...carried.view],
+						scene: [...carried.scene],
+						radius: Number.isFinite(carried.radius) && carried.radius > 0 ? carried.radius : 20
+					};
+				}
 				const basis = freeBasis(initial, initial.target);
 				return {
 					center: [...initial.target],
@@ -4548,25 +4912,62 @@ window.__ModuleLoader__.load({
 					eye: [...this.state.eye],
 					view: [...this.state.view],
 					scene: [...this.state.scene],
-					radius: this.state.radius
+					radius: this.state.radius,
+					frozen: this.userInteracted
 				};
+				this.publishState();
+			}
+			/**
+			* 广播"相机在球里的位置"（给右下角的小地图用）。
+			*
+			* 用 `requestAnimationFrame` 合并同一帧里的多次变化：拖动时每个 pointermove 都会同步一次相机，
+			* 不合并的话一帧要派发好几次事件、面板也跟着重渲染好几次 ✗。
+			*/
+			publishState() {
+				if (this.stateEventPending || this.disposed) return;
+				if (typeof window === "undefined" || typeof CustomEvent !== "function") return;
+				this.stateEventPending = true;
+				const flush = () => {
+					this.stateEventPending = false;
+					if (this.disposed) return;
+					const basis = displayBasis(this.state);
+					const detail = {
+						host: this.options.element,
+						center: [...this.state.center],
+						eye: [...this.state.eye],
+						forward: [...basis.forward],
+						up: [...basis.up],
+						distance: Math.hypot(this.state.eye[0] - this.state.center[0], this.state.eye[1] - this.state.center[1], this.state.eye[2] - this.state.center[2]),
+						radius: this.state.radius
+					};
+					window.dispatchEvent(new CustomEvent(INTERIOR_STATE_EVENT, { detail }));
+				};
+				if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+				else flush();
 			}
 			/** 等效姿态（把 S 折进 Q）：布局坐标系里相机朝向 */
 			effectiveQuat() {
-				return quatNormalize(quatMultiply(this.state.scene, this.state.view));
+				return quatNormalize(quatMultiply(quatConjugate(this.state.scene), this.state.view));
 			}
 			/** 渲染/投影/拾取用的基向量（= 布局坐标系的相机；S 已折进去） */
 			basis() {
 				return effectiveBasis(this.state);
 			}
-			/** 外部（每帧）更新：包围体与视口用于取景与操作球半径 */
-			setFrameContext(bounds, viewport) {
+			/** 外部（每帧）更新：包围体、视口、节点坐标（线段拾取要用世界坐标 ✓） */
+			setFrameContext(bounds, viewport, positions, count) {
 				this.bounds = bounds;
 				this.viewport = viewport;
-				if (this.pointer === null && Number.isFinite(bounds.radius) && bounds.radius > 0) this.state.radius = bounds.radius;
+				if (positions !== void 0) {
+					this.positions = positions;
+					this.positionCount = count ?? positions.length / 3;
+				}
+				if (this.pointer === null && !this.radiusMeasured && Number.isFinite(bounds.radius) && bounds.radius > 0) this.state.radius = bounds.radius;
+				if (this.relayoutPending && this.relayoutDeadline > 0 && (typeof performance === "undefined" || performance.now() >= this.relayoutDeadline)) this.adoptRelayoutCenter(bounds, null, 0);
 				this.syncCamera();
 			}
 			command(command, index, positions, count) {
+				this.positions = positions;
+				this.positionCount = count;
 				if (command.type === "fitAll") {
 					this.fitAll(positions, count, true);
 					return;
@@ -4578,34 +4979,76 @@ window.__ModuleLoader__.load({
 					positions[index * 3 + 2] ?? 0
 				];
 				const distance = clampNum(this.options.edgeLength * 2.6, 40, Math.max(60, this.bounds.radius));
-				const before = {
+				const from = {
 					eye: [...this.state.eye],
 					view: this.state.view
 				};
-				aimAt(this.state, target, distance);
-				this.animateFrom(before, true);
+				this.animateTo(from, this.aimTarget(target, distance), true);
 			}
-			/** 「适应窗口」：回到球外全局取景、面向球心；保留 C 与 S ✓ */
+			/**
+			* 「适应窗口」：回到球外全局取景、面向球心；保留 C 与 S ✓。
+			*
+			* 球心更新规则（文档 P2：**不复用 `smooth` 推断重排**）：
+			* - 用户还没操作过 ⇒ 采当前布局的包围体中心（初次进入 ✓）；
+			* - 收到过**明确的重新整理请求**（`kn-relayout-request` 事件 ✓）⇒ 在布局完成后采一次 ✓；
+			* - 其它情况（普通适应窗口 / 自动收敛取景）⇒ **球心保持不动** ✓。
+			*
+			* @param positions - 节点坐标。
+			* @param count - 节点数。
+			* @param smooth - 是否带动画（只决定动画，不再用来推断"是否重排" ✓）。
+			*/
 			fitAll(positions, count, smooth) {
+				this.positions = positions;
+				this.positionCount = count;
 				const bounds = boundsOf(positions, count);
 				this.bounds = bounds;
-				const newLayout = !smooth;
-				if ((!this.userInteracted || newLayout) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
-					this.state.center = [...bounds.center];
-					this.state.radius = bounds.radius;
+				const newLayout = this.relayoutPending;
+				if ((!this.userInteracted || newLayout) && Number.isFinite(bounds.radius) && bounds.radius > 0) this.adoptRelayoutCenter(bounds, positions, count);
+				else this.measureRadius(positions, count);
+				const skipFraming = newLayout && this.interactedSinceRelayout;
+				this.relayoutPending = false;
+				this.relayoutDeadline = 0;
+				this.interactedSinceRelayout = false;
+				if (skipFraming) {
+					this.syncCamera();
+					this.options.onCameraChange();
+					return;
 				}
-				const distance = fitDistance(bounds.radius, this.viewport, FOV_DEG$1, {
+				const insets = {
 					top: 64,
 					bottom: 64
-				}) * 1.08;
-				const before = {
+				};
+				const framingRadius = this.state.radius > 0 ? this.state.radius : bounds.radius;
+				const distance = fitDistance(framingRadius, this.viewport, FOV_DEG$1, insets) * 1.08;
+				const from = {
 					eye: [...this.state.eye],
 					view: this.state.view
 				};
-				fitSphere(this.state, bounds.radius, distance);
-				this.animateFrom(before, smooth);
+				this.animateTo(from, this.fitTarget(framingRadius, distance), smooth);
 			}
-			/** 每帧推进定位/取景动画（P 线性插值、Q 球面插值） */
+			/** 采用新的球心，并把操作球半径按"以新球心为中心"重量一次 ✓ */
+			adoptRelayoutCenter(bounds, positions, count) {
+				if (!Array.isArray(bounds.center) || !(bounds.radius > 0)) return;
+				this.state.center = [...bounds.center];
+				this.radiusMeasured = false;
+				if (positions !== null && count > 0) this.measureRadius(positions, count);
+				else this.state.radius = bounds.radius;
+			}
+			/** 以**固定球心 C** 为基准量半径：`max|X − C|` ✓（文档 P2） */
+			measureRadius(positions, count) {
+				const radius = radiusAbout(positions, count, this.state.center);
+				if (radius > 0) {
+					this.state.radius = radius;
+					this.radiusMeasured = true;
+				}
+			}
+			/**
+			* 每帧推进定位/取景动画（P 线性插值、Q 球面插值）。
+			*
+			* **只有这里才把插值结果写进 state**（文档 P2）：命令之后、第一帧之前，
+			* 状态必须还停在出发前 —— 否则滚轮/按下取消动画时会从"终点"开始操作，产生突发移动 ✗，
+			* 同步出去的 camera 与状态事件也会提前暴露终点 ✗。
+			*/
 			update(now) {
 				if (this.disposed) return false;
 				const animation = this.animation;
@@ -4614,23 +5057,70 @@ window.__ModuleLoader__.load({
 				const eased = 1 - Math.pow(1 - t, 3);
 				this.state.eye = lerp3(animation.fromEye, animation.toEye, eased);
 				this.state.view = quatSlerp(animation.fromView, animation.toView, eased);
-				if (t >= 1) this.animation = null;
+				if (t >= 1) {
+					this.state.eye = [...animation.toEye];
+					this.state.view = animation.toView;
+					this.animation = null;
+				}
 				this.syncCamera();
 				this.options.onCameraChange();
 				return true;
 			}
-			animateFrom(from, smooth) {
+			/**
+			* 启动一次位姿动画。
+			*
+			* @param from - 起点（调用时的实际状态 ✓ —— 连续定位就自然接着上一次的插值位置 ✓）。
+			* @param to - 终点（在临时副本上算出来的，提交之前不影响 state ✓）。
+			* @param smooth - 是否要动画；「减少动态效果」或非 smooth ⇒ 立即提交且不留待执行动画 ✓。
+			*/
+			animateTo(from, to, smooth) {
 				const duration = smooth && !this.reducedMotion() ? FOCUS_DURATION_MS : 1;
+				if (duration <= 1) {
+					this.state.eye = [...to.eye];
+					this.state.view = to.view;
+					this.animation = null;
+					this.syncCamera();
+					this.options.onCameraChange();
+					return;
+				}
 				this.animation = {
 					start: performance.now(),
 					duration,
-					fromEye: from.eye,
-					toEye: [...this.state.eye],
+					fromEye: [...from.eye],
+					toEye: [...to.eye],
 					fromView: from.view,
-					toView: this.state.view
+					toView: to.view
 				};
 				this.syncCamera();
 				this.options.onCameraChange();
+			}
+			/** 在**临时副本**上算出"对准目标"的位姿（不碰真实状态 ✓） */
+			aimTarget(target, distance) {
+				const draft = this.draftState();
+				aimAt(draft, target, distance);
+				return {
+					eye: draft.eye,
+					view: draft.view
+				};
+			}
+			/** 在**临时副本**上算出"适应窗口"的位姿（不碰真实状态 ✓） */
+			fitTarget(radius, distance) {
+				const draft = this.draftState();
+				fitSphere(draft, radius, distance);
+				return {
+					eye: draft.eye,
+					view: draft.view
+				};
+			}
+			/** 复制一份状态用于试算 ✓ */
+			draftState() {
+				return {
+					center: [...this.state.center],
+					eye: [...this.state.eye],
+					view: [...this.state.view],
+					scene: [...this.state.scene],
+					radius: this.state.radius
+				};
 			}
 			local(event) {
 				const rect = this.options.element.getBoundingClientRect();
@@ -4668,6 +5158,7 @@ window.__ModuleLoader__.load({
 						this.options.element.setPointerCapture(event.pointerId);
 						pointer.captured = true;
 						this.userInteracted = true;
+						this.interactedSinceRelayout = true;
 					}
 					if (pointer.moved) {
 						this.options.onUserCameraInput?.();
@@ -4679,8 +5170,16 @@ window.__ModuleLoader__.load({
 								x: this.grab.screen.x + dx,
 								y: this.grab.screen.y + dy
 							};
-							const result = dragAnchorTo(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target);
-							if (result.lost || result.error > 48) this.grab = null;
+							if (dragAnchorTo(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target).lost) {
+								const rebuilt = anchorFromRay(this.state, this.viewport, FOV_DEG$1, point.x, point.y);
+								if (rebuilt === null) this.grab = null;
+								else {
+									this.grab = rebuilt;
+									pointer.startX = point.x;
+									pointer.startY = point.y;
+									if (rebuilt.screen !== void 0) this.grab.screen = rebuilt.screen;
+								}
+							}
 						}
 						this.syncCamera();
 						this.options.onCameraChange();
@@ -4703,7 +5202,8 @@ window.__ModuleLoader__.load({
 					kind: "node",
 					index: node
 				};
-				const edge = pickEdge(projected, this.options.getEdges(), x, y);
+				const edges = this.options.getEdges();
+				const edge = this.positions !== null && this.positionCount > 0 ? pickClippedEdge(this.positions, edges, this.basis(), this.viewport, FOV_DEG$1, x, y) : pickEdge(projected, edges, x, y);
 				if (edge !== null) return {
 					kind: "edge",
 					index: edge
@@ -4787,6 +5287,7 @@ window.__ModuleLoader__.load({
 				this.grab = null;
 				this.options.onUserCameraInput?.();
 				this.userInteracted = true;
+				this.interactedSinceRelayout = true;
 				const spacing = clampNum(this.options.edgeLength, 8, 200);
 				const travel = wheelTravel(event.deltaY, event.deltaMode, this.viewport.height, {
 					...DEFAULT_WHEEL,
@@ -4844,6 +5345,7 @@ window.__ModuleLoader__.load({
 				element.removeEventListener("wheel", this.onWheel);
 				window.removeEventListener("keydown", this.onKeyDown);
 				window.removeEventListener("blur", this.onWindowBlur);
+				window.removeEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);
 				document.removeEventListener("visibilitychange", this.onVisibilityChange);
 				if (this.suppressedTimer !== void 0) window.clearTimeout(this.suppressedTimer);
 				this.pointer = null;
@@ -38673,7 +39175,7 @@ void main() {
 `;
 		var SpaceRenderer = class {
 			scene = new Scene();
-			camera = new PerspectiveCamera(50, 1, NEAR_PLANE, 4e3);
+			camera = new PerspectiveCamera(50, 1, NEAR_PLANE$1, 4e3);
 			renderer;
 			group = new Group();
 			nodeGeometry;
@@ -39067,7 +39569,7 @@ void main() {
 				camera.fov = fovDeg;
 				camera.aspect = viewport.width / Math.max(1, viewport.height);
 				const cameraDistance = Math.hypot(basis.position[0] - bounds.center[0], basis.position[1] - bounds.center[1], basis.position[2] - bounds.center[2]);
-				camera.near = NEAR_PLANE;
+				camera.near = NEAR_PLANE$1;
 				camera.far = Math.max(600, cameraDistance + bounds.radius * 6 + 400);
 				camera.position.set(basis.position[0], basis.position[1], basis.position[2]);
 				camera.up.set(basis.up[0], basis.up[1], basis.up[2]);
@@ -39261,15 +39763,6 @@ void main() {
 		//#endregion
 		//#region src/vendor/upstream/graph3d/session.ts
 		let layoutCache = null;
-		/**
-		* 相机缓存。
-		*
-		* 带一个「存这份相机时布局是否已经收敛」的标记：布局还在形成时相机往往是被
-		* **自动取景**摆在那里的（对着还没收敛的初始云团），把它当成「使用者的视角」
-		* 恢复回来，会让稀疏小图在中间缩成一小团——而引擎又因为「有相机缓存」不再重新取景，
-		* 于是一直错下去（验收清单 P2-4）。未收敛的相机因此不作数，下次进入重新取景。
-		*/
-		let cameraCache = null;
 		/** 工作区代次：显式失效时递增，Worker 用它丢弃旧代次的消息 */
 		let epoch = 1;
 		function spaceEpoch() {
@@ -39282,7 +39775,7 @@ void main() {
 		* 「切到二维再切回来」不是结构变化，重跑只会让节点在镜头没动的情况下挪一下。
 		*/
 		function cachedLayoutReusable(signature) {
-			return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature;
+			return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature && (layoutCache.key ?? "") === activeLibraryKey();
 		}
 		/**
 		* 取出与给定 ID 顺序对齐的旧坐标。
@@ -39292,6 +39785,7 @@ void main() {
 		*/
 		function alignedCachedPositions(ids) {
 			if (!layoutCache || ids.length === 0) return null;
+			if ((layoutCache.key ?? "") !== activeLibraryKey()) return null;
 			const byId = /* @__PURE__ */ new Map();
 			layoutCache.ids.forEach((id, index) => byId.set(id, index));
 			const out = new Float32Array(ids.length * 3);
@@ -39316,18 +39810,8 @@ void main() {
 				ids: [...ids],
 				positions: new Float32Array(positions),
 				signature,
-				settled
-			};
-		}
-		/** 可沿用的相机：只有「布局已收敛时存下的那一份」才算使用者真正的观看状态 */
-		function cachedCamera() {
-			if (!cameraCache || !cameraCache.settled) return null;
-			return cloneCamera(cameraCache.state);
-		}
-		function storeCamera(state, settled) {
-			cameraCache = {
-				state: cloneCamera(state),
-				settled
+				settled,
+				key: activeLibraryKey()
 			};
 		}
 		/** 只丢布局缓存（「重新整理」用）：相机是使用者的观看状态，不该跟着一起清 */
@@ -39344,17 +39828,6 @@ void main() {
 			let matched = 0;
 			for (const id of ids) if (known.has(id)) matched += 1;
 			return matched > 0;
-		}
-		function cloneCamera(state) {
-			const extra = state;
-			return {
-				target: [...state.target],
-				distance: state.distance,
-				angle: state.angle,
-				pitch: state.pitch,
-				...extra.q === void 0 ? {} : { q: [...extra.q] },
-				...extra.knInterior === void 0 ? {} : { knInterior: JSON.parse(JSON.stringify(extra.knInterior)) }
-			};
 		}
 		//#endregion
 		//#region src/vendor/upstream/graph3d/engine.ts
@@ -39454,12 +39927,15 @@ void main() {
 			autoFitCount = 0;
 			/** 当前这份坐标是否已经收敛（写进会话缓存，供下次直接沿用） */
 			layoutSettled = false;
+			/** 本实例绑定的知识库身份（构造时取一次）：缓存读写都按它分区 ✓ */
+			knLibraryKey = "";
 			constructor(options) {
 				this.options = options;
 				this.palette = readPalette();
 				this.renderer = new SpaceRenderer(options.canvas, this.palette);
 				this.measureContext = document.createElement("canvas").getContext("2d");
-				const restored = cachedCamera();
+				this.knLibraryKey = activeLibraryKey();
+				const restored = cachedView(this.knLibraryKey);
 				/** 相机能不能沿用：决定布局稳定后要不要重新取景（见 startLayout） */
 				this.cameraRestored = restored !== null;
 				const initial = restored ?? {
@@ -39754,7 +40230,7 @@ void main() {
 					this.pendingSettleFit = false;
 					this.navigation.fitAll(this.positions, count, true);
 				}
-				this.navigation.setFrameContext(bounds, this.viewport);
+				this.navigation.setFrameContext(bounds, this.viewport, this.positions, count);
 				const cameraMoving = this.navigation.update(now);
 				const basis = this.navigation.basis();
 				this.renderer.render(basis, this.viewport, FOV_DEG, bounds);
@@ -39938,7 +40414,7 @@ void main() {
 				}, 400);
 			}
 			persistCamera() {
-				storeCamera(this.navigation.camera, this.layoutSettled);
+				storeView(this.knLibraryKey, this.navigation.camera, this.layoutSettled);
 			}
 			dispose() {
 				if (this.disposed) return;
@@ -41360,6 +41836,193 @@ void main() {
 			}
 		};
 		//#endregion
+		//#region src/client/InteriorMinimap.tsx
+		/**
+		* 右下角的**实时截面小地图**：把用户手绘的那张平面图搬进界面。
+		*
+		* 图上有什么（对应他的画）：
+		* - 一个大圆 = 操作包围球；
+		* - 圆心的小点 = **固定转动中心** C（黑点）；
+		* - 一只眼睛 = 视角（相机）当前在球里的位置；眼睛朝向 = 视线方向（往球里看）；
+		* - 一串渐渐变淡的眼睛 = 刚才走过的路径（他画里那排眼睛 ✓）。
+		*
+		* 关键：位置不是示意的 —— 眼睛到圆心的**图上距离**就是 `|P − C| / 半径`（真实比例）✓，
+		* 于是"滚轮深入球体、穿过黑点、继续往外"这件事在图上直接看得见 ✓。
+		*
+		* 数据来源：控制器在每次相机变化后广播的 `kn-interior-state` 事件
+		* （引擎在上游组件内部创建，插件拿不到实例；这条通道不用改上游 ✓）。
+		* 面板用 `contains()` 认领属于自己那块画布的事件，多视图/多标签页不会串 ✓。
+		*/
+		/** 画布尺寸（viewBox 单位）与球的图上半径 */
+		const SIZE = 100;
+		const BALL_RADIUS = 33;
+		/** 轨迹保留几个采样（他画里那排依次渐远的眼睛 ✓） */
+		const TRAIL_LENGTH = 6;
+		/** 轨迹采样间隔（毫秒）：拖动时每个 pointermove 都记会糊成一团 ✗ */
+		const TRAIL_INTERVAL_MS = 120;
+		/** 同一个 eye 的重复广播不再追加轨迹（用"移动量占半径的比例"判断 ✓） */
+		const TRAIL_MIN_MOVE_RATIO = .004;
+		/** 超出这个半径倍数就夹到框边（真实位置还在更外面）✓ */
+		const CLAMP_RATIO = 1.4;
+		/**
+		* 小地图组件。
+		* @param props.hostRef - 图区容器：用来认领属于自己那块画布的事件 ✓。
+		* @param props.active - 视图是否可见（不可见就不画，省得留着上一个库的位置 ✗）。
+		* @returns SVG 小地图。
+		*/
+		function InteriorMinimap({ hostRef, active }) {
+			const [snapshot, setSnapshot] = (0, react.useState)(null);
+			const [trail, setTrail] = (0, react.useState)([]);
+			const lastSampleRef = (0, react.useRef)(0);
+			/** 最近一次采样用的世界坐标与截面定义（去重 + 轨迹重投影都要用 ✓） */
+			const lastEyeRef = (0, react.useRef)(null);
+			/** 当前截面：绘制轨迹时要按**当前**朝向统一重投影 ✓ */
+			const sectionRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const onState = (event) => {
+					const detail = event.detail;
+					if (detail === void 0 || detail === null || !(detail.radius > 0)) return;
+					const container = hostRef.current;
+					if (container === null || !container.contains(detail.host)) return;
+					sectionRef.current = {
+						center: [...detail.center],
+						forward: [...detail.forward],
+						up: [...detail.up],
+						radius: detail.radius
+					};
+					const point = minimapPoint(detail);
+					setSnapshot({
+						nx: point.depth / detail.radius,
+						ny: -point.lateral / detail.radius,
+						ratio: distanceRatio(point.distance, detail.radius)
+					});
+					const eye = [
+						detail.eye[0],
+						detail.eye[1],
+						detail.eye[2]
+					];
+					if (!shouldSampleTrail(lastEyeRef.current, eye, detail.radius, TRAIL_MIN_MOVE_RATIO)) return;
+					lastEyeRef.current = eye;
+					const now = typeof performance !== "undefined" ? performance.now() : 0;
+					if (now - lastSampleRef.current >= TRAIL_INTERVAL_MS) {
+						lastSampleRef.current = now;
+						setTrail((prev) => [...prev, { eye }].slice(-6));
+					}
+				};
+				window.addEventListener(INTERIOR_STATE_EVENT, onState);
+				return () => {
+					window.removeEventListener(INTERIOR_STATE_EVENT, onState);
+				};
+			}, [hostRef]);
+			(0, react.useEffect)(() => {
+				if (!active) {
+					setSnapshot(null);
+					setTrail([]);
+					lastEyeRef.current = null;
+				}
+			}, [active]);
+			/** 归一化截面坐标 → SVG 坐标（球心在正中，球面 = BALL_RADIUS）✓ */
+			const toSvg = (point) => {
+				const length = Math.hypot(point.nx, point.ny);
+				const k = length > CLAMP_RATIO ? CLAMP_RATIO / length : 1;
+				return {
+					x: SIZE / 2 + point.nx * k * BALL_RADIUS,
+					y: SIZE / 2 + point.ny * k * BALL_RADIUS
+				};
+			};
+			/** 把轨迹里的**世界坐标**投到当前截面（朝向变了也不会连成假轨迹 ✓） */
+			const trailSnapshot = (sample) => {
+				const section = sectionRef.current;
+				if (section === null) return null;
+				const point = minimapPoint({
+					center: section.center,
+					eye: sample.eye,
+					forward: section.forward,
+					up: section.up,
+					radius: section.radius
+				});
+				return {
+					nx: point.depth / section.radius,
+					ny: -point.lateral / section.radius,
+					ratio: distanceRatio(point.distance, section.radius)
+				};
+			};
+			if (!active || snapshot === null) return null;
+			const eye = toSvg(snapshot);
+			const clamped = snapshot.ratio > CLAMP_RATIO;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "kn-minimap",
+				"aria-hidden": "true",
+				"data-testid": "kn-minimap",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+					viewBox: `0 0 ${SIZE} ${SIZE}`,
+					width: SIZE,
+					height: SIZE,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+							className: "kn-minimap-ball",
+							cx: SIZE / 2,
+							cy: SIZE / 2,
+							r: BALL_RADIUS
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("line", {
+							className: "kn-minimap-axis",
+							x1: SIZE / 2 - BALL_RADIUS - 6,
+							y1: SIZE / 2,
+							x2: 89,
+							y2: SIZE / 2
+						}),
+						trail.slice(0, -1).map((sample, index) => {
+							const projected = trailSnapshot(sample);
+							if (projected === null) return null;
+							const dot = toSvg(projected);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+								className: "kn-minimap-trail",
+								cx: dot.x,
+								cy: dot.y,
+								r: 2,
+								opacity: .12 + (index + 1) * (.5 / TRAIL_LENGTH)
+							}, `${index}-${dot.x.toFixed(2)}-${dot.y.toFixed(2)}`);
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+							className: "kn-minimap-center",
+							cx: SIZE / 2,
+							cy: SIZE / 2,
+							r: 2.4
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("g", {
+							transform: `translate(${eye.x} ${eye.y})`,
+							children: [
+								clamped ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									className: "kn-minimap-clamped",
+									cx: 0,
+									cy: 0,
+									r: 9.5
+								}) : null,
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+									className: "kn-minimap-eye-outline",
+									d: "M -7 0 Q 0 -5.2 7 0 Q 0 5.2 -7 0 Z"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									className: "kn-minimap-pupil",
+									cx: -2.1,
+									cy: 0,
+									r: 1.9
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("text", {
+							className: "kn-minimap-distance",
+							x: SIZE / 2,
+							y: 98,
+							textAnchor: "middle",
+							children: [snapshot.ratio.toFixed(2), "R"]
+						})
+					]
+				})
+			});
+		}
+		//#endregion
 		//#region src/client/node-search.ts
 		/** 归一化：小写、去首尾空白、把连续空白压成一个空格 */
 		function normalizeQuery(text) {
@@ -41636,6 +42299,7 @@ void main() {
 			const identity = (0, react.useMemo)(() => (snapshot) => snapshot, []);
 			const workspaceSnapshot = props.useWorkspaces === void 0 ? void 0 : props.useWorkspaces(identity);
 			const workspacePath = (0, react.useMemo)(() => pickWorkspacePath(workspaceSnapshot, props.sessionId), [workspaceSnapshot, props.sessionId]);
+			(0, react.useMemo)(() => setActiveLibraryKey(libraryKeyOf(payload?.library)), [payload?.library]);
 			let overrideRoot;
 			if (props.useTabInfo !== void 0) try {
 				const params = props.useTabInfo()?.tab?.navigation?.params;
@@ -41925,6 +42589,7 @@ void main() {
 								"aria-label": t("relayout"),
 								title: t("relayoutHint"),
 								onClick: () => {
+									window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT, { detail: { libraryKey: libraryKeyOf(payload?.library) } }));
 									setRelayoutToken((value) => value + 1);
 									fitWholeGraph();
 								},
@@ -42086,6 +42751,10 @@ void main() {
 								visible ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "kn-msg",
 									children: t("loading")
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(InteriorMinimap, {
+									hostRef: graphHostRef,
+									active: visible
 								}),
 								visible ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ErrorBoundary, {
 									fallback: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

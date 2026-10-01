@@ -169,6 +169,14 @@ export function layoutOf(state: InteriorState, point: Vec3): Vec3 {
 
 /* --------------------------------- 投影 --------------------------------- */
 
+/**
+ * 相机空间的**近裁剪距离**：与上游 `projectPoint()` 的 `NEAR_PLANE` 保持一致 ✓。
+ *
+ * 文档 P2：我们自己曾用 1e-6、上游用 0.35 —— 两套阈值会让"渲染可见"与"能被拾取"错位
+ * （近处的内容画着却点不到 ✗）。投影、抓取、线段拾取现在共用这一个 ✓。
+ */
+export const NEAR_PLANE = 0.35;
+
 /** 像素级投影（与上游 `projectPoint` 同式；这里自带一份，保持本模块可独立测试） */
 export function projectDisplay(
   state: InteriorState,
@@ -179,7 +187,7 @@ export function projectDisplay(
   const basis = displayBasis(state);
   const d = sub(point, basis.position);
   const depth = dot(d, basis.forward);
-  if (!(depth > 1e-6)) return null;
+  if (!(depth > NEAR_PLANE)) return null;
   const focal = 1 / Math.tan((fovDeg * Math.PI) / 360);
   const scaleFactor = (focal * (viewport.height / 2)) / depth;
   return {
@@ -314,10 +322,21 @@ export function anchorFromRay(
   const disc = b * b - 4 * c;
   if (!(disc >= 0)) return null;
   const root = Math.sqrt(disc);
-  /* 球内（c < 0）取正根（前方退出交点）；球外取较小的正根 ✓ */
-  const t = c < 0 ? (-b + root) / 2 : (-b - root) / 2;
-  if (!(t > 0)) return null;
-  const display = add(ray.origin, scale(ray.direction, t));
+  /*
+   * **两个根都算出来，统一按前向距离阈值取最小有效根**（文档 P2）。
+   *
+   * 以前按 `c < 0`（球内/球外）二选一 ✗，于是"相机**恰好站在球面上**朝球内看"时：
+   * 较小根正好是 0（就是脚下那个点），被 `t > 0` 丢掉，而较大的那个根才是前方内壁 ⇒ 直接返回 null ✗
+   * —— 空白拖动整次失效。现在不再让根的符号决定唯一候选 ✓：
+   * - 前向阈值用 `NEAR_PLANE`（与投影近裁剪一致 ✓），比它更近的交点等于"贴在相机上"，不算抓取点；
+   * - **朝外看**（相机在球外/球面上、视线背离球体）时两个根都不在前方 ⇒ 返回 null（如实报告没有前方交点 ✓）；
+   * - 相机在球内时较小根为负、较大根为正 ⇒ 自动选中前方内壁 ✓。
+   */
+  const near = Math.min((-b - root) / 2, (-b + root) / 2);
+  const far = Math.max((-b - root) / 2, (-b + root) / 2);
+  const forward = [near, far].find((candidate) => candidate > NEAR_PLANE);
+  if (forward === undefined) return null;
+  const display = add(ray.origin, scale(ray.direction, forward));
   const screen = projectDisplay(state, viewport, fovDeg, display);
   return {
     layout: layoutOf(state, display),
@@ -326,7 +345,33 @@ export function anchorFromRay(
   };
 }
 
-/** 建立抓取点：优先节点，其次球面（对应文档"节点优先，其次球面"） */
+/**
+ * 抓取点离球心够远吗（有旋转杠杆吗）？
+ *
+ * 锚点贴着 C 时杠杆趋近 0：要让它在屏幕上挪 1px 需要巨大的转角 ⇒
+ * 解会被限幅、看起来"拖不动"✗（文档也要求这种情况改用虚拟球面锚点 ✓）。
+ *
+ * @param state - 导航状态（用 `radius` 定阈值）。
+ * @param anchor - 待检查的锚点。
+ * @returns 杠杆是否足够。
+ */
+export function hasLever(state: InteriorState, anchor: GrabAnchor): boolean {
+  const lever = length(sub(anchor.layout, state.center));
+  const threshold = Math.max(10, state.radius * 0.15);
+  return lever >= threshold;
+}
+
+/**
+ * 建立抓取点：**节点优先，其次球面**（文档 §拖动旋转算法）——但节点杠杆不足时改用球面 ✓。
+ *
+ * @param state - 导航状态。
+ * @param viewport - 画布尺寸。
+ * @param fovDeg - 垂直 FOV。
+ * @param projected - 上游 `getProjected()` 的结果。
+ * @param x - 光标 x（画布内）。
+ * @param y - 光标 y（画布内）。
+ * @returns 抓取点；都没有解 ⇒ null。
+ */
 export function grabAnchor(
   state: InteriorState,
   viewport: { width: number; height: number },
@@ -335,7 +380,12 @@ export function grabAnchor(
   x: number,
   y: number,
 ): GrabAnchor | null {
-  return anchorFromProjected(state, viewport, fovDeg, projected, x, y) ?? anchorFromRay(state, viewport, fovDeg, x, y);
+  const node = anchorFromProjected(state, viewport, fovDeg, projected, x, y);
+  if (node !== null && hasLever(state, node)) return node;
+  /* 球面（虚拟）抓取点：杠杆充足，且与"抓住球壳"的手感一致 ✓ */
+  const wall = anchorFromRay(state, viewport, fovDeg, x, y);
+  if (wall !== null) return wall;
+  return node; /* 连球面都没解（半径非法）时才退回节点 ✓ */
 }
 
 /* ------------------------------ 拖动求解（J） ------------------------------ */
@@ -516,6 +566,116 @@ export function dragAnchorTo(
   return { iterations: maxIterations, error, lost: false };
 }
 
+/* ------------------------------- 小地图截面 ------------------------------- */
+
+/** 小地图上的一个点：把相机位置投到"过球心与相机、且沿视线"的截面上 */
+export interface MinimapPoint {
+  /**
+   * 沿视线方向的深度（世界单位）。
+   * 球心在相机前方 ⇒ **正**；穿到球心另一侧 ⇒ **负**（于是小地图上"越深入越往左"✓）。
+   */
+  depth: number;
+  /** 垂直于视线的侧向偏移（相机上方向为正，带符号；只丢掉绕视线的方位角 ✓） */
+  lateral: number;
+  /** 到球心的**真实**距离（世界单位）——`hypot(depth, lateral)` 必须等于它 ✓ */
+  distance: number;
+  /** 是否在操作球外 */
+  outside: boolean;
+}
+
+/**
+ * 相机在操作球里的位置 → 小地图（截面图）坐标。
+ *
+ * 用户的截面图要的就是这个：一张平面图，能看出"视角现在在球体的哪个位置"。
+ * 取**过球心、过相机、且沿视线方向**的截面：横轴 = 沿视线的深度（球心在前方为正 ✓），
+ * 纵轴 = **相机上方向上的偏移**（`dot(P−C, up)`）✓。
+ *
+ * 为什么侧向不再取"垂直分量的完整模长"（文档 P2）：那样只有符号由 up 的点积决定，
+ * 当偏移主要沿屏幕右方向时，up 分量从 +0.001 跨到 −0.001 会让侧向值从 +100 跳到 −100 ✗
+ * （实际只移动了 0.002）。现在纵轴就是 up 分量本身 ⇒ **连续、不会跳变** ✓；
+ * 代价是"图上距离 = 真实距离"不再成立，所以另给一个距离读数（见 `distanceRatio`）✓。
+ *
+ * @param input - 球心、相机位置、相机的前向与上方向、操作球半径。
+ * @returns 截面坐标（世界单位）与到球心的真实距离。
+ */
+export function minimapPoint(input: {
+  center: Vec3;
+  eye: Vec3;
+  forward: Vec3;
+  up: Vec3;
+  radius: number;
+}): MinimapPoint {
+  const offset = sub(input.eye, input.center);
+  const alongView = dot(offset, input.forward);
+  const depth = -alongView;
+  const lateral = dot(offset, input.up);
+  const distance = length(offset);
+  return {
+    depth,
+    lateral,
+    distance,
+    outside: input.radius > 0 ? distance > input.radius : false,
+  };
+}
+
+/**
+ * 到球心的距离相对操作球半径的比值（小地图上的距离读数 ✓）。
+ * @param distance - 到球心的真实距离。
+ * @param radius - 操作球半径。
+ * @returns 比值；半径非法 ⇒ 0。
+ */
+export function distanceRatio(distance: number, radius: number): number {
+  return radius > 0 && Number.isFinite(radius) ? distance / radius : 0;
+}
+
+/**
+ * 是否该为小地图轨迹记一个新采样。
+ *
+ * 相机状态事件可能因为别的原因重复广播（同一位置反复派发）✗ ——
+ * 每次都追加就会画出一串没有意义的点 ✓（文档 P2 要求去重）。
+ *
+ * @param previousEye - 上一次采样时的相机位置（没有 ⇒ 记）。
+ * @param eye - 这次的位置。
+ * @param radius - 操作球半径（用于把"位移"归一化成比例）。
+ * @param minRatio - 至少移动这么多倍半径才算新采样。
+ * @returns 是否记录。
+ */
+export function shouldSampleTrail(
+  previousEye: Vec3 | null,
+  eye: Vec3,
+  radius: number,
+  minRatio = 0.004,
+): boolean {
+  if (previousEye === null) return true;
+  if (!(radius > 0)) return false;
+  return length(sub(eye, previousEye)) / radius > minRatio;
+}
+
+/**
+ * 以**固定球心 C** 为基准测量操作球半径：`max|X − C|`（文档 P2）。
+ *
+ * 为什么不能直接用包围体的 `radius`：那个是绕 `bounds.center` 算的 ✗ ——
+ * 球心冻结在别处时，它未必包得住全部节点，小地图和抓取范围就会失真 ✗。
+ *
+ * @param positions - 节点坐标（xyz 连续存放）。
+ * @param count - 节点数。
+ * @param center - 固定球心 C。
+ * @returns 半径（空图 ⇒ 传入的兜底值）。
+ */
+export function radiusAbout(positions: Float32Array, count: number, center: Vec3): number {
+  let maxDistance = 0;
+  for (let index = 0; index < count; index += 1) {
+    const x = positions[index * 3];
+    const y = positions[index * 3 + 1];
+    const z = positions[index * 3 + 2];
+    if (x === undefined || y === undefined || z === undefined) continue;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    const distance = Math.hypot(x - center[0], y - center[1], z - center[2]);
+    if (distance > maxDistance) maxDistance = distance;
+  }
+  return maxDistance > 0 ? maxDistance : 0;
+}
+
 /* --------------------------------- 滚轮 --------------------------------- */
 
 /** 滚轮推进的配置（都由插件拥有并校验，不散落在构建替换字符串里 ✓） */
@@ -570,11 +730,34 @@ export function wheelTravel(
 export function advanceEye(state: InteriorState, travel: number, maxRange: number): void {
   if (!Number.isFinite(travel) || travel === 0) return;
   const forward = rotateVec(state.view, [0, 0, -1]);
-  let next = add(state.eye, scale(forward, travel));
+  const next = add(state.eye, scale(forward, travel));
   const offset = sub(next, state.center);
   const distance = length(offset);
   if (Number.isFinite(maxRange) && maxRange > 0 && distance > maxRange) {
-    next = add(state.center, scale(offset, maxRange / distance));
+    /*
+     * 超范围时**沿视线截断行程**，而不是把点径向投回球面（文档开发备注）：
+     * 径向投影会附带给横向位移，于是"一直往前滚"会莫名其妙地往侧面漂 ✗。
+     * 求 |P + F·t − C| = maxRange 的根，取沿行进方向最远的那个 ✓。
+     */
+    const origin = sub(state.eye, state.center);
+    const b = 2 * dot(origin, forward);
+    const c = dot(origin, origin) - maxRange * maxRange;
+    const disc = b * b - 4 * c;
+    if (disc >= 0) {
+      const root = Math.sqrt(disc);
+      const roots = [(-b - root) / 2, (-b + root) / 2];
+      /* 只保留**沿行进方向**且不超过本次行程的根，取最远的那个 ✓ */
+      const usable = travel > 0
+        ? roots.filter((t) => t > 0 && t <= travel).sort((l, r) => r - l)
+        : roots.filter((t) => t < 0 && t >= travel).sort((l, r) => l - r);
+      if (usable.length > 0) {
+        /* 用一个略小于边界的系数，避免浮点落在球外 ✓ */
+        state.eye = add(state.eye, scale(forward, usable[0] * 0.999));
+        return;
+      }
+    }
+    /* 没有可截断的交点（理论上不该发生）⇒ 不动，别乱跳 ✓ */
+    return;
   }
   state.eye = next;
 }

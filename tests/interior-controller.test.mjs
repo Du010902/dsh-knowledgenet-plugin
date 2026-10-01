@@ -45,19 +45,28 @@ function makeElement() {
 
 let globals = null;
 
-/** 装全局桩：控制器构造时会挂 window/document 监听 ✓ */
+/** 装全局桩：控制器构造时会挂 window/document 监听，并广播小地图用的状态事件 ✓ */
 function installGlobals() {
   const windowHandlers = new Map();
+  const dispatched = [];
   const previous = {
     window: globalThis.window,
     document: globalThis.document,
     matchMedia: globalThis.matchMedia,
+    CustomEvent: globalThis.CustomEvent,
+  };
+  globalThis.CustomEvent = class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
   };
   globalThis.window = {
     addEventListener: (type, handler) => { windowHandlers.set(type, handler); },
     removeEventListener: (type) => { windowHandlers.delete(type); },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
+    dispatchEvent: (event) => { dispatched.push(event); return true; },
   };
   globalThis.document = {
     hidden: false,
@@ -67,10 +76,11 @@ function installGlobals() {
   };
   /* 关掉动画：定位/取景一步到位，测试不必等 620ms ✓ */
   globalThis.matchMedia = () => ({ matches: true });
-  return { windowHandlers, restore() {
+  return { windowHandlers, dispatched, restore() {
     globalThis.window = previous.window;
     globalThis.document = previous.document;
     globalThis.matchMedia = previous.matchMedia;
+    globalThis.CustomEvent = previous.CustomEvent;
   } };
 }
 
@@ -211,6 +221,48 @@ describe("控制器接线：拖动抓取点跟手", () => {
     element.emit("contextmenu", { clientX: screen.x, clientY: screen.y });
     assert.deepEqual(calls.context, [{ kind: "node", index: 5 }]);
     assert.deepEqual(calls.select, [5], "右键节点也要把它设为当前选中（与上游一致）");
+  });
+});
+
+describe("控制器接线：小地图状态广播", () => {
+  const lastDetail = () => {
+    const events = globals.dispatched.filter((event) => event.type === "kn-interior-state");
+    return events.length === 0 ? null : events[events.length - 1].detail;
+  };
+
+  it("挂载后就会广播一次（面板不必等用户操作才画得出图）", () => {
+    const { element } = makeNavigation();
+    const detail = lastDetail();
+    assert.ok(detail !== null, "应当已经广播过状态");
+    assert.equal(detail.host, element, "负载要带宿主元素（面板据此认领）");
+    assert.equal(detail.radius, 300, "带操作球半径");
+    assert.ok(Math.abs(detail.distance - 900) < 1e-9, "带相机到球心的距离");
+  });
+
+  it("滚轮之后广播新位置；拖动只转图谱 ⇒ 位置与朝向都不变", () => {
+    const { navigation, element, projected } = makeNavigation();
+    const initial = lastDetail();
+    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    const afterWheel = lastDetail();
+    assert.ok(afterWheel.distance < initial.distance, "前进 ⇒ 离球心更近");
+
+    /* 拖动：半径（= 到球心的距离）与朝向都必须不变，只有图谱在转 ✓ */
+    const screen = projectWith(navigation, [0, 0, 700]);
+    pushNode(projected, 0, screen);
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: screen.x, clientY: screen.y, shiftKey: false });
+    element.emit("pointermove", { pointerId: 1, clientX: screen.x + 40, clientY: screen.y + 10 });
+    const afterDrag = lastDetail();
+    assert.ok(Math.abs(afterDrag.distance - afterWheel.distance) < 1e-9, "拖动不该改变到球心的距离");
+    assert.deepEqual(afterDrag.forward, afterWheel.forward, "拖动不该改变朝向（视角不动 ✓）");
+    assert.deepEqual(afterDrag.eye, afterWheel.eye, "拖动不该改变相机位置（视角不动 ✓）");
+  });
+
+  it("dispose 之后不再广播（卸载后不许再往面板推状态）", () => {
+    const { navigation, element } = makeNavigation();
+    navigation.dispose();
+    const count = globals.dispatched.length;
+    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    assert.equal(globals.dispatched.length, count, "dispose 后不该再有事件");
   });
 });
 

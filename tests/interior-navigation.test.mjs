@@ -20,6 +20,7 @@ import {
   dragAnchorTo,
   effectiveBasis,
   grabAnchor,
+  hasLever,
   layoutOf,
   projectDisplay,
   solveDrag,
@@ -273,8 +274,142 @@ describe("空白拖动：射线 ∩ 操作包围球", () => {
   });
 });
 
-describe("光标射线与姿态轴", () => {
-  it("画布中心的光标射线 = 视线方向；姿态带滚转时右/上轴随之旋转", () => {
+describe("整张图谱绕固定球心作刚体旋转（用户截面图要求的行为）", () => {
+  /*
+   * 用户的截面图：相机（眼睛）沿视线深入球体内部；中间的黑点是**固定转动中心** C；
+   * 拖动 = 用鼠标"扒住"抓取点，让整张图谱绕 C 旋转，抓取点跟着鼠标走。
+   *
+   * 这套模型的三条硬性质：
+   * 1. **刚体**：旋转只改姿态，任何节点到 C 的距离都不变 ✓；
+   * 2. **抓取点跟手**：不论它在相机与 C 之间、在 C 附近、还是在 C 的另一侧 ✓；
+   * 3. **没有整体反号**：不再有"深度超过轴心就反向"那种补丁式行为 ✓
+   *    （近侧/远侧的**视差**是绕轴旋转本来的样子——像转盘：近处往右、远处往左 —— 但被抓住的那一点永远不反 ✓）。
+   */
+  const distTo = (point, center) => Math.hypot(
+    point[0] - center[0],
+    point[1] - center[1],
+    point[2] - center[2],
+  );
+
+  it("刚体：每个节点到球心 C 的距离都不变（不论在 C 的哪一侧）", () => {
+    const state = makeState({ eye: [0, 0, 240] });
+    const nodes = [[140, 40, 190], [-160, 60, -120], [30, -180, -40], [0, 0, -260]];
+    const anchorLayout = layoutOf(state, displayOf(state, [40, 20, 160]));
+    const before = nodes.map((node) => distTo(displayOf(state, node), state.center));
+    const result = dragAnchorTo(state, VIEWPORT, FOV, anchorLayout, { x: 430, y: 260 });
+    assert.ok(result.error <= 0.5, "求解应收敛");
+    const after = nodes.map((node) => distTo(displayOf(state, node), state.center));
+    before.forEach((distance, index) => {
+      assert.ok(Math.abs(distance - after[index]) < 1e-6, `节点 ${index} 到球心的距离变了 ⇒ 不是刚体`);
+    });
+  });
+
+  it("球心前后的抓取点都不反号：挨个跟手（视角前方近处 / 对面内壁）", () => {
+    for (const [name, anchorLayout] of [
+      ["视角前方近处", [0, 0, 200]],
+      ["对面内壁附近", [0, 0, -280]],
+    ]) {
+      const state = makeState({ eye: [0, 0, 240] });
+      const before = screenOf(state, displayOf(state, anchorLayout));
+      assert.ok(before !== null, `前置条件：${name}的锚点要在相机前方`);
+      const result = dragAnchorTo(state, VIEWPORT, FOV, anchorLayout, {
+        x: before.x + 36,
+        y: before.y - 18,
+      });
+      const after = screenOf(state, displayOf(state, anchorLayout));
+      assert.ok(Math.abs(after.x - (before.x + 36)) < 0.6, `${name}：x 没跟手`);
+      assert.ok(Math.abs(after.y - (before.y - 18)) < 0.6, `${name}：y 没跟手`);
+      assert.ok(result.iterations <= 6, `${name}：迭代应在上限内收敛`);
+    }
+  });
+
+  it("拖动**只转图谱**：视角（相机位置与朝向）与球心都不动", () => {
+    /*
+     * 用户 2026-10-01 的澄清（配合截面图）：
+     * 「也不是让视角旋转，可以说是视角是不动的，但是鼠标确实扒住视角所在的位置，
+     *   让整个球体围绕旋转中心来旋转。」
+     * ⇒ 拖动期间 P（相机位置）与 Q（相机姿态）必须逐分量不变，只有 S 变 ✓。
+     */
+    const state = makeState({ eye: [0, 0, 240] });
+    const eyeBefore = [...state.eye];
+    const viewBefore = [...state.view];
+    const centerBefore = [...state.center];
+    const anchorLayout = layoutOf(state, displayOf(state, [40, 20, 160]));
+    const before = screenOf(state, displayOf(state, anchorLayout));
+    dragAnchorTo(state, VIEWPORT, FOV, anchorLayout, { x: before.x + 40, y: before.y + 16 });
+    assert.deepEqual(state.eye, eyeBefore, "相机位置不能动（视角不动）");
+    assert.deepEqual(state.view, viewBefore, "相机朝向不能动（视角不动）");
+    assert.deepEqual(state.center, centerBefore, "转动中心不能动");
+    assert.notDeepEqual(state.scene, [0, 0, 0, 1], "变的只有图谱旋转 S");
+  });
+
+  it("杠杆不足的锚点会被换成球面抓取点（贴近球心时不硬拽）", () => {
+    const state = makeState({ eye: [0, 0, 240] });
+    const centerNode = screenOf(state, displayOf(state, [0, 0, -20]));
+    const projected = [{
+      x: centerNode.x,
+      y: centerNode.y,
+      depth: centerNode.depth,
+      radius: 8,
+      visible: true,
+    }];
+    /* 节点几乎压在球心上：杠杆 < 半径的 6% ⇒ 文档要求改用虚拟球面锚点 ✓ */
+    const grabbed = grabAnchor(state, VIEWPORT, FOV, projected, centerNode.x, centerNode.y);
+    assert.ok(grabbed !== null);
+    assert.ok(hasLever(state, grabbed), "换来的锚点必须有杠杆");
+    const offset = Math.hypot(
+      grabbed.display[0] - state.center[0],
+      grabbed.display[1] - state.center[1],
+      grabbed.display[2] - state.center[2],
+    );
+    assert.ok(Math.abs(offset - state.radius) < 1e-3, "虚拟锚点落在操作球面上");
+  });
+
+  it("有杠杆的普通节点仍然优先用节点当锚点（不会被球面顶掉）", () => {
+    const state = makeState({ eye: [0, 0, 240] });
+    const node = screenOf(state, displayOf(state, [0, 0, -280]));
+    const grabbed = grabAnchor(
+      state,
+      VIEWPORT,
+      FOV,
+      [{ x: node.x, y: node.y, depth: node.depth, radius: 8, visible: true }],
+      node.x,
+      node.y,
+    );
+    assert.ok(grabbed !== null);
+    const layout = grabbed.layout;
+    for (let i = 0; i < 3; i += 1) {
+      assert.ok(Math.abs(layout[i] - [0, 0, -280][i]) < 1e-6, `应反投影回节点本身（分量 ${i}）`);
+    }
+  });
+
+  it("光标停在画布中心（视角正前方那一点）拖动，同样跟手", () => {
+    const state = makeState({ eye: [0, 0, 240] });
+    const anchor = anchorFromRay(state, VIEWPORT, FOV, VIEWPORT.width / 2, VIEWPORT.height / 2);
+    assert.ok(anchor !== null, "球内朝前必有内壁交点");
+    assert.ok(anchor.display[2] < 0, "从球内看，命中的是前方内壁 ✓");
+    const before = screenOf(state, anchor.display);
+    dragAnchorTo(state, VIEWPORT, FOV, anchor.layout, { x: before.x + 30, y: before.y + 10 });
+    const after = screenOf(state, displayOf(state, anchor.layout));
+    assert.ok(Math.abs(after.x - (before.x + 30)) < 0.6, "x 应跟手");
+    assert.ok(Math.abs(after.y - (before.y + 10)) < 0.6, "y 应跟手");
+  });
+
+  it("深入球体后仍可继续前进/后退（眼睛穿过黑点，C 与图谱姿态都不变）", () => {
+    const state = makeState({ eye: [0, 0, 260] });
+    const centerBefore = [...state.center];
+    const sceneBefore = [...state.scene];
+    const viewBefore = [...state.view];
+    /* 一路推到球心另一侧 */
+    for (let i = 0; i < 8; i += 1) advanceEye(state, 120, 4000);
+    assert.ok(state.eye[2] < 0, `应已穿到球心另一侧（z=${state.eye[2]}）`);
+    assert.deepEqual(state.center, centerBefore, "球心不动");
+    assert.deepEqual(state.scene, sceneBefore, "图谱姿态不动");
+    assert.deepEqual(state.view, viewBefore, "视角朝向不动");
+  });
+});
+
+describe("光标射线与姿态轴", () => {  it("画布中心的光标射线 = 视线方向；姿态带滚转时右/上轴随之旋转", () => {
     const state = makeState();
     const centerRay = cursorRay(state, VIEWPORT, FOV, VIEWPORT.width / 2, VIEWPORT.height / 2);
     for (let i = 0; i < 3; i += 1) {

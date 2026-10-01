@@ -299,38 +299,83 @@ const NAV_IMPORT_PATCHED = [
   'import { InteriorNavigation as SpaceNavigation } from "../../../client/interior-controller.ts";',
 ].join("\n");
 
+/** 视图缓存（按库身份分区）的导入：与上面那条导入一起注入 ✓ */
+const VIEW_CACHE_IMPORT = 'import { activeLibraryKey as knActiveLibraryKey, cachedView as knCachedView, storeView as knStoreView } from "../../../client/view-cache.ts";';
+
 /**
- * `session.ts` 的相机克隆（补丁点）：**深复制**自由姿态与内部导航状态。
+ * `engine.ts` 的**视图缓存接线**（补丁点）：按知识库身份分区读写。
  *
- * 上游只复制 `target/distance/angle/pitch` ✗ —— 滚转（`q`）与"球心/相机位置/图谱旋转"
- * 都会在切标签、切工作区后被丢掉（文档明确要求缓存深复制 P/Q/S/C）✓。
+ * 上游 `session.ts` 的 `cameraCache` 是模块级单槽位、没有库身份 ✗
+ * （`design/view-navigation-repair-plan.md` P1）：A 库的球心/姿态会被 B 库采用，
+ * 两个面板并存时还会互相覆盖。这里把读/写都换成 `src/client/view-cache.ts` 里
+ * **按身份分区**的实现（身份优先用稳定 `libraryId`，退回库根路径 ✓）。
+ *
+ * 身份在**构造时绑定一次**到实例上：之后无论"当前库身份"被谁改，这个引擎都只认自己那一个 ✓
+ * ⇒ 多实例天然隔离，不依赖读取那一刻的全局状态 ✓。
  */
-const CLONE_CAMERA_NEEDLE = [
-  "function cloneCamera(state: CameraState): CameraState {",
-  "  return {",
-  "    target: [...state.target],",
-  "    distance: state.distance,",
-  "    angle: state.angle,",
-  "    pitch: state.pitch,",
-  "  };",
+const CAMERA_RESTORE_NEEDLE = "    const restored = cachedCamera();";
+const CAMERA_RESTORE_PATCHED = [
+  "    this.knLibraryKey = knActiveLibraryKey();",
+  "    const restored = knCachedView(this.knLibraryKey);",
+].join("\n");
+
+const CAMERA_FIELD_NEEDLE = "  private layoutSettled = false;";
+const CAMERA_FIELD_PATCHED = [
+  "  private layoutSettled = false;",
+  "  /** 本实例绑定的知识库身份（构造时取一次）：缓存读写都按它分区 ✓ */",
+  "  private knLibraryKey = \"\";",
+].join("\n");
+
+const CAMERA_STORE_NEEDLE = "    storeCamera(this.navigation.camera, this.layoutSettled);";
+const CAMERA_STORE_PATCHED = "    knStoreView(this.knLibraryKey, this.navigation.camera, this.layoutSettled);";
+
+/**
+ * 每帧把**节点坐标**一起交给导航（补丁点）。
+ *
+ * 关系拾取要在相机空间里按近平面裁剪线段 ⇒ 需要端点的世界坐标 ✗
+ * （`getProjected()` 只有屏幕坐标，端点跑到相机后面时那就只是一堆无效值 ✗）。
+ * 控制器本来只有 `command()` 时能拿到坐标，频率太低；这里搭上本来就每帧调用的
+ * `setFrameContext()` ✓（多传两个参数，上游签名不变，运行期无碍 ✓）。
+ */
+const FRAME_CONTEXT_NEEDLE = "    this.navigation.setFrameContext(bounds, this.viewport);";
+const FRAME_CONTEXT_PATCHED = "    this.navigation.setFrameContext(bounds, this.viewport, this.positions, count);";
+
+/**
+ * `session.ts` 的**布局缓存**也带上身份（补丁点）。
+ *
+ * 布局缓存本来就是按结构签名校验的，但那只能防"结构不同"✗ ——
+ * 两个库**共享同一批节点 ID 与连线结构**时签名相同，仍会串用坐标 ✓（文档要求一并隔离）。
+ * 这里给缓存项加一个 `key` 字段，读的时候要求与当前身份一致 ✓。
+ */
+const LAYOUT_CACHE_FIELD_NEEDLE = "  /** 这份坐标是否已经收敛：收敛过就不必再跑一轮布局 */\n  settled: boolean;\n}";
+const LAYOUT_CACHE_FIELD_PATCHED = [
+  "  /** 这份坐标是否已经收敛：收敛过就不必再跑一轮布局 */",
+  "  settled: boolean;",
+  "  /** 属于哪个知识库（由插件按身份分区；老缓存缺失时视作空串 ✓） */",
+  "  key?: string;",
   "}",
 ].join("\n");
-const CLONE_CAMERA_PATCHED = [
-  "function cloneCamera(state: CameraState): CameraState {",
-  "  const extra = state;",
-  "  return {",
-  "    target: [...state.target],",
-  "    distance: state.distance,",
-  "    angle: state.angle,",
-  "    pitch: state.pitch,",
-  "    /* 自由姿态（滚转）必须带上 ✓ */",
-  "    ...(extra.q === undefined ? {} : { q: [...extra.q] }),",
-  "    /* 内部导航状态（C/P/Q/S）也一起带上：JSON 往返即深复制（都是普通数字数组）✓ */",
-  "    ...(extra.knInterior === undefined",
-  "      ? {}",
-  "      : { knInterior: JSON.parse(JSON.stringify(extra.knInterior)) }),",
-  "  };",
-  "}",
+
+/** session.ts 注入的导入（读、写、校验三处都要用身份 ✓） */
+const SESSION_IMPORT = 'import { activeLibraryKey as knActiveLibraryKey } from "../../../client/view-cache.ts";';
+
+/** 写布局缓存时记下身份 ✓ */
+const LAYOUT_STORE_NEEDLE = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled };";
+const LAYOUT_STORE_PATCHED = "  layoutCache = { ids: [...ids], positions: new Float32Array(positions), signature, settled, key: knActiveLibraryKey() };";
+
+/** 复用判断：签名一致**且**属于同一个库 ✓ */
+const LAYOUT_REUSABLE_NEEDLE = "  return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature;";
+const LAYOUT_REUSABLE_PATCHED = [
+  "  return layoutCache !== null && layoutCache.settled && layoutCache.signature === signature",
+  "    && (layoutCache.key ?? \"\") === knActiveLibraryKey();",
+].join("\n");
+
+/** 坐标对齐：别的库留下的坐标一律不用 ✓ */
+const LAYOUT_ALIGN_NEEDLE = "  if (!layoutCache || ids.length === 0) return null;";
+const LAYOUT_ALIGN_PATCHED = [
+  "  if (!layoutCache || ids.length === 0) return null;",
+  "  /* 别的库留下的坐标不许拿来对齐（文档 P1：按知识库身份分区）✓ */",
+  "  if ((layoutCache.key ?? \"\") !== knActiveLibraryKey()) return null;",
 ].join("\n");
 
 
@@ -575,24 +620,57 @@ function freeRotationPatchPlugin() {
     transform(code, id) {
       const clean = String(id).split("?")[0].replaceAll("\\", "/");
       if (clean.endsWith("/vendor/upstream/graph3d/engine.ts")) {
-        /* 换导航实现（只换实现不换接口）✓ */
+        /* 换导航实现 + 按库身份分区读写视图缓存 ✓ */
         if (!code.includes(NAV_IMPORT_NEEDLE)) {
           throw new Error(
             "上游 engine.ts 的导航导入写法变了：请同步更新 build.mjs 的补丁点。\n"
             + `期望片段：\n${NAV_IMPORT_NEEDLE}`,
           );
         }
-        return { code: code.replace(NAV_IMPORT_NEEDLE, NAV_IMPORT_PATCHED), map: null };
+        for (const [needle, what] of [
+          [CAMERA_RESTORE_NEEDLE, "相机恢复"],
+          [CAMERA_FIELD_NEEDLE, "实例字段"],
+          [CAMERA_STORE_NEEDLE, "相机保存"],
+          [FRAME_CONTEXT_NEEDLE, "每帧上下文"],
+        ]) {
+          if (!code.includes(needle)) {
+            throw new Error(
+              `上游 engine.ts 的${what}写法变了：请同步更新 build.mjs 的补丁点。\n期望片段：\n${needle}`,
+            );
+          }
+        }
+        return {
+          code: code
+            .replace(NAV_IMPORT_NEEDLE, `${NAV_IMPORT_PATCHED}\n${VIEW_CACHE_IMPORT}`)
+            .replace(CAMERA_FIELD_NEEDLE, CAMERA_FIELD_PATCHED)
+            .replace(CAMERA_RESTORE_NEEDLE, CAMERA_RESTORE_PATCHED)
+            .replace(CAMERA_STORE_NEEDLE, CAMERA_STORE_PATCHED)
+            .replace(FRAME_CONTEXT_NEEDLE, FRAME_CONTEXT_PATCHED),
+          map: null,
+        };
       }
       if (clean.endsWith("/vendor/upstream/graph3d/session.ts")) {
-        /* 相机缓存深复制（补上自由姿态与 C/P/Q/S）✓ */
-        if (!code.includes(CLONE_CAMERA_NEEDLE)) {
-          throw new Error(
-            "上游 session.ts 的 cloneCamera 写法变了：请同步更新 build.mjs 的补丁点。\n"
-            + `期望片段：\n${CLONE_CAMERA_NEEDLE}`,
-          );
+        /* 布局缓存也按库身份分区（签名相同的两个库不再串坐标）✓ */
+        for (const [needle, what] of [
+          [LAYOUT_CACHE_FIELD_NEEDLE, "布局缓存结构"],
+          [LAYOUT_STORE_NEEDLE, "写布局缓存"],
+          [LAYOUT_REUSABLE_NEEDLE, "布局复用判断"],
+          [LAYOUT_ALIGN_NEEDLE, "坐标对齐"],
+        ]) {
+          if (!code.includes(needle)) {
+            throw new Error(
+              `上游 session.ts 的${what}写法变了：请同步更新 build.mjs 的补丁点。\n期望片段：\n${needle}`,
+            );
+          }
         }
-        return { code: code.replace(CLONE_CAMERA_NEEDLE, CLONE_CAMERA_PATCHED), map: null };
+        return {
+          code: SESSION_IMPORT + "\n" + code
+            .replace(LAYOUT_CACHE_FIELD_NEEDLE, LAYOUT_CACHE_FIELD_PATCHED)
+            .replace(LAYOUT_STORE_NEEDLE, LAYOUT_STORE_PATCHED)
+            .replace(LAYOUT_REUSABLE_NEEDLE, LAYOUT_REUSABLE_PATCHED)
+            .replace(LAYOUT_ALIGN_NEEDLE, LAYOUT_ALIGN_PATCHED),
+          map: null,
+        };
       }
       if (clean.endsWith("/vendor/upstream/graph3d/navigation.ts")) {
         /*

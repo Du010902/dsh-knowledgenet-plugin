@@ -24,6 +24,9 @@ import { rememberSessionId } from "./chat-selection.ts";
 import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } from "./current-context.ts";
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
+import { InteriorMinimap } from "./InteriorMinimap.tsx";
+import { libraryKeyOf, setActiveLibraryKey } from "./view-cache.ts";
+import { RELAYOUT_EVENT } from "./interior-controller.ts";
 import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
 import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
 import { ShadowPanel } from "./shadow.tsx";
@@ -33,7 +36,15 @@ import type { CameraCommand } from "../vendor/upstream/graph3d/types.ts";
 
 interface PanelPayload {
   ok?: boolean;
-  library?: { root?: string; name?: string; formatVersion?: number };
+  /**
+   * 知识库身份。
+   *
+   * `libraryId` 是**稳定身份**（宿主 API 会返回，见 `src/host/api.ts`）：同一个库换了挂载根目录
+   * 也还是它 ⇒ 视角缓存按它分区最可靠 ✓；`root` 只作为退路（老快照没有 id 时）✓。
+   * 文档 P1：上游的相机/布局缓存是**模块级单槽位、没有身份** ✗
+   * —— 不按身份分区就会出现"A 库的球心和姿态被 B 库采用"✓。
+   */
+  library?: { root?: string; name?: string; formatVersion?: number; libraryId?: string };
   focusId?: string | null;
   nodes?: GraphSnapshot["nodes"];
   edges?: GraphSnapshot["edges"];
@@ -216,6 +227,19 @@ function GraphPanelInner(props: {
   const workspacePath = useMemo(
     () => pickWorkspacePath(workspaceSnapshot, props.sessionId),
     [workspaceSnapshot, props.sessionId],
+  );
+
+  /*
+   * **渲染图谱之前**绑定"当前知识库身份"，供视图缓存分区使用 ✓（文档 P1）。
+   *
+   * 为什么必须在渲染期（`useMemo`）：图谱子组件是在它自己的 `useEffect` 里创建引擎的，
+   * 而 React 的效果是**子先父后**⇒ 父组件的 effect 里设置就已经晚了 ✗。
+   * 引擎在构造时会把身份绑定到实例上，之后就不再依赖这个全局值（多面板并存也隔离 ✓）。
+   * 身份优先用稳定的 `libraryId`，没有才退回库根路径 ✓。
+   */
+  useMemo(
+    () => setActiveLibraryKey(libraryKeyOf(payload?.library)),
+    [payload?.library],
   );
 
   /*
@@ -663,12 +687,17 @@ function GraphPanelInner(props: {
           title={t("relayoutHint")}
           onClick={() => {
             /*
-             * 两件事一起做（用户要求 2026-09）：
-             *  ① `relayoutToken` +1 ⇒ 丢掉缓存的坐标、从确定性初始分布重排一轮；
-             *  ② 发一条 `fitAll` ⇒ **把旋转中心初始化**（回到整张图的包围盒中心）✓
-             *     —— 之前上游只重排布局、相机原地不动，聚焦过节点的话环绕中心就一直钉在那个节点上 ✗。
-             * 注意：只复位"中心与距离"，**不动用户当前的旋转姿态**（角度/俯仰/自由四元数由使用者决定）✓。
+             * 三件事一起做（用户要求 2026-09 / 文档 P2）：
+             *  ① 广播**明确的重新整理请求** ⇒ 控制器取消抓取、等新布局完成后再采一次球心 ✓
+             *     （之前用 `smooth` 参数猜"是不是重排"，而它只表示要不要动画 ✗，
+             *      用户操作过之后球心就再也不更新了，与按钮提示不符 ✗）；
+             *  ② `relayoutToken` +1 ⇒ 丢掉缓存的坐标、从确定性初始分布重排一轮；
+             *  ③ 发一条 `fitAll` ⇒ 收全图（球心是否更新由控制器按②的请求决定 ✓）。
+             * 注意：只复位"中心与距离"，**不动用户当前的旋转姿态** ✓。
              */
+            window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT, {
+              detail: { libraryKey: libraryKeyOf(payload?.library) },
+            }));
             setRelayoutToken((value) => value + 1);
             fitWholeGraph();
           }}
@@ -848,6 +877,12 @@ function GraphPanelInner(props: {
             ) : null}
             {/* 不可见时不渲染三维：连 requestAnimationFrame 一起停（收起侧栏也能覆盖） */}
             {visible ? null : <div className="kn-msg">{t("loading")}</div>}
+            {/*
+             * 右下角的实时截面小地图（用户手绘那张图的界面版）：
+             * 大圆 = 操作包围球、中心点 = 固定转动中心、眼睛 = 视角当前位置、淡点 = 走过的路径 ✓。
+             * 只认自己这块画布广播的事件（`contains` 认领）；`pointer-events: none`，不会吃掉拖动 ✓。
+             */}
+            <InteriorMinimap hostRef={graphHostRef} active={visible} />
             {visible ? (<ErrorBoundary
               fallback={<div className="kn-msg">{t("spaceFailed")}</div>}
               onError={() => { setSpaceNotice(t("spaceFailed")); }}

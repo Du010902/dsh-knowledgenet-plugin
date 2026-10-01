@@ -23,18 +23,24 @@ import type { ContextHit } from "../vendor/upstream/graph3d/navigation.ts";
 import {
   advanceEye,
   aimAt,
+  anchorFromRay,
+  displayBasis,
   dragAnchorTo,
   effectiveBasis,
   fitSphere,
   grabAnchor,
   panEye,
+  quatConjugate,
   quatSlerp,
+  radiusAbout,
   wheelTravel,
   DEFAULT_WHEEL,
   type GrabAnchor,
   type InteriorState,
 } from "./interior-navigation.ts";
+import { pickClippedEdge } from "./edge-picking.ts";
 import { currentQuat, freeBasis, quatMultiply, quatNormalize, type Quat } from "./trackball.ts";
+import { activeLibraryKey } from "./view-cache.ts";
 
 /** 定位动画时长（毫秒）；「减少动态效果」时降为 1ms（与上游一致） */
 const FOCUS_DURATION_MS = 620;
@@ -43,7 +49,48 @@ const FOV_DEG = 50;
 /** 插在 `camera` 上的内部状态键：让上游的内存相机缓存也能带上完整状态 ✓ */
 const STATE_KEY = "knInterior";
 
-type CameraWithState = CameraState & { [STATE_KEY]?: InteriorState };
+/**
+ * 「相机在球里在哪」的窗口事件名。
+ *
+ * 引擎是在**上游组件内部**创建的（`GraphUniverse.tsx`），插件拿不到它的实例 ✗；
+ * 而相机状态只有这里（内部导航控制器）知道 ✓。
+ * 所以由控制器在每次状态变化后广播一个 `CustomEvent`，面板据此画右下角的小地图 ✓
+ * —— 与插件既有的 `NODE_CONTEXT_MENU_EVENT` 那套 glue 同一种做法，不必改上游 ✓。
+ */
+export const INTERIOR_STATE_EVENT = "kn-interior-state";
+
+/**
+ * 「用户按了重新整理」的窗口事件名。
+ *
+ * 面板按钮在重排布局的同时广播它 ✓；控制器据此：
+ * 取消进行中的抓取 ✓、等新布局完成后再**采一次球心**并取景 ✓
+ * —— 不再用 `smooth` 参数去猜"这是不是重排"（那个参数只表示要不要动画 ✗，文档 P2）。
+ * 负载带库身份：多面板并存时只认自己那一个 ✓。
+ */
+export const RELAYOUT_EVENT = "kn-relayout-request";
+
+/** 重排请求的兜底时限（毫秒）：等不到"布局完成"就用当前包围体兜一次 ✓ */
+const RELAYOUT_DEADLINE_MS = 2000;
+
+/** 事件负载：相机位置/朝向、固定球心与操作球半径 */
+export interface InteriorStateDetail {
+  /** 发起这次更新的画布宿主元素（面板用 `contains()` 认领属于自己那一块 ✓） */
+  host: Element;
+  center: Vec3;
+  eye: Vec3;
+  /** 相机朝向（显示世界） */
+  forward: Vec3;
+  /** 相机上方向（显示世界） */
+  up: Vec3;
+  /** 到球心的距离 */
+  distance: number;
+  /** 操作包围球半径 */
+  radius: number;
+}
+
+/** 挂在 `camera` 上的内部状态（`frozen` = 球心已冻结，缓存恢复时要一起带回来 ✓） */
+type CarriedState = InteriorState & { frozen?: boolean };
+type CameraWithState = CameraState & { [STATE_KEY]?: CarriedState };
 
 /** 控制器选项：与上游 `NavigationOptions` 同形（这样引擎侧不用改） */
 export interface InteriorNavigationOptions {
@@ -109,6 +156,20 @@ export class InteriorNavigation {
   private viewport: Viewport = { width: 800, height: 600 };
   /** 用户是否已经自己操作过相机：操作过就**冻结球心** ✓ */
   private userInteracted = false;
+  /** 同一帧里的相机变化只在下一帧广播一次 ✓ */
+  private stateEventPending = false;
+  /** 节点坐标（引擎每帧交过来；线段拾取需要世界坐标 ✓） */
+  private positions: Float32Array | null = null;
+  private positionCount = 0;
+  /** 是否已按"以固定球心 C 为中心"量过半径 ✓（量过就不再被 bounds.radius 覆盖 ✗） */
+  private radiusMeasured = false;
+  /** 收到明确的重新整理请求、正等新布局完成 ✓ */
+  private relayoutPending = false;
+  private relayoutDeadline = 0;
+  /** 重排期间用户自己操作过 ⇒ 不再自动取景覆盖他的视角 ✓ */
+  private interactedSinceRelayout = false;
+  /** 本实例绑定的知识库身份（构造时取一次；重新整理事件按它认领 ✓） */
+  private readonly libraryKey = activeLibraryKey();
   /*
    * 注意：这里**不用**构造参数属性（`constructor(private readonly options…)`）——
    * Node 的 strip-only TS 模式直接拒绝那种写法（ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX），
@@ -132,8 +193,26 @@ export class InteriorNavigation {
     element.addEventListener("wheel", this.onWheel, { passive: false });
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("blur", this.onWindowBlur);
+    window.addEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);
     document.addEventListener("visibilitychange", this.onVisibilityChange);
   }
+
+  /**
+   * 「重新整理」请求（面板广播）。
+   * @param event - 负载里带库身份；不是本实例的库就忽略 ✓。
+   */
+  private onRelayoutRequest = (event: Event): void => {
+    const detail = (event as CustomEvent<{ libraryKey?: string }>).detail;
+    if (detail !== undefined && detail !== null
+      && typeof detail.libraryKey === "string" && detail.libraryKey !== this.libraryKey) {
+      return;
+    }
+    this.relayoutPending = true;
+    this.interactedSinceRelayout = false;
+    this.relayoutDeadline = (typeof performance === "undefined" ? 0 : performance.now()) + RELAYOUT_DEADLINE_MS;
+    /* 重排开始就取消进行中的抓取（文档要求）✓ */
+    this.cancelPointer();
+  };
 
   /* ------------------------------ 状态与基向量 ------------------------------ */
 
@@ -145,6 +224,12 @@ export class InteriorNavigation {
   private seedState(initial: CameraState): InteriorState {
     const carried = (initial as CameraWithState)[STATE_KEY];
     if (carried !== undefined && Array.isArray(carried.center) && Array.isArray(carried.eye)) {
+      /*
+       * **"球心已冻结"也要一起恢复**（文档 P1）：
+       * 恢复完整状态却把 `userInteracted` 留在 false，会让随后的 fitAll 把
+       * 已经冻结的球心当成"还没操作过的初始球心"再挪一次 ✗。
+       */
+      this.userInteracted = carried.frozen === true;
       return {
         center: [...carried.center],
         eye: [...carried.eye],
@@ -184,12 +269,54 @@ export class InteriorNavigation {
       view: [...this.state.view],
       scene: [...this.state.scene],
       radius: this.state.radius,
+      /* 冻结标记：缓存恢复时要一起带回来，否则球心会被再挪一次 ✗ */
+      frozen: this.userInteracted,
     };
+    this.publishState();
+  }
+
+  /**
+   * 广播"相机在球里的位置"（给右下角的小地图用）。
+   *
+   * 用 `requestAnimationFrame` 合并同一帧里的多次变化：拖动时每个 pointermove 都会同步一次相机，
+   * 不合并的话一帧要派发好几次事件、面板也跟着重渲染好几次 ✗。
+   */
+  private publishState(): void {
+    if (this.stateEventPending || this.disposed) return;
+    if (typeof window === "undefined" || typeof CustomEvent !== "function") return;
+    this.stateEventPending = true;
+    const flush = (): void => {
+      this.stateEventPending = false;
+      if (this.disposed) return;
+      const basis = displayBasis(this.state);
+      const detail: InteriorStateDetail = {
+        host: this.options.element,
+        center: [...this.state.center],
+        eye: [...this.state.eye],
+        forward: [...basis.forward],
+        up: [...basis.up],
+        distance: Math.hypot(
+          this.state.eye[0] - this.state.center[0],
+          this.state.eye[1] - this.state.center[1],
+          this.state.eye[2] - this.state.center[2],
+        ),
+        radius: this.state.radius,
+      };
+      window.dispatchEvent(new CustomEvent<InteriorStateDetail>(INTERIOR_STATE_EVENT, { detail }));
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+    else flush();
   }
 
   /** 等效姿态（把 S 折进 Q）：布局坐标系里相机朝向 */
   private effectiveQuat(): Quat {
-    return quatNormalize(quatMultiply(this.state.scene, this.state.view));
+    /*
+     * 必须与 `effectiveBasis()` 一致：那里三条轴都是 `S⁻¹` 作用到 Q 的轴上，
+     * 所以对外姿态 = `inverse(S) × Q` ✓。
+     * （曾经写成 `S × Q` ✗ —— 调试/持久化看到的姿态会与真正渲染的基向量不一致，
+     *  将来谁拿这份姿态去推算就会算错。文档开发备注点名的就是这个。）
+     */
+    return quatNormalize(quatMultiply(quatConjugate(this.state.scene), this.state.view));
   }
 
   /** 渲染/投影/拾取用的基向量（= 布局坐标系的相机；S 已折进去） */
@@ -197,18 +324,29 @@ export class InteriorNavigation {
     return effectiveBasis(this.state);
   }
 
-  /** 外部（每帧）更新：包围体与视口用于取景与操作球半径 */
-  setFrameContext(bounds: Bounds, viewport: Viewport): void {
+  /** 外部（每帧）更新：包围体、视口、节点坐标（线段拾取要用世界坐标 ✓） */
+  setFrameContext(bounds: Bounds, viewport: Viewport, positions?: Float32Array, count?: number): void {
     this.bounds = bounds;
     this.viewport = viewport;
+    if (positions !== undefined) {
+      this.positions = positions;
+      this.positionCount = count ?? positions.length / 3;
+    }
     /*
      * **球心不在这里跟随**（文档：布局持续计算期间不要每帧重算操作球心 ✗）——
      * 每帧跟着包围体中心走会让画面在布局收敛时自己漂移。
-     * 球心只在 `fitAll()`（初次取景 / 布局收敛后再取景 / 明确重新整理）时采一次 ✓。
-     * 操作球半径也随之冻结：拖动期间不换 ✓。
+     * 球心只在 `fitAll()`（初次取景 / 新布局完成 / 明确重新整理）时采一次 ✓。
+     * 操作球半径也随之冻结：拖动期间不换 ✓；而且一旦按"以 C 为中心"量过（`fitAll` ✓），
+     * 就**不再**用绕 `bounds.center` 的那个半径覆盖它 ✗（文档 P2：后者未必包住全部节点 ✓）。
      */
-    if (this.pointer === null && Number.isFinite(bounds.radius) && bounds.radius > 0) {
+    if (this.pointer === null && !this.radiusMeasured
+      && Number.isFinite(bounds.radius) && bounds.radius > 0) {
       this.state.radius = bounds.radius;
+    }
+    /* 重排请求进来后迟迟等不到"布局完成"：到点就用当前包围体兜一次，别一直挂着 ✗ */
+    if (this.relayoutPending && this.relayoutDeadline > 0
+      && (typeof performance === "undefined" || performance.now() >= this.relayoutDeadline)) {
+      this.adoptRelayoutCenter(bounds, null, 0);
     }
     this.syncCamera();
   }
@@ -216,6 +354,8 @@ export class InteriorNavigation {
   /* ------------------------------- 相机命令 ------------------------------- */
 
   command(command: CameraCommand, index: number | null, positions: Float32Array, count: number): void {
+    this.positions = positions;
+    this.positionCount = count;
     if (command.type === "fitAll") {
       this.fitAll(positions, count, true);
       return;
@@ -228,32 +368,81 @@ export class InteriorNavigation {
     ];
     /* 定位：移动相机并转向它；**球心 C 与图谱旋转 S 都不动** ✓ */
     const distance = clampNum(this.options.edgeLength * 2.6, 40, Math.max(60, this.bounds.radius));
-    const before = { eye: [...this.state.eye] as Vec3, view: this.state.view };
-    aimAt(this.state, target, distance);
-    this.animateFrom(before, true);
+    const from = { eye: [...this.state.eye] as Vec3, view: this.state.view };
+    this.animateTo(from, this.aimTarget(target, distance), true);
   }
 
-  /** 「适应窗口」：回到球外全局取景、面向球心；保留 C 与 S ✓ */
+  /**
+   * 「适应窗口」：回到球外全局取景、面向球心；保留 C 与 S ✓。
+   *
+   * 球心更新规则（文档 P2：**不复用 `smooth` 推断重排**）：
+   * - 用户还没操作过 ⇒ 采当前布局的包围体中心（初次进入 ✓）；
+   * - 收到过**明确的重新整理请求**（`kn-relayout-request` 事件 ✓）⇒ 在布局完成后采一次 ✓；
+   * - 其它情况（普通适应窗口 / 自动收敛取景）⇒ **球心保持不动** ✓。
+   *
+   * @param positions - 节点坐标。
+   * @param count - 节点数。
+   * @param smooth - 是否带动画（只决定动画，不再用来推断"是否重排" ✓）。
+   */
   fitAll(positions: Float32Array, count: number, smooth: boolean): void {
+    this.positions = positions;
+    this.positionCount = count;
     const bounds = boundsOf(positions, count);
     this.bounds = bounds;
-    /*
-     * 球心：初次取稳定布局的包围体中心；用户操作过之后**冻结** ✓。
-     * 例外是「明确重新整理」——引擎在换布局后用 `smooth === false` 再取景一次，
-     * 那时允许采用新的布局中心（文档 §交互规则）✓。
-     */
-    const newLayout = !smooth;
+    const newLayout = this.relayoutPending;
     if ((!this.userInteracted || newLayout) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
-      this.state.center = [...bounds.center];
-      this.state.radius = bounds.radius;
-    }    const insets = { top: 64, bottom: 64 };
-    const distance = fitDistance(bounds.radius, this.viewport, FOV_DEG, insets) * 1.08;
-    const before = { eye: [...this.state.eye] as Vec3, view: this.state.view };
-    fitSphere(this.state, bounds.radius, distance);
-    this.animateFrom(before, smooth);
+      this.adoptRelayoutCenter(bounds, positions, count);
+    } else {
+      /* 球心不动，但半径始终按"以 C 为中心"量 ✓（操作球 / 取景 / 小地图共用它 ✓） */
+      this.measureRadius(positions, count);
+    }
+    /* 用户在重排期间自己操作过 ⇒ 别再自动取景覆盖他的视角（文档要求）✓ */
+    const skipFraming = newLayout && this.interactedSinceRelayout;
+    this.relayoutPending = false;
+    this.relayoutDeadline = 0;
+    this.interactedSinceRelayout = false;
+    if (skipFraming) {
+      this.syncCamera();
+      this.options.onCameraChange();
+      return;
+    }
+    const insets = { top: 64, bottom: 64 };
+    /*
+     * 取景距离用**操作球半径**（以固定球心 C 量出来的那个 ✓），
+     * 而不是绕 `bounds.center` 的包围半径 —— 两者在球心冻结于别处时会不一样，
+     * 用后者会出现"取景按另一个球算"的错位 ✗（文档要求三处共用同一个半径 ✓）。
+     */
+    const framingRadius = this.state.radius > 0 ? this.state.radius : bounds.radius;
+    const distance = fitDistance(framingRadius, this.viewport, FOV_DEG, insets) * 1.08;
+    const from = { eye: [...this.state.eye] as Vec3, view: this.state.view };
+    this.animateTo(from, this.fitTarget(framingRadius, distance), smooth);
   }
 
-  /** 每帧推进定位/取景动画（P 线性插值、Q 球面插值） */
+  /** 采用新的球心，并把操作球半径按"以新球心为中心"重量一次 ✓ */
+  private adoptRelayoutCenter(bounds: Bounds, positions: Float32Array | null, count: number): void {
+    if (!Array.isArray(bounds.center) || !(bounds.radius > 0)) return;
+    this.state.center = [...bounds.center];
+    this.radiusMeasured = false;
+    if (positions !== null && count > 0) this.measureRadius(positions, count);
+    else this.state.radius = bounds.radius;
+  }
+
+  /** 以**固定球心 C** 为基准量半径：`max|X − C|` ✓（文档 P2） */
+  private measureRadius(positions: Float32Array, count: number): void {
+    const radius = radiusAbout(positions, count, this.state.center);
+    if (radius > 0) {
+      this.state.radius = radius;
+      this.radiusMeasured = true;
+    }
+  }
+
+  /**
+   * 每帧推进定位/取景动画（P 线性插值、Q 球面插值）。
+   *
+   * **只有这里才把插值结果写进 state**（文档 P2）：命令之后、第一帧之前，
+   * 状态必须还停在出发前 —— 否则滚轮/按下取消动画时会从"终点"开始操作，产生突发移动 ✗，
+   * 同步出去的 camera 与状态事件也会提前暴露终点 ✗。
+   */
   update(now: number): boolean {
     if (this.disposed) return false;
     const animation = this.animation;
@@ -262,27 +451,75 @@ export class InteriorNavigation {
     const eased = 1 - Math.pow(1 - t, 3);
     this.state.eye = lerp3(animation.fromEye, animation.toEye, eased);
     this.state.view = quatSlerp(animation.fromView, animation.toView, eased);
-    if (t >= 1) this.animation = null;
+    if (t >= 1) {
+      /* 收尾时提交**精确终点**，别留插值残差 ✓ */
+      this.state.eye = [...animation.toEye] as Vec3;
+      this.state.view = animation.toView;
+      this.animation = null;
+    }
     this.syncCamera();
     this.options.onCameraChange();
     return true;
   }
 
-  private animateFrom(
-    from: { eye: Vec3; view: readonly [number, number, number, number] },
+  /**
+   * 启动一次位姿动画。
+   *
+   * @param from - 起点（调用时的实际状态 ✓ —— 连续定位就自然接着上一次的插值位置 ✓）。
+   * @param to - 终点（在临时副本上算出来的，提交之前不影响 state ✓）。
+   * @param smooth - 是否要动画；「减少动态效果」或非 smooth ⇒ 立即提交且不留待执行动画 ✓。
+   */
+  private animateTo(
+    from: { eye: Vec3; view: Quat },
+    to: { eye: Vec3; view: Quat },
     smooth: boolean,
   ): void {
     const duration = smooth && !this.reducedMotion() ? FOCUS_DURATION_MS : 1;
+    if (duration <= 1) {
+      /* 立即到位：明确同步提交，并把待执行动画清掉 ✓ */
+      this.state.eye = [...to.eye] as Vec3;
+      this.state.view = to.view;
+      this.animation = null;
+      this.syncCamera();
+      this.options.onCameraChange();
+      return;
+    }
     this.animation = {
       start: performance.now(),
       duration,
-      fromEye: from.eye,
-      toEye: [...this.state.eye],
+      fromEye: [...from.eye] as Vec3,
+      toEye: [...to.eye] as Vec3,
       fromView: from.view,
-      toView: this.state.view,
+      toView: to.view,
     };
+    /* 起点不变：这里同步出去的仍是"出发前"的状态 ✓ */
     this.syncCamera();
     this.options.onCameraChange();
+  }
+
+  /** 在**临时副本**上算出"对准目标"的位姿（不碰真实状态 ✓） */
+  private aimTarget(target: Vec3, distance: number): { eye: Vec3; view: Quat } {
+    const draft = this.draftState();
+    aimAt(draft, target, distance);
+    return { eye: draft.eye, view: draft.view };
+  }
+
+  /** 在**临时副本**上算出"适应窗口"的位姿（不碰真实状态 ✓） */
+  private fitTarget(radius: number, distance: number): { eye: Vec3; view: Quat } {
+    const draft = this.draftState();
+    fitSphere(draft, radius, distance);
+    return { eye: draft.eye, view: draft.view };
+  }
+
+  /** 复制一份状态用于试算 ✓ */
+  private draftState(): InteriorState {
+    return {
+      center: [...this.state.center],
+      eye: [...this.state.eye],
+      view: [...this.state.view],
+      scene: [...this.state.scene],
+      radius: this.state.radius,
+    };
   }
 
   /* ------------------------------- 指针交互 ------------------------------- */
@@ -329,6 +566,7 @@ export class InteriorNavigation {
         this.options.element.setPointerCapture(event.pointerId);
         pointer.captured = true;
         this.userInteracted = true;
+        this.interactedSinceRelayout = true;
       }
       if (pointer.moved) {
         this.options.onUserCameraInput?.();
@@ -342,8 +580,21 @@ export class InteriorNavigation {
             y: this.grab.screen.y + dy,
           };
           const result = dragAnchorTo(this.state, this.viewport, FOV_DEG, this.grab.layout, target);
-          /* 锚点掉到相机后面 / 没有杠杆 ⇒ 结束这次抓取，别硬算出垃圾旋转 ✓ */
-          if (result.lost || result.error > 48) this.grab = null;
+          /*
+           * 锚点掉到相机后方 / 杠杆失效（贴近球心）⇒ 按文档改用**虚拟球面锚点**继续，
+           * 并以当前位置为新基准（不跳帧）；球面也解不出来才结束这次抓取 ✓。
+           */
+          if (result.lost) {
+            const rebuilt = anchorFromRay(this.state, this.viewport, FOV_DEG, point.x, point.y);
+            if (rebuilt === null) {
+              this.grab = null;
+            } else {
+              this.grab = rebuilt;
+              pointer.startX = point.x;
+              pointer.startY = point.y;
+              if (rebuilt.screen !== undefined) this.grab.screen = rebuilt.screen;
+            }
+          }
         }
         this.syncCamera();
         this.options.onCameraChange();
@@ -366,7 +617,16 @@ export class InteriorNavigation {
     const projected = this.options.getProjected();
     const node = pickNode(projected, x, y);
     if (node !== null) return { kind: "node", index: node };
-    const edge = pickEdge(projected, this.options.getEdges(), x, y);
+    const edges = this.options.getEdges();
+    /*
+     * 关系拾取换成**插件自有**的"先按近裁剪面裁线段、再投影命中" ✓：
+     * 上游 `pickEdge()` 只要有一个端点不可见就整条跳过 ✗，而相机进入云团后
+     * "一个端点在身后"很正常 —— 于是屏幕上画着的线却点不到（文档 P2）。
+     * 没有坐标时（还没同步过）退回上游实现，行为不至于更差 ✓。
+     */
+    const edge = this.positions !== null && this.positionCount > 0
+      ? pickClippedEdge(this.positions, edges, this.basis(), this.viewport, FOV_DEG, x, y)
+      : pickEdge(projected, edges, x, y);
     if (edge !== null) return { kind: "edge", index: edge };
     return { kind: "canvas" };
   }
@@ -457,6 +717,7 @@ export class InteriorNavigation {
     this.grab = null;
     this.options.onUserCameraInput?.();
     this.userInteracted = true;
+        this.interactedSinceRelayout = true;
     const spacing = clampNum(this.options.edgeLength, 8, 200);
     const travel = wheelTravel(event.deltaY, event.deltaMode, this.viewport.height, {
       ...DEFAULT_WHEEL,
@@ -528,6 +789,7 @@ export class InteriorNavigation {
     element.removeEventListener("wheel", this.onWheel);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("blur", this.onWindowBlur);
+    window.removeEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     if (this.suppressedTimer !== undefined) window.clearTimeout(this.suppressedTimer);
     this.pointer = null;
