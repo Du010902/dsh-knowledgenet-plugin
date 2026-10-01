@@ -77,9 +77,48 @@ function stamp(now: number): string {
 /** 原子写：先写临时文件再 rename，避免半截文件 */
 async function writeAtomic(target: string, text: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true });
-  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  /*
+   * 临时名必须**唯一** ✓：原来只用 `pid + Date.now()`，同一进程同一毫秒写同一个目标
+   * 就会共享临时文件 ⇒ 互相串写或 rename 失败 ✗（复查指出的问题）。
+   * 加一段随机后缀即可（原子性仍由 rename 保证 ✓）。
+   */
+  const unique = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const tmp = `${target}.tmp-${unique}`;
   await writeFile(tmp, text, "utf8");
   await rename(tmp, target);
+}
+
+/**
+ * **同一库内串行化**的写入队列（按库根 key ✓）。
+ *
+ * 为什么需要：`writeAtomic` 只保证"不出现半截文件" ✗，它**不保证**"比较指纹 + 替换"是
+ * 不可分割的一步 —— 两个请求可以同时读到旧版本、同时通过检查、再各自覆盖 ✗（复查指出的问题）。
+ * 把插件的正文写入排进同一条队列后，"进队 → 重读 → 比较 → 提交"在**本进程内**互斥 ✓；
+ * 进程外的编辑器仍然可能插在最后一步之前 ⇒ 只能缩小窗口，不能承诺绝对原子 ✗（如实写在这里 ✓）。
+ */
+const writeQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * 把一次写入排进该库的串行队列。
+ * @param root - 库根（队列键 ✓）。
+ * @param task - 真正执行的写入（内部应重新读取并比较 ✓）。
+ * @returns 任务结果 ✓。
+ */
+export async function withLibraryWrite<T>(root: string, task: () => Promise<T>): Promise<T> {
+  const key = resolve(root);
+  const previous = writeQueues.get(key) ?? Promise.resolve();
+  /* 前一个任务失败也不能卡住后面的 ✓ */
+  const run = previous.then(task, task);
+  const guarded = run.catch(() => undefined);
+  writeQueues.set(key, guarded);
+  try {
+    return await run;
+  } finally {
+    /* 队尾还是自己 ⇒ 排空后把键清掉（不能立刻删：后面可能已经排了新任务 ✓） */
+    void guarded.then(() => {
+      if (writeQueues.get(key) === guarded) writeQueues.delete(key);
+    });
+  }
 }
 
 async function readJson<T>(file: string): Promise<T | undefined> {
@@ -353,6 +392,19 @@ export async function writeNote(
   now: number = Date.now(),
 ): Promise<V3Result<{ node: V3Node }> | { ok: false; code: "conflict"; message: string; actualHash: string }> {
   const base = assertRoot(root);
+  /*
+   * **整段进串行队列**（复查 P1-5）：重读 → 比较 → 提交必须在同一段互斥区间里，
+   * 否则两个请求可以同时通过检查再各自覆盖 ✗（rename 的原子性救不了这个 ✓）。
+   */
+  return await withLibraryWrite(base, () => writeNoteLocked(base, input, now));
+}
+
+/** `writeNote` 的串行区实现（由上面的队列保证不并发 ✓） */
+async function writeNoteLocked(
+  base: string,
+  input: { id: string; text: string; expectedHash?: string },
+  now: number,
+): Promise<V3Result<{ node: V3Node }> | { ok: false; code: "conflict"; message: string; actualHash: string }> {
   const library = await readLibrary(base, { withNotes: false });
   if (library === undefined) return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${base}` };
   const node = library.nodes.find((item) => item.id === input.id);
@@ -369,6 +421,20 @@ export async function writeNote(
 
   const abs = join(base, node.relativePath);
   const current = await readFile(abs, "utf8");
+  /*
+   * **收紧比较交换的窗口**（`design/node-note-editor-plan.md` 要求守卫覆盖"检查到提交"✓）：
+   * 上面那次指纹比较用的是**扫描时**的 hash，而文件是在这之后才读的 ⇒
+   * 两者之间被外部改过就会漏判 ✗。这里用刚读到内容再比一次：
+   * 不一致 ⇒ 同样按冲突拒绝，绝不覆盖 ✗（只在真的被并发改过时才会命中 ✓）。
+   */
+  if (typeof input.expectedHash === "string" && input.expectedHash !== "" && contentHash(current) !== input.expectedHash) {
+    return {
+      ok: false,
+      code: "conflict",
+      message: "磁盘上的内容在你读取之后被改过，为避免覆盖，本次写入已拒绝",
+      actualHash: contentHash(current),
+    };
+  }
   const parsed = parseDocument(current);
   // 原本没有 front-matter（用户手工新建的 md）⇒ 这里顺手固化一个正式 ULID 身份
   const id = isUlid(parsed.meta.id) ? parsed.meta.id : node.id.startsWith("adopted-") ? ulid(now) : parsed.meta.id;
@@ -383,6 +449,12 @@ export async function writeNote(
   };
   const text = composeDocument(meta, input.text);
   await writeAtomic(abs, text);
+  /*
+   * 返回的正文用**磁盘上那份**（= 规范化后的正文 ✓），不是原始 `input.text` ✗：
+   * `composeDocument` 会去掉正文前导空行与尾部空白，若回带原文，
+   * 界面"已保存"的基线就与磁盘不一致（复查指出的问题 ✓）。
+   */
+  const normalizedBody = parseDocument(text).body;
   return {
     ok: true,
     node: {
@@ -395,7 +467,7 @@ export async function writeNote(
       rev: meta.rev,
       relativePath: node.relativePath,
       hash: contentHash(text),
-      note: input.text,
+      note: normalizedBody,
     },
   };
 }

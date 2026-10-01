@@ -196,11 +196,15 @@ export interface GraphContextMenuProps {
   sessionId?: string | undefined;
   /** 写完之后的刷新 */
   onChanged: () => void;
+  /** 「编辑笔记」入口（节点菜单 ✓）——面板据此打开正文编辑器 ✓ */
+  onEditNote?: ((nodeId: string) => void) | undefined;
   /** 逐步上报（诊断） */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
   /** 文案 */
   copy: {
     nodeMenuTitle: string;
+    /** 节点菜单里的「编辑笔记」（缺省回落中文 ✓） */
+    editNote?: string;
     addPrerequisite: string;
     edgeMenuTitle: string;
     removeRelation: string;
@@ -461,6 +465,21 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
               </button>
             ) : menu.kind === "node" ? (
               <>
+                {/*
+                 * 「编辑笔记」：与选中区那颗按钮同一条路 ✓（`design/node-note-editor-plan.md`
+                 * 要求"选中节点信息区 + 右键菜单"两个入口 ✓）。
+                 */}
+                <button
+                  type="button"
+                  className="kn-menu-item"
+                  onClick={() => {
+                    const nodeId = menu.id;
+                    setMenu(null);
+                    props.onEditNote?.(nodeId);
+                  }}
+                >
+                  {props.copy.editNote ?? "编辑笔记"}
+                </button>
                 <button
                   type="button"
                   className="kn-menu-item"

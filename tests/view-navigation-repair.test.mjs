@@ -156,7 +156,20 @@ describe("P1 视图缓存：按知识库身份分区", () => {
      * ⇒ 被上游 try/catch 兜住 ⇒ 面板显示"三维绘制已中断"，看起来像 GPU 丢上下文 ✗
      * （排查方向被带偏一次）。这条断言把"引用必须落在解构列表里"钉住 ✓。
      */
-    assert.ok(!bundle.includes("props.libraryKey"), "产物里不许出现 props.libraryKey ✗");
+    /*
+     * 判据要落在**构建期补丁字符串**上 ✗：插件自己的组件里 `props.libraryKey` 是合法的
+     * （`NodeDocumentEditor` 真有这个 prop ✓），拿整份产物当判据会误报 ✓；
+     * 而 build.mjs 的**注释**里正引用它讲这个坑 ⇒ 先把注释剥掉再查 ✓。
+     * 产物上只查那个真正的坏模式："给解构形参加 props. 前缀" ✓。
+     */
+    const patchCode = buildSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    assert.ok(!patchCode.includes("props.libraryKey"), "补丁代码里不许写 props.libraryKey ✗");
+    assert.ok(
+      !bundle.includes("libraryKey: props.libraryKey"),
+      "产物里不许出现「给解构形参加 props. 前缀」那个坏模式 ✗",
+    );
     assert.ok(bundle.includes("libraryKey: libraryKey ??"), "引擎构造要用解构出来的变量 ✓");
     const signature = /function GraphUniverse\(\{([^}]*)\}\)/.exec(bundle);
     assert.ok(signature !== null, "产物里应能找到 GraphUniverse 的解构形参");

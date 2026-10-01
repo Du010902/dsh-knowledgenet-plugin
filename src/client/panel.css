@@ -567,6 +567,329 @@
   outline-offset: -3px;
 }
 
+/* ===================== 节点笔记编辑器 ===================== */
+
+/*
+ * 视觉照 `design/node-note-editor.html` 抄 ✓（只抄"编辑节点对应的文档"那一块 ✗ ——
+ * 设计稿里的图谱示意与"模拟外部修改"按钮是演示用的，不抄 ✓）。
+ * 颜色改用宿主主题变量，浅色/深色都跟主题走 ✓。
+ */
+
+/* 上游那个 `sr-only` 播报在 graph.css 里**没有对应类** ⇒ 按普通段落渲染、会露出来 ✗ */
+.kn-root .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 选中节点信息条 + 编辑入口（图谱左上角 ✓） */
+.kn-sel {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: calc(100% - 28px);
+  padding: 10px 14px;
+  border: 1px solid var(--dsw-alias-border-secondary, #303030);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-elevated, rgba(25, 31, 28, 0.92));
+  color: var(--dsw-alias-label-primary, #e4ebe6);
+}
+
+.kn-sel-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover, #27372e);
+  color: var(--dsw-alias-label-secondary, #b5cfbd);
+  font-size: 11px;
+}
+
+.kn-sel-title {
+  font-size: 13px;
+}
+
+.kn-sel-sub {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 11px;
+}
+
+.kn-sel-edit {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--dsw-alias-border-secondary, #303030);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kn-sel-edit:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #29352e);
+}
+
+/*
+ * 编辑器本体。
+ *
+ * 宽面板**并排**（图谱让出右侧 440px ✓）；窄侧栏**覆盖**在图谱上（设计稿的媒体查询口径 ✓）。
+ * 用容器查询而不是视口媒体查询：判据是**面板自己的宽度** ✗（侧栏可以很窄而窗口很宽 ✓）。
+ */
+.kn-graph {
+  container-type: inline-size;
+}
+
+.kn-editor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  border-left: 1px solid var(--dsw-alias-border-secondary, #303030);
+  background: var(--dsw-alias-bg-elevated, #191e1c);
+  color: var(--dsw-alias-label-primary, #e4ebe6);
+  box-shadow: -15px 0 50px rgba(0, 0, 0, 0.35);
+}
+
+/* 宽面板：并排（图谱缩到左边，编辑区不压住它 ✓） */
+@container (min-width: 720px) {
+  .kn-graph-stage[data-visible="true"] {
+    padding-right: 440px;
+  }
+
+  .kn-editor {
+    box-shadow: none;
+  }
+}
+
+.kn-editor-heading {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);
+}
+
+.kn-editor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kn-editor-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover, #27372e);
+  color: var(--dsw-alias-label-secondary, #b5cfbd);
+  font-size: 11px;
+}
+
+.kn-editor-close {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kn-editor-title {
+  margin: 8px 0 0;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.kn-editor-path {
+  margin-top: 4px;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.kn-editor-tabs {
+  display: flex;
+  gap: 16px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);
+}
+
+.kn-editor-tabs button {
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kn-editor-tabs button.is-active {
+  color: var(--dsw-alias-label-primary, #e4ebe6);
+  box-shadow: 0 2px currentColor;
+}
+
+.kn-editor-notice {
+  padding: 10px 18px;
+  background: var(--dsw-alias-bg-warning, #443823);
+  color: var(--dsw-alias-label-warning, #edcf9e);
+  font-size: 12px;
+}
+
+.kn-editor-notice-actions {
+  margin-top: 8px;
+}
+
+.kn-editor-notice-actions button,
+.kn-editor-retry {
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 破坏性动作（放弃草稿）要看得出来 ✓ */
+.kn-editor-notice-actions button.is-danger {
+  border-color: var(--dsw-alias-border-danger, #a8564f);
+  color: var(--dsw-alias-label-error, #f0a8a8);
+}
+
+/* 「放弃草稿」的二次确认卡片（复查 P1-2：替换草稿必须先确认 ✓） */
+.kn-editor-confirm {
+  margin: 10px 18px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-danger, #a8564f);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-elevated, #191e1c);
+}
+
+.kn-editor-confirm-title {
+  font-size: 13px;
+}
+
+.kn-editor-confirm-body {
+  margin: 6px 0 10px;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 12px;
+}
+
+.kn-editor-latest {
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.kn-editor-hint {
+  padding: 10px 18px 0;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 11px;
+}
+
+.kn-editor-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 18px;
+  overflow: auto;
+}
+
+.kn-editor-text {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  padding: 8px 0 20px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font-family: ui-monospace, "Microsoft YaHei", monospace;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.kn-editor-text:focus {
+  box-shadow: inset 2px 0 var(--dsw-alias-border-secondary, #3a4a40);
+  padding-left: 10px;
+}
+
+.kn-editor-preview {
+  padding: 5px 0 30px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.kn-editor-preview h3 {
+  margin: 14px 0 8px;
+  font-size: 15px;
+  color: var(--dsw-alias-label-secondary, #bddfc8);
+}
+
+.kn-editor-dim {
+  padding: 14px 0;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 12px;
+}
+
+.kn-editor-error {
+  padding: 14px 0;
+  color: var(--dsw-alias-label-error, #f0a8a8);
+  font-size: 12px;
+}
+
+.kn-editor-foot {
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--dsw-alias-border-secondary, #303030);
+}
+
+.kn-editor-status {
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 12px;
+}
+
+.kn-editor-status.is-conflict {
+  color: var(--dsw-alias-label-warning, #edcf9e);
+}
+
+.kn-editor-save {
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--dsw-alias-accent, #a9d3b9);
+  color: #183124;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kn-editor-save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.kn-editor-sub {
+  margin-top: 10px;
+  color: var(--dsw-alias-label-tertiary, #94a399);
+  font-size: 11px;
+}
+
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
 
 .kn-warn-inline {

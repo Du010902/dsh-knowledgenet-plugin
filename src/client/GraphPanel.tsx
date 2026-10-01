@@ -27,7 +27,10 @@ import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } fro
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { InteriorMinimap } from "./InteriorMinimap.tsx";
+import { NodeDocumentEditor } from "./NodeDocumentEditor.tsx";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { libraryKeyOf } from "./view-cache.ts";
+import { draftKey, forgetDraft } from "./node-document-state.ts";
 import { RELAYOUT_EVENT } from "./interior-controller.ts";
 import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
 import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
@@ -103,7 +106,16 @@ const LITERAL: Record<string, string> = {
   spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   nodeMenuTitle: "这个知识点",
+  editNote: "编辑笔记",
   addPrerequisite: "添加前置节点…",
+  /* 节点笔记编辑器（`design/node-note-editor.html` ✓）；正式文案同时进中英词典 ✓ */
+  leaveTitle: "有尚未保存的笔记",
+  leaveMessage: "先保存当前内容，再继续查看其他节点。",
+  leaveBlocked: "编辑器里还有问题要处理（见编辑区的提示），处理完再保存并继续。",
+  leaveSaveBlocked: "暂时无法保存",
+  leaveStay: "继续编辑",
+  leaveDiscard: "放弃修改",
+  leaveSave: "保存并继续",
   edgeMenuTitle: "这条依赖",
   removeRelation: "删除这条依赖",
   removeNode: "删除当前节点",
@@ -195,6 +207,64 @@ function GraphPanelInner(props: {
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
   const [cameraCommand, setCameraCommand] = useState<CameraCommand | null>(null);
   const fitSeqRef = useRef(0);
+  /**
+   * **正在编辑笔记的节点**（null = 编辑器关着 ✓）。
+   *
+   * 编辑器只编辑**正文** ✓；未保存时切节点/关闭要先问用户三选一
+   * （继续编辑 / 放弃修改 / 保存并继续 ✓）—— 这就是下面 pendingEdit 的用途。
+   */
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  /** 编辑器当前是否有未保存改动（由编辑器上报 ✓） */
+  const [editorDirty, setEditorDirty] = useState(false);
+  /** 「保存并继续」的触发计数：+1 ⇒ 编辑器保存，成功后在 onSaved 里完成待办 ✓ */
+  const [editorSaveNonce, setEditorSaveNonce] = useState(0);
+  /** 编辑器是否正在保存（弹窗据此显示"保存中"、禁用"放弃修改" ✓ —— 复查 P2-2 ✓） */
+  const [editorSaving, setEditorSaving] = useState(false);
+  /** 编辑器现在能不能保存（没有指纹/载入失败时提前禁用「保存并继续」✓ —— 复查 P2-2 ✓） */
+  const [editorSaveable, setEditorSaveable] = useState(true);
+  /** 待办：保存成功后要执行的切节点/关闭动作 ✓ */
+  const pendingEditRef = useRef<{ kind: "open"; nodeId: string } | { kind: "close" } | null>(null);
+  const [leaveDialog, setLeaveDialog] = useState<{ kind: "open"; nodeId: string } | { kind: "close" } | null>(null);
+
+  /**
+   * 请求进入某个节点的编辑器（或关闭）。
+   * 有未保存改动时**不直接切**，先弹三选一 ✓（设计稿要求 ✓）。
+   */
+  const requestEdit = useCallback((next: { kind: "open"; nodeId: string } | { kind: "close" }): void => {
+    if (editorDirty) {
+      setLeaveDialog(next);
+      return;
+    }
+    setEditingNodeId(next.kind === "open" ? next.nodeId : null);
+  }, [editorDirty]);
+
+  /** 三选一：继续编辑 */
+  const cancelLeave = useCallback((): void => {
+    pendingEditRef.current = null;
+    setLeaveDialog(null);
+  }, []);
+
+  /** 三选一：保存并继续（真正的切换在 onSaved 里完成 ⇒ 保存失败就留在原地 ✓） */
+  const saveAndLeave = useCallback((): void => {
+    pendingEditRef.current = leaveDialog;
+    setEditorSaveNonce((value) => value + 1);
+  }, [leaveDialog]);
+
+  /**
+   * 编辑器的保存生命周期（复查 P2-2）。
+   *
+   * 关键行为：**保存失败或冲突时收起弹窗、清掉待办** ✓ ——
+   * 否则那个覆盖全屏的三选一弹窗会挡住编辑器里的错误与合并入口 ✗；
+   * 且旧待办绝不能在后来某次普通保存成功时"意外生效" ✗（所以这里一并清空 ✓）。
+   * 用户处理完错误后重新点关闭/切换即可重新发起 ✓。
+   */
+  const onEditorSaveOutcome = useCallback((saving: boolean, outcome: string | null): void => {
+    setEditorSaving(saving);
+    if (saving) return;
+    if (outcome === "saved") return;
+    pendingEditRef.current = null;
+    setLeaveDialog(null);
+  }, []);
   /** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
   const [searchQuery, setSearchQuery] = useState("");
   /**
@@ -288,6 +358,40 @@ function GraphPanelInner(props: {
     }),
     [ignoreOverride, overrideRoot, workspacePath, props.sessionId],
   );
+
+  /**
+   * 编辑器的库目标：**必须稳定** ✗ —— 每次渲染新建对象会让编辑器重新读盘并冲掉草稿
+   * （复查 P1-1 的头号问题）。这里按 root/sessionId 固化 ✓。
+   *
+   * **必须排在 `target` 之后**（TDZ ✗：`useMemo` 工厂在渲染期立即求值 ✓）。
+   */
+  const editingTarget = useMemo(() => {
+    if (target === undefined) return { sessionId: props.sessionId };
+    return target.kind === "root" ? { root: target.value } : { sessionId: target.value };
+  }, [target, props.sessionId]);
+
+  /** 诊断上报也固化（编辑器内部用 ref 保管，这里再稳一层更省心 ✓） */
+  const editorReport = useCallback((step: string, detail: unknown): void => {
+    void reportDiag("note-editor", step, detail ?? null);
+  }, []);
+
+  /**
+   * 三选一：放弃修改。
+   *
+   * **必须先清掉这个节点在组件外缓存里的草稿** ✗ —— 否则稍后打开同一节点，
+   * 那个"用户刚刚明确放弃"的内容又会被恢复出来（复查 P2-3 ✓）。
+   * 清理要发生在切换之前；切换只改 state，不会触发编辑器再写一次缓存 ✓。
+   *
+   * ⚠️ **声明位置很关键**：依赖数组在**渲染期**求值 ⇒ 这里必须排在 `libraryKey` 之后，
+   * 否则就是 `Cannot access 'libraryKey' before initialization` ✗（实机崩过一次 ✓）。
+   */
+  const discardLeave = useCallback((): void => {
+    const pending = leaveDialog;
+    pendingEditRef.current = null;
+    setLeaveDialog(null);
+    if (editingNodeId !== null) forgetDraft(draftKey(libraryKey, editingNodeId));
+    if (pending !== null) setEditingNodeId(pending.kind === "open" ? pending.nodeId : null);
+  }, [leaveDialog, editingNodeId, libraryKey]);
 
   /*
    * 注意：诊断上报必须在 `graph` / `effectiveFocus` 定义**之后**——
@@ -557,6 +661,36 @@ function GraphPanelInner(props: {
   const effectiveFocus = focusId ?? payload?.focusId ?? null;
   const nodeCount = payload?.counts?.nodes ?? graph?.nodes.length ?? 0;
   const edgeCount = payload?.counts?.edges ?? graph?.edges.length ?? 0;
+
+  /**
+   * 当前**选中的节点**（信息条 + 「编辑笔记」入口要用 ✓）。
+   *
+   * 声明顺序很关键 ✗：它读 `graph` **和** `effectiveFocus` ⇒ 必须排在这两个之后
+   * （`useMemo` 的工厂在渲染期立即求值 ⇒ 排前面就是
+   * `Cannot access 'X' before initialization`，整块面板崩 ✗ —— 这个坑已经踩过两次 ✓）。
+   */
+  const selectedNode = useMemo(() => {
+    if (graph === null || effectiveFocus === null || effectiveFocus === undefined) return null;
+    const node = graph.nodes.find((item) => item.id === effectiveFocus);
+    if (node === undefined) return null;
+    return {
+      id: node.id,
+      title: node.title,
+      status: node.status,
+      prerequisites: graph.edges.filter((edge) => edge.fromId === node.id).length,
+    };
+  }, [graph, effectiveFocus]);
+
+  /**
+   * 编辑器开着时，用户在图上点了别的节点 ⇒ **跟着切过去** ✓
+   * （有未保存修改就先三选一 —— 与关闭按钮共用 `requestEdit` 同一条路 ✓）。
+   */
+  useEffect(() => {
+    if (editingNodeId === null) return;
+    if (effectiveFocus === null || effectiveFocus === undefined) return;
+    if (effectiveFocus === editingNodeId) return;
+    requestEdit({ kind: "open", nodeId: effectiveFocus });
+  }, [effectiveFocus, editingNodeId, requestEdit]);
 
   /*
    * 搜索候选：**列出所有命中的节点，让用户自己挑** ✓（用户反馈 2026-10）。
@@ -960,6 +1094,104 @@ function GraphPanelInner(props: {
               active={visible}
               sceneKey={sceneKey}
             />
+            {/*
+             * 选中节点信息 + 「编辑笔记」入口（设计稿左上角那条 ✓）。
+             *
+             * 上游那个 `sr-only` 播报是给读屏用的、**本来不可见** ✗；
+             * 这里给用户一条**真正看得见**的信息条（标题 + 状态 + 前置数），
+             * 并把正文编辑入口放在它右边 ✓ —— 与右键菜单里的同名入口是同一个动作 ✓。
+             */}
+            {selectedNode !== null && editingNodeId === null ? (
+              <div className="kn-sel">
+                <div>
+                  <span className="kn-sel-tag">{t("focusNow")}</span>{" "}
+                  <span className="kn-sel-title">{selectedNode.title}</span>
+                  <div className="kn-sel-sub">
+                    {t(selectedNode.status === "done" ? "statusDone" : selectedNode.status === "learning" ? "statusLearning" : "statusTodo")}
+                    {selectedNode.prerequisites > 0 ? ` · ${selectedNode.prerequisites} ${t("prerequisites")}` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="kn-sel-edit"
+                  onClick={() => { requestEdit({ kind: "open", nodeId: selectedNode.id }); }}
+                >
+                  {t("editNote")}
+                </button>
+              </div>
+            ) : null}
+            {/*
+             * **节点笔记编辑器**（`design/node-note-editor.html` 的"编辑节点对应的文档"那一部分 ✓）。
+             * 宽面板并排、窄侧栏覆盖在图谱上（CSS 容器查询 ✓）；关闭后图谱视角原样保留 ✓。
+             * `key={editingNodeId}` ⇒ 换节点即重挂 ⇒ 草稿不会串到别的节点 ✗。
+             */}
+            {editingNodeId !== null ? (
+              <NodeDocumentEditor
+                key={`${libraryKey}::${editingNodeId}`}
+                nodeId={editingNodeId}
+                libraryKey={libraryKey}
+                target={editingTarget}
+                t={props.t}
+                saveNonce={editorSaveNonce}
+                onDirtyChange={setEditorDirty}
+                onSaveOutcome={onEditorSaveOutcome}
+                onSaveableChange={setEditorSaveable}
+                onClose={() => { requestEdit({ kind: "close" }); }}
+                onSaved={(document) => {
+                  /*
+                   * 保存成功：① 身份被"采用"（adopted-* → ULID）⇒ **编辑目标、选择、草稿键一起换** ✓
+                   * （复查 P2-4：只换编辑目标会让"选中 ≠ 编辑目标"的 effect 又把旧身份请求回来 ✗，
+                   * 旧键也必须删掉，不能"复制后保留" ✗）；
+                   * ② 待办（保存并继续）**独立执行** ✓ —— 采用身份时也要真的继续 ✗；
+                   * ③ 轻量刷新数据（**不重建布局** ✗ ⇒ 视角与转动中心都不动 ✓）。
+                   */
+                  const adopted = document.nodeId !== editingNodeId;
+                  if (adopted) {
+                    forgetDraft(draftKey(libraryKey, editingNodeId));
+                    setEditingNodeId(document.nodeId);
+                    /* 选择也跟到新身份：否则下面那个"选中驱动编辑"的 effect 会拿旧 id 再打开一次 ✗ */
+                    setFocusId(document.nodeId);
+                  }
+                  const pending = pendingEditRef.current;
+                  pendingEditRef.current = null;
+                  setLeaveDialog(null);
+                  if (pending !== null) {
+                    const next = pending.kind === "open"
+                      ? (adopted && pending.nodeId === editingNodeId ? document.nodeId : pending.nodeId)
+                      : null;
+                    if (!(adopted && next === document.nodeId)) setEditingNodeId(next);
+                  }
+                  void load({ refresh: true });
+                }}
+                report={editorReport}
+              />
+            ) : null}
+            {/* 未保存时切节点/关闭：三选一（继续编辑 / 放弃修改 / 保存并继续 ✓） */}
+            {leaveDialog !== null ? (
+              <ConfirmDialog
+                title={t("leaveTitle")}
+                message={editorSaving
+                  ? t("statusSaving")
+                  : editorSaveable ? t("leaveMessage") : t("leaveBlocked")}
+                confirmLabel={editorSaving
+                  ? t("statusSaving")
+                  : editorSaveable ? t("leaveSave") : t("leaveSaveBlocked")}
+                cancelLabel={t("leaveStay")}
+                extraLabel={t("leaveDiscard")}
+                /*
+                 * 两个参数**必须分开** ✗（复查 P1-5）：
+                 * - `busy` = 正在写盘 ⇒ 三个按钮与 Esc/背景一起冻结（不能"说放弃了却在写" ✗）；
+                 * - `confirmDisabled` = 当前存不了（缺指纹 / 载入失败 / 冲突）⇒ **只**禁用"保存并继续"，
+                 *   继续编辑、放弃修改、Esc、点背景照常可用 ✓ ——
+                 *   否则用户会被弹窗困住，而他要处理的错误恰好在被挡住的编辑器里 ✗。
+                 */
+                busy={editorSaving}
+                confirmDisabled={!editorSaveable}
+                onCancel={cancelLeave}
+                onExtra={discardLeave}
+                onConfirm={saveAndLeave}
+              />
+            ) : null}
             {/* 右键菜单：节点加前置 / 连线删依赖（上游两种视图都会派发 window 事件） */}
             <GraphContextMenu
               nodes={graph.nodes}
@@ -967,9 +1199,11 @@ function GraphPanelInner(props: {
               root={target !== undefined && target.kind === "root" ? target.value : undefined}
               sessionId={target !== undefined && target.kind === "session" ? target.value : props.sessionId}
               onChanged={() => { void load({ refresh: true }); }}
+              onEditNote={(nodeId) => { setFocusId(nodeId); requestEdit({ kind: "open", nodeId }); }}
               report={(step, detail) => { void reportDiag("graph-menu", step, detail ?? null); }}
               copy={{
                 nodeMenuTitle: t("nodeMenuTitle"),
+                editNote: t("editNote"),
                 addPrerequisite: t("addPrerequisite"),
                 edgeMenuTitle: t("edgeMenuTitle"),
                 removeRelation: t("removeRelation"),

@@ -265,29 +265,117 @@ describe("接线：两张图、留白、生命周期、方向符号", () => {
     );
   });
 
-  it("面板里**不许 useMemo 先用后声明**（渲染期立即求值 ⇒ TDZ 会崩面板 ✗）", () => {
+  it("面板里**不许 useMemo / useCallback 先用后声明**（渲染期立即求值 ⇒ TDZ 会崩面板 ✗）", async () => {
     /*
-     * 这条是给上面那类事故做的通用护栏：`useMemo` 的工厂在**渲染期立刻执行** ✓，
-     * 所以它引用的组件变量必须在它之前声明 ✗ —— 否则就是
-     * `Cannot access 'X' before initialization`（实机已经踩过一次 ✗）。
-     * 只查 useMemo 的工厂体：其它位置（effect 回调、事件回调）晚执行，引用后声明的变量是合法的 ✓。
+     * 这条是给那类事故做的通用护栏：`useMemo(...)` / `useCallback(...)` 的**整个调用参数**
+     * 都在渲染期求值 ✓（工厂体立即执行、**依赖数组也要读一遍** ✓），
+     * 所以引用的组件变量必须先声明 ✗ —— 否则 `Cannot access 'X' before initialization`
+     * ⇒ 整块面板只剩"渲染出错"（实机踩过三次：`props`、`graph`、`libraryKey` ✗）。
+     *
+     * 第三例正是 `useCallback(..., [libraryKey])` 的**依赖数组**：只查 useMemo 会漏判 ✗。
+     *
+     * 实现要点：**按括号配对**取整个调用参数，不要用"第一个 `, [`"猜依赖数组 ✗
+     * （那样会把嵌套数组/后面的 `, [...]` 当成依赖 ⇒ 大量误报 ✗）。
+     * 只查这两个 Hook：effect / 事件回调晚执行，引用后声明的变量是合法的 ✓。
      */
     const declarations = new Map();
-    for (const match of panelSource.matchAll(/^ {2}const (\w+)[\s:=]/gm)) {
+    for (const match of panelSource.matchAll(/^ {0,2}const (\w+)[\s:=]/gm)) {
       if (!declarations.has(match[1])) declarations.set(match[1], match.index ?? 0);
     }
+    /* 扫**所有客户端源码**（不只面板 ✗）：编辑器、小地图、卡片同样会踩这个坑 ✓ */
+    const clientSources = await Promise.all(
+      ["GraphPanel.tsx", "NodeDocumentEditor.tsx", "InteriorMinimap.tsx", "GraphContextMenu.tsx", "PlanReview.tsx"]
+        .map(async (name) => [name, await readFile(path.join(HERE, "..", "src", "client", name), "utf8")]),
+    );
+    /**
+     * 把注释与字符串**等长替换成空格** ✓：
+     * 否则 `"save-failed"` 这种字面量会被当成对变量 `save` 的引用 ⇒ 误报 ✗。
+     * 等长替换能保持字符偏移不变，括号配对也照旧 ✓。
+     */
+    const strip = (source) => {
+      let out = "";
+      let index = 0;
+      while (index < source.length) {
+        const two = source.slice(index, index + 2);
+        if (two === "//") {
+          const end = source.indexOf("\n", index);
+          const stop = end < 0 ? source.length : end;
+          out += " ".repeat(stop - index);
+          index = stop;
+          continue;
+        }
+        if (two === "/*") {
+          const end = source.indexOf("*/", index + 2);
+          const stop = end < 0 ? source.length : end + 2;
+          out += " ".repeat(stop - index);
+          index = stop;
+          continue;
+        }
+        const char = source[index];
+        if (char === '"' || char === "'" || char === "`") {
+          let cursor = index + 1;
+          while (cursor < source.length && source[cursor] !== char) {
+            if (source[cursor] === "\\") cursor += 1;
+            cursor += 1;
+          }
+          const stop = Math.min(cursor + 1, source.length);
+          out += " ".repeat(stop - index);
+          index = stop;
+          continue;
+        }
+        out += char;
+        index += 1;
+      }
+      return out;
+    };
+    /** 从开括号处按配对取到闭括号 ✓ */
+    const callBody = (openParen) => {
+      let depth = 0;
+      for (let index = openParen; index < panelSource.length; index += 1) {
+        const char = panelSource[index];
+        if (char === "(") depth += 1;
+        else if (char === ")") {
+          depth -= 1;
+          if (depth === 0) return panelSource.slice(openParen + 1, index);
+        }
+      }
+      return null;
+    };
     const offenders = [];
-    for (const match of panelSource.matchAll(/useMemo(?:<[^>]*>)?\(\(\) => ([^;]{0,900}?), \[[^\]]*\]\)/g)) {
-      const body = match[1];
-      const at = match.index ?? 0;
-      for (const [name, declaredAt] of declarations) {
-        if (declaredAt <= at) continue;
-        if (new RegExp(`\\b${name}\\b`).test(body)) {
-          offenders.push(`useMemo 在第 ${at} 字符处引用了第 ${declaredAt} 字符才声明的 ${name}`);
+    let scanned = 0;
+    /*
+     * 扫**所有**客户端组件（不只面板 ✗）：编辑器、小地图、卡片里同样可能踩这个坑 ✓。
+     */
+    for (const [file, raw] of clientSources) {
+      const source = strip(raw);
+      const declared = new Map();
+      for (const match of source.matchAll(/^ {0,2}const (\w+)[\s:=]/gm)) {
+        if (!declared.has(match[1])) declared.set(match[1], match.index ?? 0);
+      }
+      for (const start of source.matchAll(/use(?:Memo|Callback)(?:<[^>]*>)?\(/g)) {
+        const at = (start.index ?? 0) + start[0].length - 1;
+        let depth = 0;
+        let body = null;
+        for (let index = at; index < source.length; index += 1) {
+          const char = source[index];
+          if (char === "(") depth += 1;
+          else if (char === ")") {
+            depth -= 1;
+            if (depth === 0) { body = source.slice(at + 1, index); break; }
+          }
+        }
+        if (body === null || body.length > 4000) continue;
+        scanned += 1;
+        for (const [name, declaredAt] of declared) {
+          if (declaredAt <= at) continue;
+          if (new RegExp(`\\b${name}\\b`).test(body)) {
+            offenders.push(`${file}：第 ${at} 字符处的 ${start[0].replace("(", "")} 引用了第 ${declaredAt} 字符才声明的 ${name}`);
+          }
         }
       }
     }
-    assert.deepEqual(offenders, [], `useMemo 不许先用后声明：\n${offenders.join("\n")}`);
+    assert.ok(scanned >= 8, `守卫要真的扫到 Hook（实际 ${scanned} 个）`);
+    assert.deepEqual(offenders, [], `useMemo / useCallback 不许先用后声明：\n${offenders.join("\n")}`);
   });
 
   it("方向标记：有投影就画箭头；垂直于图平面时用朝内/朝外符号 ✓", () => {

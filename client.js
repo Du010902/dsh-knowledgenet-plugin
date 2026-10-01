@@ -159,6 +159,21 @@ window.__ModuleLoader__.load({
 			};
 		}
 		//#endregion
+		//#region src/client/dialog-keyboard.ts
+		/**
+		* 键盘该怎么响应。
+		* @param key - `event.key`。
+		* @param options.busy - 正在写盘（一切都冻结 ✓）。
+		* @param options.confirmDisabled - 确认不可用（只挡 Enter ✓）。
+		* @returns 该做什么 ✓。
+		*/
+		function dialogKeyboardIntent(key, options = {}) {
+			if (options.busy === true) return "ignore";
+			if (key === "Escape") return "cancel";
+			if (key === "Enter") return options.confirmDisabled === true ? "ignore" : "confirm";
+			return "ignore";
+		}
+		//#endregion
 		//#region src/client/ConfirmDialog.tsx
 		/**
 		* 自己的确认弹窗。
@@ -170,35 +185,45 @@ window.__ModuleLoader__.load({
 		* - 样式由 `confirmDialogCss()` 注入到 head（弹窗在 light DOM 里，Shadow DOM 的样式管不到它）；
 		* - Esc = 取消，Enter = 确认，背景点击 = 取消，打开时焦点落在"确认"上。
 		*/
+		/** 弹窗键盘意图（实现与测试都在 `dialog-keyboard.ts` ✓ —— `.tsx` 没法被 Node 直接单测 ✗） */
 		/**
 		* 渲染一个确认弹窗。
-		* @param props - 文案与两个回调。
+		* @param props - 文案与回调。
 		* @returns portal 到 body 的模态层。
 		*/
 		function ConfirmDialog(props) {
 			const { onConfirm, onCancel } = props;
+			const busy = props.busy === true;
+			const confirmDisabled = props.confirmDisabled === true || busy;
 			(0, react.useEffect)(() => {
 				const onKey = (event) => {
-					if (event.key === "Escape") {
-						event.preventDefault();
-						onCancel();
-					} else if (event.key === "Enter") {
-						event.preventDefault();
-						onConfirm();
-					}
+					const intent = dialogKeyboardIntent(event.key, {
+						busy,
+						confirmDisabled
+					});
+					if (intent === "ignore") return;
+					event.preventDefault();
+					if (intent === "cancel") onCancel();
+					else onConfirm();
 				};
 				window.addEventListener("keydown", onKey, true);
 				return () => window.removeEventListener("keydown", onKey, true);
-			}, [onCancel, onConfirm]);
+			}, [
+				onCancel,
+				onConfirm,
+				busy,
+				confirmDisabled
+			]);
 			if (typeof document === "undefined") return null;
 			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "kn-modal-backdrop",
 				role: "presentation",
-				onClick: onCancel,
+				onClick: busy ? void 0 : onCancel,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "kn-modal",
 					role: "dialog",
 					"aria-modal": "true",
+					"aria-busy": busy ? "true" : void 0,
 					"aria-label": props.title,
 					onClick: (event) => {
 						event.stopPropagation();
@@ -214,18 +239,31 @@ window.__ModuleLoader__.load({
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "kn-modal-actions",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "kn-modal-btn",
-								onClick: onCancel,
-								children: props.cancelLabel
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "kn-modal-btn kn-modal-primary",
-								autoFocus: true,
-								onClick: onConfirm,
-								children: props.confirmLabel
-							})]
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-modal-btn",
+									disabled: busy,
+									onClick: onCancel,
+									children: props.cancelLabel
+								}),
+								props.extraLabel !== void 0 && props.onExtra !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-modal-btn",
+									disabled: busy,
+									onClick: props.onExtra,
+									children: props.extraLabel
+								}) : null,
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-modal-btn kn-modal-primary",
+									autoFocus: true,
+									disabled: confirmDisabled,
+									title: confirmDisabled && !busy ? props.message : void 0,
+									onClick: onConfirm,
+									children: props.confirmLabel
+								})
+							]
 						})
 					]
 				})
@@ -2093,7 +2131,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0kn-panel-css
-		const KN_PANEL_CSS = "/* ============================================================================\n   KnowledgeNet 插件面板样式（注入到 Shadow Root 内）\n   ----------------------------------------------------------------------------\n   1) token 桥：把上游 graph.css 用的 KnowledgeNet 变量名，映射到宿主主题 token\n      （--dsw-alias-*，取自 cordis_inspect_query 的 Theme provider）。宿主主题切换时\n      这些自定义属性会随宿主一起变，因此亮/暗色自动跟随。\n   2) 面板自身的少量骨架样式。所有颜色都来自 token，只有阴影与圆角是字面值。\n   注意：本文件不引入任何全局选择器，且只在 Shadow Root 内生效，不会污染宿主页面。\n   ========================================================================== */\n\n.kn-root {\n  --surface: var(--dsw-alias-bg-layer-1, #ffffff);\n  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);\n  --canvas: var(--dsw-alias-bg-base, #f5f8f7);\n  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);\n  --text: var(--dsw-alias-label-primary, #192523);\n  --secondary: var(--dsw-alias-label-secondary, #526663);\n  --muted: var(--dsw-alias-state-idle-primary, #778a87);\n  --border: var(--dsw-alias-border-l2, #d6e0dd);\n  --line: var(--dsw-alias-border-l1, #d6e0dd);\n  --line-soft: var(--dsw-alias-border-l1, #e5ecea);\n  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);\n  --dot: var(--dsw-alias-border-l1, #dbe4e1);\n  --accent: var(--dsw-alias-brand-primary, #167f68);\n  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);\n  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);\n  --accent-text: var(--dsw-alias-brand-primary, #146b58);\n  --success: var(--dsw-alias-state-success-primary, #2f8a70);\n  --warning: var(--dsw-alias-state-warn-primary, #a8762c);\n  --todo: var(--dsw-alias-state-idle-primary, #74878d);\n  --danger: var(--dsw-alias-state-error-primary, #c63e48);\n  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);\n  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);\n  /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */\n  --on-accent: #ffffff;\n  --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);\n  --shadow-soft: 0 5px 24px rgba(0, 0, 0, 0.1);\n  --radius: 12px;\n  --radius-node: 12px;\n\n  display: flex;\n  flex-direction: column;\n  box-sizing: border-box;\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n  line-height: 1.5;\n}\n\n.kn-root *,\n.kn-root *::before,\n.kn-root *::after {\n  box-sizing: border-box;\n}\n\n.kn-head {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 4px 10px;\n  align-items: baseline;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--line);\n  background: var(--surface-raised);\n}\n\n.kn-head-title {\n  font-weight: 600;\n}\n\n.kn-head-meta {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-head-hint {\n  margin-left: auto;\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n}\n\n.kn-graph > .graph {\n  height: 100%;\n}\n\n/*\n * 三维视图的挂载壳：**常驻挂载**，可见性只用显隐表达 ✓。\n *\n * 为什么不再\"不可见就卸载\"：每次重挂都会新建一个 WebGL 上下文与画布 ✗，\n * 浏览器上下文数量到上限就会丢上下文（「三维绘制已中断」那一页 ✗）；\n * 而上游渲染循环是按需唤醒的 ⇒ 常驻几乎不耗电 ✓。\n */\n.kn-graph-stage {\n  position: absolute;\n  inset: 0;\n}\n\n.kn-graph-stage[data-visible=\"false\"] {\n  /* 保留布局尺寸（避免重排），但不可见也不可交互 ✓ */\n  visibility: hidden;\n}\n\n/* ---------------- 右下角实时截面小地图（用户手绘那张图的界面版） ---------------- */\n\n/*\n * 位置：**右下角**（上游状态灯在上右、提示在下左，这里不撞）✓。\n * `pointer-events: none` 是关键：它只是\"仪表\"，绝不能吃掉画布上的拖动/滚轮 ✗。\n */\n.kn-minimap {\n  position: absolute;\n  right: 12px;\n  bottom: 12px;\n  z-index: 5;\n  pointer-events: none;\n  opacity: 0.9;\n}\n\n.kn-minimap svg {\n  display: block;\n}\n\n/* 两张正交位置图并排（共享球心与比例尺 ✓） */\n.kn-minimap-row {\n  display: flex;\n  gap: 4px;\n}\n\n/* 每张图的纵轴记号（↑↓ / ↔） */\n.kn-minimap-glyph {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  font-size: 8px;\n}\n\n/* 朝向箭头：固定参考里的真实视线方向 ✓ */\n.kn-minimap-arrow {\n  stroke: var(--dsw-alias-label-primary, #1f2937);\n  stroke-width: 1.1;\n  stroke-linecap: round;\n}\n\n/* 视线垂直于本图平面时改用「朝内 ⊗ / 朝外 ⊙」符号 ✓ */\n.kn-minimap-outward {\n  stroke: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke-width: 0.9;\n  fill: none;\n}\n\n.kn-minimap-outward-dot {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke: none;\n}\n\n/* 操作包围球 */\n.kn-minimap-ball {\n  fill: none;\n  stroke: var(--dsw-alias-border-l2, #d6e0dd);\n  stroke-width: 1;\n}\n\n/* 过球心的基线（读出\"深入了多少\"） */\n.kn-minimap-axis {\n  stroke: var(--dsw-alias-border-l1, #e6ece9);\n  stroke-width: 0.7;\n  stroke-dasharray: 2 3;\n}\n\n/* 固定转动中心（黑点） */\n.kn-minimap-center {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 走过的路径 */\n.kn-minimap-trail {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n}\n\n/* 视角当前位置：一只朝球里看的眼睛 */\n.kn-minimap-eye-outline {\n  fill: var(--dsw-alias-bg-layer-1, #ffffff);\n  stroke: var(--dsw-alias-label-primary, #1f2937);\n  stroke-width: 1.1;\n}\n\n.kn-minimap-pupil {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 被夹到框边（真实位置还在更外面）时套一圈虚线 ✓ */\n.kn-minimap-clamped {\n  fill: none;\n  stroke: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke-width: 0.8;\n  stroke-dasharray: 2 2;\n}\n\n/* 到球心的距离读数（单位 = 操作球半径；球外读数带 ↗，表示图上半径经过压缩 ✓） */\n.kn-minimap-distance {\n  margin-top: 2px;\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  color: var(--dsw-alias-label-tertiary, #6b7280);\n  font-size: 8px;\n  font-variant-numeric: tabular-nums;\n  text-align: center;\n}\n\n/* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */\n.kn-graph > .graph-empty {\n  height: 100%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--muted);\n}\n\n.kn-msg {\n  padding: 10px 12px;\n  color: var(--muted);\n}\n\n/* 两个错误类名并存：.kn-error 是新的统一写法，.kn-msg-error 保留给早期卡片 */\n.kn-error,\n.kn-msg-error {\n  color: var(--danger);\n}\n\n.kn-simple {\n  padding: 8px 12px;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n}\n\n/* ------------------------------ 紧凑卡片（节点 / 建前置） ------------------------------ */\n\n/* height: null 的 ShadowPanel 用这个类：按内容自适应，不再撑满父容器 */\n.kn-root-auto {\n  height: auto;\n  max-height: 460px;\n  /*\n   * 关键：auto 模式是「把组件嵌进宿主已有容器」用的（指南页的入口卡片就是），\n   * 所以必须**去掉面板外壳**——否则 .kn-root 的边框/底色会和卡片自己的框叠成两层\n   * （实测就是这样：外面一圈是外壳，里面一圈是卡片）。\n   */\n  border: 0;\n  border-radius: 0;\n  background: none;\n  overflow: visible;\n}\n\n/* height: \"fill\" 的 ShadowPanel 用这个类：撑满宿主给的面板区域 */\n.kn-root-fill {\n  height: 100%;\n}\n\n/* 左侧栏的「知识库」标志不在 Shadow DOM 里：它是一条注入到 head 的数据驱动样式，\n   规则由 src/client/badges-css.ts 生成（工作区行没有插槽，只有稳定的 data-row-key）。 */\n\n/* --------------------- 「开始」页上的入口卡片 --------------------- */\n\n/*\n * 卡片形状**逐项照抄**宿主指南页的胶囊（ui-sidebar-right 的 GuideBody.module.css `.entry`\n * 与 `.entryIcon`/`.entryText`/`.entryTitle`/`.entryDescription`）：尺寸、内边距、边框宽度、\n * 圆角、颜色 token 全部对齐，所以它和 shipped 的三张卡片看起来是同一套东西。\n * 类名与作用域仍然是我自己的（Shadow DOM 里），不 import 任何 Client 包。\n */\n.kn-guide-card {\n  display: flex;\n  gap: 14px;\n  align-items: center;\n  box-sizing: border-box;\n  width: 380px;\n  max-width: 100%;\n  min-height: 56px;\n  padding: 14px 20px;\n  color: var(--dsw-alias-label-primary, #1b1b1b);\n  font: inherit;\n  text-align: left;\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);\n  border-radius: var(--dsl-guide-entry-radius, 16px);\n  cursor: pointer;\n}\n\n.kn-guide-card:hover {\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));\n}\n\n.kn-guide-card:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 2px;\n}\n\n/* 26px 的固定盒子、安静一点的字色：与 shipped 卡片的字形框一致（**不要**填充底） */\n.kn-guide-icon {\n  display: flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 26px;\n  height: 26px;\n  color: var(--dsw-alias-label-secondary, #5c6b66);\n}\n\n.kn-guide-text {\n  display: flex;\n  flex: 1;\n  min-width: 0;\n  flex-direction: column;\n  gap: 3px;\n}\n\n.kn-guide-title {\n  overflow: hidden;\n  font-size: 14px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.kn-guide-desc {\n  overflow: hidden;\n  color: var(--dsw-alias-label-tertiary, #8a9994);\n  font-size: 11px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* ------------------------------ 常驻面板 ------------------------------ */\n\n.kn-head-panel {\n  gap: 6px 10px;\n}\n\n.kn-modes {\n  display: inline-flex;\n  margin-left: auto;\n  gap: 4px;\n}\n\n.kn-btn {\n  padding: 2px 9px;\n  border: 1px solid var(--border);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  color: var(--secondary);\n  font: inherit;\n  font-size: 12px;\n  cursor: pointer;\n}\n\n.kn-btn:hover:not(:disabled) {\n  border-color: var(--accent);\n  color: var(--text);\n}\n\n.kn-btn.is-on {\n  border-color: var(--accent);\n  background: var(--accent-soft);\n  color: var(--accent-text);\n}\n\n.kn-btn:disabled {\n  opacity: 0.5;\n  cursor: default;\n}\n\n/* ---------------- 图标按钮（圆环刷新）：照抄宿主 `.tool` 的圆形图标按钮 ----------------\n   用户要求（2026-09）：把「刷新」从\"文字胶囊\"改成浏览器里那种圆环箭头。\n   尺寸直接沿用宿主产品里那颗（`ui-sidebar-files/src/client/FilesBody.module.css` 的 `.tool`：\n   28×28 圆 + `padding: 6px` + 15px 字形 + `--dsw-radius-sm` + 透明底、hover 只换底色/字色）✓。\n   注意：`.kn-root-fill .kn-btn` 那几条响应式规则会给按钮写死高度与左右内边距，\n   所以这些\"形状\"属性统一放在文件**末尾**（同优先级、后出现者胜）—— 见文末那组覆盖。 */\n.kn-icon-btn {\n  display: inline-flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  color: var(--dsw-alias-label-secondary, #526663);\n  line-height: 1;\n  cursor: pointer;\n}\n\n.kn-icon-btn:hover:not(:disabled) {\n  color: var(--dsw-alias-label-primary, #192523);\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n}\n\n.kn-icon-btn svg {\n  width: 15px;\n  height: 15px;\n  flex: none;\n}\n\n.kn-icon-btn:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 1px;\n}\n\n/* ---------------- 搜索框（照浏览器那条工具行） ----------------\n   用户要求 2026-10：搜索框要**和刷新按钮同一行、排在它后面**（浏览器就是 `[←][→][⟳] [地址栏] [↗]`）✓。\n   所以这里不再自己占一行：`.kn-search` 只是头部 flex 行里的一个**可伸缩子项**，\n   高度/内边距/分隔线都沿用 `.kn-root-fill .kn-head-panel` 那一套 ✓。\n   形态与宿主地址栏对齐：28px 高、0.5px 边框、`--dsw-radius-sm`、focus 时描一圈 ✓。 */\n.kn-search {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  align-self: center;\n  gap: 4px;\n  min-width: 0;\n}\n\n.kn-search-box {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  gap: 8px;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  padding: 0 9px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */\n  position: relative;\n}\n\n.kn-search-box:focus-within {\n  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);\n  outline-offset: -1px;\n}\n\n.kn-search-box svg {\n  flex: none;\n  width: 14px;\n  height: 14px;\n  color: var(--dsw-alias-label-secondary, #526663);\n}\n\n.kn-search-field {\n  flex: 1 1 auto;\n  min-width: 0;\n  height: 100%;\n  padding: 0;\n  border: 0;\n  outline: 0;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n}\n\n/* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）\n   绝对定位在**输入框那一格**下面（`left/right: 0` ⇒ 与输入框等宽 ✓），浮在图上方；\n   层级只要高过画布即可（画布没有 z-index）✓ */\n.kn-search-list {\n  position: absolute;\n  top: 30px;\n  left: 0;\n  right: 0;\n  z-index: 5;\n  display: flex;\n  flex-direction: column;\n  max-height: 264px;\n  overflow: auto;\n  padding: 4px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-2, #1b1b1b);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);\n}\n\n.kn-search-item {\n  display: flex;\n  align-items: baseline;\n  gap: 8px;\n  min-height: 26px;\n  padding: 4px 8px;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  text-align: left;\n  cursor: pointer;\n}\n\n.kn-search-item.is-active {\n  background: var(--dsw-alias-interactive-bg-hover, #292929);\n}\n\n.kn-search-item-title {\n  min-width: 0;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* 别名命中时补一句\"是哪个别名命中的\"，并靠右显示 ✓ */\n.kn-search-item-alias {\n  flex: none;\n  margin-left: auto;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n.kn-search-empty {\n  padding: 6px 8px;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n/*\n * 候选列表在头部行里做**浮层**，而 `.kn-root-fill .kn-head-panel` 是 `overflow: hidden`\n * ⇒ 不加这一条，下拉会被头部那一行直接裁掉（实测：渲染出来什么都看不见 ✗）。\n * 类名写在元素上（`.kn-head-panel.is-search-open`）比特异性：两个类 > 一个类，与顺序无关 ✓。\n */\n.kn-root-fill .kn-head-panel.is-search-open {\n  overflow: visible;\n}\n\n/*\n * **画布不要那圈焦点环**（用户两次反馈：\"点击之后这个边框会变得高亮，很奇怪\" / \"怎么又变成高亮了\"）。\n *\n * 环来自上游 `graph.css` 的 `.universe:focus-visible`：画布需要在指针按下时拿到焦点，\n * F / 方向键才生效（`graph3d/navigation.ts` 主动 focus）✓。\n *\n * 之前只压\"鼠标点出来的那一次\"（靠 `[data-pointer-focus]`）✗ —— 不够：\n * **宿主/脚本聚焦**画布时（切标签、侧栏重排后自动聚焦）浏览器同样算 `:focus-visible` ✗，\n * 那时标记不在，环就又出来了。\n * 所以这里**不再依赖浏览器的 `:focus-visible` 启发式** ✗：\n * `:focus` 与 `:focus-visible` 一起压掉 ✓，键盘可达性改用**我们自己打的标记**给提示 ✓。\n * 特异性：`.kn-root` 前缀 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。\n */\n.kn-root .universe:focus,\n.kn-root .universe:focus-visible {\n  outline: none;\n}\n\n/*\n * 键盘 Tab 聚焦时才给可见提示 ✓（标记由面板在捕获阶段打：Tab 打上、指针按下清掉 ✓）。\n * 可访问性不掉：键盘用户仍然看得见焦点在哪。\n */\n.kn-root .universe[data-keyboard-focus=\"true\"]:focus {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n/* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */\n\n.kn-warn-inline {\n  padding: 6px 12px;\n  border: 0;\n  border-bottom: 1px solid var(--line-soft);\n  border-radius: 0;\n}\n\n.kn-body {\n  display: flex;\n  flex: 1 1 auto;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 0;\n  padding: 8px 12px;\n  overflow: auto;\n}\n\n.kn-sect {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.kn-sect-title {\n  color: var(--secondary);\n  font-weight: 600;\n}\n\n.kn-chips {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n}\n\n.kn-chip {\n  padding: 1px 8px;\n  border: 1px solid var(--line);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  font-size: 12px;\n}\n\n.kn-list {\n  margin: 0;\n  padding-left: 14px;\n}\n\n.kn-list li {\n  margin: 2px 0;\n}\n\n.kn-arrow {\n  color: var(--accent);\n}\n\n.kn-dim {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-tag {\n  margin-left: 6px;\n  padding: 0 6px;\n  border-radius: 999px;\n  background: var(--accent-soft);\n  color: var(--accent-text);\n  font-size: 11px;\n}\n\n.kn-note {\n  margin: 0;\n  max-height: 220px;\n  padding: 8px;\n  overflow: auto;\n  border-radius: 8px;\n  background: var(--canvas-soft);\n  font-size: 12px;\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.kn-warn {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  padding: 8px;\n  border: 1px solid var(--warning);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--warning) 10%, transparent);\n}\n\n/* ---------------- 聚焦视图（胶囊 + 两个矩形框） ---------------- */\n\n\n\n\n/* ---------------- 聚焦视图：收紧空间（覆盖上面的默认值） ---------------- */\n\n\n/* 箭头改成水平（朝右） */\n\n/* 面板很窄时退回纵向（等价于原来那套），避免挤压 */\n@media (max-width: 900px) {\n}\n\n/* ---------------- 标签页模式：去掉卡片外壳，和宿主其它标签页一致（贴边铺满） ---------------- */\n\n.kn-root-fill {\n  border: 0;\n  border-radius: 0;\n  background: transparent;\n  box-shadow: none;\n}\n/* 头部与内容之间只留一条与宿主同风格的分隔线，不再自成一张卡片 */\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-graph { background: transparent; }\n\n/* ---------------- 标签页模式：与宿主其它标签页同一套网格（头行 + 贯通分隔线 + 统一左起点） ---------------- */\n\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 0 12px;\n  min-height: 44px;\n  display: flex;\n  align-items: center;\n  border-radius: 0;\n  border-bottom: 1px solid var(--line-soft);\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n.kn-root-fill .kn-graph { padding: 0; }\n/* 内容区与头行左对齐：聚焦/空间视图不各加一层内边距 */\n.kn-root-fill .kn-msg { padding: 12px; }\n.kn-root-fill .kn-warn-inline { margin: 0 12px; }\n\n/* ---------------- 标签页模式：不再自画头部分隔线（否则永远与宿主的线对不齐） ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 6px 12px;\n  min-height: 0;            /* 不再固定 44px：高度随内容，宿主的线在哪就是哪 */\n  border: 0;                /* 不再画自己的线 */\n  border-bottom: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n\n/* ---------------- 聚焦视图：框改用底色块表达（1px 描边会被误读成\"分隔线\"，且与宿主那条线错位） ---------------- */\n\n\n/* ---------------- 标签页模式：不自己画底色/描边，与宿主内容区一致 ---------------- */\n\n.kn-root-fill .kn-msg,\n.kn-root-fill .kn-warn-inline { background: transparent; }\n\n/* ---------------- 标签页模式：三维/二维画布容器不自绘底色、底纹与分隔线 ---------------- */\n\n.kn-root-fill .graph,\n.kn-root-fill .kn-graph,\n.kn-root-fill .graph-canvas,\n.kn-root-fill canvas {\n  background-color: transparent;\n  background-image: none;\n  border-top: 0;\n}\n\n/* ---------------- 标签页模式：三维视图的自绘 chrome（提示条/状态胶囊）不再画底色与描边 ---------------- */\n\n.kn-root-fill [class^=\"universe-\"],\n.kn-root-fill [class*=\" universe-\"] {\n  background: transparent;\n  border-color: transparent;\n  box-shadow: none;\n  backdrop-filter: none;\n}\n.kn-root-fill .universe-hint { opacity: .55; font-size: 11.5px; }\n.kn-root-fill .graph,\n.kn-root-fill .graph-space,\n.kn-root-fill .universe { border-top: 0; background: transparent; }\n\n/* ---------------- 聚焦视图：两个分组框是必要组件——恢复矩形框（仅描边，不铺底色） ---------------- */\n\n\n/* ---------------- 标签页模式：恢复头行下沿的分隔线（必要组件），用宿主同源 token ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  min-height: 46px;\n  padding: 0 12px;\n  border-bottom: 1px solid var(--line-soft);\n}\n\n/* ---------------- 标签页模式：头部行不换行、按钮收紧，分隔线不再被挤下去 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  flex-wrap: nowrap;           /* 不许换行：换行会把整行撑高、把分隔线推下去 */\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title,\n.kn-root-fill .kn-head-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.kn-root-fill .kn-head-meta { margin-right: auto; }   /* 标题/计数靠左，按钮靠右 */\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn {\n  height: 24px;\n  padding: 0 9px;\n  font-size: 12px;\n  line-height: 22px;\n  white-space: nowrap;\n}\n\n/* ---------------- 标签页模式（B 方案）：不再自画分隔线，头行压成紧凑一行 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 0;          /* 面板里只留宿主那条线 */\n  height: 28px;\n  min-height: 28px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn { height: 22px; padding: 0 8px; font-size: 11.5px; line-height: 20px; }\n\n/* ---------------- 恢复头行分隔线（线是必须的），高度先回到 40px，待与宿主对齐后再微调 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 1px solid var(--line-soft);\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header\n   （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）\n   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  display: flex;\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  align-items: center;\n  flex-wrap: nowrap;\n  gap: 4px;\n  height: 38px;\n  min-height: 38px;\n  padding: 0 6px 0 16px;\n  border-bottom: 0.5px solid var(--dsw-alias-border-l3);\n  overflow: hidden;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 12px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */\n.kn-root-fill .kn-btn {\n  border-color: var(--dsw-alias-border-l3, #d6e0dd);\n  color: var(--dsw-alias-label-secondary, #526663);\n  background: transparent;\n}\n.kn-root-fill .kn-btn:hover:not(:disabled) {\n  border-color: var(--dsw-alias-label-secondary, #526663);\n  color: var(--dsw-alias-label-primary, #192523);\n}\n.kn-root-fill .kn-btn:disabled { opacity: .5; }\n\n/* ---------------- 聚焦视图：分组块内，标签下方加一条分隔线，节点一律在线以下 ---------------- */\n\n\n/* ---------------- agent 提案审阅区 ---------------- */\n\n.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }\n.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }\n.kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }\n.kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }\n.kn-plan-summary { font-size: 12px; opacity: .8; }\n.kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }\n.kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }\n.kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }\n.kn-plan-tag.is-reuse { opacity: .6; }\n.kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }\n.kn-plan-hint { font-size: 11px; opacity: .55; }\n.kn-plan-note { font-size: 12px; opacity: .85; }\n.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }\n\n/* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */\n.kn-empty-hint {\n  position: absolute; left: 0; right: 0; top: 0;\n  padding: 10px 12px; text-align: center;\n  pointer-events: none;\n}\n\n/* 危险按钮（彻底删除）：红字描边，视觉上与\"备份删除\"分得开 */\n.kn-modal-btn.is-danger {\n  color: #e5534b;\n  border: 0.5px solid rgba(229, 83, 75, 0.5);\n}\n.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }\n\n/* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------\n   `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），\n   它们是 `.kn-btn` 单类选择器、与本组同优先级 ⇒ **后出现者胜**。\n   所以圆环刷新按钮的形状只能放在最后，否则某档尺寸下又会被撑回\"文字胶囊\"✗。 */\n.kn-root-fill .kn-btn.kn-icon-btn {\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  line-height: 1;\n  flex: none;\n}\n.kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {\n  border: none;\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n  color: var(--dsw-alias-label-primary, #192523);\n}\n/* ============================================================================\n   KnowledgeNet · 画布：二维聚焦与三维空间视图\n   ----------------------------------------------------------------------------\n   画布：二维聚焦与三维空间视图\n   由 src/styles.css 按小节边界拆分而来：段内内容与顺序都没有改动，\n   导入顺序见 src/main.tsx（响应式那一份排在最后，覆盖才生效）。\n   ========================================================================== */\n\n/* ------------------------------- 画布：图 ------------------------------- */\n\n/*\n * 二维聚焦画布：背景不再是规则点阵，而是「低对比度微尘 + 中心雾光」。\n * 规则点阵会暗示这是一张二维平面，而这里只是**同一张三维网的一个切面**；\n * 微尘与雾光不带方向感，也不与卡片抢注意力。\n */\n.graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n  overflow: hidden;\n  border-top: 1px solid var(--line-soft);\n  background-color: var(--canvas);\n  background-image:\n    radial-gradient(circle at 50% 44%, var(--accent-faint), transparent 38%),\n    radial-gradient(circle at 80% 18%, rgba(93, 113, 168, 0.035), transparent 30%),\n    radial-gradient(var(--dot) 0.7px, transparent 0.7px);\n  background-size: 100% 100%, 100% 100%, 26px 26px;\n}\n\n.graph-scroll {\n  position: absolute;\n  inset: 0;\n  overflow: auto;\n  /*\n   * 稳定预留滚动条的位置。**这一行是必须的，不是优化。**\n   *\n   * 分屏比例算出来的面板宽度经常是小数（例如 1236.75），而 `clientWidth` 会取整（1237）。\n   * 画布平面的尺寸取自 `clientWidth`，于是它比真实内容盒大不到 1px → 出现滚动条 →\n   * `clientWidth` 少掉滚动条那几像素 → ResizeObserver 把平面改小 → 滚动条又消失 → 平面又变大……\n   * 一帧一轮，永不停歇：桌面上看到的就是「图谱视图不停抖动」（WebView2 用经典滚动条，\n   * 必然复现；无头 Chrome 默认 overlay 滚动条，所以自检一直没发现）。\n   *\n   * `scrollbar-gutter: stable` 让 `clientWidth` 与「滚动条在不在」无关，环路从根上断掉：\n   * 平面尺寸不再反复变，滚动条要么一直有、要么一直没有。\n   */\n  scrollbar-gutter: stable;\n}\n\n.graph-plane {\n  position: relative;\n  transform-origin: top center;\n  transition: transform 0.2s;\n}\n\n.graph-lines {\n  position: absolute;\n  inset: 0;\n  width: 100%;\n  height: 100%;\n  pointer-events: none;\n  overflow: visible;\n}\n\n/*\n * 连线：可见层 + 命中层（六项交互修复第 1 条）\n *\n * 可见线只有 1–1.6px，鼠标根本点不准，因此每条边还有一个 12px 宽的**透明命中层**：\n * 它只在描边上命中（`pointer-events: stroke`），不挡住节点卡片，也不改变任何视觉。\n * `vector-effect: non-scaling-stroke` 让命中宽度不随平面缩放变化——\n * 缩到 60% 时命中区不该跟着缩成 7px。\n */\n.graph-edge-hit {\n  pointer-events: stroke;\n  cursor: context-menu;\n}\n\n.graph-edge-hit:focus {\n  outline: none;\n}\n\n/* 悬停与选中都加粗、提亮同一条可见线；命中层不参与视觉 */\n.graph-edge:hover .graph-edge-line,\n.graph-edge:focus-within .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n/*\n * 已选中的关系要**一直**看得出来：它比悬停更持久——\n * 右键菜单关掉之后，用户还得能认出刚才那条线是哪一条。\n */\n.graph-edge[data-selected=\"true\"] .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n.graph-label {\n  position: absolute;\n  left: 24px;\n  font-size: 12px;\n  letter-spacing: 0.02em;\n  color: var(--muted);\n  pointer-events: none;\n}\n\n/*\n * 画布节点：一张轻卡片。\n *\n * 与之前的三处区别：圆角 12px、边框用 `--line-soft`（分组线，不是硬边界）、\n * 状态从彩色胶囊变成「小圆点 + 文字」、选中靠一圈强调色光晕而不是加粗整张卡。\n */\n.graph-node {\n  position: absolute;\n  z-index: 2;\n  display: flex;\n  flex-direction: column;\n  justify-content: center;\n  gap: 9px;\n  width: 172px;\n  min-height: 84px;\n  padding: 13px 15px;\n  transform: translate(-50%, -50%);\n  border: 1px solid var(--line-soft);\n  border-radius: var(--radius-node);\n  background: var(--surface);\n  box-shadow: var(--shadow-soft);\n  text-align: left;\n  transition:\n    background 0.18s,\n    border-color 0.18s,\n    box-shadow 0.18s,\n    transform 0.18s,\n    width 0.18s;\n}\n\n.graph-node:hover {\n  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));\n  box-shadow: var(--shadow);\n  transform: translate(-50%, -50%) translateY(-2px);\n}\n\n.graph-node.selected {\n  z-index: 4;\n  width: 190px;\n  border-color: var(--accent);\n  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-soft);\n}\n\n.graph-node.root:not(.selected) {\n  background: var(--surface-raised);\n}\n\n.graph-node-title {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 600;\n  line-height: 1.45;\n  overflow-wrap: anywhere;\n}\n\n.graph-node.selected .graph-node-title {\n  font-size: 15px;\n}\n\n.graph-node-icon {\n  display: grid;\n  place-items: center;\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  border-radius: 7px;\n  background: var(--canvas-soft);\n  color: var(--secondary);\n}\n\n.graph-node.selected .graph-node-icon {\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-node-icon .icon {\n  width: 14px;\n  height: 14px;\n}\n\n.graph-node-bottom {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n/* 节点状态：小圆点 + 文字，不是胶囊 */\n.graph-node-status {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  font-size: 12px;\n  color: var(--secondary);\n}\n\n.graph-node-status.is-learning {\n  color: var(--warning);\n}\n\n.graph-node-status.is-done {\n  color: var(--success);\n}\n\n.graph-node-info {\n  font-size: 12px;\n  color: var(--muted);\n  white-space: nowrap;\n}\n\n/* 三维空间视图：画布交给 WebGL，不再铺二维底纹 */\n.graph[data-mode=\"space\"] {\n  background-image: none;\n}\n\n/*\n * 画布浮层（缩放 / 图例 / 当前视图说明）：统一成「半透明底 + 模糊」的玻璃片，\n * 而不是三个各自带边框和阴影的小盒子。\n *\n * 参考图里这些浮层**没有边框**（`.space-status`/`.graph-legend`/`.graph-help`\n * 都只有 `--canvas 82%` 的底 + blur），边框是这版实现多出来的结构感；\n * 去掉之后画布更通透，浮层仍然读得清。\n */\n.canvas-controls,\n.graph-legend,\n.selection-label {\n  display: flex;\n  align-items: center;\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.canvas-controls {\n  position: absolute;\n  bottom: 16px;\n  left: 16px;\n  z-index: 6;\n  gap: 2px;\n  padding: 4px;\n}\n\n.canvas-controls .icon-btn {\n  width: 30px;\n  height: 30px;\n}\n\n.canvas-controls output {\n  min-width: 38px;\n  font-size: 12px;\n  color: var(--secondary);\n  text-align: center;\n}\n\n.canvas-controls .sep {\n  width: 1px;\n  height: 16px;\n  margin: 0 3px;\n  background: var(--line-soft);\n}\n\n.graph-legend {\n  position: absolute;\n  right: 16px;\n  bottom: 16px;\n  z-index: 6;\n  gap: 13px;\n  padding: 7px 9px;\n  pointer-events: none;\n}\n\n.graph-legend span {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n\n.graph-legend .status-dot {\n  width: 7px;\n  height: 7px;\n  /* 参考图的图例点带一点内阴影：小圆点因此不是一个纯色贴片 */\n  box-shadow: inset -1px -1px 2px rgba(0, 0, 0, 0.25);\n}\n\n/* 「未开始」用 --todo（#74878d），与参考图的图例一致，而不是文字用的中性灰 */\n.graph-legend .status-dot:not(.is-learning):not(.is-done) {\n  background: var(--todo);\n}\n\n.selection-label {\n  position: absolute;\n  top: 14px;\n  left: 16px;\n  z-index: 6;\n  gap: 7px;\n  padding: 7px 9px;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.selection-label .status-dot {\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 名称密度已收进工具栏的「视图设置」菜单（验收清单 P2-6）：这里的下拉框规则删除 */\n\n/* ------------------------- 三维空间视图（GraphUniverse） ------------------------- */\n\n.universe {\n  position: absolute;\n  inset: 0;\n  overflow: hidden;\n  /* 指针手势全部由相机控制器接管：拖动转向、滚轮缩放，都不要触发页面滚动 */\n  touch-action: none;\n  /*\n   * 平时是普通箭头，**按下左键拖动时**才变成一只手（`data-dragging` 由\n   * `graph3d/navigation.ts` 的指针状态机打上/取下）。\n   * 整块画布常驻 `cursor: grab` 会让人以为「这里有东西可以抓」，\n   * 而它其实只是一个观察视图。\n   */\n  cursor: default;\n  /*\n   * 中心辉光由 CSS 画（不占 GPU 绘制调用）：三维画布本身是透明的，\n   * 底色与辉光都来自这一层，于是「星空 + 雾」与主题切换天然一致。\n   *\n   * 参数照参考图 `drawBackground()`：圆心 (51%, 48%)、半径 58% 视口长边、\n   * 两个 stop（--graph-glow-1 / -2）。二维视图那层蓝色辉光不在这里——\n   * 参考图的空间画布是不透明的，那层压根看不见。\n   */\n  background-image: radial-gradient(\n    circle 58vmax at 51% 48%,\n    var(--graph-glow-1),\n    var(--graph-glow-2) 48%,\n    transparent\n  );\n}\n\n/* 按住左键拖动时才是「抓住」的手型（状态由指针状态机给出） */\n.universe[data-dragging=\"true\"] {\n  cursor: grabbing;\n}\n\n.universe:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n.universe-canvas {\n  position: absolute;\n  inset: 0;\n  display: block;\n  width: 100%;\n  height: 100%;\n}\n\n/* 标题层：有限、自行投影的 HTML 标签，不随全图缩放，也不吃指针事件 */\n.universe-labels {\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n  overflow: hidden;\n}\n\n.universe-label {\n  position: absolute;\n  top: 0;\n  left: 0;\n  max-width: 220px;\n  white-space: nowrap;\n  font-size: 12px;\n  line-height: 1.3;\n  letter-spacing: 0.01em;\n  /*\n   * 文字描边用画布底色：节点背后有连线时仍然读得清。\n   * 参考图是在画布上先 stroke 一圈 4px 的底色再 fill，这里用一圈无模糊的\n   * 阴影近似同一个「光晕」效果——方块字有笔画间隙，模糊版本会糊成一团。\n   */\n  text-shadow:\n    0 0 3px var(--canvas),\n    0 0 3px var(--canvas),\n    1px 0 0 var(--canvas),\n    -1px 0 0 var(--canvas),\n    0 1px 0 var(--canvas),\n    0 -1px 0 var(--canvas);\n  will-change: transform;\n}\n\n/* 三档配色与参考图一致：选中 = accent-strong，相关/悬停 = 正文色，普通 = 次要色 */\n.universe-label.is-selected {\n  color: var(--accent-strong);\n}\n\n.universe-label.is-related {\n  color: var(--text);\n}\n\n.universe-label.is-normal {\n  color: var(--secondary);\n}\n\n/* 画布浮层统一成「玻璃片」：半透明底 + 模糊，不抢星空的视觉 */\n.universe-status,\n.universe-hint,\n.universe-offstage,\n.universe-tooltip {\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n/*\n * 布局状态条放右上角。\n *\n * 左上角已经被「当前视图说明」（`.selection-label`）占住——参考图那里只有\n * 一条状态，这一版有两件事要说，因此把「布局在算什么」移到右上：\n * 两块玻璃片各占一角，不互相压字。\n */\n.universe-status {\n  position: absolute;\n  top: 14px;\n  right: 16px;\n  z-index: 6;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 9px;\n  /* 状态句不许折行：折一次就会在「可自由探索」中间断开，看着像被裁掉 */\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n.universe-status .statuslight {\n  width: 6px;\n  height: 6px;\n  border-radius: 50%;\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 旧的「模式提示横幅」样式已随控制方式开关一起删除：\n   只剩环绕观察一种控制方式时，不需要再提示当前处于哪种模式 */\n\n.universe-offstage {\n  position: absolute;\n  left: 50%;\n  bottom: 58px;\n  transform: translateX(-50%);\n  z-index: 7;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 12px;\n  /* 它是可点的按钮，不是说明条：这里保留一圈强调色边框 */\n  border: 1px solid var(--accent);\n  color: var(--accent-text);\n}\n\n.universe-tooltip {\n  position: absolute;\n  z-index: 8;\n  display: grid;\n  gap: 4px;\n  min-width: 150px;\n  max-width: 230px;\n  padding: 10px 11px;\n  border: 1px solid var(--line);\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);\n  box-shadow: var(--shadow);\n  pointer-events: none;\n}\n\n.universe-tooltip strong {\n  color: var(--text);\n  font-size: 13px;\n  font-weight: 650;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.universe-tooltip span {\n  color: var(--muted);\n  font-size: 12px;\n  white-space: nowrap;\n}\n\n/* 操作提示放左下角：与左下角的缩放控件同一侧，不与图例抢位置 */\n.universe-hint {\n  position: absolute;\n  left: 16px;\n  bottom: 16px;\n  z-index: 5;\n  padding: 7px 9px;\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n/* WebGL 2 不可用或上下文丢失：给明确出路，而不是留一块黑画布 */\n.universe-fallback {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n}\n\n.universe-fallback h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.universe-fallback p {\n  max-width: 380px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n.universe-fallback-actions {\n  display: flex;\n  gap: 10px;\n  margin-top: 6px;\n}\n\n/* 画布空态：没有目标或没有节点时，说明下一步做什么 */\n.graph-empty {\n  position: absolute;\n  inset: 0;\n  z-index: 3;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.graph-empty .empty-mark {\n  display: grid;\n  place-items: center;\n  width: 43px;\n  height: 43px;\n  border-radius: 13px;\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-empty h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.graph-empty p {\n  max-width: 320px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n/* 首屏拉取三维代码时的占位（图谱按需加载，见 WorkspaceShell） */\n.graph-loading {\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 12px;\n  height: 100%;\n  color: var(--muted);\n  font-size: 13px;\n}\n\n.graph-loading .spinner {\n  width: 20px;\n  height: 20px;\n  border-width: 2px;\n}\n\n";
+		const KN_PANEL_CSS = "/* ============================================================================\n   KnowledgeNet 插件面板样式（注入到 Shadow Root 内）\n   ----------------------------------------------------------------------------\n   1) token 桥：把上游 graph.css 用的 KnowledgeNet 变量名，映射到宿主主题 token\n      （--dsw-alias-*，取自 cordis_inspect_query 的 Theme provider）。宿主主题切换时\n      这些自定义属性会随宿主一起变，因此亮/暗色自动跟随。\n   2) 面板自身的少量骨架样式。所有颜色都来自 token，只有阴影与圆角是字面值。\n   注意：本文件不引入任何全局选择器，且只在 Shadow Root 内生效，不会污染宿主页面。\n   ========================================================================== */\n\n.kn-root {\n  --surface: var(--dsw-alias-bg-layer-1, #ffffff);\n  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);\n  --canvas: var(--dsw-alias-bg-base, #f5f8f7);\n  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);\n  --text: var(--dsw-alias-label-primary, #192523);\n  --secondary: var(--dsw-alias-label-secondary, #526663);\n  --muted: var(--dsw-alias-state-idle-primary, #778a87);\n  --border: var(--dsw-alias-border-l2, #d6e0dd);\n  --line: var(--dsw-alias-border-l1, #d6e0dd);\n  --line-soft: var(--dsw-alias-border-l1, #e5ecea);\n  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);\n  --dot: var(--dsw-alias-border-l1, #dbe4e1);\n  --accent: var(--dsw-alias-brand-primary, #167f68);\n  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);\n  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);\n  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);\n  --accent-text: var(--dsw-alias-brand-primary, #146b58);\n  --success: var(--dsw-alias-state-success-primary, #2f8a70);\n  --warning: var(--dsw-alias-state-warn-primary, #a8762c);\n  --todo: var(--dsw-alias-state-idle-primary, #74878d);\n  --danger: var(--dsw-alias-state-error-primary, #c63e48);\n  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);\n  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);\n  /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */\n  --on-accent: #ffffff;\n  --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);\n  --shadow-soft: 0 5px 24px rgba(0, 0, 0, 0.1);\n  --radius: 12px;\n  --radius-node: 12px;\n\n  display: flex;\n  flex-direction: column;\n  box-sizing: border-box;\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n  line-height: 1.5;\n}\n\n.kn-root *,\n.kn-root *::before,\n.kn-root *::after {\n  box-sizing: border-box;\n}\n\n.kn-head {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 4px 10px;\n  align-items: baseline;\n  padding: 8px 12px;\n  border-bottom: 1px solid var(--line);\n  background: var(--surface-raised);\n}\n\n.kn-head-title {\n  font-weight: 600;\n}\n\n.kn-head-meta {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-head-hint {\n  margin-left: auto;\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n}\n\n.kn-graph > .graph {\n  height: 100%;\n}\n\n/*\n * 三维视图的挂载壳：**常驻挂载**，可见性只用显隐表达 ✓。\n *\n * 为什么不再\"不可见就卸载\"：每次重挂都会新建一个 WebGL 上下文与画布 ✗，\n * 浏览器上下文数量到上限就会丢上下文（「三维绘制已中断」那一页 ✗）；\n * 而上游渲染循环是按需唤醒的 ⇒ 常驻几乎不耗电 ✓。\n */\n.kn-graph-stage {\n  position: absolute;\n  inset: 0;\n}\n\n.kn-graph-stage[data-visible=\"false\"] {\n  /* 保留布局尺寸（避免重排），但不可见也不可交互 ✓ */\n  visibility: hidden;\n}\n\n/* ---------------- 右下角实时截面小地图（用户手绘那张图的界面版） ---------------- */\n\n/*\n * 位置：**右下角**（上游状态灯在上右、提示在下左，这里不撞）✓。\n * `pointer-events: none` 是关键：它只是\"仪表\"，绝不能吃掉画布上的拖动/滚轮 ✗。\n */\n.kn-minimap {\n  position: absolute;\n  right: 12px;\n  bottom: 12px;\n  z-index: 5;\n  pointer-events: none;\n  opacity: 0.9;\n}\n\n.kn-minimap svg {\n  display: block;\n}\n\n/* 两张正交位置图并排（共享球心与比例尺 ✓） */\n.kn-minimap-row {\n  display: flex;\n  gap: 4px;\n}\n\n/* 每张图的纵轴记号（↑↓ / ↔） */\n.kn-minimap-glyph {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  font-size: 8px;\n}\n\n/* 朝向箭头：固定参考里的真实视线方向 ✓ */\n.kn-minimap-arrow {\n  stroke: var(--dsw-alias-label-primary, #1f2937);\n  stroke-width: 1.1;\n  stroke-linecap: round;\n}\n\n/* 视线垂直于本图平面时改用「朝内 ⊗ / 朝外 ⊙」符号 ✓ */\n.kn-minimap-outward {\n  stroke: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke-width: 0.9;\n  fill: none;\n}\n\n.kn-minimap-outward-dot {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke: none;\n}\n\n/* 操作包围球 */\n.kn-minimap-ball {\n  fill: none;\n  stroke: var(--dsw-alias-border-l2, #d6e0dd);\n  stroke-width: 1;\n}\n\n/* 过球心的基线（读出\"深入了多少\"） */\n.kn-minimap-axis {\n  stroke: var(--dsw-alias-border-l1, #e6ece9);\n  stroke-width: 0.7;\n  stroke-dasharray: 2 3;\n}\n\n/* 固定转动中心（黑点） */\n.kn-minimap-center {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 走过的路径 */\n.kn-minimap-trail {\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n}\n\n/* 视角当前位置：一只朝球里看的眼睛 */\n.kn-minimap-eye-outline {\n  fill: var(--dsw-alias-bg-layer-1, #ffffff);\n  stroke: var(--dsw-alias-label-primary, #1f2937);\n  stroke-width: 1.1;\n}\n\n.kn-minimap-pupil {\n  fill: var(--dsw-alias-label-primary, #1f2937);\n}\n\n/* 被夹到框边（真实位置还在更外面）时套一圈虚线 ✓ */\n.kn-minimap-clamped {\n  fill: none;\n  stroke: var(--dsw-alias-label-tertiary, #6b7280);\n  stroke-width: 0.8;\n  stroke-dasharray: 2 2;\n}\n\n/* 到球心的距离读数（单位 = 操作球半径；球外读数带 ↗，表示图上半径经过压缩 ✓） */\n.kn-minimap-distance {\n  margin-top: 2px;\n  fill: var(--dsw-alias-label-tertiary, #6b7280);\n  color: var(--dsw-alias-label-tertiary, #6b7280);\n  font-size: 8px;\n  font-variant-numeric: tabular-nums;\n  text-align: center;\n}\n\n/* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */\n.kn-graph > .graph-empty {\n  height: 100%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--muted);\n}\n\n.kn-msg {\n  padding: 10px 12px;\n  color: var(--muted);\n}\n\n/* 两个错误类名并存：.kn-error 是新的统一写法，.kn-msg-error 保留给早期卡片 */\n.kn-error,\n.kn-msg-error {\n  color: var(--danger);\n}\n\n.kn-simple {\n  padding: 8px 12px;\n  border: 1px solid var(--border);\n  border-radius: var(--radius);\n  background: var(--surface);\n  color: var(--text);\n  font-size: 13px;\n}\n\n/* ------------------------------ 紧凑卡片（节点 / 建前置） ------------------------------ */\n\n/* height: null 的 ShadowPanel 用这个类：按内容自适应，不再撑满父容器 */\n.kn-root-auto {\n  height: auto;\n  max-height: 460px;\n  /*\n   * 关键：auto 模式是「把组件嵌进宿主已有容器」用的（指南页的入口卡片就是），\n   * 所以必须**去掉面板外壳**——否则 .kn-root 的边框/底色会和卡片自己的框叠成两层\n   * （实测就是这样：外面一圈是外壳，里面一圈是卡片）。\n   */\n  border: 0;\n  border-radius: 0;\n  background: none;\n  overflow: visible;\n}\n\n/* height: \"fill\" 的 ShadowPanel 用这个类：撑满宿主给的面板区域 */\n.kn-root-fill {\n  height: 100%;\n}\n\n/* 左侧栏的「知识库」标志不在 Shadow DOM 里：它是一条注入到 head 的数据驱动样式，\n   规则由 src/client/badges-css.ts 生成（工作区行没有插槽，只有稳定的 data-row-key）。 */\n\n/* --------------------- 「开始」页上的入口卡片 --------------------- */\n\n/*\n * 卡片形状**逐项照抄**宿主指南页的胶囊（ui-sidebar-right 的 GuideBody.module.css `.entry`\n * 与 `.entryIcon`/`.entryText`/`.entryTitle`/`.entryDescription`）：尺寸、内边距、边框宽度、\n * 圆角、颜色 token 全部对齐，所以它和 shipped 的三张卡片看起来是同一套东西。\n * 类名与作用域仍然是我自己的（Shadow DOM 里），不 import 任何 Client 包。\n */\n.kn-guide-card {\n  display: flex;\n  gap: 14px;\n  align-items: center;\n  box-sizing: border-box;\n  width: 380px;\n  max-width: 100%;\n  min-height: 56px;\n  padding: 14px 20px;\n  color: var(--dsw-alias-label-primary, #1b1b1b);\n  font: inherit;\n  text-align: left;\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);\n  border-radius: var(--dsl-guide-entry-radius, 16px);\n  cursor: pointer;\n}\n\n.kn-guide-card:hover {\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));\n}\n\n.kn-guide-card:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 2px;\n}\n\n/* 26px 的固定盒子、安静一点的字色：与 shipped 卡片的字形框一致（**不要**填充底） */\n.kn-guide-icon {\n  display: flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 26px;\n  height: 26px;\n  color: var(--dsw-alias-label-secondary, #5c6b66);\n}\n\n.kn-guide-text {\n  display: flex;\n  flex: 1;\n  min-width: 0;\n  flex-direction: column;\n  gap: 3px;\n}\n\n.kn-guide-title {\n  overflow: hidden;\n  font-size: 14px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.kn-guide-desc {\n  overflow: hidden;\n  color: var(--dsw-alias-label-tertiary, #8a9994);\n  font-size: 11px;\n  line-height: 1.4;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* ------------------------------ 常驻面板 ------------------------------ */\n\n.kn-head-panel {\n  gap: 6px 10px;\n}\n\n.kn-modes {\n  display: inline-flex;\n  margin-left: auto;\n  gap: 4px;\n}\n\n.kn-btn {\n  padding: 2px 9px;\n  border: 1px solid var(--border);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  color: var(--secondary);\n  font: inherit;\n  font-size: 12px;\n  cursor: pointer;\n}\n\n.kn-btn:hover:not(:disabled) {\n  border-color: var(--accent);\n  color: var(--text);\n}\n\n.kn-btn.is-on {\n  border-color: var(--accent);\n  background: var(--accent-soft);\n  color: var(--accent-text);\n}\n\n.kn-btn:disabled {\n  opacity: 0.5;\n  cursor: default;\n}\n\n/* ---------------- 图标按钮（圆环刷新）：照抄宿主 `.tool` 的圆形图标按钮 ----------------\n   用户要求（2026-09）：把「刷新」从\"文字胶囊\"改成浏览器里那种圆环箭头。\n   尺寸直接沿用宿主产品里那颗（`ui-sidebar-files/src/client/FilesBody.module.css` 的 `.tool`：\n   28×28 圆 + `padding: 6px` + 15px 字形 + `--dsw-radius-sm` + 透明底、hover 只换底色/字色）✓。\n   注意：`.kn-root-fill .kn-btn` 那几条响应式规则会给按钮写死高度与左右内边距，\n   所以这些\"形状\"属性统一放在文件**末尾**（同优先级、后出现者胜）—— 见文末那组覆盖。 */\n.kn-icon-btn {\n  display: inline-flex;\n  flex: none;\n  align-items: center;\n  justify-content: center;\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  color: var(--dsw-alias-label-secondary, #526663);\n  line-height: 1;\n  cursor: pointer;\n}\n\n.kn-icon-btn:hover:not(:disabled) {\n  color: var(--dsw-alias-label-primary, #192523);\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n}\n\n.kn-icon-btn svg {\n  width: 15px;\n  height: 15px;\n  flex: none;\n}\n\n.kn-icon-btn:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: 1px;\n}\n\n/* ---------------- 搜索框（照浏览器那条工具行） ----------------\n   用户要求 2026-10：搜索框要**和刷新按钮同一行、排在它后面**（浏览器就是 `[←][→][⟳] [地址栏] [↗]`）✓。\n   所以这里不再自己占一行：`.kn-search` 只是头部 flex 行里的一个**可伸缩子项**，\n   高度/内边距/分隔线都沿用 `.kn-root-fill .kn-head-panel` 那一套 ✓。\n   形态与宿主地址栏对齐：28px 高、0.5px 边框、`--dsw-radius-sm`、focus 时描一圈 ✓。 */\n.kn-search {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  align-self: center;\n  gap: 4px;\n  min-width: 0;\n}\n\n.kn-search-box {\n  display: flex;\n  flex: 1 1 auto;\n  align-items: center;\n  gap: 8px;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  padding: 0 9px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-1, #ffffff);\n  /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */\n  position: relative;\n}\n\n.kn-search-box:focus-within {\n  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);\n  outline-offset: -1px;\n}\n\n.kn-search-box svg {\n  flex: none;\n  width: 14px;\n  height: 14px;\n  color: var(--dsw-alias-label-secondary, #526663);\n}\n\n.kn-search-field {\n  flex: 1 1 auto;\n  min-width: 0;\n  height: 100%;\n  padding: 0;\n  border: 0;\n  outline: 0;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n}\n\n/* 边打边算的**候选列表**（用户反馈 2026-10：命中多个时列出来让用户自己挑，别替他决定 ✓）\n   绝对定位在**输入框那一格**下面（`left/right: 0` ⇒ 与输入框等宽 ✓），浮在图上方；\n   层级只要高过画布即可（画布没有 z-index）✓ */\n.kn-search-list {\n  position: absolute;\n  top: 30px;\n  left: 0;\n  right: 0;\n  z-index: 5;\n  display: flex;\n  flex-direction: column;\n  max-height: 264px;\n  overflow: auto;\n  padding: 4px;\n  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: var(--dsw-alias-bg-layer-2, #1b1b1b);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);\n}\n\n.kn-search-item {\n  display: flex;\n  align-items: baseline;\n  gap: 8px;\n  min-height: 26px;\n  padding: 4px 8px;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  text-align: left;\n  cursor: pointer;\n}\n\n.kn-search-item.is-active {\n  background: var(--dsw-alias-interactive-bg-hover, #292929);\n}\n\n.kn-search-item-title {\n  min-width: 0;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n/* 别名命中时补一句\"是哪个别名命中的\"，并靠右显示 ✓ */\n.kn-search-item-alias {\n  flex: none;\n  margin-left: auto;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n.kn-search-empty {\n  padding: 6px 8px;\n  color: var(--dsw-alias-label-tertiary, #8a8a8a);\n  font-size: 11px;\n}\n\n/*\n * 候选列表在头部行里做**浮层**，而 `.kn-root-fill .kn-head-panel` 是 `overflow: hidden`\n * ⇒ 不加这一条，下拉会被头部那一行直接裁掉（实测：渲染出来什么都看不见 ✗）。\n * 类名写在元素上（`.kn-head-panel.is-search-open`）比特异性：两个类 > 一个类，与顺序无关 ✓。\n */\n.kn-root-fill .kn-head-panel.is-search-open {\n  overflow: visible;\n}\n\n/*\n * **画布不要那圈焦点环**（用户两次反馈：\"点击之后这个边框会变得高亮，很奇怪\" / \"怎么又变成高亮了\"）。\n *\n * 环来自上游 `graph.css` 的 `.universe:focus-visible`：画布需要在指针按下时拿到焦点，\n * F / 方向键才生效（`graph3d/navigation.ts` 主动 focus）✓。\n *\n * 之前只压\"鼠标点出来的那一次\"（靠 `[data-pointer-focus]`）✗ —— 不够：\n * **宿主/脚本聚焦**画布时（切标签、侧栏重排后自动聚焦）浏览器同样算 `:focus-visible` ✗，\n * 那时标记不在，环就又出来了。\n * 所以这里**不再依赖浏览器的 `:focus-visible` 启发式** ✗：\n * `:focus` 与 `:focus-visible` 一起压掉 ✓，键盘可达性改用**我们自己打的标记**给提示 ✓。\n * 特异性：`.kn-root` 前缀 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。\n */\n.kn-root .universe:focus,\n.kn-root .universe:focus-visible {\n  outline: none;\n}\n\n/*\n * 键盘 Tab 聚焦时才给可见提示 ✓（标记由面板在捕获阶段打：Tab 打上、指针按下清掉 ✓）。\n * 可访问性不掉：键盘用户仍然看得见焦点在哪。\n */\n.kn-root .universe[data-keyboard-focus=\"true\"]:focus {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n/* ===================== 节点笔记编辑器 ===================== */\n\n/*\n * 视觉照 `design/node-note-editor.html` 抄 ✓（只抄\"编辑节点对应的文档\"那一块 ✗ ——\n * 设计稿里的图谱示意与\"模拟外部修改\"按钮是演示用的，不抄 ✓）。\n * 颜色改用宿主主题变量，浅色/深色都跟主题走 ✓。\n */\n\n/* 上游那个 `sr-only` 播报在 graph.css 里**没有对应类** ⇒ 按普通段落渲染、会露出来 ✗ */\n.kn-root .sr-only {\n  position: absolute;\n  width: 1px;\n  height: 1px;\n  margin: -1px;\n  padding: 0;\n  overflow: hidden;\n  clip-path: inset(50%);\n  white-space: nowrap;\n  border: 0;\n}\n\n/* 选中节点信息条 + 编辑入口（图谱左上角 ✓） */\n.kn-sel {\n  position: absolute;\n  left: 14px;\n  top: 14px;\n  z-index: 3;\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  max-width: calc(100% - 28px);\n  padding: 10px 14px;\n  border: 1px solid var(--dsw-alias-border-secondary, #303030);\n  border-radius: 9px;\n  background: var(--dsw-alias-bg-elevated, rgba(25, 31, 28, 0.92));\n  color: var(--dsw-alias-label-primary, #e4ebe6);\n}\n\n.kn-sel-tag {\n  padding: 2px 8px;\n  border-radius: 4px;\n  background: var(--dsw-alias-interactive-bg-hover, #27372e);\n  color: var(--dsw-alias-label-secondary, #b5cfbd);\n  font-size: 11px;\n}\n\n.kn-sel-title {\n  font-size: 13px;\n}\n\n.kn-sel-sub {\n  margin-top: 2px;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 11px;\n}\n\n.kn-sel-edit {\n  flex: none;\n  padding: 6px 12px;\n  border: 1px solid var(--dsw-alias-border-secondary, #303030);\n  border-radius: 7px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\n\n.kn-sel-edit:hover {\n  background: var(--dsw-alias-interactive-bg-hover, #29352e);\n}\n\n/*\n * 编辑器本体。\n *\n * 宽面板**并排**（图谱让出右侧 440px ✓）；窄侧栏**覆盖**在图谱上（设计稿的媒体查询口径 ✓）。\n * 用容器查询而不是视口媒体查询：判据是**面板自己的宽度** ✗（侧栏可以很窄而窗口很宽 ✓）。\n */\n.kn-graph {\n  container-type: inline-size;\n}\n\n.kn-editor {\n  position: absolute;\n  top: 0;\n  right: 0;\n  bottom: 0;\n  z-index: 4;\n  display: flex;\n  flex-direction: column;\n  width: min(440px, 100%);\n  border-left: 1px solid var(--dsw-alias-border-secondary, #303030);\n  background: var(--dsw-alias-bg-elevated, #191e1c);\n  color: var(--dsw-alias-label-primary, #e4ebe6);\n  box-shadow: -15px 0 50px rgba(0, 0, 0, 0.35);\n}\n\n/* 宽面板：并排（图谱缩到左边，编辑区不压住它 ✓） */\n@container (min-width: 720px) {\n  .kn-graph-stage[data-visible=\"true\"] {\n    padding-right: 440px;\n  }\n\n  .kn-editor {\n    box-shadow: none;\n  }\n}\n\n.kn-editor-heading {\n  padding: 16px 18px 12px;\n  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);\n}\n\n.kn-editor-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 12px;\n}\n\n.kn-editor-tag {\n  padding: 2px 8px;\n  border-radius: 4px;\n  background: var(--dsw-alias-interactive-bg-hover, #27372e);\n  color: var(--dsw-alias-label-secondary, #b5cfbd);\n  font-size: 11px;\n}\n\n.kn-editor-close {\n  padding: 2px 8px;\n  border: 0;\n  border-radius: 6px;\n  background: transparent;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 16px;\n  line-height: 1;\n  cursor: pointer;\n}\n\n.kn-editor-title {\n  margin: 8px 0 0;\n  font-size: 17px;\n  font-weight: 500;\n}\n\n.kn-editor-path {\n  margin-top: 4px;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-family: ui-monospace, monospace;\n  font-size: 11px;\n  word-break: break-all;\n}\n\n.kn-editor-tabs {\n  display: flex;\n  gap: 16px;\n  padding: 8px 18px;\n  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);\n}\n\n.kn-editor-tabs button {\n  padding: 4px 0;\n  border: 0;\n  border-radius: 0;\n  background: transparent;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font: inherit;\n  cursor: pointer;\n}\n\n.kn-editor-tabs button.is-active {\n  color: var(--dsw-alias-label-primary, #e4ebe6);\n  box-shadow: 0 2px currentColor;\n}\n\n.kn-editor-notice {\n  padding: 10px 18px;\n  background: var(--dsw-alias-bg-warning, #443823);\n  color: var(--dsw-alias-label-warning, #edcf9e);\n  font-size: 12px;\n}\n\n.kn-editor-notice-actions {\n  margin-top: 8px;\n}\n\n.kn-editor-notice-actions button,\n.kn-editor-retry {\n  padding: 4px 10px;\n  border: 1px solid currentColor;\n  border-radius: 6px;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\n\n/* 破坏性动作（放弃草稿）要看得出来 ✓ */\n.kn-editor-notice-actions button.is-danger {\n  border-color: var(--dsw-alias-border-danger, #a8564f);\n  color: var(--dsw-alias-label-error, #f0a8a8);\n}\n\n/* 「放弃草稿」的二次确认卡片（复查 P1-2：替换草稿必须先确认 ✓） */\n.kn-editor-confirm {\n  margin: 10px 18px 0;\n  padding: 12px 14px;\n  border: 1px solid var(--dsw-alias-border-danger, #a8564f);\n  border-radius: 8px;\n  background: var(--dsw-alias-bg-elevated, #191e1c);\n}\n\n.kn-editor-confirm-title {\n  font-size: 13px;\n}\n\n.kn-editor-confirm-body {\n  margin: 6px 0 10px;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 12px;\n}\n\n.kn-editor-latest {\n  margin: 8px 0 0;\n  max-height: 160px;\n  overflow: auto;\n  white-space: pre-wrap;\n  font-family: ui-monospace, monospace;\n  font-size: 11px;\n}\n\n.kn-editor-hint {\n  padding: 10px 18px 0;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 11px;\n}\n\n.kn-editor-body {\n  flex: 1;\n  min-height: 0;\n  padding: 0 18px;\n  overflow: auto;\n}\n\n.kn-editor-text {\n  width: 100%;\n  height: 100%;\n  min-height: 220px;\n  padding: 8px 0 20px;\n  border: 0;\n  outline: none;\n  resize: none;\n  background: transparent;\n  color: inherit;\n  font-family: ui-monospace, \"Microsoft YaHei\", monospace;\n  font-size: 13px;\n  line-height: 1.9;\n}\n\n.kn-editor-text:focus {\n  box-shadow: inset 2px 0 var(--dsw-alias-border-secondary, #3a4a40);\n  padding-left: 10px;\n}\n\n.kn-editor-preview {\n  padding: 5px 0 30px;\n  white-space: pre-wrap;\n  font-size: 13px;\n  line-height: 1.9;\n}\n\n.kn-editor-preview h3 {\n  margin: 14px 0 8px;\n  font-size: 15px;\n  color: var(--dsw-alias-label-secondary, #bddfc8);\n}\n\n.kn-editor-dim {\n  padding: 14px 0;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 12px;\n}\n\n.kn-editor-error {\n  padding: 14px 0;\n  color: var(--dsw-alias-label-error, #f0a8a8);\n  font-size: 12px;\n}\n\n.kn-editor-foot {\n  padding: 12px 18px 16px;\n  border-top: 1px solid var(--dsw-alias-border-secondary, #303030);\n}\n\n.kn-editor-status {\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 12px;\n}\n\n.kn-editor-status.is-conflict {\n  color: var(--dsw-alias-label-warning, #edcf9e);\n}\n\n.kn-editor-save {\n  padding: 6px 13px;\n  border: 0;\n  border-radius: 7px;\n  background: var(--dsw-alias-accent, #a9d3b9);\n  color: #183124;\n  font: inherit;\n  cursor: pointer;\n}\n\n.kn-editor-save:disabled {\n  opacity: 0.45;\n  cursor: default;\n}\n\n.kn-editor-sub {\n  margin-top: 10px;\n  color: var(--dsw-alias-label-tertiary, #94a399);\n  font-size: 11px;\n}\n\n/* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */\n\n.kn-warn-inline {\n  padding: 6px 12px;\n  border: 0;\n  border-bottom: 1px solid var(--line-soft);\n  border-radius: 0;\n}\n\n.kn-body {\n  display: flex;\n  flex: 1 1 auto;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 0;\n  padding: 8px 12px;\n  overflow: auto;\n}\n\n.kn-sect {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.kn-sect-title {\n  color: var(--secondary);\n  font-weight: 600;\n}\n\n.kn-chips {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n}\n\n.kn-chip {\n  padding: 1px 8px;\n  border: 1px solid var(--line);\n  border-radius: 999px;\n  background: var(--surface-raised);\n  font-size: 12px;\n}\n\n.kn-list {\n  margin: 0;\n  padding-left: 14px;\n}\n\n.kn-list li {\n  margin: 2px 0;\n}\n\n.kn-arrow {\n  color: var(--accent);\n}\n\n.kn-dim {\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.kn-tag {\n  margin-left: 6px;\n  padding: 0 6px;\n  border-radius: 999px;\n  background: var(--accent-soft);\n  color: var(--accent-text);\n  font-size: 11px;\n}\n\n.kn-note {\n  margin: 0;\n  max-height: 220px;\n  padding: 8px;\n  overflow: auto;\n  border-radius: 8px;\n  background: var(--canvas-soft);\n  font-size: 12px;\n  white-space: pre-wrap;\n  word-break: break-word;\n}\n\n.kn-warn {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  padding: 8px;\n  border: 1px solid var(--warning);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--warning) 10%, transparent);\n}\n\n/* ---------------- 聚焦视图（胶囊 + 两个矩形框） ---------------- */\n\n\n\n\n/* ---------------- 聚焦视图：收紧空间（覆盖上面的默认值） ---------------- */\n\n\n/* 箭头改成水平（朝右） */\n\n/* 面板很窄时退回纵向（等价于原来那套），避免挤压 */\n@media (max-width: 900px) {\n}\n\n/* ---------------- 标签页模式：去掉卡片外壳，和宿主其它标签页一致（贴边铺满） ---------------- */\n\n.kn-root-fill {\n  border: 0;\n  border-radius: 0;\n  background: transparent;\n  box-shadow: none;\n}\n/* 头部与内容之间只留一条与宿主同风格的分隔线，不再自成一张卡片 */\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-graph { background: transparent; }\n\n/* ---------------- 标签页模式：与宿主其它标签页同一套网格（头行 + 贯通分隔线 + 统一左起点） ---------------- */\n\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 0 12px;\n  min-height: 44px;\n  display: flex;\n  align-items: center;\n  border-radius: 0;\n  border-bottom: 1px solid var(--line-soft);\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n.kn-root-fill .kn-graph { padding: 0; }\n/* 内容区与头行左对齐：聚焦/空间视图不各加一层内边距 */\n.kn-root-fill .kn-msg { padding: 12px; }\n.kn-root-fill .kn-warn-inline { margin: 0 12px; }\n\n/* ---------------- 标签页模式：不再自画头部分隔线（否则永远与宿主的线对不齐） ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  margin: 0;\n  padding: 6px 12px;\n  min-height: 0;            /* 不再固定 44px：高度随内容，宿主的线在哪就是哪 */\n  border: 0;                /* 不再画自己的线 */\n  border-bottom: 0;\n  border-radius: 0;\n  background: transparent;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 12px; }\n\n/* ---------------- 聚焦视图：框改用底色块表达（1px 描边会被误读成\"分隔线\"，且与宿主那条线错位） ---------------- */\n\n\n/* ---------------- 标签页模式：不自己画底色/描边，与宿主内容区一致 ---------------- */\n\n.kn-root-fill .kn-msg,\n.kn-root-fill .kn-warn-inline { background: transparent; }\n\n/* ---------------- 标签页模式：三维/二维画布容器不自绘底色、底纹与分隔线 ---------------- */\n\n.kn-root-fill .graph,\n.kn-root-fill .kn-graph,\n.kn-root-fill .graph-canvas,\n.kn-root-fill canvas {\n  background-color: transparent;\n  background-image: none;\n  border-top: 0;\n}\n\n/* ---------------- 标签页模式：三维视图的自绘 chrome（提示条/状态胶囊）不再画底色与描边 ---------------- */\n\n.kn-root-fill [class^=\"universe-\"],\n.kn-root-fill [class*=\" universe-\"] {\n  background: transparent;\n  border-color: transparent;\n  box-shadow: none;\n  backdrop-filter: none;\n}\n.kn-root-fill .universe-hint { opacity: .55; font-size: 11.5px; }\n.kn-root-fill .graph,\n.kn-root-fill .graph-space,\n.kn-root-fill .universe { border-top: 0; background: transparent; }\n\n/* ---------------- 聚焦视图：两个分组框是必要组件——恢复矩形框（仅描边，不铺底色） ---------------- */\n\n\n/* ---------------- 标签页模式：恢复头行下沿的分隔线（必要组件），用宿主同源 token ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  min-height: 46px;\n  padding: 0 12px;\n  border-bottom: 1px solid var(--line-soft);\n}\n\n/* ---------------- 标签页模式：头部行不换行、按钮收紧，分隔线不再被挤下去 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  flex-wrap: nowrap;           /* 不许换行：换行会把整行撑高、把分隔线推下去 */\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title,\n.kn-root-fill .kn-head-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.kn-root-fill .kn-head-meta { margin-right: auto; }   /* 标题/计数靠左，按钮靠右 */\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn {\n  height: 24px;\n  padding: 0 9px;\n  font-size: 12px;\n  line-height: 22px;\n  white-space: nowrap;\n}\n\n/* ---------------- 标签页模式（B 方案）：不再自画分隔线，头行压成紧凑一行 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 0;          /* 面板里只留宿主那条线 */\n  height: 28px;\n  min-height: 28px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  gap: 0 8px;\n  overflow: hidden;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; }\n.kn-root-fill .kn-btn { height: 22px; padding: 0 8px; font-size: 11.5px; line-height: 20px; }\n\n/* ---------------- 恢复头行分隔线（线是必须的），高度先回到 40px，待与宿主对齐后再微调 ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  border-bottom: 1px solid var(--line-soft);\n  height: 40px;\n  min-height: 40px;\n  padding: 0 12px;\n  flex-wrap: nowrap;\n  align-items: center;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; }\n.kn-root-fill .kn-head-meta { font-size: 11.5px; margin-right: auto; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header\n   （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）\n   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */\n\n.kn-root-fill .kn-head,\n.kn-root-fill .kn-head-panel {\n  display: flex;\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  align-items: center;\n  flex-wrap: nowrap;\n  gap: 4px;\n  height: 38px;\n  min-height: 38px;\n  padding: 0 6px 0 16px;\n  border-bottom: 0.5px solid var(--dsw-alias-border-l3);\n  overflow: hidden;\n}\n.kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }\n.kn-root-fill .kn-head-meta { font-size: 12px; margin-right: auto; white-space: nowrap; }\n.kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }\n.kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }\n\n/* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */\n.kn-root-fill .kn-btn {\n  border-color: var(--dsw-alias-border-l3, #d6e0dd);\n  color: var(--dsw-alias-label-secondary, #526663);\n  background: transparent;\n}\n.kn-root-fill .kn-btn:hover:not(:disabled) {\n  border-color: var(--dsw-alias-label-secondary, #526663);\n  color: var(--dsw-alias-label-primary, #192523);\n}\n.kn-root-fill .kn-btn:disabled { opacity: .5; }\n\n/* ---------------- 聚焦视图：分组块内，标签下方加一条分隔线，节点一律在线以下 ---------------- */\n\n\n/* ---------------- agent 提案审阅区 ---------------- */\n\n.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }\n.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }\n.kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }\n.kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }\n.kn-plan-summary { font-size: 12px; opacity: .8; }\n.kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }\n.kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }\n.kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }\n.kn-plan-tag.is-reuse { opacity: .6; }\n.kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }\n.kn-plan-hint { font-size: 11px; opacity: .55; }\n.kn-plan-note { font-size: 12px; opacity: .85; }\n.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }\n\n/* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */\n.kn-empty-hint {\n  position: absolute; left: 0; right: 0; top: 0;\n  padding: 10px 12px; text-align: center;\n  pointer-events: none;\n}\n\n/* 危险按钮（彻底删除）：红字描边，视觉上与\"备份删除\"分得开 */\n.kn-modal-btn.is-danger {\n  color: #e5534b;\n  border: 0.5px solid rgba(229, 83, 75, 0.5);\n}\n.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }\n\n/* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------\n   `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），\n   它们是 `.kn-btn` 单类选择器、与本组同优先级 ⇒ **后出现者胜**。\n   所以圆环刷新按钮的形状只能放在最后，否则某档尺寸下又会被撑回\"文字胶囊\"✗。 */\n.kn-root-fill .kn-btn.kn-icon-btn {\n  width: 28px;\n  height: 28px;\n  padding: 6px;\n  border: none;\n  border-radius: var(--dsw-radius-sm, 6px);\n  background: transparent;\n  line-height: 1;\n  flex: none;\n}\n.kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {\n  border: none;\n  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));\n  color: var(--dsw-alias-label-primary, #192523);\n}\n/* ============================================================================\n   KnowledgeNet · 画布：二维聚焦与三维空间视图\n   ----------------------------------------------------------------------------\n   画布：二维聚焦与三维空间视图\n   由 src/styles.css 按小节边界拆分而来：段内内容与顺序都没有改动，\n   导入顺序见 src/main.tsx（响应式那一份排在最后，覆盖才生效）。\n   ========================================================================== */\n\n/* ------------------------------- 画布：图 ------------------------------- */\n\n/*\n * 二维聚焦画布：背景不再是规则点阵，而是「低对比度微尘 + 中心雾光」。\n * 规则点阵会暗示这是一张二维平面，而这里只是**同一张三维网的一个切面**；\n * 微尘与雾光不带方向感，也不与卡片抢注意力。\n */\n.graph {\n  position: relative;\n  flex: 1;\n  min-height: 0;\n  overflow: hidden;\n  border-top: 1px solid var(--line-soft);\n  background-color: var(--canvas);\n  background-image:\n    radial-gradient(circle at 50% 44%, var(--accent-faint), transparent 38%),\n    radial-gradient(circle at 80% 18%, rgba(93, 113, 168, 0.035), transparent 30%),\n    radial-gradient(var(--dot) 0.7px, transparent 0.7px);\n  background-size: 100% 100%, 100% 100%, 26px 26px;\n}\n\n.graph-scroll {\n  position: absolute;\n  inset: 0;\n  overflow: auto;\n  /*\n   * 稳定预留滚动条的位置。**这一行是必须的，不是优化。**\n   *\n   * 分屏比例算出来的面板宽度经常是小数（例如 1236.75），而 `clientWidth` 会取整（1237）。\n   * 画布平面的尺寸取自 `clientWidth`，于是它比真实内容盒大不到 1px → 出现滚动条 →\n   * `clientWidth` 少掉滚动条那几像素 → ResizeObserver 把平面改小 → 滚动条又消失 → 平面又变大……\n   * 一帧一轮，永不停歇：桌面上看到的就是「图谱视图不停抖动」（WebView2 用经典滚动条，\n   * 必然复现；无头 Chrome 默认 overlay 滚动条，所以自检一直没发现）。\n   *\n   * `scrollbar-gutter: stable` 让 `clientWidth` 与「滚动条在不在」无关，环路从根上断掉：\n   * 平面尺寸不再反复变，滚动条要么一直有、要么一直没有。\n   */\n  scrollbar-gutter: stable;\n}\n\n.graph-plane {\n  position: relative;\n  transform-origin: top center;\n  transition: transform 0.2s;\n}\n\n.graph-lines {\n  position: absolute;\n  inset: 0;\n  width: 100%;\n  height: 100%;\n  pointer-events: none;\n  overflow: visible;\n}\n\n/*\n * 连线：可见层 + 命中层（六项交互修复第 1 条）\n *\n * 可见线只有 1–1.6px，鼠标根本点不准，因此每条边还有一个 12px 宽的**透明命中层**：\n * 它只在描边上命中（`pointer-events: stroke`），不挡住节点卡片，也不改变任何视觉。\n * `vector-effect: non-scaling-stroke` 让命中宽度不随平面缩放变化——\n * 缩到 60% 时命中区不该跟着缩成 7px。\n */\n.graph-edge-hit {\n  pointer-events: stroke;\n  cursor: context-menu;\n}\n\n.graph-edge-hit:focus {\n  outline: none;\n}\n\n/* 悬停与选中都加粗、提亮同一条可见线；命中层不参与视觉 */\n.graph-edge:hover .graph-edge-line,\n.graph-edge:focus-within .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n/*\n * 已选中的关系要**一直**看得出来：它比悬停更持久——\n * 右键菜单关掉之后，用户还得能认出刚才那条线是哪一条。\n */\n.graph-edge[data-selected=\"true\"] .graph-edge-line {\n  stroke: var(--accent);\n  stroke-width: 2.4;\n  opacity: 1;\n}\n\n.graph-label {\n  position: absolute;\n  left: 24px;\n  font-size: 12px;\n  letter-spacing: 0.02em;\n  color: var(--muted);\n  pointer-events: none;\n}\n\n/*\n * 画布节点：一张轻卡片。\n *\n * 与之前的三处区别：圆角 12px、边框用 `--line-soft`（分组线，不是硬边界）、\n * 状态从彩色胶囊变成「小圆点 + 文字」、选中靠一圈强调色光晕而不是加粗整张卡。\n */\n.graph-node {\n  position: absolute;\n  z-index: 2;\n  display: flex;\n  flex-direction: column;\n  justify-content: center;\n  gap: 9px;\n  width: 172px;\n  min-height: 84px;\n  padding: 13px 15px;\n  transform: translate(-50%, -50%);\n  border: 1px solid var(--line-soft);\n  border-radius: var(--radius-node);\n  background: var(--surface);\n  box-shadow: var(--shadow-soft);\n  text-align: left;\n  transition:\n    background 0.18s,\n    border-color 0.18s,\n    box-shadow 0.18s,\n    transform 0.18s,\n    width 0.18s;\n}\n\n.graph-node:hover {\n  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-soft));\n  box-shadow: var(--shadow);\n  transform: translate(-50%, -50%) translateY(-2px);\n}\n\n.graph-node.selected {\n  z-index: 4;\n  width: 190px;\n  border-color: var(--accent);\n  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow-soft);\n}\n\n.graph-node.root:not(.selected) {\n  background: var(--surface-raised);\n}\n\n.graph-node-title {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 600;\n  line-height: 1.45;\n  overflow-wrap: anywhere;\n}\n\n.graph-node.selected .graph-node-title {\n  font-size: 15px;\n}\n\n.graph-node-icon {\n  display: grid;\n  place-items: center;\n  width: 24px;\n  height: 24px;\n  flex-shrink: 0;\n  border-radius: 7px;\n  background: var(--canvas-soft);\n  color: var(--secondary);\n}\n\n.graph-node.selected .graph-node-icon {\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-node-icon .icon {\n  width: 14px;\n  height: 14px;\n}\n\n.graph-node-bottom {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n/* 节点状态：小圆点 + 文字，不是胶囊 */\n.graph-node-status {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  font-size: 12px;\n  color: var(--secondary);\n}\n\n.graph-node-status.is-learning {\n  color: var(--warning);\n}\n\n.graph-node-status.is-done {\n  color: var(--success);\n}\n\n.graph-node-info {\n  font-size: 12px;\n  color: var(--muted);\n  white-space: nowrap;\n}\n\n/* 三维空间视图：画布交给 WebGL，不再铺二维底纹 */\n.graph[data-mode=\"space\"] {\n  background-image: none;\n}\n\n/*\n * 画布浮层（缩放 / 图例 / 当前视图说明）：统一成「半透明底 + 模糊」的玻璃片，\n * 而不是三个各自带边框和阴影的小盒子。\n *\n * 参考图里这些浮层**没有边框**（`.space-status`/`.graph-legend`/`.graph-help`\n * 都只有 `--canvas 82%` 的底 + blur），边框是这版实现多出来的结构感；\n * 去掉之后画布更通透，浮层仍然读得清。\n */\n.canvas-controls,\n.graph-legend,\n.selection-label {\n  display: flex;\n  align-items: center;\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n.canvas-controls {\n  position: absolute;\n  bottom: 16px;\n  left: 16px;\n  z-index: 6;\n  gap: 2px;\n  padding: 4px;\n}\n\n.canvas-controls .icon-btn {\n  width: 30px;\n  height: 30px;\n}\n\n.canvas-controls output {\n  min-width: 38px;\n  font-size: 12px;\n  color: var(--secondary);\n  text-align: center;\n}\n\n.canvas-controls .sep {\n  width: 1px;\n  height: 16px;\n  margin: 0 3px;\n  background: var(--line-soft);\n}\n\n.graph-legend {\n  position: absolute;\n  right: 16px;\n  bottom: 16px;\n  z-index: 6;\n  gap: 13px;\n  padding: 7px 9px;\n  pointer-events: none;\n}\n\n.graph-legend span {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n\n.graph-legend .status-dot {\n  width: 7px;\n  height: 7px;\n  /* 参考图的图例点带一点内阴影：小圆点因此不是一个纯色贴片 */\n  box-shadow: inset -1px -1px 2px rgba(0, 0, 0, 0.25);\n}\n\n/* 「未开始」用 --todo（#74878d），与参考图的图例一致，而不是文字用的中性灰 */\n.graph-legend .status-dot:not(.is-learning):not(.is-done) {\n  background: var(--todo);\n}\n\n.selection-label {\n  position: absolute;\n  top: 14px;\n  left: 16px;\n  z-index: 6;\n  gap: 7px;\n  padding: 7px 9px;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.selection-label .status-dot {\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 名称密度已收进工具栏的「视图设置」菜单（验收清单 P2-6）：这里的下拉框规则删除 */\n\n/* ------------------------- 三维空间视图（GraphUniverse） ------------------------- */\n\n.universe {\n  position: absolute;\n  inset: 0;\n  overflow: hidden;\n  /* 指针手势全部由相机控制器接管：拖动转向、滚轮缩放，都不要触发页面滚动 */\n  touch-action: none;\n  /*\n   * 平时是普通箭头，**按下左键拖动时**才变成一只手（`data-dragging` 由\n   * `graph3d/navigation.ts` 的指针状态机打上/取下）。\n   * 整块画布常驻 `cursor: grab` 会让人以为「这里有东西可以抓」，\n   * 而它其实只是一个观察视图。\n   */\n  cursor: default;\n  /*\n   * 中心辉光由 CSS 画（不占 GPU 绘制调用）：三维画布本身是透明的，\n   * 底色与辉光都来自这一层，于是「星空 + 雾」与主题切换天然一致。\n   *\n   * 参数照参考图 `drawBackground()`：圆心 (51%, 48%)、半径 58% 视口长边、\n   * 两个 stop（--graph-glow-1 / -2）。二维视图那层蓝色辉光不在这里——\n   * 参考图的空间画布是不透明的，那层压根看不见。\n   */\n  background-image: radial-gradient(\n    circle 58vmax at 51% 48%,\n    var(--graph-glow-1),\n    var(--graph-glow-2) 48%,\n    transparent\n  );\n}\n\n/* 按住左键拖动时才是「抓住」的手型（状态由指针状态机给出） */\n.universe[data-dragging=\"true\"] {\n  cursor: grabbing;\n}\n\n.universe:focus-visible {\n  outline: 2px solid var(--accent);\n  outline-offset: -3px;\n}\n\n.universe-canvas {\n  position: absolute;\n  inset: 0;\n  display: block;\n  width: 100%;\n  height: 100%;\n}\n\n/* 标题层：有限、自行投影的 HTML 标签，不随全图缩放，也不吃指针事件 */\n.universe-labels {\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n  overflow: hidden;\n}\n\n.universe-label {\n  position: absolute;\n  top: 0;\n  left: 0;\n  max-width: 220px;\n  white-space: nowrap;\n  font-size: 12px;\n  line-height: 1.3;\n  letter-spacing: 0.01em;\n  /*\n   * 文字描边用画布底色：节点背后有连线时仍然读得清。\n   * 参考图是在画布上先 stroke 一圈 4px 的底色再 fill，这里用一圈无模糊的\n   * 阴影近似同一个「光晕」效果——方块字有笔画间隙，模糊版本会糊成一团。\n   */\n  text-shadow:\n    0 0 3px var(--canvas),\n    0 0 3px var(--canvas),\n    1px 0 0 var(--canvas),\n    -1px 0 0 var(--canvas),\n    0 1px 0 var(--canvas),\n    0 -1px 0 var(--canvas);\n  will-change: transform;\n}\n\n/* 三档配色与参考图一致：选中 = accent-strong，相关/悬停 = 正文色，普通 = 次要色 */\n.universe-label.is-selected {\n  color: var(--accent-strong);\n}\n\n.universe-label.is-related {\n  color: var(--text);\n}\n\n.universe-label.is-normal {\n  color: var(--secondary);\n}\n\n/* 画布浮层统一成「玻璃片」：半透明底 + 模糊，不抢星空的视觉 */\n.universe-status,\n.universe-hint,\n.universe-offstage,\n.universe-tooltip {\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--canvas) 82%, transparent);\n  backdrop-filter: blur(8px);\n  color: var(--muted);\n  font-size: 12px;\n}\n\n/*\n * 布局状态条放右上角。\n *\n * 左上角已经被「当前视图说明」（`.selection-label`）占住——参考图那里只有\n * 一条状态，这一版有两件事要说，因此把「布局在算什么」移到右上：\n * 两块玻璃片各占一角，不互相压字。\n */\n.universe-status {\n  position: absolute;\n  top: 14px;\n  right: 16px;\n  z-index: 6;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 9px;\n  /* 状态句不许折行：折一次就会在「可自由探索」中间断开，看着像被裁掉 */\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n.universe-status .statuslight {\n  width: 6px;\n  height: 6px;\n  border-radius: 50%;\n  background: var(--accent);\n  box-shadow: 0 0 10px var(--accent);\n}\n\n/* 旧的「模式提示横幅」样式已随控制方式开关一起删除：\n   只剩环绕观察一种控制方式时，不需要再提示当前处于哪种模式 */\n\n.universe-offstage {\n  position: absolute;\n  left: 50%;\n  bottom: 58px;\n  transform: translateX(-50%);\n  z-index: 7;\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  padding: 7px 12px;\n  /* 它是可点的按钮，不是说明条：这里保留一圈强调色边框 */\n  border: 1px solid var(--accent);\n  color: var(--accent-text);\n}\n\n.universe-tooltip {\n  position: absolute;\n  z-index: 8;\n  display: grid;\n  gap: 4px;\n  min-width: 150px;\n  max-width: 230px;\n  padding: 10px 11px;\n  border: 1px solid var(--line);\n  border-radius: 9px;\n  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);\n  box-shadow: var(--shadow);\n  pointer-events: none;\n}\n\n.universe-tooltip strong {\n  color: var(--text);\n  font-size: 13px;\n  font-weight: 650;\n  overflow: hidden;\n  white-space: nowrap;\n  text-overflow: ellipsis;\n}\n\n.universe-tooltip span {\n  color: var(--muted);\n  font-size: 12px;\n  white-space: nowrap;\n}\n\n/* 操作提示放左下角：与左下角的缩放控件同一侧，不与图例抢位置 */\n.universe-hint {\n  position: absolute;\n  left: 16px;\n  bottom: 16px;\n  z-index: 5;\n  padding: 7px 9px;\n  white-space: nowrap;\n  pointer-events: none;\n}\n\n/* WebGL 2 不可用或上下文丢失：给明确出路，而不是留一块黑画布 */\n.universe-fallback {\n  position: absolute;\n  inset: 0;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n}\n\n.universe-fallback h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.universe-fallback p {\n  max-width: 380px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n.universe-fallback-actions {\n  display: flex;\n  gap: 10px;\n  margin-top: 6px;\n}\n\n/* 画布空态：没有目标或没有节点时，说明下一步做什么 */\n.graph-empty {\n  position: absolute;\n  inset: 0;\n  z-index: 3;\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 10px;\n  padding: 40px;\n  text-align: center;\n  color: var(--secondary);\n  pointer-events: none;\n}\n\n.graph-empty .empty-mark {\n  display: grid;\n  place-items: center;\n  width: 43px;\n  height: 43px;\n  border-radius: 13px;\n  background: var(--accent-soft);\n  color: var(--accent);\n}\n\n.graph-empty h3 {\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--text);\n}\n\n.graph-empty p {\n  max-width: 320px;\n  font-size: 12px;\n  line-height: 1.9;\n}\n\n/* 首屏拉取三维代码时的占位（图谱按需加载，见 WorkspaceShell） */\n.graph-loading {\n  display: grid;\n  place-content: center;\n  justify-items: center;\n  gap: 12px;\n  height: 100%;\n  color: var(--muted);\n  font-size: 13px;\n}\n\n.graph-loading .spinner {\n  width: 20px;\n  height: 20px;\n  border-width: 2px;\n}\n\n";
 		//#endregion
 		//#region src/client/shadow.tsx
 		/**
@@ -41662,32 +41700,45 @@ void main() {
 							report("canvas-menu-create", {});
 						},
 						children: props.copy.createNode ?? "创建节点"
-					}) : menu.kind === "node" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "kn-menu-item",
-						onClick: () => {
-							const fromId = menu.id;
-							setMenu(null);
-							setPrompt({
-								fromId,
-								x: menu.x,
-								y: menu.y
-							});
-						},
-						children: props.copy.addPrerequisite
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "kn-menu-item is-danger",
-						onClick: () => {
-							const nodeId = menu.id;
-							setMenu(null);
-							setConfirmRemoveNode({
-								nodeId,
-								label: titleOf(nodeId)
-							});
-						},
-						children: props.copy.removeNode
-					})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					}) : menu.kind === "node" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "kn-menu-item",
+							onClick: () => {
+								const nodeId = menu.id;
+								setMenu(null);
+								props.onEditNote?.(nodeId);
+							},
+							children: props.copy.editNote ?? "编辑笔记"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "kn-menu-item",
+							onClick: () => {
+								const fromId = menu.id;
+								setMenu(null);
+								setPrompt({
+									fromId,
+									x: menu.x,
+									y: menu.y
+								});
+							},
+							children: props.copy.addPrerequisite
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "kn-menu-item is-danger",
+							onClick: () => {
+								const nodeId = menu.id;
+								setMenu(null);
+								setConfirmRemoveNode({
+									nodeId,
+									label: titleOf(nodeId)
+								});
+							},
+							children: props.copy.removeNode
+						})
+					] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",
 						className: "kn-menu-item is-danger",
 						onClick: () => {
@@ -42484,6 +42535,1086 @@ void main() {
 			});
 		}
 		//#endregion
+		//#region src/client/node-document-client.ts
+		/**
+		* 客户端侧的**节点正文读写**通道（`design/node-note-editor-plan.md`）。
+		*
+		* 三条纪律：
+		* 1. **不经过发送模型消息**保存 ✗ —— 直接把正文 POST 给宿主路由 ✓；
+		* 2. 每次请求带**序号 + AbortController**：切节点/切库时旧响应绝不允许覆盖新状态 ✓；
+		* 3. 客户端**不引入任何 Node 文件模块** ✗（只认 `nodeId` 与相对路径展示 ✓）。
+		*/
+		function asDocument(value) {
+			if (value === null || typeof value !== "object") return void 0;
+			const raw = value;
+			if (typeof raw.nodeId !== "string" || typeof raw.text !== "string") return void 0;
+			return {
+				nodeId: raw.nodeId,
+				title: typeof raw.title === "string" ? raw.title : "",
+				path: typeof raw.path === "string" ? raw.path : "",
+				text: raw.text,
+				hash: typeof raw.hash === "string" ? raw.hash : "",
+				revision: typeof raw.revision === "number" ? raw.revision : 0
+			};
+		}
+		function asFailure(value) {
+			const code = typeof value === "string" ? value : "";
+			return [
+				"library_unavailable",
+				"unsupported_format",
+				"node_missing",
+				"too_large",
+				"conflict",
+				"write_failed",
+				"bad_body"
+			].includes(code) ? code : "unknown";
+		}
+		function targetBody(target) {
+			const body = {};
+			if (target?.root !== void 0 && target.root !== "") body.root = target.root;
+			else if (target?.sessionId !== void 0 && target.sessionId !== "") body.sessionId = target.sessionId;
+			return body;
+		}
+		async function post(fetcher, body, options) {
+			const parsed = await (await fetcher(GRAPH_API_ROUTE, {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					accept: "application/json"
+				},
+				credentials: "same-origin",
+				...options.signal === void 0 ? {} : { signal: options.signal },
+				body: JSON.stringify(body)
+			})).json().catch(() => null);
+			if (parsed === null) return {
+				ok: false,
+				error: {
+					code: "unknown",
+					message: "宿主返回了无法解析的内容"
+				}
+			};
+			return parsed;
+		}
+		/**
+		* 读一个节点的正文文档。
+		* @param nodeId - 稳定节点 id（重命名也追得住 ✓）。
+		* @param options - 目标库、序号守卫与取消信号 ✓。
+		* @returns 文档或带 code 的失败；**过期响应会被丢弃**（返回 `stale` 语义由调用方判空 ✓）。
+		*/
+		async function readNodeDocument(nodeId, fetcher, options = {}) {
+			const parsed = await post(fetcher, {
+				kind: "read-node-document",
+				nodeId,
+				...targetBody(options.target)
+			}, options);
+			if (options.isCurrent !== void 0 && !options.isCurrent()) return void 0;
+			if (parsed.ok === true) {
+				const document = asDocument(parsed.document);
+				if (document === void 0) return {
+					ok: false,
+					code: "unknown",
+					message: "宿主返回的文档形状不对"
+				};
+				return {
+					ok: true,
+					document
+				};
+			}
+			const error = parsed.error;
+			return {
+				ok: false,
+				code: asFailure(error?.code),
+				message: typeof error?.message === "string" ? error.message : "读取失败"
+			};
+		}
+		/**
+		* 保存正文（带读取时的指纹做比较交换 ✓）。
+		* @param input - 节点 id、完整正文、读取时拿到的指纹。
+		* @param fetcher - fetch 注入点。
+		* @param options - 目标库、序号守卫与取消信号 ✓。
+		* @returns 新文档；冲突时带上磁盘**最新正文**（供比较/合并 ✓）。
+		*/
+		async function saveNodeDocument(input, fetcher, options = {}) {
+			const body = {
+				kind: "save-node-document",
+				nodeId: input.nodeId,
+				text: input.text,
+				...targetBody(options.target)
+			};
+			if (input.hash !== void 0 && input.hash !== "") body.hash = input.hash;
+			const parsed = await post(fetcher, body, options);
+			if (options.isCurrent !== void 0 && !options.isCurrent()) return void 0;
+			if (parsed.ok === true) {
+				const document = asDocument(parsed.document);
+				if (document === void 0) return {
+					ok: false,
+					code: "unknown",
+					message: "宿主返回的文档形状不对"
+				};
+				return {
+					ok: true,
+					document
+				};
+			}
+			const error = parsed.error;
+			const latest = asDocument(error?.latest);
+			return {
+				ok: false,
+				code: asFailure(error?.code),
+				message: typeof error?.message === "string" ? error.message : "保存失败",
+				...latest === void 0 ? {} : { latest }
+			};
+		}
+		//#endregion
+		//#region src/client/node-document-state.ts
+		/** 编辑器文案（宿主 locale 缺席时的回落；正式文案在中英词典里 ✓） */
+		const EDITOR_LITERAL = {
+			notePanelTitle: "节点笔记",
+			closeEditor: "关闭编辑区",
+			tabEdit: "编辑",
+			tabPreview: "预览",
+			editorHint: "支持 Markdown · 正文直接保存到这个节点的文档",
+			previewSimplified: "简化预览：只把 `## ` 行显示为小标题，其余按纯文本显示",
+			statusSaved: "已保存",
+			statusDirty: "有未保存修改",
+			statusConflict: "草稿未保存 · 文件有更新",
+			statusSaving: "正在保存…",
+			statusSaveFailed: "保存失败 · 草稿仍在",
+			saveNote: "保存笔记",
+			saveShortcut: "Ctrl / ⌘ + S 保存",
+			conflictNotice: "文件在外部发生了变化，你的草稿仍保留。请先比较最新正文，再决定如何合并。",
+			compareLatest: "查看最新正文",
+			hideLatest: "收起最新正文",
+			latestText: "最新正文",
+			adoptLatest: "放弃草稿，使用最新正文",
+			adoptLatestConfirmTitle: "放弃草稿？",
+			adoptLatestConfirmMessage: "将用磁盘上的最新正文替换你未保存的草稿，此操作不可撤销。",
+			mergeAndSave: "已合并，基于最新版本保存",
+			refreshBaseline: "刷新冲突基线",
+			mergeFailed: "刷新最新正文失败，草稿仍在",
+			loadingDocument: "正在读取正文…",
+			loadFailed: "读取正文失败",
+			retryLoad: "重试读取",
+			saveFailed: "保存失败",
+			retrySave: "重试保存",
+			saveDone: "笔记已保存",
+			copyDraft: "复制草稿",
+			copied: "草稿已复制到剪贴板",
+			copyFailed: "复制失败，请手动选中内容复制",
+			refreshingLatest: "正在读取最新正文…",
+			mergeNeedsReview: "已读到最新正文，请先查看再点「已合并，基于最新版本保存」",
+			copied: "草稿已复制到剪贴板",
+			nodeMissing: "这个节点已经不在库里了（草稿保留，可复制走）",
+			tooLarge: "正文太大，面板编辑器不处理这么大的文档",
+			unsupportedFormat: "这个知识库是旧格式（只读兼容），面板里不能编辑正文",
+			libraryUnavailable: "找不到知识库",
+			missingFingerprint: "这份文档没有可用的版本指纹，出于安全不能编辑",
+			leaveTitle: "有尚未保存的笔记",
+			leaveMessage: "先保存当前内容，再继续查看其他节点。",
+			leaveStay: "继续编辑",
+			leaveDiscard: "放弃修改",
+			leaveSave: "保存并继续",
+			emptyDocument: "（这个节点还没有正文，直接写就行）"
+		};
+		/** 初始状态（首次载入中 ✓） */
+		function initialEditorState(nodeId = "") {
+			return {
+				phase: "loading",
+				nodeId,
+				draft: "",
+				base: "",
+				hash: "",
+				revision: 0,
+				path: "",
+				title: "",
+				conflicted: false,
+				latest: null,
+				comparing: false,
+				saving: false,
+				frozen: false,
+				saveErrorKey: null,
+				loadErrorKey: null,
+				refreshing: false
+			};
+		}
+		/** 有未保存修改？ */
+		function isDirty(state) {
+			return state.draft !== state.base;
+		}
+		/**
+		* 能保存？（复查要求：**载入完成 + 有指纹 + 不冲突 + 不在保存中** ✓）
+		*
+		* 少了"载入完成"这一条，重新读取的窗口里会拿旧基线提交 ✗；
+		* 少了"有指纹"这一条，会发出一条宿主必然拒绝的请求 ✗。
+		*/
+		function canSave(state) {
+			return state.phase === "ready" && state.hash !== "" && isDirty(state) && !state.conflicted && !state.saving && state.saveErrorKey === null;
+		}
+		/** 状态文字（对应设计稿底部那行 ✓） */
+		function statusText(state, t) {
+			if (state.saving) return t("statusSaving");
+			if (state.conflicted) return t("statusConflict");
+			if (state.saveErrorKey !== null) return t("statusSaveFailed");
+			return isDirty(state) ? t("statusDirty") : t("statusSaved");
+		}
+		/** 失败 code → 文案 key（宿主给的稳定 code ✓） */
+		function failureKey(code) {
+			if (code === "node_missing") return "nodeMissing";
+			if (code === "too_large") return "tooLarge";
+			if (code === "unsupported_format") return "unsupportedFormat";
+			if (code === "library_unavailable") return "libraryUnavailable";
+			if (code === "bad_body") return "missingFingerprint";
+			return "loadFailed";
+		}
+		/**
+		* 正文的安全预览：**只按纯文本切段**，`## ` 起小标题 ✓。
+		* 不解析 HTML、不注入脚本、不渲染链接标记 ✗（设计稿要求的"安全渲染" ✓）。
+		*/
+		function previewBlocks(text) {
+			if (text === "") return [{
+				heading: false,
+				text: EDITOR_LITERAL.emptyDocument
+			}];
+			return text.split("\n").map((line) => {
+				const heading = line.startsWith("## ");
+				return {
+					heading,
+					text: heading ? line.slice(3) : line
+				};
+			});
+		}
+		/** 一份文档能不能拿来编辑（**必须有指纹** ✗：没指纹就保护不了外部修改 ✓） */
+		function documentEditable(document) {
+			return document.hash !== "";
+		}
+		/**
+		* 状态机。
+		*
+		* 最要紧的两条不变量：
+		* - **载入永远不覆盖脏草稿** ✗：dirty 时载入成功只更新"比较基线+最新正文"，把状态标成冲突 ✓；
+		* - **只有显式的 `adopt-latest` 才能替换草稿** ✗（"查看"只 `toggle-compare` ✓）。
+		*/
+		function editorReducer(state, action) {
+			switch (action.type) {
+				case "load-start": return {
+					...state,
+					phase: "loading",
+					loadErrorKey: null
+				};
+				case "restore-draft": return {
+					...state,
+					draft: action.draft,
+					base: action.base,
+					hash: action.hash
+				};
+				case "load-ok": {
+					const document = action.document;
+					if (!documentEditable(document)) return {
+						...state,
+						phase: "loadError",
+						loadErrorKey: "missingFingerprint"
+					};
+					const common = {
+						phase: "ready",
+						nodeId: document.nodeId,
+						revision: document.revision,
+						path: document.path,
+						title: document.title,
+						loadErrorKey: null
+					};
+					if (state.draft !== state.base || state.conflicted) {
+						if (state.hash !== "" && state.hash === document.hash) return {
+							...state,
+							...common,
+							conflicted: false,
+							latest: null,
+							comparing: false
+						};
+						if (state.draft === document.text) return {
+							...state,
+							...common,
+							base: document.text,
+							hash: document.hash,
+							conflicted: false,
+							latest: null,
+							comparing: false
+						};
+						return {
+							...state,
+							...common,
+							latest: document,
+							conflicted: true,
+							comparing: true
+						};
+					}
+					return {
+						...state,
+						...common,
+						draft: document.text,
+						base: document.text,
+						hash: document.hash,
+						conflicted: false,
+						latest: null,
+						comparing: false
+					};
+				}
+				case "load-failed": return {
+					...state,
+					phase: "loadError",
+					loadErrorKey: action.key
+				};
+				case "edit":
+					if (state.frozen || state.saving) return state;
+					return {
+						...state,
+						draft: action.text,
+						saveErrorKey: null
+					};
+				case "save-start": return {
+					...state,
+					saving: true,
+					frozen: true,
+					refreshing: false,
+					saveErrorKey: null
+				};
+				case "save-ok": {
+					const document = action.document;
+					const draft = state.draft === action.submitted ? document.text : state.draft;
+					return {
+						...state,
+						draft,
+						saving: false,
+						frozen: false,
+						refreshing: false,
+						nodeId: document.nodeId,
+						base: document.text,
+						hash: document.hash,
+						revision: document.revision,
+						path: document.path,
+						title: document.title,
+						conflicted: false,
+						latest: null,
+						comparing: false,
+						saveErrorKey: null
+					};
+				}
+				case "save-conflict": return {
+					...state,
+					saving: false,
+					frozen: false,
+					refreshing: false,
+					conflicted: true,
+					comparing: true,
+					latest: action.latest
+				};
+				case "save-failed": return {
+					...state,
+					saving: false,
+					frozen: false,
+					refreshing: false,
+					saveErrorKey: action.key
+				};
+				case "conflict-refresh-start": return {
+					...state,
+					refreshing: true,
+					saveErrorKey: null
+				};
+				case "conflict-refresh-ok": return {
+					...state,
+					refreshing: false,
+					conflicted: true,
+					comparing: true,
+					latest: action.latest,
+					saveErrorKey: null
+				};
+				case "conflict-refresh-failed": return {
+					...state,
+					refreshing: false,
+					saveErrorKey: action.key
+				};
+				case "toggle-compare": return {
+					...state,
+					comparing: !state.comparing
+				};
+				case "adopt-latest":
+					if (state.latest === null) return state;
+					return {
+						...state,
+						draft: state.latest.text,
+						base: state.latest.text,
+						hash: state.latest.hash,
+						revision: state.latest.revision,
+						conflicted: false,
+						comparing: false
+					};
+				case "merge-and-save":
+					if (state.latest === null) return state;
+					return {
+						...state,
+						base: state.latest.text,
+						hash: state.latest.hash,
+						revision: state.latest.revision,
+						conflicted: false,
+						comparing: false
+					};
+				default: return state;
+			}
+		}
+		/**
+		* **已挂载之外的**草稿缓存：面板卸载、切会话、切到别的节点后仍在 ✓。
+		*
+		* 键是"库身份 + nodeId"⇒ 不同库里的同名节点不会串 ✗（复查 P1-6 ✓）。
+		* 只保存在内存里，进程结束即消失（首版口径 ✓）；有上限，避免无限增长 ✓。
+		*
+		* ⚠️ **空正文也是有效草稿** ✗：`draft === ""` 表示"用户把正文删光了"，
+		* 与"没有记录"是两件事 —— 所以这里存的是**记录对象**，
+		* 而不是"空字符串就删表"（那会把删除操作弄丢 ✗，复查 P1-1）。
+		*/
+		const drafts = /* @__PURE__ */ new Map();
+		const DRAFT_LIMIT = 40;
+		/** 拼草稿键（库身份用面板给的稳定 key ✓） */
+		function draftKey(libraryKey, nodeId) {
+			return `${libraryKey}::${nodeId}`;
+		}
+		/** 记一份草稿（**只在真有未保存内容时调用** ✓；空正文同样要记 ✓） */
+		function rememberDraft(key, record) {
+			drafts.delete(key);
+			drafts.set(key, {
+				draft: record.draft,
+				base: record.base,
+				hash: record.hash
+			});
+			while (drafts.size > DRAFT_LIMIT) {
+				const oldest = drafts.keys().next();
+				if (oldest.done === true) break;
+				drafts.delete(oldest.value);
+			}
+		}
+		/** 取回草稿记录（没有 ⇒ undefined ✓） */
+		function recallDraft(key) {
+			const record = drafts.get(key);
+			return record === void 0 ? void 0 : { ...record };
+		}
+		/** 忘掉草稿（关闭编辑器并选择放弃、或保存成功、或身份被采用时迁移 ✓） */
+		function forgetDraft(key) {
+			drafts.delete(key);
+		}
+		/** 造一个保存互斥门 ✓ */
+		function createSaveGate() {
+			let busy = false;
+			return {
+				tryEnter() {
+					if (busy) return false;
+					busy = true;
+					return true;
+				},
+				exit() {
+					busy = false;
+				},
+				get busy() {
+					return busy;
+				}
+			};
+		}
+		/** 造一个「最新正文」读取守卫 ✓ */
+		function createLatestGuard() {
+			let current = 0;
+			return {
+				next() {
+					current += 1;
+					return current;
+				},
+				isCurrent(token) {
+					return token === current;
+				},
+				invalidate() {
+					current += 1;
+				}
+			};
+		}
+		//#endregion
+		//#region src/client/NodeDocumentEditor.tsx
+		/**
+		* **节点笔记编辑器**（`design/node-note-editor.html` 的界面语言 + `node-note-editor-plan.md` 的行为
+		* + `design/node-document-editor-review.md` 的草稿保护修正）。
+		*
+		* 复查逼出来的六条，全部落在 `editorReducer` 与这里的接线里 ✓：
+		* 1. **载入不覆盖脏草稿**：`load` 只依赖稳定的"库身份 + nodeId" ✓，
+		*    父面板无关重渲染**不会**重新读取（否则输入第一个字就被磁盘正文冲掉 ✗ —— 复查头号问题）；
+		* 2. 「查看最新正文」只**展开比较区** ✓；替换草稿另有明确按钮 + 二次确认 ✓；
+		* 3. 冲突时提供「已合并，基于最新版本保存」✓（换基线、保留草稿、再提交 ✓）；
+		* 4. **保存失败 ≠ 载入失败**：草稿始终在输入框里、可改可复制、重试执行**保存** ✓；
+		* 5. 没有指纹的文档**不可编辑** ✓（宿主也会拒写 ✓）；
+		* 6. 草稿按"库 + nodeId"缓存在组件外 ✓：面板卸载/切目标后能恢复，且不串库 ✓。
+		*/
+		/**
+		* 节点笔记编辑器。
+		* @param props.nodeId - 正在编辑的节点（稳定 id ✓）。
+		* @param props.libraryKey - **库身份**（草稿缓存键用；稳定即可 ✓）。
+		* @param props.target - 库目标（root 或 sessionId ✓）。
+		* @param props.draftKey - 草稿缓存键（缺省 libraryKey + nodeId ✓）。
+		* @param props.onClose - 关闭编辑区（调用方负责"未保存"三选一 ✓）。
+		* @param props.onSaved - 保存成功回调（返回的文档可能带**新身份** ✓）。
+		* @param props.onDirtyChange - 未保存状态变化（父面板只用来决定要不要拦 ✓）。
+		* @param props.saveNonce - 「保存并继续」的触发计数：+1 ⇒ 保存一次 ✓。
+		* @param props.report - 诊断上报（内部用 ref ⇒ **不参与** load 依赖 ✓）。
+		* @param props.fetcher - fetch 注入点（测试用 ✓）。
+		* @param props.t - 宿主 locale 函数（可选 ✓）。
+		* @returns 编辑器界面。
+		*/
+		function NodeDocumentEditor(props) {
+			const t = (0, react.useMemo)(() => makeTranslator(props.t, EDITOR_LITERAL), [props.t]);
+			const [state, dispatch] = (0, react.useReducer)(editorReducer, props.nodeId, initialEditorState);
+			const [tab, setTab] = (0, react.useState)("edit");
+			const [confirmAdopt, setConfirmAdopt] = (0, react.useState)(false);
+			/** 复制草稿的反馈（null = 还没复制过 ✓） */
+			const [copyState, setCopyState] = (0, react.useState)(null);
+			const reportRef = (0, react.useRef)(props.report);
+			reportRef.current = props.report;
+			const onSavedRef = (0, react.useRef)(props.onSaved);
+			onSavedRef.current = props.onSaved;
+			const onDirtyChangeRef = (0, react.useRef)(props.onDirtyChange);
+			onDirtyChangeRef.current = props.onDirtyChange;
+			const targetRef = (0, react.useRef)(props.target);
+			targetRef.current = props.target;
+			const targetKey = props.target === void 0 ? "" : `${props.target.root ?? ""}|${props.target.sessionId ?? ""}`;
+			const cacheKey = props.draftKey ?? `${props.libraryKey ?? ""}::${props.nodeId}`;
+			const cacheKeyRef = (0, react.useRef)(cacheKey);
+			cacheKeyRef.current = cacheKey;
+			const seqRef = (0, react.useRef)(0);
+			const abortRef = (0, react.useRef)(null);
+			/** 在飞的保存请求（卸载时要中断 ✓） */
+			const saveAbortRef = (0, react.useRef)(null);
+			/** 保存互斥门（同步 ✓，所有保存入口共用；不使用 abort 代替 ✗） */
+			const saveGateRef = (0, react.useRef)(createSaveGate());
+			/** 保存请求的**独立**编号（与读请求分开 ⇒ 旧保存响应不许回写 ✓） */
+			const saveSeqRef = (0, react.useRef)(0);
+			/** 冲突「最新正文」读取的守卫（晚到的旧读取不许覆盖新的 ✓） */
+			const conflictGuardRef = (0, react.useRef)(createLatestGuard());
+			/** 保存生命周期回调给父面板：`(saving, outcome)` ✓（"保存并继续"失败要收起弹窗 ✓） */
+			const saveOutcomeRef = (0, react.useRef)(props.onSaveOutcome);
+			saveOutcomeRef.current = props.onSaveOutcome;
+			const textareaRef = (0, react.useRef)(null);
+			const rootRef = (0, react.useRef)(null);
+			const fetcher = (0, react.useMemo)(() => props.fetcher ?? ((input, init) => fetch(input, init)), [props.fetcher]);
+			/** 读一次（序号 + 取消；成功与失败分支都检查请求身份 ✓） */
+			const load = (0, react.useCallback)(async () => {
+				const seq = seqRef.current + 1;
+				seqRef.current = seq;
+				abortRef.current?.abort();
+				const controller = new AbortController();
+				abortRef.current = controller;
+				dispatch({ type: "load-start" });
+				try {
+					const outcome = await readNodeDocument(props.nodeId, fetcher, {
+						target: targetRef.current,
+						signal: controller.signal,
+						isCurrent: () => seq === seqRef.current
+					});
+					if (outcome === void 0 || seq !== seqRef.current) return;
+					if (outcome.ok === true) {
+						dispatch({
+							type: "load-ok",
+							document: outcome.document
+						});
+						reportRef.current?.("node-document-read", {
+							nodeId: props.nodeId,
+							revision: outcome.document.revision
+						});
+						return;
+					}
+					dispatch({
+						type: "load-failed",
+						key: failureKey(outcome.code)
+					});
+					reportRef.current?.("node-document-read-failed", {
+						nodeId: props.nodeId,
+						code: outcome.code
+					});
+				} catch (error) {
+					if (seq !== seqRef.current) return;
+					dispatch({
+						type: "load-failed",
+						key: "loadFailed"
+					});
+					reportRef.current?.("node-document-read-error", String(error));
+				}
+			}, [fetcher, props.nodeId]);
+			(0, react.useEffect)(() => {
+				const cached = recallDraft(cacheKeyRef.current);
+				if (cached !== void 0) dispatch({
+					type: "restore-draft",
+					draft: cached.draft,
+					base: cached.base,
+					hash: cached.hash
+				});
+				load();
+				return () => {
+					seqRef.current += 1;
+					abortRef.current?.abort();
+					saveAbortRef.current?.abort();
+				};
+			}, [load, targetKey]);
+			(0, react.useEffect)(() => {
+				if (isDirty(state)) rememberDraft(cacheKeyRef.current, {
+					draft: state.draft,
+					base: state.base,
+					hash: state.hash
+				});
+				else forgetDraft(cacheKeyRef.current);
+			}, [
+				state.draft,
+				state.base,
+				state.hash,
+				state.conflicted
+			]);
+			const dirty = isDirty(state);
+			(0, react.useEffect)(() => {
+				onDirtyChangeRef.current?.(dirty);
+			}, [dirty]);
+			(0, react.useEffect)(() => () => {
+				onDirtyChangeRef.current?.(false);
+			}, []);
+			const saveable = state.phase === "ready" && state.hash !== "" && !state.conflicted && !state.saving;
+			const onSaveableChangeRef = (0, react.useRef)(props.onSaveableChange);
+			onSaveableChangeRef.current = props.onSaveableChange;
+			(0, react.useEffect)(() => {
+				onSaveableChangeRef.current?.(saveable);
+			}, [saveable]);
+			(0, react.useEffect)(() => {
+				if (state.phase !== "ready" || state.conflicted) return;
+				textareaRef.current?.focus();
+			}, [
+				state.phase,
+				state.conflicted,
+				props.nodeId
+			]);
+			/**
+			* 用**显式给定的正文与指纹**保存。
+			*
+			* 为什么把这个内部函数抽出来：冲突里的"已合并，基于最新版本保存"要用**新基线**提交，
+			* 而 `state` 在这一拍还是旧的 ⇒ 不能只依赖 reducer 状态 ✗。
+			*/
+			const saveWith = (0, react.useCallback)(async (text, hash) => {
+				/**
+				* **统一失败出口** ✗：所有"没存下去"的路径（提前拒绝、结构化失败、异常）都要
+				* dispatch + 通知父面板 —— 少了通知，父面板就会留着三选一弹窗挡住错误，
+				* 旧的离开待办也会一直挂着（复查 P2-2 ✓）。
+				*/
+				const fail = (key) => {
+					dispatch({
+						type: "save-failed",
+						key
+					});
+					saveOutcomeRef.current?.(false, key);
+					return false;
+				};
+				if (hash === "") return fail("missingFingerprint");
+				if (!saveGateRef.current.tryEnter()) return false;
+				const seq = seqRef.current;
+				const saveSeq = saveSeqRef.current + 1;
+				saveSeqRef.current = saveSeq;
+				conflictGuardRef.current.invalidate();
+				saveOutcomeRef.current?.(true, null);
+				dispatch({ type: "save-start" });
+				const controller = new AbortController();
+				saveAbortRef.current = controller;
+				try {
+					const outcome = await saveNodeDocument({
+						nodeId: props.nodeId,
+						text,
+						hash
+					}, fetcher, {
+						target: targetRef.current,
+						signal: controller.signal,
+						isCurrent: () => seq === seqRef.current && saveSeq === saveSeqRef.current
+					});
+					if (outcome === void 0) return false;
+					if (outcome.ok === true) {
+						dispatch({
+							type: "save-ok",
+							document: outcome.document,
+							submitted: text
+						});
+						if (outcome.document.nodeId !== props.nodeId) {
+							forgetDraft(`${props.libraryKey ?? ""}::${props.nodeId}`);
+							rememberDraft(`${props.libraryKey ?? ""}::${outcome.document.nodeId}`, {
+								draft: outcome.document.text,
+								base: outcome.document.text,
+								hash: outcome.document.hash
+							});
+						}
+						reportRef.current?.("node-document-saved", {
+							nodeId: outcome.document.nodeId,
+							revision: outcome.document.revision
+						});
+						saveOutcomeRef.current?.(false, "saved");
+						onSavedRef.current?.(outcome.document);
+						return true;
+					}
+					if (outcome.code === "conflict") {
+						dispatch({
+							type: "save-conflict",
+							latest: outcome.latest ?? null
+						});
+						reportRef.current?.("node-document-conflict", { nodeId: props.nodeId });
+						saveOutcomeRef.current?.(false, "conflict");
+						return false;
+					}
+					reportRef.current?.("node-document-save-failed", {
+						nodeId: props.nodeId,
+						code: outcome.code
+					});
+					return fail(failureKey(outcome.code));
+				} catch (error) {
+					if (seq !== seqRef.current) return false;
+					reportRef.current?.("node-document-save-error", String(error));
+					return fail("saveFailed");
+				} finally {
+					saveGateRef.current.exit();
+				}
+			}, [
+				fetcher,
+				props.libraryKey,
+				props.nodeId
+			]);
+			const save = (0, react.useCallback)(() => saveWith(state.draft, state.hash), [
+				saveWith,
+				state.draft,
+				state.hash
+			]);
+			const saveNonceRef = (0, react.useRef)(props.saveNonce ?? 0);
+			(0, react.useEffect)(() => {
+				const nonce = props.saveNonce ?? 0;
+				if (nonce === saveNonceRef.current) return;
+				saveNonceRef.current = nonce;
+				save();
+			}, [props.saveNonce]);
+			/**
+			* Ctrl / ⌘ + S：**只在本编辑器内**生效（含 Shadow DOM 里的真实焦点 ✓），
+			* 不抢宿主其它编辑器的快捷键 ✗（复查指出的问题 ✓）。
+			*/
+			(0, react.useEffect)(() => {
+				const onKeyDown = (event) => {
+					if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+					const root = rootRef.current;
+					const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+					if (!(root !== null && (path.includes(root) || root.contains(event.target)))) return;
+					if (!canSave(state)) return;
+					event.preventDefault();
+					save();
+				};
+				window.addEventListener("keydown", onKeyDown, true);
+				return () => {
+					window.removeEventListener("keydown", onKeyDown, true);
+				};
+			}, [save, state]);
+			/** 冲突里"刷新最新正文"（没有 latest 时用 ✓）：只更新比较基线，**不碰草稿** ✗ */
+			const refreshLatest = (0, react.useCallback)(async () => {
+				const token = conflictGuardRef.current.next();
+				const seq = seqRef.current;
+				dispatch({ type: "conflict-refresh-start" });
+				try {
+					const outcome = await readNodeDocument(props.nodeId, fetcher, {
+						target: targetRef.current,
+						isCurrent: () => seq === seqRef.current && conflictGuardRef.current.isCurrent(token)
+					});
+					if (outcome === void 0 || seq !== seqRef.current || !conflictGuardRef.current.isCurrent(token)) return null;
+					if (outcome.ok === true) {
+						dispatch({
+							type: "conflict-refresh-ok",
+							latest: outcome.document
+						});
+						return outcome.document;
+					}
+					dispatch({
+						type: "conflict-refresh-failed",
+						key: failureKey(outcome.code)
+					});
+					return null;
+				} catch (error) {
+					if (seq !== seqRef.current || !conflictGuardRef.current.isCurrent(token)) return null;
+					dispatch({
+						type: "conflict-refresh-failed",
+						key: "mergeFailed"
+					});
+					reportRef.current?.("node-document-refresh-error", String(error));
+					return null;
+				}
+			}, [fetcher, props.nodeId]);
+			/**
+			* 「已合并，基于最新版本保存」。
+			*
+			* **没有 latest 时只刷新、绝不写入** ✗（复查 P1-1）：那种情况下用户还没看过盘上那份，
+			* 拿"刚读到的 hash"当基线提交就等于替他确认覆盖 ✗；
+			* 等他看过并**再次点击**（那时 latest 已在）才真正换基线并保存 ✓。
+			*/
+			const mergeAndSave = (0, react.useCallback)(async () => {
+				if (state.latest === null) {
+					await refreshLatest();
+					return;
+				}
+				dispatch({ type: "merge-and-save" });
+				await saveWith(state.draft, state.latest.hash);
+			}, [
+				refreshLatest,
+				saveWith,
+				state.draft,
+				state.latest
+			]);
+			/** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
+			const adoptLatest = (0, react.useCallback)(async () => {
+				let latest = state.latest;
+				if (latest === null) latest = await refreshLatest();
+				if (latest === null) return;
+				forgetDraft(cacheKeyRef.current);
+				dispatch({ type: "adopt-latest" });
+			}, [refreshLatest, state.latest]);
+			/** 复制草稿：**给出成功/失败反馈** ✗（旧实现静默吞掉失败 ⇒ 用户以为复制了 ✓） */
+			const copyDraft = (0, react.useCallback)(() => {
+				const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
+				if (clipboard === void 0) {
+					setCopyState("failed");
+					return;
+				}
+				clipboard.writeText(state.draft).then(() => setCopyState("done"), () => setCopyState("failed"));
+			}, [state.draft]);
+			const blocks = (0, react.useMemo)(() => previewBlocks(state.draft), [state.draft]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "kn-editor",
+				"aria-label": t("notePanelTitle"),
+				"data-dirty": dirty ? "true" : "false",
+				"data-phase": state.phase,
+				ref: (node) => {
+					rootRef.current = node;
+				},
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "kn-editor-heading",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kn-editor-tag",
+									children: t("notePanelTitle")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-editor-close",
+									"aria-label": t("closeEditor"),
+									onClick: props.onClose,
+									children: "×"
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+								className: "kn-editor-title",
+								children: state.title === "" ? props.nodeId : state.title
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-editor-path",
+								children: state.path
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "kn-editor-tabs",
+						role: "tablist",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							role: "tab",
+							"aria-selected": tab === "edit",
+							className: tab === "edit" ? "is-active" : "",
+							onClick: () => setTab("edit"),
+							children: t("tabEdit")
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							role: "tab",
+							"aria-selected": tab === "preview",
+							className: tab === "preview" ? "is-active" : "",
+							onClick: () => setTab("preview"),
+							children: t("tabPreview")
+						})]
+					}),
+					state.conflicted ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "kn-editor-notice",
+						role: "alert",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("conflictNotice") }),
+							state.refreshing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-editor-dim",
+								children: t("refreshingLatest")
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-notice-actions",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										disabled: state.saving || state.refreshing,
+										onClick: () => dispatch({ type: "toggle-compare" }),
+										children: state.comparing ? t("hideLatest") : t("compareLatest")
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										disabled: state.saving || state.refreshing,
+										onClick: () => {
+											mergeAndSave();
+										},
+										children: t("mergeAndSave")
+									}),
+									state.latest === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "kn-editor-dim",
+										children: t("mergeNeedsReview")
+									}) : null,
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: "is-danger",
+										disabled: state.saving || state.refreshing,
+										onClick: () => setConfirmAdopt(true),
+										children: t("adoptLatest")
+									}),
+									state.latest === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										disabled: state.saving || state.refreshing,
+										onClick: () => {
+											refreshLatest();
+										},
+										children: t("refreshBaseline")
+									}) : null
+								]
+							}),
+							state.comparing && state.latest !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
+								className: "kn-editor-latest",
+								"aria-label": t("latestText"),
+								children: state.latest.text
+							}) : null
+						]
+					}) : null,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "kn-editor-hint",
+						children: t("editorHint")
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "kn-editor-body",
+						children: state.phase === "loading" && state.draft === "" && state.base === "" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "kn-editor-dim",
+							children: t("loadingDocument")
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+							state.phase === "loadError" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-error",
+								role: "alert",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t(state.loadErrorKey ?? "loadFailed") }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-editor-notice-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => {
+											load();
+										},
+										children: t("retryLoad")
+									}), state.draft !== "" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: copyDraft,
+										children: copyState === "done" ? t("copied") : t("copyDraft")
+									}), copyState === "failed" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "kn-editor-dim",
+										children: t("copyFailed")
+									}) : null] }) : null]
+								})]
+							}) : null,
+							tab === "edit" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+								ref: textareaRef,
+								className: "kn-editor-text",
+								"aria-label": t("notePanelTitle"),
+								spellCheck: false,
+								readOnly: state.saving || state.frozen,
+								value: state.draft,
+								onChange: (event) => dispatch({
+									type: "edit",
+									text: event.target.value
+								})
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-preview",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-editor-dim",
+									children: t("previewSimplified")
+								}), blocks.map((block, index) => block.heading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", { children: block.text }, index) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: block.text }, index))]
+							}),
+							state.saveErrorKey !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-error",
+								role: "alert",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t(state.saveErrorKey) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-editor-notice-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										disabled: state.saving || state.refreshing,
+										onClick: () => {
+											save();
+										},
+										children: t("retrySave")
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: copyDraft,
+										children: t("copyDraft")
+									})]
+								})]
+							}) : null
+						] })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "kn-editor-foot",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "kn-editor-row",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: state.conflicted ? "kn-editor-status is-conflict" : "kn-editor-status",
+								children: statusText(state, t)
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "kn-editor-save",
+								disabled: !canSave(state),
+								onClick: () => {
+									save();
+								},
+								children: t("saveNote")
+							})]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "kn-editor-row kn-editor-sub",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("saveShortcut") }), state.revision > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["rev ", state.revision] }) : null]
+						})]
+					}),
+					confirmAdopt ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "kn-editor-confirm",
+						role: "dialog",
+						"aria-modal": "true",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-editor-confirm-title",
+								children: t("adoptLatestConfirmTitle")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-editor-confirm-body",
+								children: t("adoptLatestConfirmMessage")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-editor-notice-actions",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									disabled: state.saving || state.refreshing,
+									onClick: () => setConfirmAdopt(false),
+									children: t("leaveStay")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "is-danger",
+									onClick: () => {
+										setConfirmAdopt(false);
+										adoptLatest();
+									},
+									children: t("adoptLatest")
+								})]
+							})
+						]
+					}) : null
+				]
+			});
+		}
+		//#endregion
 		//#region src/client/node-search.ts
 		/** 归一化：小写、去首尾空白、把连续空白压成一个空格 */
 		function normalizeQuery(text) {
@@ -42663,7 +43794,15 @@ void main() {
 			spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
 			workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
 			nodeMenuTitle: "这个知识点",
+			editNote: "编辑笔记",
 			addPrerequisite: "添加前置节点…",
+			leaveTitle: "有尚未保存的笔记",
+			leaveMessage: "先保存当前内容，再继续查看其他节点。",
+			leaveBlocked: "编辑器里还有问题要处理（见编辑区的提示），处理完再保存并继续。",
+			leaveSaveBlocked: "暂时无法保存",
+			leaveStay: "继续编辑",
+			leaveDiscard: "放弃修改",
+			leaveSave: "保存并继续",
 			edgeMenuTitle: "这条依赖",
 			removeRelation: "删除这条依赖",
 			removeNode: "删除当前节点",
@@ -42727,6 +43866,60 @@ void main() {
 			/** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
 			const [cameraCommand, setCameraCommand] = (0, react.useState)(null);
 			const fitSeqRef = (0, react.useRef)(0);
+			/**
+			* **正在编辑笔记的节点**（null = 编辑器关着 ✓）。
+			*
+			* 编辑器只编辑**正文** ✓；未保存时切节点/关闭要先问用户三选一
+			* （继续编辑 / 放弃修改 / 保存并继续 ✓）—— 这就是下面 pendingEdit 的用途。
+			*/
+			const [editingNodeId, setEditingNodeId] = (0, react.useState)(null);
+			/** 编辑器当前是否有未保存改动（由编辑器上报 ✓） */
+			const [editorDirty, setEditorDirty] = (0, react.useState)(false);
+			/** 「保存并继续」的触发计数：+1 ⇒ 编辑器保存，成功后在 onSaved 里完成待办 ✓ */
+			const [editorSaveNonce, setEditorSaveNonce] = (0, react.useState)(0);
+			/** 编辑器是否正在保存（弹窗据此显示"保存中"、禁用"放弃修改" ✓ —— 复查 P2-2 ✓） */
+			const [editorSaving, setEditorSaving] = (0, react.useState)(false);
+			/** 编辑器现在能不能保存（没有指纹/载入失败时提前禁用「保存并继续」✓ —— 复查 P2-2 ✓） */
+			const [editorSaveable, setEditorSaveable] = (0, react.useState)(true);
+			/** 待办：保存成功后要执行的切节点/关闭动作 ✓ */
+			const pendingEditRef = (0, react.useRef)(null);
+			const [leaveDialog, setLeaveDialog] = (0, react.useState)(null);
+			/**
+			* 请求进入某个节点的编辑器（或关闭）。
+			* 有未保存改动时**不直接切**，先弹三选一 ✓（设计稿要求 ✓）。
+			*/
+			const requestEdit = (0, react.useCallback)((next) => {
+				if (editorDirty) {
+					setLeaveDialog(next);
+					return;
+				}
+				setEditingNodeId(next.kind === "open" ? next.nodeId : null);
+			}, [editorDirty]);
+			/** 三选一：继续编辑 */
+			const cancelLeave = (0, react.useCallback)(() => {
+				pendingEditRef.current = null;
+				setLeaveDialog(null);
+			}, []);
+			/** 三选一：保存并继续（真正的切换在 onSaved 里完成 ⇒ 保存失败就留在原地 ✓） */
+			const saveAndLeave = (0, react.useCallback)(() => {
+				pendingEditRef.current = leaveDialog;
+				setEditorSaveNonce((value) => value + 1);
+			}, [leaveDialog]);
+			/**
+			* 编辑器的保存生命周期（复查 P2-2）。
+			*
+			* 关键行为：**保存失败或冲突时收起弹窗、清掉待办** ✓ ——
+			* 否则那个覆盖全屏的三选一弹窗会挡住编辑器里的错误与合并入口 ✗；
+			* 且旧待办绝不能在后来某次普通保存成功时"意外生效" ✗（所以这里一并清空 ✓）。
+			* 用户处理完错误后重新点关闭/切换即可重新发起 ✓。
+			*/
+			const onEditorSaveOutcome = (0, react.useCallback)((saving, outcome) => {
+				setEditorSaving(saving);
+				if (saving) return;
+				if (outcome === "saved") return;
+				pendingEditRef.current = null;
+				setLeaveDialog(null);
+			}, []);
 			/** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
 			const [searchQuery, setSearchQuery] = (0, react.useState)("");
 			/**
@@ -42789,6 +43982,41 @@ void main() {
 				overrideRoot,
 				workspacePath,
 				props.sessionId
+			]);
+			/**
+			* 编辑器的库目标：**必须稳定** ✗ —— 每次渲染新建对象会让编辑器重新读盘并冲掉草稿
+			* （复查 P1-1 的头号问题）。这里按 root/sessionId 固化 ✓。
+			*
+			* **必须排在 `target` 之后**（TDZ ✗：`useMemo` 工厂在渲染期立即求值 ✓）。
+			*/
+			const editingTarget = (0, react.useMemo)(() => {
+				if (target === void 0) return { sessionId: props.sessionId };
+				return target.kind === "root" ? { root: target.value } : { sessionId: target.value };
+			}, [target, props.sessionId]);
+			/** 诊断上报也固化（编辑器内部用 ref 保管，这里再稳一层更省心 ✓） */
+			const editorReport = (0, react.useCallback)((step, detail) => {
+				reportDiag("note-editor", step, detail ?? null);
+			}, []);
+			/**
+			* 三选一：放弃修改。
+			*
+			* **必须先清掉这个节点在组件外缓存里的草稿** ✗ —— 否则稍后打开同一节点，
+			* 那个"用户刚刚明确放弃"的内容又会被恢复出来（复查 P2-3 ✓）。
+			* 清理要发生在切换之前；切换只改 state，不会触发编辑器再写一次缓存 ✓。
+			*
+			* ⚠️ **声明位置很关键**：依赖数组在**渲染期**求值 ⇒ 这里必须排在 `libraryKey` 之后，
+			* 否则就是 `Cannot access 'libraryKey' before initialization` ✗（实机崩过一次 ✓）。
+			*/
+			const discardLeave = (0, react.useCallback)(() => {
+				const pending = leaveDialog;
+				pendingEditRef.current = null;
+				setLeaveDialog(null);
+				if (editingNodeId !== null) forgetDraft(draftKey(libraryKey, editingNodeId));
+				if (pending !== null) setEditingNodeId(pending.kind === "open" ? pending.nodeId : null);
+			}, [
+				leaveDialog,
+				editingNodeId,
+				libraryKey
 			]);
 			/** 静默建库只做一次（避免失败后反复重建） */
 			const creatingRef = (0, react.useRef)(false);
@@ -42978,6 +44206,41 @@ void main() {
 			const effectiveFocus = focusId ?? payload?.focusId ?? null;
 			payload?.counts?.nodes ?? graph?.nodes.length;
 			payload?.counts?.edges ?? graph?.edges.length;
+			/**
+			* 当前**选中的节点**（信息条 + 「编辑笔记」入口要用 ✓）。
+			*
+			* 声明顺序很关键 ✗：它读 `graph` **和** `effectiveFocus` ⇒ 必须排在这两个之后
+			* （`useMemo` 的工厂在渲染期立即求值 ⇒ 排前面就是
+			* `Cannot access 'X' before initialization`，整块面板崩 ✗ —— 这个坑已经踩过两次 ✓）。
+			*/
+			const selectedNode = (0, react.useMemo)(() => {
+				if (graph === null || effectiveFocus === null || effectiveFocus === void 0) return null;
+				const node = graph.nodes.find((item) => item.id === effectiveFocus);
+				if (node === void 0) return null;
+				return {
+					id: node.id,
+					title: node.title,
+					status: node.status,
+					prerequisites: graph.edges.filter((edge) => edge.fromId === node.id).length
+				};
+			}, [graph, effectiveFocus]);
+			/**
+			* 编辑器开着时，用户在图上点了别的节点 ⇒ **跟着切过去** ✓
+			* （有未保存修改就先三选一 —— 与关闭按钮共用 `requestEdit` 同一条路 ✓）。
+			*/
+			(0, react.useEffect)(() => {
+				if (editingNodeId === null) return;
+				if (effectiveFocus === null || effectiveFocus === void 0) return;
+				if (effectiveFocus === editingNodeId) return;
+				requestEdit({
+					kind: "open",
+					nodeId: effectiveFocus
+				});
+			}, [
+				effectiveFocus,
+				editingNodeId,
+				requestEdit
+			]);
 			const searchMatches = (0, react.useMemo)(() => {
 				if (graph === null) return [];
 				return rankNodes(graph.nodes, searchQuery, SEARCH_LIMIT);
@@ -43268,6 +44531,76 @@ void main() {
 									active: visible,
 									sceneKey
 								}),
+								selectedNode !== null && editingNodeId === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-sel",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "kn-sel-tag",
+											children: t("focusNow")
+										}),
+										" ",
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "kn-sel-title",
+											children: selectedNode.title
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "kn-sel-sub",
+											children: [t(selectedNode.status === "done" ? "statusDone" : selectedNode.status === "learning" ? "statusLearning" : "statusTodo"), selectedNode.prerequisites > 0 ? ` · ${selectedNode.prerequisites} ${t("prerequisites")}` : ""]
+										})
+									] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: "kn-sel-edit",
+										onClick: () => {
+											requestEdit({
+												kind: "open",
+												nodeId: selectedNode.id
+											});
+										},
+										children: t("editNote")
+									})]
+								}) : null,
+								editingNodeId !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeDocumentEditor, {
+									nodeId: editingNodeId,
+									libraryKey,
+									target: editingTarget,
+									t: props.t,
+									saveNonce: editorSaveNonce,
+									onDirtyChange: setEditorDirty,
+									onSaveOutcome: onEditorSaveOutcome,
+									onSaveableChange: setEditorSaveable,
+									onClose: () => {
+										requestEdit({ kind: "close" });
+									},
+									onSaved: (document) => {
+										const adopted = document.nodeId !== editingNodeId;
+										if (adopted) {
+											forgetDraft(draftKey(libraryKey, editingNodeId));
+											setEditingNodeId(document.nodeId);
+											setFocusId(document.nodeId);
+										}
+										const pending = pendingEditRef.current;
+										pendingEditRef.current = null;
+										setLeaveDialog(null);
+										if (pending !== null) {
+											const next = pending.kind === "open" ? adopted && pending.nodeId === editingNodeId ? document.nodeId : pending.nodeId : null;
+											if (!(adopted && next === document.nodeId)) setEditingNodeId(next);
+										}
+										load({ refresh: true });
+									},
+									report: editorReport
+								}, `${libraryKey}::${editingNodeId}`) : null,
+								leaveDialog !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ConfirmDialog, {
+									title: t("leaveTitle"),
+									message: editorSaving ? t("statusSaving") : editorSaveable ? t("leaveMessage") : t("leaveBlocked"),
+									confirmLabel: editorSaving ? t("statusSaving") : editorSaveable ? t("leaveSave") : t("leaveSaveBlocked"),
+									cancelLabel: t("leaveStay"),
+									extraLabel: t("leaveDiscard"),
+									busy: editorSaving,
+									confirmDisabled: !editorSaveable,
+									onCancel: cancelLeave,
+									onExtra: discardLeave,
+									onConfirm: saveAndLeave
+								}) : null,
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphContextMenu, {
 									nodes: graph.nodes,
 									edges: graph.edges,
@@ -43276,11 +44609,19 @@ void main() {
 									onChanged: () => {
 										load({ refresh: true });
 									},
+									onEditNote: (nodeId) => {
+										setFocusId(nodeId);
+										requestEdit({
+											kind: "open",
+											nodeId
+										});
+									},
 									report: (step, detail) => {
 										reportDiag("graph-menu", step, detail ?? null);
 									},
 									copy: {
 										nodeMenuTitle: t("nodeMenuTitle"),
+										editNote: t("editNote"),
 										addPrerequisite: t("addPrerequisite"),
 										edgeMenuTitle: t("edgeMenuTitle"),
 										removeRelation: t("removeRelation"),
@@ -43417,6 +44758,43 @@ void main() {
 			searchMiss: "没有匹配的节点",
 			counts: "节点 {n} · 依赖 {e}",
 			noNodes: "这个知识库里还没有知识点。",
+			editNote: "编辑笔记",
+			notePanelTitle: "节点笔记",
+			closeEditor: "关闭编辑区",
+			tabEdit: "编辑",
+			tabPreview: "预览",
+			editorHint: "支持 Markdown · 正文直接保存到这个节点的文档",
+			statusSaved: "已保存",
+			statusDirty: "有未保存修改",
+			statusConflict: "草稿未保存 · 文件有更新",
+			statusSaving: "正在保存…",
+			saveNote: "保存笔记",
+			saveShortcut: "Ctrl / ⌘ + S 保存",
+			copyDraft: "复制草稿",
+			copied: "草稿已复制到剪贴板",
+			copyFailed: "复制失败，请手动选中内容复制",
+			refreshingLatest: "正在读取最新正文…",
+			mergeNeedsReview: "已读到最新正文，请先查看，再点「已合并，基于最新版本保存」",
+			mergeFailed: "刷新最新正文失败，草稿仍在",
+			statusSaveFailed: "保存失败 · 草稿仍在",
+			conflictNotice: "文件在外部发生了变化，你的草稿仍保留。请先比较最新正文，再决定如何合并。",
+			compareLatest: "查看最新正文",
+			latestText: "最新正文",
+			loadingDocument: "正在读取正文…",
+			loadFailed: "读取正文失败",
+			saveFailed: "保存失败",
+			saveDone: "笔记已保存",
+			nodeMissing: "这个节点已经不在库里了（草稿保留，可复制走）",
+			tooLarge: "正文太大，面板编辑器不处理这么大的文档",
+			unsupportedFormat: "这个知识库是旧格式（只读兼容），面板里不能编辑正文",
+			libraryUnavailable: "找不到知识库",
+			leaveTitle: "有尚未保存的笔记",
+			leaveMessage: "先保存当前内容，再继续查看其他节点。",
+			leaveBlocked: "编辑器里还有问题要处理（见编辑区的提示），处理完再保存并继续。",
+			leaveSaveBlocked: "暂时无法保存",
+			leaveStay: "继续编辑",
+			leaveDiscard: "放弃修改",
+			leaveSave: "保存并继续",
 			spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
 			workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
 			title: "知识库图谱",
@@ -43454,6 +44832,43 @@ void main() {
 			searchMiss: "No matching node",
 			counts: "{n} nodes · {e} links",
 			noNodes: "This library has no knowledge nodes yet.",
+			editNote: "Edit note",
+			notePanelTitle: "Node note",
+			closeEditor: "Close the editor",
+			tabEdit: "Edit",
+			tabPreview: "Preview",
+			editorHint: "Markdown supported · saves straight to this node's document",
+			statusSaved: "Saved",
+			statusDirty: "Unsaved changes",
+			statusConflict: "Draft unsaved · file changed",
+			statusSaving: "Saving…",
+			saveNote: "Save note",
+			saveShortcut: "Ctrl / ⌘ + S to save",
+			copyDraft: "Copy draft",
+			copied: "Draft copied to the clipboard",
+			copyFailed: "Copy failed — select the text and copy manually",
+			refreshingLatest: "Loading the latest text…",
+			mergeNeedsReview: "Latest text loaded — review it, then click Merge and save",
+			mergeFailed: "Could not refresh the latest text; your draft is kept",
+			statusSaveFailed: "Save failed · draft kept",
+			conflictNotice: "The file changed outside the panel. Your draft is kept — compare the latest text first, then decide how to merge.",
+			compareLatest: "Use latest text",
+			latestText: "Latest text",
+			loadingDocument: "Loading the note…",
+			loadFailed: "Could not read the note",
+			saveFailed: "Could not save",
+			saveDone: "Note saved",
+			nodeMissing: "This node is no longer in the library (your draft is kept so you can copy it out)",
+			tooLarge: "The note is too large for the panel editor",
+			unsupportedFormat: "This library uses the old read-only format, so the panel cannot edit notes here",
+			libraryUnavailable: "Knowledge library not found",
+			leaveTitle: "Unsaved note",
+			leaveMessage: "Save the current note before opening another node.",
+			leaveBlocked: "The editor still has an issue to resolve (see the notice there); fix it, then save and continue.",
+			leaveSaveBlocked: "Cannot save right now",
+			leaveStay: "Keep editing",
+			leaveDiscard: "Discard changes",
+			leaveSave: "Save and continue",
 			spaceFailed: "The 3D view is unavailable. The data is fine — hit Retry or reload the panel.",
 			workspaceHint: "The panel follows the current workspace: open this library directory as a workspace and it shows up here.",
 			title: "Knowledge graph",

@@ -16,6 +16,7 @@ import { addPrerequisiteFromUi, applyPlanFromUi, removeNodeFromUi, removePrerequ
 import { mkdir } from "node:fs/promises";
 import { createSubdirectory } from "./create-dir.ts";
 import { createNodeFromUi } from "./mutate.ts";
+import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation } from "./isolation-state.ts";
 import { listPlans } from "./plans.ts";
@@ -317,6 +318,9 @@ export async function handleApiRequest(
     nodeId?: unknown;
     question?: unknown;
     query?: unknown;
+    /** 节点正文编辑：完整正文与读取时的整文件指纹 ✓ */
+    text?: unknown;
+    hash?: unknown;
   } | null | undefined;
   if (record === null || typeof record !== "object") {
     return { status: 200, body: { ok: false, error: { code: "bad_body", message: "请求体必须是对象" } } };
@@ -516,6 +520,88 @@ export async function handleApiRequest(
       return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: error instanceof Error ? error.message : String(error) } } };
     }
   }
+  /*
+   * 「节点正文编辑」（`design/node-note-editor-plan.md`）：
+   * `read-node-document` 读全文 + 实际路径 + **整文件指纹**；
+   * `save-node-document` 带指纹做**比较交换**，冲突时回带最新正文 ✓。
+   * 只读写正文，front-matter 身份由存储层维护 ✗；路径由宿主按 nodeId 解析 ✓。
+   */
+  if (record.kind === "read-node-document" || record.kind === "save-node-document") {
+    const resolved = await resolveRequestedRoot(ctx, config, {
+      root: typeof record.root === "string" ? record.root : undefined,
+      sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
+    });
+    if (resolved.root === undefined) {
+      return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: "找不到知识库" } } };
+    }
+    /*
+     * v2（上游文件夹格式）是**只读兼容**：没有可写的正文文件概念，
+     * 明确告诉客户端"这个库不支持在这里编辑"，而不是假装能存 ✗。
+     * `loadLibrary` 对旧格式是**抛错**（`unsupported_format`）⇒ 这里如实转达 ✓。
+     */
+    try {
+      const loaded = await loadLibrary(resolved.root, {});
+      if (loaded.storage === "v2") {
+        return {
+          status: 200,
+          body: {
+            ok: false,
+            error: {
+              code: "unsupported_format",
+              message: "这个知识库还是旧格式（v2，只读兼容）⇒ 面板里不能编辑正文",
+            },
+          },
+        };
+      }
+    } catch (error) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          error: {
+            code: "unsupported_format",
+            message: error instanceof Error ? error.message : String(error),
+          },
+        },
+      };
+    }
+    const nodeId = typeof record.nodeId === "string" ? record.nodeId : "";
+    if (record.kind === "read-node-document") {
+      const result = await readNodeDocument(resolved.root, nodeId);
+      return result.ok === true
+        ? { status: 200, body: { ok: true, document: result.document } }
+        : { status: 200, body: { ok: false, error: { code: result.code, message: result.message } } };
+    }
+    if (typeof record.text !== "string") {
+      return { status: 200, body: { ok: false, error: { code: "bad_body", message: "缺少 text" } } };
+    }
+    const result = await saveNodeDocument(resolved.root, {
+      nodeId,
+      text: record.text,
+      /*
+       * 指纹**原样传下去**（缺失/空白/类型不对由存储侧判 `bad_body` 并拒写 ✓）——
+       * 面板这条保存接口必须带指纹 ✗：它存在的意义就是"不覆盖外部修改" ✓。
+       */
+      hash: record.hash,
+    });
+    if (result.ok === true) {
+      /* 落盘成功 ⇒ 让面板下次取数拿到新修订 ✓（图谱不必重建布局 ✓） */
+      invalidateLibrary(resolved.root);
+      return { status: 200, body: { ok: true, document: result.document } };
+    }
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        error: {
+          code: result.code,
+          message: result.message,
+          ...(result.latest === undefined ? {} : { latest: result.latest }),
+        },
+      },
+    };
+  }
+
   /*
    * 「删除当前节点」：按库自己的语义**移除节点身份**
    * （`.meta/knowledgenet` 移进 `<root>/.knowledgenet/trash/node-metadata/`，用户的文件夹与文件一个不动）。

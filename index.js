@@ -667,7 +667,7 @@ function rotr(value, bits) {
 	return (value >>> bits | value << 32 - bits) >>> 0;
 }
 /** UTF-8 字节；优先用 TextEncoder（浏览器与 Node 都有），否则手工编码 */
-function utf8Bytes(text) {
+function utf8Bytes$1(text) {
 	if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
 	const out = [];
 	for (let i = 0; i < text.length; i += 1) {
@@ -688,11 +688,11 @@ function utf8Bytes(text) {
 }
 /** UTF-8 字节数（不是字符数：中文一个字是 3 个字节） */
 function byteLengthOf(text) {
-	return utf8Bytes(text).byteLength;
+	return utf8Bytes$1(text).byteLength;
 }
 /** 十六进制小写 SHA-256 */
 function sha256Hex(text) {
-	const bytes = utf8Bytes(text);
+	const bytes = utf8Bytes$1(text);
 	const bitLength = bytes.length * 8;
 	const total = Math.ceil((bytes.length + 9) / 64) * 64;
 	const buffer = new Uint8Array(total);
@@ -1401,9 +1401,37 @@ function stamp(now) {
 /** 原子写：先写临时文件再 rename，避免半截文件 */
 async function writeAtomic(target, text) {
 	await mkdir(dirname(target), { recursive: true });
-	const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+	const tmp = `${target}.tmp-${`${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`}`;
 	await writeFile(tmp, text, "utf8");
 	await rename(tmp, target);
+}
+/**
+* **同一库内串行化**的写入队列（按库根 key ✓）。
+*
+* 为什么需要：`writeAtomic` 只保证"不出现半截文件" ✗，它**不保证**"比较指纹 + 替换"是
+* 不可分割的一步 —— 两个请求可以同时读到旧版本、同时通过检查、再各自覆盖 ✗（复查指出的问题）。
+* 把插件的正文写入排进同一条队列后，"进队 → 重读 → 比较 → 提交"在**本进程内**互斥 ✓；
+* 进程外的编辑器仍然可能插在最后一步之前 ⇒ 只能缩小窗口，不能承诺绝对原子 ✗（如实写在这里 ✓）。
+*/
+const writeQueues = /* @__PURE__ */ new Map();
+/**
+* 把一次写入排进该库的串行队列。
+* @param root - 库根（队列键 ✓）。
+* @param task - 真正执行的写入（内部应重新读取并比较 ✓）。
+* @returns 任务结果 ✓。
+*/
+async function withLibraryWrite(root, task) {
+	const key = resolve(root);
+	const run = (writeQueues.get(key) ?? Promise.resolve()).then(task, task);
+	const guarded = run.catch(() => void 0);
+	writeQueues.set(key, guarded);
+	try {
+		return await run;
+	} finally {
+		guarded.then(() => {
+			if (writeQueues.get(key) === guarded) writeQueues.delete(key);
+		});
+	}
 }
 async function readJson(file) {
 	try {
@@ -1640,6 +1668,10 @@ async function readNode(root, ref) {
 */
 async function writeNote$1(root, input, now = Date.now()) {
 	const base = assertRoot(root);
+	return await withLibraryWrite(base, () => writeNoteLocked(base, input, now));
+}
+/** `writeNote` 的串行区实现（由上面的队列保证不并发 ✓） */
+async function writeNoteLocked(base, input, now) {
 	const library = await readLibrary(base, { withNotes: false });
 	if (library === void 0) return {
 		ok: false,
@@ -1659,7 +1691,14 @@ async function writeNote$1(root, input, now = Date.now()) {
 		actualHash: node.hash
 	};
 	const abs = join(base, node.relativePath);
-	const parsed = parseDocument(await readFile(abs, "utf8"));
+	const current = await readFile(abs, "utf8");
+	if (typeof input.expectedHash === "string" && input.expectedHash !== "" && contentHash(current) !== input.expectedHash) return {
+		ok: false,
+		code: "conflict",
+		message: "磁盘上的内容在你读取之后被改过，为避免覆盖，本次写入已拒绝",
+		actualHash: contentHash(current)
+	};
+	const parsed = parseDocument(current);
 	const id = isUlid(parsed.meta.id) ? parsed.meta.id : node.id.startsWith("adopted-") ? ulid(now) : parsed.meta.id;
 	const meta = {
 		...parsed.meta,
@@ -1672,6 +1711,7 @@ async function writeNote$1(root, input, now = Date.now()) {
 	};
 	const text = composeDocument(meta, input.text);
 	await writeAtomic(abs, text);
+	const normalizedBody = parseDocument(text).body;
 	return {
 		ok: true,
 		node: {
@@ -1684,7 +1724,7 @@ async function writeNote$1(root, input, now = Date.now()) {
 			rev: meta.rev,
 			relativePath: node.relativePath,
 			hash: contentHash(text),
-			note: input.text
+			note: normalizedBody
 		}
 	};
 }
@@ -4830,6 +4870,156 @@ async function createSubdirectory(input) {
 	}
 }
 //#endregion
+//#region src/host/node-document.ts
+/**
+* 面板用的**节点正文读写**（对应 `design/node-note-editor-plan.md` 的「API 与文件安全」）。
+*
+* 设计要点（逐条落地 ✓）：
+* - 只读写**正文**：front-matter 的身份 / 标题 / 状态 / 修订号全部由存储层维护，
+*   客户端拿不到、也改不了 ✗（避免用户误改节点身份）；
+* - 读返回**实际相对路径**（节点被重命名后是新的那个 ✓）与**整文件指纹**
+*   （`contentHash(整个文件)` ⇒ 外部改了正文或 front-matter 都会被发现 ✓）；
+* - 保存是**比较交换**：带上读取时的指纹，磁盘对不上就拒绝并回带**最新正文**，
+*   让界面能比较 / 手动合并，绝不默认覆盖 ✗；
+* - 大文档有明确上限：超过就**拒绝**（读与写都拒），绝不静默截断后允许保存 ✗；
+* - 只认库内相对路径 ⇒ 由存储层按 `nodeId` 自己解析路径 ✗（不接受客户端给的绝对路径 ✓）。
+*/
+/**
+* 正文大小上限（UTF-8 字节）。
+*
+* 512KB 远超正常笔记（几万字），但足以挡住"误把大文件塞进来"的情形 ✓。
+*/
+const MAX_DOCUMENT_BYTES = 524288;
+/**
+* **正文口径**：读、写、返回三处必须完全一致 ✓。
+*
+* 磁盘上的正文与 front-matter 之间有一个分隔换行，`composeDocument` 也会去掉正文的
+* 前导空行与尾部空白 ⇒ 读回来的 `note` 若原样带着那个换行，
+* 编辑器打开时顶部就多一个空行、而且**保存后基线与草稿不相等**（会被判成"还有未保存修改" ✗）。
+*/
+function normalizeBody(text) {
+	return text.replace(/^\n+/, "").replace(/\s+$/, "");
+}
+function docOf(node) {
+	return {
+		nodeId: node.id,
+		title: node.title,
+		path: node.relativePath,
+		text: normalizeBody(typeof node.note === "string" ? node.note : ""),
+		hash: node.hash,
+		revision: node.rev
+	};
+}
+function utf8Bytes(text) {
+	let bytes = 0;
+	for (const char of text) {
+		const code = char.codePointAt(0) ?? 0;
+		bytes += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
+	}
+	return bytes;
+}
+/**
+* 读一个节点的正文文档。
+* @param root - 库根（**由宿主解析**，不接受客户端绝对路径 ✓）。
+* @param nodeId - 稳定节点 id。
+* @returns 文档，或带 code 的失败 ✓。
+*/
+async function readNodeDocument(root, nodeId) {
+	const id = typeof nodeId === "string" ? nodeId.trim() : "";
+	if (id === "") return {
+		ok: false,
+		code: "node_missing",
+		message: "缺少 nodeId"
+	};
+	const library = await readLibrary(root, { withNotes: true });
+	if (library === void 0) return {
+		ok: false,
+		code: "not_library",
+		message: `这里还不是 v3 知识库：${root}`
+	};
+	const node = library.nodes.find((item) => item.id === id);
+	if (node === void 0) return {
+		ok: false,
+		code: "node_missing",
+		message: "没有找到这个知识点"
+	};
+	const document = docOf(node);
+	if (utf8Bytes(document.text) > 524288) return {
+		ok: false,
+		code: "too_large",
+		message: `正文超过 ${Math.round(MAX_DOCUMENT_BYTES / 1024)}KB，面板编辑器不处理这么大的文档`
+	};
+	return {
+		ok: true,
+		document
+	};
+}
+/**
+* 保存正文（整体替换），带**比较交换**守卫。
+*
+* **指纹是必填的** ✗（复查 P1-4）：面板这条保存接口的存在意义就是"不覆盖外部修改" ✓，
+* 缺指纹/空白/类型不对一律 `bad_body` 且**不写文件** ✗ ——
+* 其它工具若需要"无指纹写入"，那是它们自己的语义（在 store 层 ✓），面板不继承 ✓。
+*
+* @param root - 库根（宿主解析 ✓）。
+* @param input - `nodeId`、完整正文、读取时的**整文件指纹**（必填 ✓）。
+* @param now - 时间戳（测试注入 ✓）。
+* @returns 新文档（含新指纹与**规范化后的正文** ✓）；指纹对不上 ⇒ `conflict` 并回带最新正文 ✓。
+*/
+async function saveNodeDocument(root, input, now = Date.now()) {
+	const id = typeof input.nodeId === "string" ? input.nodeId.trim() : "";
+	if (id === "") return {
+		ok: false,
+		code: "node_missing",
+		message: "缺少 nodeId"
+	};
+	const hash = typeof input.hash === "string" ? input.hash.trim() : "";
+	if (hash === "") return {
+		ok: false,
+		code: "bad_body",
+		message: "保存必须带上读取时的整文件指纹（否则无法保证不覆盖外部修改）"
+	};
+	const text = typeof input.text === "string" ? input.text : "";
+	if (utf8Bytes(text) > 524288) return {
+		ok: false,
+		code: "too_large",
+		message: `正文超过 ${Math.round(MAX_DOCUMENT_BYTES / 1024)}KB，已拒绝保存（不截断 ✓）`
+	};
+	const result = await writeNote$1(root, {
+		id,
+		text,
+		expectedHash: hash
+	}, now);
+	if (result.ok === true) return {
+		ok: true,
+		document: docOf(result.node)
+	};
+	if (result.code === "conflict") {
+		const latest = await readNodeDocument(root, id);
+		return {
+			ok: false,
+			code: "conflict",
+			message: result.message,
+			...latest.ok === true ? { latest: latest.document } : {}
+		};
+	}
+	if (result.code === "not_library") return {
+		ok: false,
+		code: "not_library",
+		message: result.message
+	};
+	if (result.code === "node_missing") return {
+		ok: false,
+		code: "node_missing",
+		message: result.message
+	};
+	return {
+		ok: false,
+		code: "write_failed",
+		message: result.message
+	};
+}
+//#endregion
 //#region src/host/isolation-state.ts
 const states = /* @__PURE__ */ new Set();
 /**
@@ -5412,6 +5602,101 @@ async function handleApiRequest(ctx, config, request) {
 				}
 			};
 		}
+	}
+	if (record.kind === "read-node-document" || record.kind === "save-node-document") {
+		const resolved = await resolveRequestedRoot(ctx, config, {
+			root: typeof record.root === "string" ? record.root : void 0,
+			sessionId: typeof record.sessionId === "string" ? record.sessionId : void 0
+		});
+		if (resolved.root === void 0) return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "library_unavailable",
+					message: "找不到知识库"
+				}
+			}
+		};
+		try {
+			if ((await loadLibrary(resolved.root, {})).storage === "v2") return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "unsupported_format",
+						message: "这个知识库还是旧格式（v2，只读兼容）⇒ 面板里不能编辑正文"
+					}
+				}
+			};
+		} catch (error) {
+			return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "unsupported_format",
+						message: error instanceof Error ? error.message : String(error)
+					}
+				}
+			};
+		}
+		const nodeId = typeof record.nodeId === "string" ? record.nodeId : "";
+		if (record.kind === "read-node-document") {
+			const result = await readNodeDocument(resolved.root, nodeId);
+			return result.ok === true ? {
+				status: 200,
+				body: {
+					ok: true,
+					document: result.document
+				}
+			} : {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: result.code,
+						message: result.message
+					}
+				}
+			};
+		}
+		if (typeof record.text !== "string") return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "bad_body",
+					message: "缺少 text"
+				}
+			}
+		};
+		const result = await saveNodeDocument(resolved.root, {
+			nodeId,
+			text: record.text,
+			hash: record.hash
+		});
+		if (result.ok === true) {
+			invalidateLibrary(resolved.root);
+			return {
+				status: 200,
+				body: {
+					ok: true,
+					document: result.document
+				}
+			};
+		}
+		return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: result.code,
+					message: result.message,
+					...result.latest === void 0 ? {} : { latest: result.latest }
+				}
+			}
+		};
 	}
 	if (record.kind === "remove-node") {
 		const resolved = await resolveRequestedRoot(ctx, config, {
