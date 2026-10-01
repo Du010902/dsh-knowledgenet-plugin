@@ -19,9 +19,10 @@ import {
   anchorFromRay,
   displayBasis,
   effectiveBasis,
-  minimapPoint,
+  minimapAxesFrom,
+  minimapComponents,
   radiusAbout,
-  shouldSampleTrail,
+  trailSampleStep,
 } from "../src/client/interior-navigation.ts";
 import { clippedEdgeSegment, pickClippedEdge } from "../src/client/edge-picking.ts";
 import {
@@ -445,36 +446,15 @@ describe("P2 线段拾取：一端在相机后面也要能点中", () => {
   });
 });
 
-/* ==================== P2：小地图连续性与轨迹 ==================== */
+/* ==================== P2：小地图（已由位置图方案取代） ==================== */
 
-describe("P2 小地图：侧向符号连续、轨迹存世界坐标", () => {
-  const section = { forward: [0, 0, -1], up: [0, 1, 0], radius: 300, center: [0, 0, 0] };
-  const pointAt = (eye) => minimapPoint({ ...section, eye });
-
-  it("侧向只用 up 分量 ⇒ 跨越 up=0 不再从 +100 跳到 −100（旧实现 ✗）", () => {
-    const a = pointAt([100, 0.001, 100]);
-    const b = pointAt([100, -0.001, 100]);
-    assert.ok(Math.abs(a.lateral - b.lateral) < 0.01, `侧向必须连续，实际 ${a.lateral} → ${b.lateral}`);
-    assert.ok(Math.abs(a.lateral - 0.001) < 1e-9, "侧向 = dot(P−C, up)");
-    const right = pointAt([250, 0, 0]);
-    assert.ok(Math.abs(right.lateral) < 1e-9, "纯右向偏移在纵向上没有分量（图上不可表示 ⇒ 另给距离读数 ✓）");
-    assert.equal(right.distance, 250, "距离读数仍然准确");
-  });
-
-  it("轨迹去重：同一位置反复广播不追加，真正移动才追加", () => {
-    assert.equal(shouldSampleTrail(null, [0, 0, 300], 300), true, "第一次要记");
-    assert.equal(shouldSampleTrail([0, 0, 300], [0, 0, 300], 300), false, "原地不动不记");
-    assert.equal(shouldSampleTrail([0, 0, 300], [0, 0, 300.5], 300), false, "小于阈值不记");
-    assert.equal(shouldSampleTrail([0, 0, 300], [0, 0, 260], 300), true, "明显移动要记");
-  });
-
-  it("接线：轨迹存世界坐标、绘制时按当前截面重投影；带距离读数", () => {
-    assert.ok(minimapSource.includes("eye: [number, number, number]"), "轨迹要存世界坐标（否则换朝向就连成假轨迹 ✗）");
-    assert.ok(minimapSource.includes("trailSnapshot"), "绘制时按当前截面重投影");
-    assert.ok(minimapSource.includes("shouldSampleTrail"), "重复广播要去重");
-    assert.ok(minimapSource.includes("kn-minimap-distance"), "要有距离读数");
-  });
-});
+/*
+ * 这里的旧断言（"侧向只取 up 分量"、"shouldSampleTrail"）对应的是**上一版**小地图契约 ✗。
+ * 那一版虽然去掉了侧向符号翻转，却仍把第三轴丢掉、并对球外做硬限幅
+ * （`design/minimap-position-continuity-analysis.md` 指出的空间误差 ✓）。
+ * 现在换成"固定参考轴 + 两张正交位置图 + 严格单调压缩"，
+ * 相应测试全部搬到 [interior-minimap.test.mjs](./interior-minimap.test.mjs) ✓。
+ */
 
 /* ==================== 开发备注：两项一致性 ==================== */
 

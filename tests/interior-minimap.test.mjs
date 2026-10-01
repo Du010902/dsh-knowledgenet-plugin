@@ -1,12 +1,16 @@
 /**
- * 右下角实时截面小地图：映射数学 + 接线。
+ * 右下角**视角位置图**的测试（依 `design/minimap-position-continuity-analysis.md`）。
  *
- * 用户手绘的那张平面图（大圆 = 空间球体、中间黑点 = 固定转动中心、一排眼睛 = 视角的位置）
- * 要变成界面右下角的实时图。这里钉住两件不能错的事：
- * 1. **位置比例是真的**：眼睛到圆心的图上距离 = `|P − C| / 半径`，不是示意 ✓
- *    —— 所以"滚轮深入、穿过黑点、继续往外"在图上直接看得见；
- * 2. **转图谱不影响它**：拖动只转 S，视角没动 ⇒ 小地图上的眼睛不许动 ✓
- *    （如果这里用了 `effectiveBasis` 就会跟着乱动 ✗）。
+ * 文档确认的三处空间误差，这里逐条钉住：
+ * 1. **第三轴被丢掉**：旧实现只画 forward/up 两个分量 ⇒ 相机在 (600,0,0) 时被画到圆心，
+ *    读数却写着 2R ✗。现在两张正交投影，三分量都在 ✓，`hypot` 就是真实距离 ✓。
+ * 2. **球外硬夹**：旧的"超过 1.4R 就停在 1.4R"让 3.28R / 3R / 2R 全画在同一个点 ✗。
+ *    现在球内线性、球外严格单调压缩 ✓。
+ * 3. **图标可能被裁**：圆心 + 最大图上半径 + 图标/提示圈必须落在 viewBox 内 ✓。
+ *
+ * 另外两条连续性要求：
+ * - **参考轴固定**：只改相机朝向（eye 不动）时位置标记不得移动 ✓；
+ * - **轨迹采样基准只跟真正提交的位置** ✓（旧实现先更新基准再看时间闸门 ⇒ 慢速小步攒不出点 ✗）。
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -15,154 +19,296 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import {
-  advanceEye,
-  applySceneRotation,
-  displayBasis,
-  dragAnchorTo,
-  displayOf,
-  layoutOf,
-  minimapPoint,
+  MINIMAP_EXTERIOR_HEADROOM,
+  minimapAxesFrom,
+  minimapComponents,
+  minimapForwardIn,
+  minimapPlotOffset,
+  minimapPlottedRatio,
+  trailSampleStep,
 } from "../src/client/interior-navigation.ts";
-import { quatFromAxisAngle } from "../src/client/trackball.ts";
+import { quatFromAxisAngle, rotateVec } from "../src/client/trackball.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const minimapSource = await readFile(path.join(HERE, "..", "src", "client", "InteriorMinimap.tsx"), "utf8");
 const panelSource = await readFile(path.join(HERE, "..", "src", "client", "GraphPanel.tsx"), "utf8");
 const controllerSource = await readFile(path.join(HERE, "..", "src", "client", "interior-controller.ts"), "utf8");
 const css = await readFile(path.join(HERE, "..", "src", "client", "panel.css"), "utf8");
-const indexSource = await readFile(path.join(HERE, "..", "src", "client", "index.ts"), "utf8");
-const bundle = await readFile(path.join(HERE, "..", "client.js"), "utf8");
 
-const state = (overrides = {}) => ({
-  center: [0, 0, 0],
-  eye: [0, 0, 900],
-  view: [0, 0, 0, 1],
-  scene: [0, 0, 0, 1],
-  radius: 300,
-  ...overrides,
+/** 单位姿态的参考轴：forward = −Z、up = +Y、right = +X ✓ */
+const AXES = minimapAxesFrom([0, 0, -1], [0, 1, 0], [1, 0, 0]);
+const C = [0, 0, 0];
+
+describe("三分量都在：沿被旧实现丢掉的第三轴移动也要看得出来", () => {
+  it("相机在 (600,0,0)：depth/up 都是 0，但 right = 600 ⇒ 不再被画到圆心 ✗", () => {
+    const components = minimapComponents([600, 0, 0], C, AXES);
+    /* 注意：`-dot(...)` 会得到 `-0`，严格相等下 `-0 !== 0` ⇒ 用绝对值断言 ✓ */
+    assert.ok(Math.abs(components.depth) < 1e-12, "深度分量确实是 0");
+    assert.ok(Math.abs(components.up) < 1e-12, "纵分量确实是 0");
+    assert.equal(components.right, 600, "**第三轴**必须保留 ✓（旧实现丢掉它 ⇒ 眼睛画在圆心 ✗）");
+    assert.equal(components.distance, 600, "真实距离 600（= 2R）✓");
+  });
+
+  it("三个分量无损：hypot(depth, up, right) === 真实距离（任意位置与姿态）", () => {
+    const turn = quatFromAxisAngle([0.3, 1, 0.2], 0.9);
+    const rotated = minimapAxesFrom(
+      rotateVec(turn, [0, 0, -1]),
+      rotateVec(turn, [0, 1, 0]),
+      rotateVec(turn, [1, 0, 0]),
+    );
+    for (const eye of [[0, 0, 900], [600, 0, 0], [120, -80, 40], [-200, 300, -500]]) {
+      const components = minimapComponents(eye, C, rotated);
+      const distance = Math.hypot(...eye);
+      assert.ok(
+        Math.abs(Math.hypot(components.depth, components.up, components.right) - distance) < 1e-9,
+        `三分量必须无损（eye=${eye}）`,
+      );
+      assert.ok(Math.abs(components.distance - distance) < 1e-9, "真实距离读数准确 ✓");
+    }
+  });
+
+  it("固定参考轴：只改相机朝向（eye 不动）⇒ 位置分量一个都不变 ✓，方向分量在变 ✓", () => {
+    const eye = [200, 0, 0];
+    const before = minimapComponents(eye, C, AXES);
+    const turn = quatFromAxisAngle([0, 1, 0], Math.PI / 2);
+    const forward = rotateVec(turn, [0, 0, -1]);
+    const after = minimapComponents(eye, C, AXES);
+    assert.deepEqual(after, before, "位置分量不许随朝向变 ✗（参考轴固定 ✓）");
+    const viewBefore = minimapForwardIn(AXES, [0, 0, -1]);
+    const viewAfter = minimapForwardIn(AXES, forward);
+    assert.ok(Math.abs(viewBefore.forward - viewAfter.forward) > 0.5, "朝向分量应当变化 ✓");
+  });
 });
-/** 从状态取截面坐标（用显示世界的相机朝向 ✓） */
-const pointOf = (s) => {
-  const basis = displayBasis(s);
-  return minimapPoint({ center: s.center, eye: s.eye, forward: basis.forward, up: basis.up, radius: s.radius });
-};
 
-describe("截面坐标：真实比例、深度方向、内外判定", () => {
-  it("球外近侧：深度为正（球心在相机前方）、在球外", () => {
-    const point = pointOf(state());
-    assert.ok(point.depth > 0, `球心在前方 ⇒ 深度应正，实际 ${point.depth}`);
-    assert.ok(Math.abs(point.depth - 900) < 1e-9, "没有侧向偏移时深度 = 到球心的距离");
-    assert.equal(point.outside, true, "900 > 半径 300 ⇒ 在球外");
+describe("球外不再硬夹：每个非零距离变化都在图上响应", () => {
+  const plotted = (distance) => minimapPlottedRatio(distance, 300);
+
+  it("球面正好是 1；球内线性", () => {
+    assert.equal(plotted(0), 0);
+    assert.ok(Math.abs(plotted(150) - 0.5) < 1e-12, "球内线性 ✓");
+    assert.ok(Math.abs(plotted(300) - 1) < 1e-12, "球面 = 1 ✓");
   });
 
-  it("站在球心上：坐标正好是圆心", () => {
-    const point = pointOf(state({ eye: [0, 0, 0] }));
-    assert.ok(Math.abs(point.depth) < 1e-12 && Math.abs(point.lateral) < 1e-12);
-    assert.equal(point.distance, 0);
-    assert.equal(point.outside, false);
+  it("**严格单调**：2R / 3R / 3.28R 不再画在同一点（旧实现全挤在 1.4 ✗）", () => {
+    const sequence = [1.4, 2, 3, 3.28, 5, 10].map((ratio) => plotted(ratio * 300));
+    for (let index = 1; index < sequence.length; index += 1) {
+      assert.ok(
+        sequence[index] > sequence[index - 1] + 1e-9,
+        `球外必须严格单调：${sequence[index - 1].toFixed(4)} → ${sequence[index].toFixed(4)}`,
+      );
+    }
+    const two = plotted(600);
+    const three = plotted(900);
+    const far = plotted(984);
+    assert.ok(
+      three > two + 0.02 && far > three + 0.005,
+      `三点必须明显分开：${two.toFixed(3)} / ${three.toFixed(3)} / ${far.toFixed(3)}`,
+    );
   });
 
-  it("穿过球心到另一侧：深度变负（图上会跑到圆心另一侧）", () => {
-    const point = pointOf(state({ eye: [0, 0, -200] }));
-    assert.ok(point.depth < 0, `越过球心 ⇒ 深度为负，实际 ${point.depth}`);
-    assert.ok(Math.abs(point.distance - 200) < 1e-9);
+  it("压缩有界且连续：渐近到 1 + HEADROOM，球面处连续 ✓", () => {
+    const limit = 1 + MINIMAP_EXTERIOR_HEADROOM;
+    assert.ok(Math.abs(plotted(300) - 1) < 1e-12, "球面连续 ✓");
+    assert.ok(plotted(1e6) <= limit && plotted(1e6) > limit - 1e-6, "渐近到上限 ✓");
+    for (const ratio of [1.001, 1.01, 1.1]) {
+      assert.ok(plotted(ratio * 300) >= 1, "球外不许低于球面 ✓");
+      assert.ok(plotted(ratio * 300) < limit, "球外不许越过上限 ✓");
+    }
+    assert.equal(minimapPlottedRatio(600, 0), 0, "半径非法 ⇒ 0，不产生 NaN ✓");
   });
 
-  it("纵轴 = `dot(P−C, up)`（连续），距离另给读数（文档 P2 改的就是这里）", () => {
+  it("**图上偏移**：模长正好等于压缩后的半径、方向不变、球外真的分得开 ✓", () => {
     /*
-     * 旧契约是"图上距离 = 真实距离"，但侧向取的是**垂直分量的模长** ✗ ——
-     * 只要 up 分量过零，符号就整体翻转（+100 跳 −100 ✗，文档 P2）。
-     * 现在纵轴就是 up 分量本身：连续、不会跳 ✓；代价是图上距离不再是真实距离，
-     * 由 `distanceRatio` 单独给读数 ✓。
+     * 这一条是渲染预览逼出来的：压缩系数必须按"**每世界单位**"算
+     * （`plotted / distance` ✓），写成 `plotted / raw`（两个比值相除 ✗）
+     * 会把 2R 又缩回圆心附近（实测与球心几乎重叠 ✗）。
      */
-    for (const eye of [[0, 0, 900], [120, 0, 600], [0, -220, 40], [-90, 160, -700]]) {
-      const view = quatFromAxisAngle([0.4, 1, 0.2], 0.8);
-      const point = pointOf(state({ eye, view }));
-      const up = displayBasis(state({ eye, view })).up;
-      const expected = eye[0] * up[0] + eye[1] * up[1] + eye[2] * up[2];
-      assert.ok(Math.abs(point.lateral - expected) < 1e-9, `纵轴必须是 up 分量（eye=${eye}）`);
-      /* 真实距离仍然准确，而且不小于纵轴分量 ✓ */
-      const distance = Math.hypot(eye[0], eye[1], eye[2]);
-      assert.ok(Math.abs(point.distance - distance) < 1e-9, "距离读数必须准确");
-      assert.ok(Math.abs(point.lateral) <= distance + 1e-9);
+    for (const [x, y, distance] of [[600, 0, 600], [0, 984, 984], [900, 0, 900], [0, 0, 0]]) {
+      const offset = minimapPlotOffset(x, y, distance, 300);
+      const expected = minimapPlottedRatio(distance, 300);
+      assert.ok(
+        Math.abs(Math.hypot(offset.x, offset.y) - expected) < 1e-12,
+        `偏移模长必须等于压缩后的图上半径（输入 ${x},${y}）`,
+      );
+      if (distance > 1e-9) {
+        /* 方向保持：偏移与输入分量成同一比例 ✓ */
+        assert.ok(Math.abs(offset.x * y - offset.y * x) < 1e-9, "方向不许被改动 ✓");
+      }
     }
-  });
-
-  it("侧向偏移：相机上方向为正、相反方向为负", () => {
-    const up = pointOf(state({ eye: [0, 150, 600] }));
-    assert.ok(up.lateral > 0, "沿相机上方向偏移 ⇒ 正的侧向值");
-    const down = pointOf(state({ eye: [0, -150, 600] }));
-    assert.ok(down.lateral < 0, "相反方向 ⇒ 负值");
-  });
-
-  it("**转图谱不影响它**：拖动只转 S ⇒ 小地图上的眼睛不动", () => {
-    const before = state({ eye: [0, 0, 240] });
-    const marker = pointOf(before);
-    const anchorLayout = layoutOf(before, displayOf(before, [0, 0, -20]));
-    dragAnchorTo(before, { width: 800, height: 600 }, 50, anchorLayout, { x: 430, y: 300 });
-    assert.notDeepEqual(before.scene, [0, 0, 0, 1], "前置条件：确实转了图谱");
-    const after = pointOf(before);
-    assert.ok(Math.abs(after.depth - marker.depth) < 1e-9, "深度不该变");
-    assert.ok(Math.abs(after.lateral - marker.lateral) < 1e-9, "侧向不该变");
-  });
-
-  it("滚轮深入球体：图上眼睛朝圆心移动并越过它", () => {
-    const s = state({ eye: [0, 0, 500] });
-    const start = pointOf(s).depth;
-    advanceEye(s, 260, 4000);
-    const middle = pointOf(s).depth;
-    advanceEye(s, 400, 4000);
-    const past = pointOf(s).depth;
-    assert.ok(middle < start, "前进 ⇒ 图上深度减小（往圆心走）");
-    assert.ok(past < 0, "继续前进 ⇒ 越过圆心（深度为负）");
+    /* 三个球外位置在图上必须明显分开（旧实现硬夹 ⇒ 全在同一点 ✗） */
+    const two = minimapPlotOffset(600, 0, 600, 300).x;
+    const three = minimapPlotOffset(900, 0, 900, 300).x;
+    const ten = minimapPlotOffset(3000, 0, 3000, 300).x;
+    assert.ok(three > two + 0.05 && ten > three + 0.02, `球外必须分得开：${two.toFixed(3)} / ${three.toFixed(3)} / ${ten.toFixed(3)}`);
+    /* 第三轴位置（(600,0,0)）在"深度/左右"那张图里必须明显离开圆心 ✓ */
+    const thirdAxis = minimapPlotOffset(0, 600, 600, 300);
+    assert.ok(Math.abs(thirdAxis.x) < 1e-12, "深度分量为 0 ⇒ 横轴在球心处 ✓");
+    assert.ok(Math.abs(thirdAxis.y) > 0.6, `第三轴位置必须离开圆心（旧实现画在圆心 ✗），实际 ${thirdAxis.y.toFixed(3)}`);
   });
 });
 
-describe("接线：控制器广播、面板认领并画在右下角", () => {
-  it("控制器把状态打成一个窗口事件（合并到下一帧）", () => {
-    assert.ok(controllerSource.includes('INTERIOR_STATE_EVENT = "kn-interior-state"'), "要有对外事件名");
-    assert.ok(controllerSource.includes("new CustomEvent<InteriorStateDetail>(INTERIOR_STATE_EVENT"), "要派发状态事件");
-    assert.ok(controllerSource.includes("stateEventPending"), "同一帧的多次变化要合并（拖动时每个 move 都同步一次 ✗）");
-    assert.ok(controllerSource.includes("host: this.options.element"), "负载要带宿主元素，供面板认领");
+describe("轨迹采样：基准只跟真正提交的位置", () => {
+  it("慢速小步能累计出采样点（旧实现先更新基准 ⇒ 永远攒不出来 ✗）", () => {
+    let base = { lastEye: null, lastAt: 0 };
+    let committed = 0;
+    /* 每步只动 1 世界单位（小于阈值 0.004R = 1.2），但累计到 10 ⇒ 必须提交 ✓ */
+    for (let step = 1; step <= 10; step += 1) {
+      const eye = [0, 0, 900 - step];
+      const result = trailSampleStep(base.lastEye, eye, 300, step * 1000, base.lastAt);
+      base = { lastEye: result.lastEye, lastAt: result.lastAt };
+      if (result.committed) committed += 1;
+    }
+    assert.ok(committed >= 1, `累计移动必须留下轨迹点，实际提交 ${committed} 次`);
   });
 
-  it("面板：挂在小地图宿主容器里，并按 contains 认领属于自己那块画布", () => {
-    assert.ok(panelSource.includes("<InteriorMinimap hostRef={graphHostRef} active={visible}"), "图区要渲染小地图");
-    assert.ok(minimapSource.includes("container.contains(detail.host)"), "只认自己画布里的事件（多视图不串）");
-    assert.ok(minimapSource.includes("window.addEventListener(INTERIOR_STATE_EVENT"), "要订阅控制器的事件");
-    assert.ok(minimapSource.includes("window.removeEventListener(INTERIOR_STATE_EVENT"), "卸载要摘掉监听");
-    assert.ok(minimapSource.includes("if (!active)"), "不可见时清掉旧位置（免得留着上一个库的点 ✗）");
+  it("时间闸门内的移动不提交、也**不动基准** ✓", () => {
+    const first = trailSampleStep(null, [0, 0, 900], 300, 0, 0);
+    assert.equal(first.committed, true, "第一次直接提交 ✓");
+    const base = { lastEye: first.lastEye, lastAt: first.lastAt };
+    const tooSoon = trailSampleStep(base.lastEye, [0, 0, 800], 300, 50, base.lastAt);
+    assert.equal(tooSoon.committed, false, "间隔不够 ⇒ 不提交 ✓");
+    assert.deepEqual(tooSoon.lastEye, base.lastEye, "**基准必须停在上一次真正提交的位置** ✗");
+    const later = trailSampleStep(tooSoon.lastEye, [0, 0, 800], 300, 200, tooSoon.lastAt);
+    assert.equal(later.committed, true, "过了间隔 ⇒ 提交 ✓（位移相对上次提交算 ✓）");
   });
 
-  it("样式：右下角、不吃指针事件、球/中心点/眼睛都有各自的类", () => {
-    assert.match(css, /\.kn-minimap \{[\s\S]{0,200}position: absolute;[\s\S]{0,120}right: 12px;[\s\S]{0,80}bottom: 12px;/);
-    assert.match(css, /\.kn-minimap \{[\s\S]{0,300}pointer-events: none/, "仪表不能吃掉画布的拖动/滚轮 ✗");
-    for (const cls of ["kn-minimap-ball", "kn-minimap-center", "kn-minimap-eye-outline", "kn-minimap-pupil", "kn-minimap-trail", "kn-minimap-clamped"]) {
-      assert.ok(minimapSource.includes(cls) && css.includes(`.${cls}`), `${cls} 要既有元素也有样式`);
+  it("停住时不追加重复点、半径非法不提交 ✓", () => {
+    const still = trailSampleStep([0, 0, 300], [0, 0, 300], 300, 5000, 0);
+    assert.equal(still.committed, false, "没动就不追加 ✓");
+    const bad = trailSampleStep(null, [0, 0, 300], 0, 5000, 0);
+    assert.equal(bad.committed, false, "半径非法 ⇒ 不提交 ✓");
+  });
+});
+
+describe("接线：两张图、留白、生命周期、方向符号", () => {
+  it("两张正交图（↑↓ / ↔）共享球心与比例尺；读数保留真实比例 ✓", () => {
+    assert.ok(minimapSource.includes('type PanelAxis = "up" | "right"'), "要按两条侧轴出两张图 ✓");
+    assert.ok(
+      minimapSource.includes('const AXES_LABEL: Record<PanelAxis, string> = { up: "↑↓", right: "↔" }'),
+      "要有纵轴记号",
+    );
+    assert.ok(
+      minimapSource.includes('drawPanel("up")') && minimapSource.includes('drawPanel("right")'),
+      "两张图都要画 ✓",
+    );
+    assert.ok(minimapSource.includes("minimapPlottedRatio"), "球外走压缩映射，不再硬夹 ✗");
+    assert.ok(minimapSource.includes("rawRatio.toFixed(2)"), "读数给真实比例 ✓");
+    assert.ok(minimapSource.includes('"↗ "'), "球外读数要有 ↗ 提示（图上半径经过压缩 ✓）");
+  });
+
+  it("留白自检：眼睛 / 提示圈 / **方向箭头 / 朝内朝外符号** 都要落在 viewBox 内 ✓", () => {
+    /*
+     * 复查指出的遗漏：旧模型只算 `max(眼睛半宽, 提示圈)` ✗，漏了箭头与符号，
+     * 于是位置在球下方（2R）时符号延伸到 **62.85**、超出 62 的画布被裁 ✗。
+     * 这里不只断言"有那段代码"，而是**从源码把常量解析出来重算四个方向** ✓，
+     * 以后谁改了尺寸/图标/符号大小都会立刻失败 ✓。
+     */
+    assert.ok(minimapSource.includes("DECOR_EXTENT"), "装饰延伸要纳入同一个留白模型 ✓");
+    assert.ok(minimapSource.includes("小地图留白不足"), "越界要直接抛错，而不是等截图才发现被裁 ✗");
+    for (const name of ["ARROW_LENGTH", "OUTSIDE_RING", "EYE_HALF_WIDTH", "SYMBOL_GAP", "SYMBOL_RADIUS"]) {
+      assert.ok(
+        new RegExp(`^const ${name} = `, "m").test(minimapSource),
+        `${name} 要作为命名常量参与留白计算（否则测试与实现会脱节 ✗）`,
+      );
+    }
+    const num = (name) => Number(new RegExp(`^const ${name} = ([\\d.]+);`, "m").exec(minimapSource)[1]);
+    const SIZE = num("SIZE");
+    const CENTER = SIZE / 2;
+    const BALL_RADIUS = num("BALL_RADIUS");
+    const EYE_W = num("EYE_HALF_WIDTH");
+    const EYE_H = num("EYE_HALF_HEIGHT");
+    const RING = num("OUTSIDE_RING");
+    const ARROW = num("ARROW_LENGTH");
+    const SYMBOL_R = num("SYMBOL_RADIUS");
+    const SYMBOL_GAP = num("SYMBOL_GAP");
+    /* 最远的眼睛中心（球外压缩的渐近上限 ✓） */
+    const reach = CENTER + (1 + MINIMAP_EXTERIOR_HEADROOM) * BALL_RADIUS;
+    const extents = {
+      右: reach + Math.max(EYE_W, RING, ARROW),
+      左: reach + Math.max(EYE_W, RING, ARROW),
+      上: reach + EYE_H,
+      下: reach + Math.max(EYE_H, ARROW, EYE_H + SYMBOL_GAP + SYMBOL_R),
+    };
+    for (const [direction, extent] of Object.entries(extents)) {
+      assert.ok(extent <= SIZE, `${direction}方向留白不足：${extent.toFixed(2)} > ${SIZE} ✗`);
+    }
+    /* 复算复查给的那组数：旧常量下"下方 + 符号"确实会越界（这就是被裁的那次 ✗） */
+    const oldExtent = 31 + 1.156 * 17 + (4 + 5 + 3.2);
+    assert.ok(oldExtent > 62, `旧常量下应当越界（复算 ${oldExtent.toFixed(2)} > 62 ✓）`);
+  });
+
+  it("参考轴只建立一次、不随朝向变；换库/换场景清空 ✓", () => {
+    assert.ok(minimapSource.includes("if (axesRef.current === null)"), "参考轴只在建立时取一次 ✓");
+    assert.ok(
+      minimapSource.includes("minimapAxesFrom(detail.forward, detail.up, detail.right)"),
+      "由事件里的姿态建立 ✓",
+    );
+    assert.ok(minimapSource.includes("}, [active, sceneKey]);"), "可见性与场景变化都要清空 ✓");
+    assert.ok(panelSource.includes("sceneKey={sceneKey}"), "面板要把场景标识传下来 ✓");
+    assert.ok(panelSource.includes("const sceneKey = useMemo("), "场景标识 = 库身份 + 节点集合 ✓");
+    assert.ok(panelSource.includes("key={sceneKey}"), "三维场景与小地图用同一个 key ✓");
+  });
+
+  it("**声明顺序**：`sceneKey` 必须排在 `graph` 之后（否则 TDZ 报错、整块面板崩 ✗）", () => {
+    /*
+     * 真实事故：把 `sceneKey` 的 useMemo 放在组件前部（它读 `graph` ✗）⇒
+     * `ReferenceError: Cannot access 'graph' before initialization` ⇒ 面板只显示"渲染出错" ✗。
+     * 静态字符串测试抓不到这类错误，但"谁先声明"是能查的 ✓。
+     */
+    const graphAt = panelSource.indexOf("const graph = useMemo<GraphSnapshot | null>");
+    const sceneKeyAt = panelSource.indexOf("const sceneKey = useMemo(");
+    assert.ok(graphAt > 0, "应当能找到 graph 的声明");
+    assert.ok(sceneKeyAt > 0, "应当能找到 sceneKey 的声明");
+    assert.ok(
+      sceneKeyAt > graphAt,
+      `sceneKey（第 ${sceneKeyAt} 字符）必须排在 graph（第 ${graphAt} 字符）之后 ✗`,
+    );
+  });
+
+  it("面板里**不许 useMemo 先用后声明**（渲染期立即求值 ⇒ TDZ 会崩面板 ✗）", () => {
+    /*
+     * 这条是给上面那类事故做的通用护栏：`useMemo` 的工厂在**渲染期立刻执行** ✓，
+     * 所以它引用的组件变量必须在它之前声明 ✗ —— 否则就是
+     * `Cannot access 'X' before initialization`（实机已经踩过一次 ✗）。
+     * 只查 useMemo 的工厂体：其它位置（effect 回调、事件回调）晚执行，引用后声明的变量是合法的 ✓。
+     */
+    const declarations = new Map();
+    for (const match of panelSource.matchAll(/^ {2}const (\w+)[\s:=]/gm)) {
+      if (!declarations.has(match[1])) declarations.set(match[1], match.index ?? 0);
+    }
+    const offenders = [];
+    for (const match of panelSource.matchAll(/useMemo(?:<[^>]*>)?\(\(\) => ([^;]{0,900}?), \[[^\]]*\]\)/g)) {
+      const body = match[1];
+      const at = match.index ?? 0;
+      for (const [name, declaredAt] of declarations) {
+        if (declaredAt <= at) continue;
+        if (new RegExp(`\\b${name}\\b`).test(body)) {
+          offenders.push(`useMemo 在第 ${at} 字符处引用了第 ${declaredAt} 字符才声明的 ${name}`);
+        }
+      }
+    }
+    assert.deepEqual(offenders, [], `useMemo 不许先用后声明：\n${offenders.join("\n")}`);
+  });
+
+  it("方向标记：有投影就画箭头；垂直于图平面时用朝内/朝外符号 ✓", () => {
+    assert.ok(minimapSource.includes("perpendicular"), "要有退化判定 ✓");
+    assert.ok(minimapSource.includes("kn-minimap-arrow"), "要有箭头 ✓");
+    assert.ok(minimapSource.includes("kn-minimap-outward"), "要有朝内/朝外符号 ✓");
+    assert.ok(minimapSource.includes("ARROW_MIN_LENGTH"), "阈值要显式 ✓");
+    for (const cls of [
+      "kn-minimap-row",
+      "kn-minimap-glyph",
+      "kn-minimap-arrow",
+      "kn-minimap-outward",
+      "kn-minimap-outward-dot",
+      "kn-minimap-distance",
+    ]) {
+      assert.ok(css.includes(`.${cls}`), `${cls} 要有样式 ✓`);
     }
   });
 
-  it("三维视图常驻挂载：不可见只做显隐（避免反复重建 WebGL 上下文 ✗）", () => {
-    /* 「三维绘制已中断」= 浏览器丢上下文；反复挂载/卸载是常见诱因 ✗ */
-    assert.ok(panelSource.includes('className="kn-graph-stage" data-visible={visible ? "true" : "false"}'), "要有常驻挂载壳");
-    assert.ok(!/visible \? null : <div className="kn-msg">\{t\("loading"\)\}<\/div>/.test(panelSource), "不该再按可见性卸载三维视图 ✗");
-    assert.match(css, /\.kn-graph-stage \{[\s\S]{0,120}position: absolute;[\s\S]{0,80}inset: 0;/, "壳要铺满图区");
-    assert.match(css, /\.kn-graph-stage\[data-visible="false"\] \{[\s\S]{0,80}visibility: hidden;/, "不可见时隐藏（保留布局尺寸）");
-  });
-
-  it("兜底页不再出现「另一个视图」那条路（插件早已没有两维视图 ✗）", () => {
-    /* 只查**用户可见文案**：词典里的 spaceFailed、面板里同一份文案、产物里的按钮字 ✓ */
-    assert.ok(!/spaceFailed: "[^"]*二维/.test(indexSource), "词典里的失败提示不许再提旧视图 ✗");
-    assert.ok(!/spaceFailed: "[^"]*二维/.test(panelSource), "面板里的同一份提示也不许提 ✗");
-    assert.ok(!bundle.includes("回到二维聚焦"), "产物里不许再有那颗按钮 ✗");
-    /* 换上的新文案要在产物里 ✓（说清"能做什么"：重试 / 刷新面板） */
-    assert.ok(bundle.includes("可以先点「重试」重建"), "兜底页文案应换成可操作的说明 ✓");
-    assert.ok(panelSource.includes("kn-graph-stage"), "三维常驻挂载壳要在面板里 ✓");
-  });
-
-  it("图形比例：球半径与画布尺寸在组件里是常量，眼睛按归一化坐标定位", () => {
-    assert.ok(minimapSource.includes("const SIZE = 100") && minimapSource.includes("const BALL_RADIUS = 33"));
-    assert.ok(minimapSource.includes("point.depth / detail.radius"), "用**操作球半径**归一化（真实比例 ✓）");
-    assert.ok(!minimapSource.includes("effectiveBasis"), "不许用等效基：转图谱会让眼睛乱动 ✗");
+  it("事件负载要带 right（否则第三轴又没了 ✗）", () => {
+    assert.ok(controllerSource.includes("right: Vec3;"), "负载里要有相机右方向 ✓");
+    assert.ok(controllerSource.includes("right: [...basis.right],"), "广播时要真的带上它 ✓");
   });
 });

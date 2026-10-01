@@ -90,6 +90,8 @@ export interface InteriorStateDetail {
   forward: Vec3;
   /** 相机上方向（显示世界） */
   up: Vec3;
+  /** 相机右方向（显示世界）——小地图要靠它才能画出被旧实现丢掉的第三轴 ✓ */
+  right: Vec3;
   /** 到球心的距离 */
   distance: number;
   /** 操作包围球半径 */
@@ -321,6 +323,7 @@ export class InteriorNavigation {
         eye: [...this.state.eye],
         forward: [...basis.forward],
         up: [...basis.up],
+        right: [...basis.right],
         distance: Math.hypot(
           this.state.eye[0] - this.state.center[0],
           this.state.eye[1] - this.state.center[1],

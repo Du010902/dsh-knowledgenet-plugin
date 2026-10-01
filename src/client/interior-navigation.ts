@@ -816,99 +816,179 @@ export function spinStep(
 
 /* ------------------------------- 小地图截面 ------------------------------- */
 
-/** 小地图上的一个点：把相机位置投到"过球心与相机、且沿视线"的截面上 */
-export interface MinimapPoint {
-  /**
-   * 沿视线方向的深度（世界单位）。
-   * 球心在相机前方 ⇒ **正**；穿到球心另一侧 ⇒ **负**（于是小地图上"越深入越往左"✓）。
-   */
-  depth: number;
-  /** 垂直于视线的侧向偏移（相机上方向为正，带符号；只丢掉绕视线的方位角 ✓） */
-  lateral: number;
-  /** 到球心的**真实**距离（世界单位）——`hypot(depth, lateral)` 必须等于它 ✓ */
-  distance: number;
-  /** 是否在操作球外 */
-  outside: boolean;
+/**
+ * 位置图的**固定参考轴**。
+ *
+ * 文档要点：轴必须在该库视图首次建立时定下来，**不能随相机朝向变** ✗ ——
+ * 否则定位/适应窗口改了 `view`（甚至只是滚转）就会让整张位置图与历史轨迹一起变，
+ * 用户会把"坐标轴变了"误读成"相机移动了" ✗。
+ */
+export interface MinimapAxes {
+  /** 深度轴：`depth = -dot(offset, forward)`，球心在相机前方时为正 ✓ */
+  forward: Vec3;
+  up: Vec3;
+  right: Vec3;
+}
+
+/** 由一次相机姿态取参考轴（只在**建立/重置**时调用 ✓） */
+export function minimapAxesFrom(forward: Vec3, up: Vec3, right: Vec3): MinimapAxes {
+  return { forward: [...forward], up: [...up], right: [...right] };
 }
 
 /**
- * 相机在操作球里的位置 → 小地图（截面图）坐标。
+ * 相机位置在固定参考轴下的三个分量。
  *
- * 用户的截面图要的就是这个：一张平面图，能看出"视角现在在球体的哪个位置"。
- * 取**过球心、过相机、且沿视线方向**的截面：横轴 = 沿视线的深度（球心在前方为正 ✓），
- * 纵轴 = **相机上方向上的偏移**（`dot(P−C, up)`）✓。
- *
- * 为什么侧向不再取"垂直分量的完整模长"（文档 P2）：那样只有符号由 up 的点积决定，
- * 当偏移主要沿屏幕右方向时，up 分量从 +0.001 跨到 −0.001 会让侧向值从 +100 跳到 −100 ✗
- * （实际只移动了 0.002）。现在纵轴就是 up 分量本身 ⇒ **连续、不会跳变** ✓；
- * 代价是"图上距离 = 真实距离"不再成立，所以另给一个距离读数（见 `distanceRatio`）✓。
- *
- * @param input - 球心、相机位置、相机的前向与上方向、操作球半径。
- * @returns 截面坐标（世界单位）与到球心的真实距离。
+ * **三个分量都保留** ✓（两张正交位置图各用其中两条）：
+ * 旧实现只画 `forward/up` 两个分量、把 `right` 丢掉 ✗，于是相机在 `(600,0,0)` 时
+ * depth 与 lateral 都是 0 ⇒ 眼睛被画到圆心，可读数却写着 2R ✗（文档复现的第一个错误）。
  */
-export function minimapPoint(input: {
-  center: Vec3;
-  eye: Vec3;
-  forward: Vec3;
-  up: Vec3;
-  radius: number;
-}): MinimapPoint {
-  const offset = sub(input.eye, input.center);
-  const alongView = dot(offset, input.forward);
-  const depth = -alongView;
-  const lateral = dot(offset, input.up);
-  const distance = length(offset);
+export interface MinimapComponents {
+  /** 沿参考深度轴的分量（球心在前方为正 ✓） */
+  depth: number;
+  /** 参考"上"轴分量 */
+  up: number;
+  /** 参考"右"轴分量（旧实现丢掉的第三轴 ✓） */
+  right: number;
+  /** 到球心的**真实**距离（世界单位 ✓） */
+  distance: number;
+}
+
+/**
+ * 相机相对球心的位置 → 固定参考轴下的三个分量。
+ * @param eye - 相机位置（显示世界）。
+ * @param center - 固定球心 C。
+ * @param axes - 固定的参考轴。
+ * @returns 三分量与真实距离（`hypot(depth, up, right) === distance` ✓ 无损 ✓）。
+ */
+export function minimapComponents(eye: Vec3, center: Vec3, axes: MinimapAxes): MinimapComponents {
+  const offset = sub(eye, center);
   return {
-    depth,
-    lateral,
-    distance,
-    outside: input.radius > 0 ? distance > input.radius : false,
+    depth: -dot(offset, axes.forward),
+    up: dot(offset, axes.up),
+    right: dot(offset, axes.right),
+    distance: length(offset),
   };
 }
 
 /**
- * 到球心的距离相对操作球半径的比值（小地图上的距离读数 ✓）。
- * @param distance - 到球心的真实距离。
- * @param radius - 操作球半径。
- * @returns 比值；半径非法 ⇒ 0。
+ * 当前视线在固定参考轴下的分量（画方向箭头用 ✓）。
+ * @param axes - 固定参考轴。
+ * @param forward - 当前视线方向。
+ * @returns 三个分量（绝对值很小 = 视线垂直于该图平面 ⇒ 调用方该画"朝内/朝外"符号 ✓）。
  */
-export function distanceRatio(distance: number, radius: number): number {
-  return radius > 0 && Number.isFinite(radius) ? distance / radius : 0;
+export function minimapForwardIn(axes: MinimapAxes, forward: Vec3): { forward: number; up: number; right: number } {
+  return {
+    forward: dot(forward, axes.forward),
+    up: dot(forward, axes.up),
+    right: dot(forward, axes.right),
+  };
+}
+
+/** 球外压缩的渐近余量：图上半径 1 = 球面 ⇒ 最远 `1 + HEADROOM` ✓ */
+export const MINIMAP_EXTERIOR_HEADROOM = 0.32;
+/** 球外压缩的尺度（越小压缩来得越早 ✓） */
+export const MINIMAP_EXTERIOR_SCALE = 1.5;
+
+/**
+ * 真实距离 → **图上半径**（以球半径为单位）。
+ *
+ * - 球内**线性**（球面正好 = 1 ✓，空间含义直观 ✓）；
+ * - 球外**严格单调的连续压缩**（渐近到 `1 + HEADROOM` ✓）。
+ *
+ * 旧实现是"超过 1.4R 就硬夹在 1.4R" ✗ —— 于是 (0,0,984)、(0,0,900)、(0,0,600) 三个
+ * 真实距离 3.28R / 3R / 2R 的位置**全被画在同一个点**上（文档复现的第二个错误 ✓）。
+ *
+ * @param distance - 真实距离（世界单位）。
+ * @param radius - 操作球半径。
+ * @returns 图上半径（0 = 球心，1 = 球面，>1 = 球外且随距离严格增长 ✓）。
+ */
+export function minimapPlottedRatio(distance: number, radius: number): number {
+  if (!(radius > 0) || !Number.isFinite(distance)) return 0;
+  const ratio = Math.max(0, distance / radius);
+  if (ratio <= 1) return ratio;
+  return 1 + (1 - Math.exp(-(ratio - 1) / MINIMAP_EXTERIOR_SCALE)) * MINIMAP_EXTERIOR_HEADROOM;
+}
+
+/** 轨迹采样的一次判定结果 */
+export interface TrailSampleStep {
+  /** 这次事件是否**真的**落了一个轨迹点 */
+  committed: boolean;
+  /** 提交后的"最后采样位置"（**只在实际提交时**才变 ✓） */
+  lastEye: Vec3 | null;
+  /** 提交后的"最后采样时刻" */
+  lastAt: number;
 }
 
 /**
- * 是否该为小地图轨迹记一个新采样。
+ * 轨迹要不要落一个采样点（文档 §轨迹采样比较基准更新过早）。
  *
- * 相机状态事件可能因为别的原因重复广播（同一位置反复派发）✗ ——
- * 每次都追加就会画出一串没有意义的点 ✓（文档 P2 要求去重）。
+ * 旧实现先按位移判断、**立刻**更新基准，然后才看 120ms 时间闸门 ✗ ——
+ * 没被采纳的中间位置也会覆盖基准 ⇒ 慢速小步永远攒不出一个采样点 ✗。
+ * 这里把"基准"定义为**最后一次真正提交的位置** ✓：只有提交才更新 it，
+ * 于是小步位移会**累加**到超过阈值为止 ✓。
  *
- * @param previousEye - 上一次采样时的相机位置（没有 ⇒ 记）。
- * @param eye - 这次的位置。
- * @param radius - 操作球半径（用于把"位移"归一化成比例）。
- * @param minRatio - 至少移动这么多倍半径才算新采样。
- * @returns 是否记录。
+ * @param lastEye - 最后一次**真正提交**的位置（没有 ⇒ 直接提交 ✓）。
+ * @param eye - 本次位置。
+ * @param radius - 操作球半径（用来把位移归一化成比例）。
+ * @param now - 当前时刻（毫秒）。
+ * @param lastAt - 最后一次提交的时刻。
+ * @param minRatio - 位移阈值（相对半径）。
+ * @param intervalMs - 时间间隔下限。
+ * @returns 是否提交，以及提交后应写回的基准与时刻 ✓。
  */
-export function shouldSampleTrail(
-  previousEye: Vec3 | null,
+export function trailSampleStep(
+  lastEye: Vec3 | null,
   eye: Vec3,
   radius: number,
+  now: number,
+  lastAt: number,
   minRatio = 0.004,
-): boolean {
-  if (previousEye === null) return true;
-  if (!(radius > 0)) return false;
-  return length(sub(eye, previousEye)) / radius > minRatio;
+  intervalMs = 120,
+): TrailSampleStep {
+  if (!(radius > 0)) return { committed: false, lastEye, lastAt };
+  /* 还没有基准 ⇒ 第一个采样直接落下 ✓（不该被时间闸门挡住 ✗） */
+  if (lastEye === null) return { committed: true, lastEye: [...eye], lastAt: now };
+  const moved = length(sub(eye, lastEye)) / radius;
+  if (moved <= minRatio) return { committed: false, lastEye, lastAt };
+  if (now - lastAt < intervalMs) return { committed: false, lastEye, lastAt };
+  return { committed: true, lastEye: [...eye], lastAt: now };
+}
+
+/**
+ * 一对位置分量 → 图上的平面偏移（**相对球心**，单位 = 球半径 ✓）。
+ *
+ * 关键：压缩要按"**每世界单位**的图上半径"算 —— `minimapPlottedRatio / distance` ✓。
+ * 写成 `plotted / raw`（两个无量纲比值相除 ✗）会把球外位置又缩回圆心附近 ✗
+ * （实测：2R 与球心几乎重叠 —— 这正是渲染预览才看出来的 ✗）。
+ * 方向保持不变（等比缩放 ✓），模长正好等于 `minimapPlottedRatio` ✓。
+ *
+ * @param x - 横轴分量（深度 ✓）。
+ * @param y - 纵轴分量（该图的侧轴 ✓）。
+ * @param distance - 到球心的真实距离。
+ * @param radius - 操作球半径。
+ * @returns 相对球心的偏移（图上单位 = 球半径；`hypot` = `minimapPlottedRatio` ✓）。
+ */
+export function minimapPlotOffset(
+  x: number,
+  y: number,
+  distance: number,
+  radius: number,
+): { x: number; y: number } {
+  if (!(distance > 1e-9) || !(radius > 0)) return { x: 0, y: 0 };
+  const factor = minimapPlottedRatio(distance, radius) / distance;
+  return { x: x * factor, y: y * factor };
 }
 
 /**
  * 以**固定球心 C** 为基准测量操作球半径：`max|X − C|`（文档 P2）。
  *
- * 为什么不能直接用包围体的 `radius`：那个是绕 `bounds.center` 算的 ✗ ——
- * 球心冻结在别处时，它未必包得住全部节点，小地图和抓取范围就会失真 ✗。
+ * 为什么不能用包围体的 `radius`：那个是绕 `bounds.center` 算的 ✗ ——
+ * 球心冻结在别处时它未必包得住全部节点，小地图与抓取范围都会失真 ✗。
  *
  * @param positions - 节点坐标（xyz 连续存放）。
  * @param count - 节点数。
  * @param center - 固定球心 C。
- * @returns 半径（空图 ⇒ 传入的兜底值）。
+ * @returns 半径（空图 / 全是非法坐标 ⇒ 0 ✓）。
  */
 export function radiusAbout(positions: Float32Array, count: number, center: Vec3): number {
   let maxDistance = 0;

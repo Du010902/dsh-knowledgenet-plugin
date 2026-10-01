@@ -129,9 +129,37 @@
 
 .kn-minimap svg {
   display: block;
-  /* 控件本体 84px（viewBox 是 100，等比缩放，线条依然清晰）✓ */
-  width: 84px;
-  height: 84px;
+}
+
+/* 两张正交位置图并排（共享球心与比例尺 ✓） */
+.kn-minimap-row {
+  display: flex;
+  gap: 4px;
+}
+
+/* 每张图的纵轴记号（↑↓ / ↔） */
+.kn-minimap-glyph {
+  fill: var(--dsw-alias-label-tertiary, #6b7280);
+  font-size: 8px;
+}
+
+/* 朝向箭头：固定参考里的真实视线方向 ✓ */
+.kn-minimap-arrow {
+  stroke: var(--dsw-alias-label-primary, #1f2937);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+
+/* 视线垂直于本图平面时改用「朝内 ⊗ / 朝外 ⊙」符号 ✓ */
+.kn-minimap-outward {
+  stroke: var(--dsw-alias-label-tertiary, #6b7280);
+  stroke-width: 0.9;
+  fill: none;
+}
+
+.kn-minimap-outward-dot {
+  fill: var(--dsw-alias-label-tertiary, #6b7280);
+  stroke: none;
 }
 
 /* 操作包围球 */
@@ -177,11 +205,14 @@
   stroke-dasharray: 2 2;
 }
 
-/* 到球心的距离读数（单位 = 操作球半径）✓ */
+/* 到球心的距离读数（单位 = 操作球半径；球外读数带 ↗，表示图上半径经过压缩 ✓） */
 .kn-minimap-distance {
+  margin-top: 2px;
   fill: var(--dsw-alias-label-tertiary, #6b7280);
+  color: var(--dsw-alias-label-tertiary, #6b7280);
   font-size: 8px;
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */
