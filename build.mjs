@@ -1320,7 +1320,13 @@ const panelCss = await readFile(path.join(PLUGIN, "src/client/panel.css"), "utf8
 const graphCss = await readFile(path.join(UPSTREAM, "styles/graph.css"), "utf8");
 /* 富文本编辑器（Milkdown/Crepe）的样式 + KaTeX 字体，见下面 readEditorCss ✓ */
 const editorCss = await readEditorCss();
-const css = `${panelCss}\n${graphCss}\n${editorCss}`;
+/*
+ * 拼接顺序很关键 ✗：**覆盖样式必须放在最后** ✓。
+ * panel.css 里写同样的规则会被后拼进来的 Crepe CSS 压住（权重相同 ⇒ 后者赢 ✗），
+ * 那正是"表格看不出是表格"的成因之一 ✓。
+ */
+const editorOverridesCss = await readFile(path.join(PLUGIN, "src/client/editor-overrides.css"), "utf8");
+const css = `${panelCss}\n${graphCss}\n${editorCss}\n${editorOverridesCss}`;
 
 /**
  * 富文本编辑器要用的 CSS：**构建期读文件拼成一份**，随面板 CSS 一起注入 shadowRoot ✓。
@@ -1335,6 +1341,129 @@ const css = `${panelCss}\n${graphCss}\n${editorCss}`;
  */
 async function readEditorCss() {
   const parts = [];
+  /** 已经内联过的文件（按绝对路径去重 ✓ —— KaTeX 会被多处引用 ✗） */
+  const visited = new Set();
+  /**
+   * 解析一条 `@import` 的目标 ✓。
+   *
+   * 策略（按顺序）：
+   * 1. 相对路径 ⇒ 按「引用者所在目录」算 ✓；
+   * 2. 从引用者所在目录**向上**找 `node_modules`（Node 的解析顺序 ✓）；
+   * 3. `@milkdown/kit/...` 是**再导出包** ⇒ 真实文件在它的 `lib/` 下 ✓；
+   * 4. 都找不到 ⇒ 用一份**预先建好的 CSS 索引**按路径后缀匹配 ✓
+   *    （pnpm 的目录名带哈希 ✗，后缀匹配最稳 ✓）。
+   *
+   * @param spec - `@import` 里的字符串。
+   * @param fromFile - 谁引用的（绝对路径）。
+   * @returns 绝对路径，或 undefined（找不到）。
+   */
+  const cssIndex = [];
+  const indexCss = async (dir, depth) => {
+    if (depth > 8) return;
+    let items = [];
+    try {
+      items = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const item of items) {
+      const full = path.join(dir, item.name);
+      if (item.isDirectory()) {
+        await indexCss(full, depth + 1);
+      } else if (item.name.endsWith(".css")) {
+        cssIndex.push(full.replace(/\\/g, "/"));
+      }
+    }
+  };
+  await indexCss(path.join(PLUGIN, "node_modules"), 0);
+
+  const resolveImport = (spec, fromFile) => {
+    const candidates = [];
+    if (spec.startsWith(".") || spec.startsWith("/")) {
+      candidates.push(path.resolve(path.dirname(fromFile), spec));
+    } else {
+      let dir = path.dirname(fromFile);
+      for (let depth = 0; depth < 8; depth += 1) {
+        candidates.push(path.join(dir, "node_modules", spec));
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      candidates.push(path.join(PLUGIN, "node_modules", spec));
+      if (spec.startsWith("@milkdown/kit/")) {
+        candidates.push(path.join(PLUGIN, "node_modules/@milkdown/kit/lib", spec.slice("@milkdown/kit/".length)));
+      }
+      /*
+       * `@milkdown/*` 各包同样把产物放在 `lib/` 下 ✓，且包内的 `view/`、`style/`
+       * 中间层在发布产物里**可能被压平** ✗（`@milkdown/prose/view/style/prosemirror.css`
+       * 实际是 `@milkdown/prose/lib/style/prosemirror.css` ✓）⇒ 逐个去掉中间层再试 ✓。
+       */
+      if (spec.startsWith("@milkdown/")) {
+        const [scope, pkg, ...rest] = spec.split("/");
+        for (let drop = 0; drop < rest.length; drop += 1) {
+          candidates.push(path.join(PLUGIN, "node_modules", scope, pkg, "lib", ...rest.slice(drop)));
+        }
+      }
+    }
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+    /*
+     * 后缀匹配：先试"包内 + 尾部两段"✓（例如 `style/prosemirror.css` ✓），
+     * 再退到"包内 + 文件名"✓ —— 发布产物会把中间层压平 ✗
+     * （`@milkdown/prose/view/style/prosemirror.css` 实际在 `…/prose/lib/style/prosemirror.css` ✓），
+     * 所以不能按完整 spec 后缀找 ✓。
+     */
+    const normalized = spec.replace(/\\/g, "/");
+    const inPackage = (file) => {
+      if (normalized.startsWith("@")) {
+        const [scope, pkg] = normalized.split("/");
+        return file.includes(`/node_modules/${scope}/${pkg}/`);
+      }
+      const pkg = normalized.split("/")[0];
+      return file.includes(`/node_modules/${pkg}/`);
+    };
+    const tailTwo = normalized.split("/").slice(-2).join("/");
+    const base = normalized.split("/").pop();
+    const candidatesInPackage = cssIndex.filter(inPackage);
+    return (
+      candidatesInPackage.find((file) => file.endsWith(`/${tailTwo}`))
+      ?? candidatesInPackage.find((file) => file.endsWith(`/${base}`))
+    );
+  };
+  /**
+   * **递归展开 `@import`** ✗。
+   *
+   * 为什么必须做：Crepe 的样式是一棵 `@import` 树（classic 主题导入
+   * `./prosemirror.css`、`./reset.css`、…，`cursor.css` 导入 gapcursor 与虚拟光标，
+   * `latex.css` 导入 KaTeX ✓）。而我们是**按文本拼接**进一个 `<style>` 的 ✓ ⇒
+   * 那些 `@import` 原样留着 ⇒ 浏览器把裸包名当 URL 去请求 ⇒ **拿不到 ⇒ 样式残缺** ✗
+   * —— 用户截图里"表格看不出是表格"就是这么来的 ✓。
+   *
+   * @param css - 待处理文本。
+   * @param fromFile - 该文本来自哪个文件。
+   * @returns 展开后的文本 ✓。
+   */
+  const inlineImports = async (css, fromFile) => {
+    let out = css;
+    const specs = [...out.matchAll(/@import\s+['"]([^'"]+)['"]\s*;/g)].map((match) => match[1]);
+    for (const spec of specs) {
+      const file = resolveImport(spec, fromFile);
+      if (file === undefined) {
+        throw new Error(`样式 @import 解析不到：${spec}（来自 ${path.basename(fromFile)}）✗`);
+      }
+      let content = "";
+      if (!visited.has(file)) {
+        visited.add(file);
+        content = await inlineImports(await readFile(file, "utf8"), file);
+      }
+      out = out.replace(
+        new RegExp(`@import\\s+['"]${spec.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]\\s*;`),
+        `\n/* 已就地展开：${spec} ✓ */\n${content}\n`,
+      );
+    }
+    return out;
+  };
   /**
    * **必需**资源：缺失就构建失败 ✗（复查：`continue` 跳过会让"构建成功但公式/表格没样式"✗）。
    * @param file - 绝对路径。
@@ -1345,7 +1474,8 @@ async function readEditorCss() {
     if (!existsSync(file)) {
       throw new Error(`富文本编辑器必需的样式缺失：${label}（${file}）⇒ 构建不能继续 ✗`);
     }
-    return await readFile(file, "utf8");
+    visited.add(file);
+    return await inlineImports(await readFile(file, "utf8"), file);
   };
   /*
    * 只取我们用到的 feature 的样式（ai / diff 那些没用上，不塞进产物 ✗）；
@@ -1382,6 +1512,8 @@ async function readEditorCss() {
    * 所以这里把每个 `@font-face` 的 `src:` **整段重写成唯一的 woff2 data URI** ✓。
    */
   const katexDir = path.join(PLUGIN, "node_modules/katex/dist");
+  /* KaTeX 会同时被 latex.css 的 @import 引用 ⇒ 这里先标记，保证只内联一份 ✓ */
+  visited.add(path.join(katexDir, "katex.min.css"));
   let text = await required(path.join(katexDir, "katex.min.css"), "katex.min.css");
   const fontDir = path.join(katexDir, "fonts");
   let inlined = 0;
@@ -1412,6 +1544,16 @@ async function readEditorCss() {
     throw new Error(`KaTeX 样式里仍残留在包外请求的字体：${leftover[1]} ✗`);
   }
   parts.push(`/* katex（${inlined} 个字体已内联为 data URI ✓）*/\n${text}`);
+  /*
+   * **最后再确认一次没有"活着的" @import** ✗。
+   * 留一个下来，浏览器就会把它当 URL 去请求（裸包名必然失败 ✗）⇒
+   * 那条 `@import` 引入的整套样式（表格 / 光标 / KaTeX 布局 …）都会缺失 ✓，
+   * 而构建还会"成功"—— 这正是用户截图那个"表格看不出是表格"的成因 ✓。
+   */
+  const dangling = parts.find((part) => /@import\s+['"]/.test(part));
+  if (dangling !== undefined) {
+    throw new Error("注入的样式里仍有未展开的 @import（样式会残缺 ✗）");
+  }
   return parts.join("\n");
 }
 

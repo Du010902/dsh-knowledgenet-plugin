@@ -230,8 +230,16 @@ function GraphPanelInner(props: {
    * 请求进入某个节点的编辑器（或关闭）。
    * 有未保存改动时**不直接切**，先弹三选一 ✓（设计稿要求 ✓）。
    */
-  const requestEdit = useCallback((next: { kind: "open"; nodeId: string } | { kind: "close" }): void => {
-    if (editorDirty) {
+  const requestEdit = useCallback((
+    next: { kind: "open"; nodeId: string } | { kind: "close" },
+    /*
+     * **来得更新鲜的 dirty** ✗（第三次复查 P2-1）：编辑器刚在组合结束后取过快照，
+     * 那一刻的"有没有未保存内容"比 React state 更准 ⇒ 一律以传入值为准 ✓，
+     * 否则"该弹三选一却没弹"或"明明干净却拦住"都可能发生 ✗。
+     */
+    freshDirty?: boolean | undefined,
+  ): void => {
+    if (freshDirty ?? editorDirty) {
       setLeaveDialog(next);
       return;
     }
@@ -1136,7 +1144,7 @@ function GraphPanelInner(props: {
                 onDirtyChange={setEditorDirty}
                 onSaveOutcome={onEditorSaveOutcome}
                 onSaveableChange={setEditorSaveable}
-                onClose={() => { requestEdit({ kind: "close" }); }}
+                onClose={(dirty) => { requestEdit({ kind: "close" }, dirty); }}
                 onSaved={(document) => {
                   /*
                    * 保存成功：① 身份被"采用"（adopted-* → ULID）⇒ **编辑目标、选择、草稿键一起换** ✓

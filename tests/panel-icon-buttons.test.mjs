@@ -77,7 +77,7 @@ describe("面板头部图标按钮：共同形态", () => {
     assert.match(css, /\.kn-icon-btn \{[\s\S]{0,400}border: none/, "去掉胶囊边框");
     assert.match(css, /\.kn-icon-btn \{[\s\S]{0,400}background: transparent/, "去掉胶囊底色");
     assert.match(css, /\.kn-icon-btn svg \{[\s\S]{0,120}width: 15px;[\s\S]{0,60}height: 15px/, "字形 15px（与宿主一致）");
-    assert.match(css, /\.kn-icon-btn:hover:not\(:disabled\) \{[\s\S]{0,200}interactive-bg-hover/, "hover 用宿主 hover token");
+    assert.match(css, /\.kn-icon-btn:hover:not\(:disabled\) \{[\s\S]{0,200}kn-hover/, "hover 用由主题 token 派生的 --kn-hover ✓");
     assert.match(css, /\.kn-icon-btn:focus-visible/, "键盘焦点要看得见");
   });
 

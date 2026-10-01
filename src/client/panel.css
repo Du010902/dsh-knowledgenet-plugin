@@ -9,30 +9,30 @@
    ========================================================================== */
 
 .kn-root {
-  --surface: var(--dsw-alias-bg-layer-1, #ffffff);
-  --surface-raised: var(--dsw-alias-bg-layer-2, #ffffff);
-  --canvas: var(--dsw-alias-bg-base, #f5f8f7);
-  --canvas-soft: var(--dsw-alias-bg-layer-2, #eef3f1);
-  --text: var(--dsw-alias-label-primary, #192523);
-  --secondary: var(--dsw-alias-label-secondary, #526663);
-  --muted: var(--dsw-alias-state-idle-primary, #778a87);
-  --border: var(--dsw-alias-border-l2, #d6e0dd);
-  --line: var(--dsw-alias-border-l1, #d6e0dd);
-  --line-soft: var(--dsw-alias-border-l1, #e5ecea);
-  --hover: var(--dsw-alias-bg-layer-2, #e8f0ed);
-  --dot: var(--dsw-alias-border-l1, #dbe4e1);
-  --accent: var(--dsw-alias-brand-primary, #167f68);
-  --accent-hover: var(--dsw-alias-brand-primary, #0c6f59);
-  --accent-strong: var(--dsw-alias-brand-primary, #0c6f59);
-  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 12%, transparent);
-  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 6%, transparent);
-  --accent-text: var(--dsw-alias-brand-primary, #146b58);
-  --success: var(--dsw-alias-state-success-primary, #2f8a70);
-  --warning: var(--dsw-alias-state-warn-primary, #a8762c);
-  --todo: var(--dsw-alias-state-idle-primary, #74878d);
-  --danger: var(--dsw-alias-state-error-primary, #c63e48);
-  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 8%, transparent);
-  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #167f68) 3%, transparent);
+  --surface: var(--dsw-alias-bg-layer-1);
+  --surface-raised: var(--dsw-alias-bg-layer-2);
+  --canvas: var(--dsw-alias-bg-base);
+  --canvas-soft: var(--dsw-alias-bg-layer-2);
+  --text: var(--dsw-alias-label-primary);
+  --secondary: var(--dsw-alias-label-secondary);
+  --muted: var(--dsw-alias-state-idle-primary);
+  --border: var(--dsw-alias-border-l2);
+  --line: var(--dsw-alias-border-l1);
+  --line-soft: var(--dsw-alias-border-l1);
+  --hover: var(--dsw-alias-bg-layer-2);
+  --dot: var(--dsw-alias-border-l1);
+  --accent: var(--dsw-alias-brand-primary);
+  --accent-hover: var(--dsw-alias-brand-primary);
+  --accent-strong: var(--dsw-alias-brand-primary);
+  --accent-soft: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);
+  --accent-faint: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent);
+  --accent-text: var(--dsw-alias-brand-primary);
+  --success: var(--dsw-alias-state-success-primary);
+  --warning: var(--dsw-alias-state-warn-primary);
+  --todo: var(--dsw-alias-state-idle-primary);
+  --danger: var(--dsw-alias-state-error-primary);
+  --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
+  --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary) 3%, transparent);
   /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */
   --on-accent: #ffffff;
   --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);
@@ -139,68 +139,68 @@
 
 /* 每张图的纵轴记号（↑↓ / ↔） */
 .kn-minimap-glyph {
-  fill: var(--dsw-alias-label-tertiary, #6b7280);
+  fill: var(--dsw-alias-state-idle-primary);
   font-size: 8px;
 }
 
 /* 朝向箭头：固定参考里的真实视线方向 ✓ */
 .kn-minimap-arrow {
-  stroke: var(--dsw-alias-label-primary, #1f2937);
+  stroke: var(--dsw-alias-label-primary);
   stroke-width: 1.1;
   stroke-linecap: round;
 }
 
 /* 视线垂直于本图平面时改用「朝内 ⊗ / 朝外 ⊙」符号 ✓ */
 .kn-minimap-outward {
-  stroke: var(--dsw-alias-label-tertiary, #6b7280);
+  stroke: var(--dsw-alias-state-idle-primary);
   stroke-width: 0.9;
   fill: none;
 }
 
 .kn-minimap-outward-dot {
-  fill: var(--dsw-alias-label-tertiary, #6b7280);
+  fill: var(--dsw-alias-state-idle-primary);
   stroke: none;
 }
 
 /* 操作包围球 */
 .kn-minimap-ball {
   fill: none;
-  stroke: var(--dsw-alias-border-l2, #d6e0dd);
+  stroke: var(--dsw-alias-border-l2);
   stroke-width: 1;
 }
 
 /* 过球心的基线（读出"深入了多少"） */
 .kn-minimap-axis {
-  stroke: var(--dsw-alias-border-l1, #e6ece9);
+  stroke: var(--dsw-alias-border-l1);
   stroke-width: 0.7;
   stroke-dasharray: 2 3;
 }
 
 /* 固定转动中心（黑点） */
 .kn-minimap-center {
-  fill: var(--dsw-alias-label-primary, #1f2937);
+  fill: var(--dsw-alias-label-primary);
 }
 
 /* 走过的路径 */
 .kn-minimap-trail {
-  fill: var(--dsw-alias-label-tertiary, #6b7280);
+  fill: var(--dsw-alias-state-idle-primary);
 }
 
 /* 视角当前位置：一只朝球里看的眼睛 */
 .kn-minimap-eye-outline {
-  fill: var(--dsw-alias-bg-layer-1, #ffffff);
-  stroke: var(--dsw-alias-label-primary, #1f2937);
+  fill: var(--dsw-alias-bg-layer-1);
+  stroke: var(--dsw-alias-label-primary);
   stroke-width: 1.1;
 }
 
 .kn-minimap-pupil {
-  fill: var(--dsw-alias-label-primary, #1f2937);
+  fill: var(--dsw-alias-label-primary);
 }
 
 /* 被夹到框边（真实位置还在更外面）时套一圈虚线 ✓ */
 .kn-minimap-clamped {
   fill: none;
-  stroke: var(--dsw-alias-label-tertiary, #6b7280);
+  stroke: var(--dsw-alias-state-idle-primary);
   stroke-width: 0.8;
   stroke-dasharray: 2 2;
 }
@@ -208,8 +208,8 @@
 /* 到球心的距离读数（单位 = 操作球半径；球外读数带 ↗，表示图上半径经过压缩 ✓） */
 .kn-minimap-distance {
   margin-top: 2px;
-  fill: var(--dsw-alias-label-tertiary, #6b7280);
-  color: var(--dsw-alias-label-tertiary, #6b7280);
+  fill: var(--dsw-alias-state-idle-primary);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 8px;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -286,17 +286,17 @@
   max-width: 100%;
   min-height: 56px;
   padding: 14px 20px;
-  color: var(--dsw-alias-label-primary, #1b1b1b);
+  color: var(--dsw-alias-label-primary);
   font: inherit;
   text-align: left;
-  background: var(--dsw-alias-bg-layer-1, #ffffff);
-  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsl-guide-entry-radius, 16px);
   cursor: pointer;
 }
 
 .kn-guide-card:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04));
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
 }
 
 .kn-guide-card:focus-visible {
@@ -312,7 +312,7 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  color: var(--dsw-alias-label-secondary, #5c6b66);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .kn-guide-text {
@@ -333,7 +333,7 @@
 
 .kn-guide-desc {
   overflow: hidden;
-  color: var(--dsw-alias-label-tertiary, #8a9994);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
   line-height: 1.4;
   white-space: nowrap;
@@ -396,14 +396,14 @@
   border: none;
   border-radius: var(--dsw-radius-sm, 6px);
   background: transparent;
-  color: var(--dsw-alias-label-secondary, #526663);
+  color: var(--dsw-alias-label-secondary);
   line-height: 1;
   cursor: pointer;
 }
 
 .kn-icon-btn:hover:not(:disabled) {
-  color: var(--dsw-alias-label-primary, #192523);
-  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--dsw-alias-label-primary);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
 }
 
 .kn-icon-btn svg {
@@ -440,15 +440,15 @@
   height: 28px;
   box-sizing: border-box;
   padding: 0 9px;
-  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);
+  border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm, 6px);
-  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  background: var(--dsw-alias-bg-layer-1);
   /* 候选浮层的定位上下文就是**输入框这一格** ⇒ 浮层与它左右等宽 ✓（用户反馈：挂在整块搜索区上太长） */
   position: relative;
 }
 
 .kn-search-box:focus-within {
-  outline: 1px solid var(--dsw-alias-state-business-primary, #4a90d9);
+  outline: 1px solid var(--dsw-alias-brand-primary);
   outline-offset: -1px;
 }
 
@@ -456,7 +456,7 @@
   flex: none;
   width: 14px;
   height: 14px;
-  color: var(--dsw-alias-label-secondary, #526663);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .kn-search-field {
@@ -485,9 +485,9 @@
   max-height: 264px;
   overflow: auto;
   padding: 4px;
-  border: 0.5px solid var(--dsw-alias-border-l2, #d6e0dd);
+  border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm, 6px);
-  background: var(--dsw-alias-bg-layer-2, #1b1b1b);
+  background: var(--dsw-alias-bg-layer-2);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
@@ -507,7 +507,7 @@
 }
 
 .kn-search-item.is-active {
-  background: var(--dsw-alias-interactive-bg-hover, #292929);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
 }
 
 .kn-search-item-title {
@@ -521,13 +521,13 @@
 .kn-search-item-alias {
   flex: none;
   margin-left: auto;
-  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
 }
 
 .kn-search-empty {
   padding: 6px 8px;
-  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
 }
 
@@ -599,17 +599,17 @@
   gap: 16px;
   max-width: calc(100% - 28px);
   padding: 10px 14px;
-  border: 1px solid var(--dsw-alias-border-secondary, #303030);
+  border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 9px;
-  background: var(--dsw-alias-bg-elevated, rgba(25, 31, 28, 0.92));
-  color: var(--dsw-alias-label-primary, #e4ebe6);
+  background: var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-label-primary);
 }
 
 .kn-sel-tag {
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--dsw-alias-interactive-bg-hover, #27372e);
-  color: var(--dsw-alias-label-secondary, #b5cfbd);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
 }
 
@@ -619,14 +619,14 @@
 
 .kn-sel-sub {
   margin-top: 2px;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
 }
 
 .kn-sel-edit {
   flex: none;
   padding: 6px 12px;
-  border: 1px solid var(--dsw-alias-border-secondary, #303030);
+  border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 7px;
   background: transparent;
   color: inherit;
@@ -635,7 +635,7 @@
 }
 
 .kn-sel-edit:hover {
-  background: var(--dsw-alias-interactive-bg-hover, #29352e);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
 }
 
 /*
@@ -657,9 +657,9 @@
   display: flex;
   flex-direction: column;
   width: min(440px, 100%);
-  border-left: 1px solid var(--dsw-alias-border-secondary, #303030);
-  background: var(--dsw-alias-bg-elevated, #191e1c);
-  color: var(--dsw-alias-label-primary, #e4ebe6);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
   box-shadow: -15px 0 50px rgba(0, 0, 0, 0.35);
 }
 
@@ -674,11 +674,49 @@
   }
 }
 
-.kn-editor-heading {
-  padding: 16px 18px 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);
+/* ===================== 编辑器打开时：图谱 HUD 必须让位、且不许穿透 ===================== */
+
+/*
+ * 截图里的问题（`design/br-html-fallback-and-editor-overlay-analysis.md` 第 3 节）：
+ * 图谱自带的 HUD（右上状态灯 `.universe-status`、左下提示 `.universe-hint`、右下小地图
+ * `.kn-minimap`，上游 graph.css 里是 `position: absolute` + `z-index: 5~6` ✗）
+ * 会压在编辑区上 —— 因为 `.kn-editor` 原来只有 `z-index: 4` ✗，
+ * 而"给舞台加 padding"并不会移动这些绝对定位控件 ✗。
+ *
+ * 处理办法是**分层 + 隔离**，不是单独抬某个提示 ✗：
+ * ① 编辑器整体抬到图谱 HUD 之上 ⇒ 遮挡关系确定（保存按钮、关闭按钮永远不会被盖住 ✓）；
+ * ② 宽面板里让已知 HUD 主动**左移让出 440px 编辑条** ✓（它们仍可见，只是不再压住编辑区 ✓）；
+ * ③ 窄面板（编辑器覆盖整块图谱）里图谱层**不接受指针** ✓ ⇒ 被遮住的控件不会被点到 ✓。
+ */
+.kn-graph:has(.kn-editor) .kn-editor {
+  /* 高过上游 HUD 的 6 ✓（同样的选择器权重也高过 graph.css 的 .universe-status ✓） */
+  z-index: 12;
 }
 
+@container (min-width: 720px) {
+  .kn-graph:has(.kn-editor) .universe-status,
+  .kn-graph:has(.kn-editor) .universe-hint {
+    /* 让出右侧编辑条 ✓（原来是贴整个面板的边 ✗） */
+    right: 452px;
+    max-width: calc(100% - 464px);
+  }
+
+  .kn-graph:has(.kn-editor) .kn-minimap {
+    right: 452px;
+  }
+}
+
+@container (max-width: 719px) {
+  /* 编辑器覆盖整块图谱 ⇒ 底下的图谱控件一律不响应指针 ✓（"不得穿透"✓） */
+  .kn-graph:has(.kn-editor) .kn-graph-stage {
+    pointer-events: none;
+  }
+}
+
+.kn-editor-heading {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
 .kn-editor-row {
   display: flex;
   align-items: center;
@@ -689,8 +727,8 @@
 .kn-editor-tag {
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--dsw-alias-interactive-bg-hover, #27372e);
-  color: var(--dsw-alias-label-secondary, #b5cfbd);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
 }
 
@@ -699,52 +737,109 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
+/* 标题：单行省略 ✓（完整标题看 title 提示 ✓）—— 身份标题只占一行 ✓ */
 .kn-editor-title {
-  margin: 8px 0 0;
-  font-size: 17px;
-  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* 路径住在「详情」里 ✓（可读的次级色 ✓，不再常驻占高度 ✓） */
 .kn-editor-path {
-  margin-top: 4px;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  word-break: break-all;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 头部右侧的小工具组：正文/源码 + 详情 + 关闭 ✓（合计约 44px 高 ✓） */
+.kn-editor-heading {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
 .kn-editor-tabs {
   display: flex;
-  gap: 16px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--dsw-alias-border-secondary, #303030);
+  flex: none;
+  gap: 2px;
+  align-items: center;
 }
 
 .kn-editor-tabs button {
-  padding: 4px 0;
+  padding: 3px 8px;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-label-secondary);
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
 
+.kn-editor-tabs button:hover {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+}
+
 .kn-editor-tabs button.is-active {
-  color: var(--dsw-alias-label-primary, #e4ebe6);
-  box-shadow: 0 2px currentColor;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+/* 详情按钮与关闭按钮：同一尺寸的小方钮 ✓ */
+.kn-editor-more,
+.kn-editor-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kn-editor-more:hover,
+.kn-editor-close:hover {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 详情面板：按需展开 ✓（默认不占正文高度 ✓） */
+.kn-editor-details {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .kn-editor-notice {
   padding: 10px 18px;
-  background: var(--dsw-alias-bg-warning, #443823);
-  color: var(--dsw-alias-label-warning, #edcf9e);
+  background: var(--kn-warn-bg, color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent));
+  color: var(--dsw-alias-state-warn-primary);
   font-size: 12px;
 }
 
@@ -765,17 +860,17 @@
 
 /* 破坏性动作（放弃草稿）要看得出来 ✓ */
 .kn-editor-notice-actions button.is-danger {
-  border-color: var(--dsw-alias-border-danger, #a8564f);
-  color: var(--dsw-alias-label-error, #f0a8a8);
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* 「放弃草稿」的二次确认卡片（复查 P1-2：替换草稿必须先确认 ✓） */
 .kn-editor-confirm {
   margin: 10px 18px 0;
   padding: 12px 14px;
-  border: 1px solid var(--dsw-alias-border-danger, #a8564f);
+  border: 1px solid var(--dsw-alias-state-error-primary);
   border-radius: 8px;
-  background: var(--dsw-alias-bg-elevated, #191e1c);
+  background: var(--dsw-alias-bg-layer-1);
 }
 
 .kn-editor-confirm-title {
@@ -784,7 +879,7 @@
 
 .kn-editor-confirm-body {
   margin: 6px 0 10px;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 12px;
 }
 
@@ -799,34 +894,43 @@
 
 .kn-editor-hint {
   padding: 10px 18px 0;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
 }
 
+/*
+ * **正文视口——整个编辑器里唯一负责纵向滚动的地方** ✓（文档第 2 节 ✓）。
+ * flex 剩余高度 + min-height:0 是必须的 ✗：否则 flex 子项不肯收缩 ⇒ 出现"外层一条、内层一条"两个滚动条 ✓。
+ */
 .kn-editor-body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
-  padding: 0 18px;
-  overflow: auto;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .kn-editor-text {
+  flex: 1;
   width: 100%;
-  height: 100%;
-  min-height: 220px;
-  padding: 8px 0 20px;
+  /* 不写死高度、也不留 220px 最小高 ✗：那会和外层滚动叠加 ✓ */
+  min-height: 0;
+  padding: 10px 16px 20px;
   border: 0;
   outline: none;
   resize: none;
   background: transparent;
   color: inherit;
   font-family: ui-monospace, "Microsoft YaHei", monospace;
-  font-size: 13px;
-  line-height: 1.9;
+  font-size: 12.5px;
+  line-height: 1.7;
+  overflow: auto;
 }
 
 .kn-editor-text:focus {
-  box-shadow: inset 2px 0 var(--dsw-alias-border-secondary, #3a4a40);
+  box-shadow: inset 2px 0 var(--dsw-alias-border-l1);
   padding-left: 10px;
 }
 
@@ -840,40 +944,51 @@
 .kn-editor-preview h3 {
   margin: 14px 0 8px;
   font-size: 15px;
-  color: var(--dsw-alias-label-secondary, #bddfc8);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .kn-editor-dim {
   padding: 14px 0;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 12px;
 }
 
 .kn-editor-error {
   padding: 14px 0;
-  color: var(--dsw-alias-label-error, #f0a8a8);
+  color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
 }
 
+/* 底部：**单行**状态栏 ✓（左状态 / 右保存 ✓，合计约 36px） */
 .kn-editor-foot {
-  padding: 12px 18px 16px;
-  border-top: 1px solid var(--dsw-alias-border-secondary, #303030);
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
 .kn-editor-status {
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  /* 状态文字要**读得清** ✗（原来用 idle 色 ⇒ 淡到看不清 ✓），只有次要提示才用更淡的色 ✓ */
+  color: var(--dsw-alias-label-secondary);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kn-editor-status.is-conflict {
-  color: var(--dsw-alias-label-warning, #edcf9e);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .kn-editor-save {
-  padding: 6px 13px;
+  padding: 5px 12px;
   border: 0;
   border-radius: 7px;
-  background: var(--dsw-alias-accent, #a9d3b9);
+  background: var(--dsw-alias-brand-primary);
   color: #183124;
   font: inherit;
   cursor: pointer;
@@ -886,7 +1001,7 @@
 
 .kn-editor-sub {
   margin-top: 10px;
-  color: var(--dsw-alias-label-tertiary, #94a399);
+  color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
 }
 
@@ -903,55 +1018,35 @@
  * 2. 让编辑区在窄面板里正确滚动、长表格与长公式可以横向滚动 ✓（不压缩到不可读 ✓）。
  */
 /*
- * ⚠️ 变量要同时落在 **`.milkdown` 这一层** ✗：Crepe 的 classic 主题正是把 `--crepe-color-*`
- * 定义在 `.milkdown` 上（不是 `:root`）⇒ 只覆盖父容器的话，编辑器内部仍用**浅色主题**的
- * 深色文字 ⇒ 暗色面板上正文几乎看不见 ✗（我在独立渲染页里就是这么发现的 ✓）。
+ * 变量映射与表格可见性规则**已移到 `src/client/editor-overrides.css`** ✓ ——
+ * 它们必须排在 Crepe 自带 CSS **之后**、且权重更高才能赢 ✗（详见该文件顶部注释 ✓）。
  */
-.kn-editor-rich,
-.kn-editor-rich .milkdown {
-  --crepe-color-background: var(--dsw-alias-bg-elevated, #191e1c);
-  --crepe-color-on-background: var(--dsw-alias-label-primary, #e4ebe6);
-  --crepe-color-surface: var(--dsw-alias-bg-elevated, #191e1c);
-  --crepe-color-surface-low: var(--dsw-alias-interactive-bg-hover, #27372e);
-  --crepe-color-on-surface: var(--dsw-alias-label-primary, #e4ebe6);
-  --crepe-color-on-surface-variant: var(--dsw-alias-label-secondary, #b5cfbd);
-  --crepe-color-outline: var(--dsw-alias-border-secondary, #303a35);
-  --crepe-color-primary: var(--dsw-alias-accent, #a9d3b9);
-  --crepe-color-secondary: var(--dsw-alias-interactive-bg-hover, #27372e);
-  --crepe-color-on-secondary: var(--dsw-alias-label-primary, #e4ebe6);
-  --crepe-color-inverse: var(--dsw-alias-label-primary, #e4ebe6);
-  --crepe-color-on-inverse: var(--dsw-alias-bg-elevated, #191e1c);
-  --crepe-color-inline-code: var(--dsw-alias-label-error, #f0a8a8);
-  --crepe-color-error: var(--dsw-alias-label-error, #f0a8a8);
-  --crepe-color-hover: var(--dsw-alias-interactive-bg-hover, #29352e);
-  --crepe-color-selected: var(--dsw-alias-interactive-bg-hover, #33413a);
-
-  flex: 1;
-  min-height: 220px;
-  padding: 4px 18px 20px;
-  overflow: auto;
-  color: var(--dsw-alias-label-primary, #e4ebe6);
-  font-size: 13px;
-  line-height: 1.9;
+/*
+ * 左右留白：这里 18px + ProseMirror 6px ≈ **24px** ✓（文档建议 16–24px ✓，两层不重复叠加 ✓）。
+ * 纵向滚动**不在这里** ✗（交给 .kn-editor-body ✓）⇒ 不再出现"两个纵向滚动条"✓。
+ */
+.kn-editor-rich {
+  flex: none;
+  min-height: 0;
+  padding: 2px 18px 16px;
+  overflow: visible;
+  color: var(--dsw-alias-label-primary);
 }
 
-/* Crepe 自己的容器撑满可用高度，长文滚动发生在这一层 ✓ */
+/*
+ * Crepe 容器**自然撑高** ✓（不再 `height:100%` ✗）：
+ * 高度 100% 与内边距叠加会把内容顶出容器 ⇒ 在正文视口之外又多出一条滚动 ✓。
+ * 纵向滚动统一由 `.kn-editor-body` 承担 ✓。
+ */
 .kn-editor-rich .milkdown {
-  height: 100%;
+  height: auto;
   background: transparent;
 }
 
 .kn-editor-rich .milkdown .ProseMirror {
-  min-height: 220px;
+  min-height: 0;
   padding: 0;
   outline: none;
-}
-
-/* 表格与公式**允许横向滚动** ✓（窄面板里不压缩到不可读 ✗） */
-.kn-editor-rich .milkdown table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
 }
 
 .kn-editor-rich .milkdown .katex-display {
@@ -1230,7 +1325,7 @@
 
 /* ---------------- 标签页模式：头行**逐项对齐**宿主「文件」页的 .header
    （来源：packages/client/ui-sidebar-files/src/client/FilesBody.module.css:19）
-   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l3) ---------------- */
+   height 38px / padding 0 6px 0 16px / border-bottom 0.5px var(--dsw-alias-border-l2) ---------------- */
 
 .kn-root-fill .kn-head,
 .kn-root-fill .kn-head-panel {
@@ -1243,7 +1338,7 @@
   height: 38px;
   min-height: 38px;
   padding: 0 6px 0 16px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
   overflow: hidden;
 }
 .kn-root-fill .kn-head-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
@@ -1253,13 +1348,13 @@
 
 /* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */
 .kn-root-fill .kn-btn {
-  border-color: var(--dsw-alias-border-l3, #d6e0dd);
-  color: var(--dsw-alias-label-secondary, #526663);
+  border-color: var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
   background: transparent;
 }
 .kn-root-fill .kn-btn:hover:not(:disabled) {
-  border-color: var(--dsw-alias-label-secondary, #526663);
-  color: var(--dsw-alias-label-primary, #192523);
+  border-color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
 }
 .kn-root-fill .kn-btn:disabled { opacity: .5; }
 
@@ -1268,20 +1363,20 @@
 
 /* ---------------- agent 提案审阅区 ---------------- */
 
-.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); }
-.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 10px; }
+.kn-plan { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.kn-plan-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
 .kn-plan-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }
 .kn-plan-meta { font-size: 11px; font-weight: 400; opacity: .6; }
 .kn-plan-summary { font-size: 12px; opacity: .8; }
 .kn-plan-items { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
 .kn-plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .kn-plan-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd); opacity: .8; }
+.kn-plan-tag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; border: 0.5px solid var(--dsw-alias-border-l2); opacity: .8; }
 .kn-plan-tag.is-reuse { opacity: .6; }
 .kn-plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .kn-plan-hint { font-size: 11px; opacity: .55; }
 .kn-plan-note { font-size: 12px; opacity: .85; }
-.kn-plan-error { font-size: 12px; color: var(--dsw-alias-label-tertiary, #c66); }
+.kn-plan-error { font-size: 12px; color: var(--dsw-alias-state-idle-primary); }
 
 /* 空库提示：浮在画布上方，但**不拦截鼠标**（否则右键又点不动了） */
 .kn-empty-hint {
@@ -1292,10 +1387,10 @@
 
 /* 危险按钮（彻底删除）：红字描边，视觉上与"备份删除"分得开 */
 .kn-modal-btn.is-danger {
-  color: #e5534b;
-  border: 0.5px solid rgba(229, 83, 75, 0.5);
+  color: var(--dsw-alias-state-error-primary);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 50%, transparent);
 }
-.kn-modal-btn.is-danger:hover { background: rgba(229, 83, 75, 0.12); }
+.kn-modal-btn.is-danger:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
 
 /* ---------------- 图标按钮的形状覆盖（必须放在文件末尾） ----------------
    `.kn-root-fill .kn-btn` 在多处写死了 height 22/24px 与左右内边距（panel.css 里那几条响应式调参），
@@ -1313,6 +1408,6 @@
 }
 .kn-root-fill .kn-btn.kn-icon-btn:hover:not(:disabled) {
   border: none;
-  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
-  color: var(--dsw-alias-label-primary, #192523);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-primary);
 }

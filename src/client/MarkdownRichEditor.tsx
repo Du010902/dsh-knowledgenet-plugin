@@ -20,6 +20,57 @@
 import { useEffect, useImperativeHandle, useRef, type ReactNode, type RefObject } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import { replaceAll } from "@milkdown/kit/utils";
+import { EditorView } from "@codemirror/view";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
+
+/**
+ * **代码/公式源码区的 CodeMirror 主题**（`design/code-and-math-block-redesign.md` ✓）。
+ *
+ * 为什么必须走主题扩展 ✗（而不是继续叠 CSS ✓）：截图里"浅色正文 + 深色活动行号块"的混搭，
+ * 来自 CodeMirror 自带样式与 Crepe 主题各管一半 ✓；
+ * 这个文档明确要求：editor / scroller / content / gutters / activeLine / selection / cursor
+ * **成套**接入 ✓，只消除一个黑矩形会留下别的暗色元素 ✗。
+ *
+ * Crepe 的 `featureConfigs["code-mirror"].theme` 会把这段扩展**追加**进 CodeMirror ✓
+ * ⇒ 后注册的主题规则生效 ✓，CSS 覆盖作为兜底 ✓。
+ *
+ * 颜色一律用宿主 token ✓（亮/暗自动跟随 ✓）；**默认关闭行号** ✓
+ * （文档：短笔记更接近文档而不是 IDE ✓；"显示行号"这个开关目前没做 ✗）。
+ */
+/** Syntax colors use the host palette in both light and dark themes. */
+const KN_CODE_HIGHLIGHT = HighlightStyle.define([
+  { tag: [tags.meta, tags.variableName, tags.typeName, tags.propertyName, tags.operator, tags.punctuation], color: "var(--dsw-alias-label-primary)" },
+  { tag: tags.comment, color: "var(--dsw-alias-label-secondary)", fontStyle: "italic" },
+  { tag: [tags.keyword, tags.atom, tags.bool, tags.number], color: "color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, var(--dsw-alias-label-primary))" },
+  { tag: [tags.string, tags.regexp, tags.escape], color: "color-mix(in srgb, var(--dsw-alias-brand-primary) 65%, var(--dsw-alias-label-primary))" },
+]);
+const KN_CODE_THEME = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "var(--dsw-alias-label-primary)",
+    fontSize: "13px",
+  },
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": {
+    fontFamily: 'ui-monospace, SFMono-Regular, Consolas, "Cascadia Mono", monospace',
+    lineHeight: "1.6",
+    overflow: "auto",
+  },
+  ".cm-content": { padding: "6px 0", caretColor: "var(--dsw-alias-label-primary)" },
+  /* 默认关行号 ✓（也顺手去掉截图里那个深色行号方块 ✗） */
+  ".cm-gutters": { display: "none", border: "none", backgroundColor: "transparent" },
+  /* 活动行只给一点点反馈 ✓（不再整块变色 ✓） */
+  ".cm-activeLine": {
+    backgroundColor: "color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)",
+  },
+  ".cm-activeLineGutter": { backgroundColor: "transparent" },
+  ".cm-selectionBackground, .cm-content ::selection": {
+    backgroundColor: "color-mix(in srgb, var(--dsw-alias-brand-primary) 26%, transparent)",
+  },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--dsw-alias-label-primary)" },
+});
+
 
 /** 编辑器对外接口（父组件通过 ref 调用 ✓） */
 export interface MarkdownRichEditorHandle {
@@ -121,6 +172,39 @@ export function MarkdownRichEditor(props: {
       features: {
         [CrepeFeature.AI]: false,
         [CrepeFeature.ImageBlock]: false,
+      },
+      /*
+       * **文案与行为配置**（`design/math-editor-ui-design.md` ✓）。
+       *
+       * 为什么需要：公式块在 Crepe 里**复用**了通用代码块的界面（latex 特性扩展的就是
+       * codeBlockSchema ✓）⇒ 默认会露出 "Search language / Preview / Hide / Copy" ✗。
+       * 这里用**官方配置项**换成中文与更贴切的措辞 ✓，而不是靠 CSS 假装替换文字 ✗
+       * （文档明确要求：能用配置就用配置 ✓）。
+       */
+      featureConfigs: {
+        [CrepeFeature.CodeMirror]: {
+          searchPlaceholder: "搜索语言…",
+          noResultText: "没有匹配的语言",
+          copyText: "复制",
+          /* 「PREVIEW」大写标签 → 轻量的「结果」✓（不常驻大写标签 ✓） */
+          previewLabel: "结果",
+          previewToggleButton: (previewOnlyMode: boolean) => (previewOnlyMode ? "编辑源码" : "只看结果"),
+          /*
+           * ⚠️ Crepe 的 code-mirror 特性用的是 **`previewToggleText`** ✗（不是基类的
+           * `previewToggleButton` ✓）—— 只配后者的话按钮上仍是英文 "Hide" ✓（截图实测 ✓）。
+           * 两个都配上 ✓，谁生效都对 ✓。
+           */
+          previewToggleText: (previewOnlyMode: boolean) => (previewOnlyMode ? "编辑源码" : "只看结果"),
+          previewLoading: "渲染中…",
+          previewOnlyByDefault: true,
+          /* 代码/公式源码**成套**的编辑主题 ✓（见 KN_CODE_THEME ✓） */
+          theme: KN_CODE_THEME,
+          extensions: [syntaxHighlighting(KN_CODE_HIGHLIGHT)],
+        },
+        [CrepeFeature.Latex]: {
+          /* 行内公式局部编辑的确认按钮 ✓（只提交到草稿，不等于保存文件 ✓） */
+          inlineEditConfirm: "完成",
+        },
       },
     });
     crepe.on((listener) => {

@@ -130,15 +130,15 @@ function ensureStyle(): void {
     ".kn-sel-bar {",
     "  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
     "  padding: 4px 6px; border-radius: 999px;",
-    "  border: 0.5px solid var(--dsw-alias-border-l3, #d6e0dd);",
-    "  background: var(--dsw-alias-bg-layer-2, #ffffff);",
-    "  color: var(--dsw-alias-label-primary, #192523);",
+    "  border: 0.5px solid var(--dsw-alias-border-l2);",
+    "  background: var(--dsw-alias-bg-layer-2);",
+    "  color: var(--dsw-alias-label-primary);",
     "  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); font-size: 12px; }",
     ".kn-sel-bar button {",
     "  border: 0; border-radius: 999px; background: transparent; color: inherit;",
     "  font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; }",
-    ".kn-sel-bar button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); }",
-    ".kn-sel-bar .kn-sel-primary { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.06)); font-weight: 600; }",
+    ".kn-sel-bar button:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); }",
+    ".kn-sel-bar .kn-sel-primary { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); font-weight: 600; }",
     /*
      * 「收集知识点」弹窗的标签组（形态照设计稿 `knowledgenet-multiselect-design.html`）：
      * 一个 chip = 一个待建的知识点，chip 内可改名、× 可删；末尾一个输入框负责新增 ✓。
@@ -147,33 +147,33 @@ function ensureStyle(): void {
     ".kn-ms-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }",
     ".kn-ms-label-row .kn-pick-label { margin: 0; }",
     ".kn-ms-composer { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 7px; min-height: 90px; padding: 10px; box-sizing: border-box;",
-    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
+    "  border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); }",
     ".kn-ms-composer:focus-within { border-color: #819b91; }",
     ".kn-ms-chip { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; min-height: 30px; padding: 0 5px 0 10px;",
-    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-2, #ffffff); color: inherit; }",
+    "  border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-2); color: inherit; }",
     ".kn-ms-chip input { padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }",
     ".kn-ms-remove { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;",
-    "  background: transparent; color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 16px; line-height: 1; cursor: pointer; }",
-    ".kn-ms-remove:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); color: inherit; }",
+    "  background: transparent; color: var(--dsw-alias-label-secondary); font-size: 16px; line-height: 1; cursor: pointer; }",
+    ".kn-ms-remove:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); color: inherit; }",
     /*
      * 注：`.kn-ms-new`（末尾那个"手动输入新标签"的输入框）已按用户要求删掉 ✓ ——
      * 知识点只能来自对话划词，标签本身仍可就地改名（`.kn-ms-chip input`）。
      */
     /* 一个标签都没有时的引导语（只是提示，不是"可以在这里输入"的输入位） */
-    ".kn-ms-placeholder { align-self: center; color: var(--dsw-alias-label-secondary, #5c6b66); font-size: 12px; }",
-    ".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-ms-placeholder { align-self: center; color: var(--dsw-alias-label-secondary); font-size: 12px; }",
+    ".kn-ms-details { margin: 8px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary); }",
     /*
      * 「是否添加为前置」这一行：**两个互斥选项**（创建独立节点 / 添加为前置）✓。
      *
      * 用原生 radio：语义准确（不是"可同时勾选"的复选框）、键盘（方向键 / Space）与读屏天然可用 ✓；
      * 样式上把行做成可点区域，radio 本体保持浏览器默认外观（不自己画控件 = 不会在亮暗主题里跑偏 ✓）。
      */
-    ".kn-ms-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 14px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-ms-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 14px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary); }",
     ".kn-ms-radio { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: inherit; font-size: 12px; }",
-    ".kn-ms-radio input { margin: 0; accent-color: var(--dsw-alias-button-primary-fill, #24786b); cursor: pointer; }",
-    ".kn-ms-radio:hover { color: var(--dsw-alias-label-primary, #192523); }",
+    ".kn-ms-radio input { margin: 0; accent-color: var(--dsw-alias-brand-primary); cursor: pointer; }",
+    ".kn-ms-radio:hover { color: var(--dsw-alias-label-primary); }",
     ".kn-ms-note { margin-top: 8px; font-size: 12px; }",
-    ".kn-ms-drag { font-size: 11px; letter-spacing: 4px; line-height: 1; color: var(--dsw-alias-label-secondary, #5c6b66); opacity: .55; }",
+    ".kn-ms-drag { font-size: 11px; letter-spacing: 4px; line-height: 1; color: var(--dsw-alias-label-secondary); opacity: .55; }",
     /*
      * 「设为前置」弹窗（形态照设计稿 `knowledgenet-picker-design.html`）：
      * 头部 / 内容 / 底部三段，全出血分隔线；字段与结果行都走宿主 token，亮暗主题自动跟随 ✓。
@@ -185,8 +185,8 @@ function ensureStyle(): void {
      * 子元素不打开指针事件的话整个弹窗都点不动 ✗（旧 `.kn-sel-modal` 就带着这一条，重构时容易漏）。
      */
     "  pointer-events: auto;",
-    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 12px;",
-    "  background: var(--dsw-alias-bg-layer-2, #ffffff); color: var(--dsw-alias-label-primary, #192523);",
+    "  border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px;",
+    "  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary);",
     "  box-shadow: 0 22px 64px rgba(0, 0, 0, .35); font-size: 13px; line-height: 1.5; }",
     /* 头部现在只承担"拖动把手"（标题已按用户要求去掉），所以内边距改小、只留拖拽区 ✓ */
     ".kn-pick-head { padding: 12px 22px 10px; }",
@@ -197,9 +197,9 @@ function ensureStyle(): void {
      * 现在标签只有一份（`.kn-ms-chip*`），不会再出现"两个弹窗各有一套标签"的重复形态 ✓。
      */
     /* 「添加为谁的前置」：与上面的标签区隔开（展开时才有） */
-    ".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
+    ".kn-pick-target { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l2); }",
     ".kn-pick-label { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 500; }",
-    ".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-group { margin: 14px 0 8px; font-size: 12px; color: var(--dsw-alias-label-secondary); }",
     /*
      * 搜索框：**图标与输入框是同一行的两个 flex 子项**，不是"绝对定位盖在输入框上"。
      *
@@ -209,38 +209,38 @@ function ensureStyle(): void {
      * = 文字正好从 35px 处开始 ✓（与设计稿的 `padding-left: 35px` 等价），图标不可能再飘 ✓。
      */
     ".kn-search-wrap { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; box-sizing: border-box;",
-    "  border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px; background: var(--dsw-alias-bg-layer-1, #ffffff); }",
-    ".kn-search-wrap svg { flex: none; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    "  border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); }",
+    ".kn-search-wrap svg { flex: none; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary); }",
     ".kn-search-wrap input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
     "  background: transparent; color: inherit; font: inherit; }",
-    ".kn-search-wrap input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-search-wrap input::placeholder { color: var(--dsw-alias-label-secondary); }",
     /* 输入框自己的类（守门测试要求用到的 kn-* 必须有定义；行为与上面那条一致 ✓） */
     ".kn-search-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0;",
     "  background: transparent; color: inherit; font: inherit; }",
-    ".kn-search-input::placeholder { color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-search-input::placeholder { color: var(--dsw-alias-label-secondary); }",
     /* 结果行：整行可点，选中时描边 + ✓ */
     ".kn-pick-results { display: flex; flex-direction: column; gap: 2px; max-height: 236px; overflow: auto; }",
     ".kn-pick-row { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 6px 10px;",
     "  border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
-    ".kn-pick-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
+    ".kn-pick-row:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); }",
     ".kn-pick-row[aria-pressed='true'] { border-color: #819b91; background: rgba(129, 155, 145, .18); }",
     ".kn-pick-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-    ".kn-pick-row-mark { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-row-mark { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--dsw-alias-label-secondary); }",
     ".kn-pick-row[aria-pressed='true'] .kn-pick-row-mark { color: inherit; }",
-    ".kn-pick-empty { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    ".kn-pick-empty { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--dsw-alias-label-secondary); }",
     /* 底部：状态行 + 取消/确认添加 */
     ".kn-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px;",
-    "  border-top: 1px solid var(--dsw-alias-border-l3, #d6e0dd); }",
-    ".kn-pick-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-secondary, #5c6b66); }",
+    "  border-top: 1px solid var(--dsw-alias-border-l2); }",
+    ".kn-pick-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--dsw-alias-label-secondary); }",
     ".kn-pick-actions { display: flex; gap: 8px; flex: none; }",
-    ".kn-pick-btn { height: 34px; padding: 0 13px; border: 1px solid var(--dsw-alias-border-l3, #d6e0dd); border-radius: 7px;",
+    ".kn-pick-btn { height: 34px; padding: 0 13px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px;",
     "  background: transparent; color: inherit; font: inherit; cursor: pointer; }",
-    ".kn-pick-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, .06)); }",
-    ".kn-pick-btn.is-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill, #d5e5df);",
-    "  color: var(--dsw-alias-label-primary-foreground, #17221e); }",
+    ".kn-pick-btn:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); }",
+    ".kn-pick-btn.is-primary { border-color: transparent; background: var(--dsw-alias-brand-primary);",
+    "  color: var(--dsw-alias-bg-base); }",
     ".kn-pick-btn.is-primary:hover:not(:disabled) { filter: brightness(1.06); }",
     ".kn-pick-btn.is-primary:disabled { opacity: .42; cursor: not-allowed; }",
-    ".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary, #e5534b); }",
+    ".kn-pick-error { margin: 0 22px 14px; font-size: 12px; color: var(--dsw-alias-state-error-primary); }",
     ".kn-pick-section { margin-top: 12px; font-size: 11px; opacity: .6; }",
   ].join("\n");
   /*
@@ -1645,9 +1645,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                       height: 36,
                       boxSizing: "border-box",
                       padding: "0 11px",
-                      border: "1px solid var(--dsw-alias-border-l3, #d6e0dd)",
+                      border: "1px solid var(--dsw-alias-border-l2)",
                       borderRadius: 7,
-                      background: "var(--dsw-alias-bg-layer-1, #ffffff)",
+                      background: "var(--dsw-alias-bg-layer-1)",
                     }}
                   >
                     {/*
@@ -1661,7 +1661,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                       width={16}
                       height={16}
                       aria-hidden="true"
-                      style={{ flex: "none", width: 16, height: 16, color: "var(--dsw-alias-label-secondary, #8a8a8a)" }}
+                      style={{ flex: "none", width: 16, height: 16, color: "var(--dsw-alias-label-secondary)" }}
                     >
                       <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
                       <path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />

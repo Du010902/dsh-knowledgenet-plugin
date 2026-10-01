@@ -15,10 +15,15 @@ import type { NodeDocument } from "./node-document-client.ts";
 export const EDITOR_LITERAL: Record<string, string> = {
   notePanelTitle: "节点笔记",
   closeEditor: "关闭编辑区",
+  details: "详情",
+  detailPath: "路径",
+  detailRevision: "修订",
+  detailShortcut: "快捷键",
   tabRich: "正文",
   richLoading: "正在准备正文编辑器…",
   richFailed: "正文编辑器初始化失败：请切到「源码」继续编辑或复制内容（此时不会保存 ✗）",
   unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已停在「源码」模式（原文一字不动 ✓）",
+  /* 换行标签 <br> 是支持写法 ✓（实测可逐字往返 ✓），不进这条提示 ✓ */
   unsupportedRisk: "在「正文」模式下编辑并保存，可能会改写上面这些语法 ✗",
   openRichAnyway: "仍要用正文模式打开",
   tabSource: "源码",
@@ -430,12 +435,35 @@ export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
     .replace(/\$\$[\s\S]*?\$\$/g, " ")
     .replace(/(?<!\\)\$[^$\n]*\$/g, " ");
   const reasons: string[] = [];
+  /*
+   * **```latex 围栏会被渲染成公式** ✗（`design/math-editor-ui-design.md` 的"数据语义必须区分" ✓）：
+   * Crepe 的 latex 特性扩展的是 **codeBlockSchema** ✓ ⇒ language=latex 的代码块
+   * 会被序列化成数学节点 ✓ ⇒ 用户真想记录一段 LaTeX 源码示例时会被当成公式 ✗。
+   * 这个判断必须在**挖掉代码块之前**做 ✓（下面 `stripped` 已经把围栏删了 ✓）。
+   */
+  if (/^\s*```+\s*latex\b/im.test(markdown)) {
+    reasons.push("LaTeX 围栏代码（会被渲染成公式）");
+  }
   const test = (pattern: RegExp, reason: string): void => {
     if (pattern.test(stripped) && !reasons.includes(reason)) reasons.push(reason);
   };
-  /* 原始 HTML（注释与标签）—— 富编辑器会按自己的 schema 处理 ✗ */
-  test(/<!--[\s\S]*?-->/, "HTML 注释");
-  test(/<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/, "原始 HTML 标签");
+  /*
+   * **安全换行标签先摘掉，再判 HTML** ✓。
+   *
+   * 为什么可以放行 ✗ —— 实测（Crepe 7.22.2 + 本插件同一套内联 CSS，真实浏览器往返探针 ✓）：
+   * 行内 `<br />`、`<br>`、`<br/>`、`<BR />`、连续多个、独立成行、引用里、表格单元格里、
+   * 代码块/行内代码里的**字面量**、以及与其他 HTML 混排 ——
+   * **无操作打开**与**编辑别的段落后**都**逐字保留** ✓（只有表格单元格会顺带做对齐填充 ✓）。
+   * ⇒ 它们是可保真的常用写法 ✓，不该让整篇退回源码 ✗（截图里正是被它触发的 ✗）。
+   *
+   * 这正是文档要求的顺序 ✓：**先验证往返、再放宽规则** ✓；
+   * 不放行任意 HTML ✗，也不对正文做全局字符串替换 ✗（编辑器自己原样保留 ✓）。
+   */
+  const textWithoutBreaks = stripped.replace(/<br\s*\/?>/gi, " ");
+  /* HTML 注释与"非 br"的标签 ✗ */
+  if (/<!--[\s\S]*?-->/.test(textWithoutBreaks) || /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/.test(textWithoutBreaks)) {
+    reasons.push("原始 HTML 标签");
+  }
   /* 指令 / MDX 容器：`:::note`、`::youtube`、MDX 注释写法之类 ✗ */
   test(/^\s*:::{1,3}/m, "自定义指令（:::）");
   test(/^\s*\{/m, "模板 / MDX 语法");
@@ -446,8 +474,12 @@ export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
   test(/^\s*\[[^\]]+\]:\s+\S+/m, "引用式链接定义");
   /* LaTeX 宏定义：KaTeX 子集之外，序列化未必保留 ✗ */
   test(/^\s*\\newcommand/m, "LaTeX 宏定义");
-  /* 正文里再出现 front-matter 分隔线 ⇒ 多半是用户手写的内容，交源码更稳 ✓ */
-  test(/^\s*---\s*$/m, "疑似 front-matter 分隔线");
+  /*
+   * **刻意不判 `---`** ✗（第三次复查 P2-2）：正文里的 `---` 是标准**水平分隔线** ✓
+   * （也可以是 Setext 标题的下划线 ✓），而 front-matter 早被宿主分离走了 ✓ ——
+   * 把它当"额外元数据"会让普通文档被无理由锁进源码模式 ✗，
+   * 用户编辑时插入一条分隔线更会被突然踢出正文界面 ✗。
+   */
   return { reasons };
 }
 

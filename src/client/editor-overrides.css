@@ -1,0 +1,739 @@
+/* ============================================================================
+   富文本编辑器（Milkdown / Crepe）—— **必须最后拼接的覆盖样式** ✓
+   ----------------------------------------------------------------------------
+   为什么单独成文件 ✗（用户截图连着翻车两次 ✓）：
+
+   1) 这份样式必须排在 **Crepe 自带 CSS 之后** ✓。同样的规则写进 panel.css 时，
+      panel.css 是**先**拼进去的 ⇒ 一旦权重相同，后到的 Crepe 就赢了 ✗ ——
+      "表格看不出是表格"就是这么来的 ✓（Crepe 的边框只有 20% 不透明度 ✗）。
+   2) 权重也一并抬高到 `.kn-root .kn-editor-rich .milkdown …` ✓ ——
+      高过 Crepe 的 `.milkdown .milkdown-table-block td` ✓，双保险 ✓。
+   3) 颜色一律走 harness 真实 token ✓（`--dsw-alias-*` ✓），亮/暗自动跟随 ✓。
+
+   由 build.mjs 在 `panel.css + graph.css + 编辑器第三方样式` 之后追加 ✓。
+   ========================================================================== */
+
+/* ------------------------- ① Crepe 主题变量接到宿主主题 ------------------------- */
+
+/*
+ * 变量要同时落在 **`.milkdown` 这一层** ✗：Crepe 的 classic 主题把 `--crepe-color-*`
+ * 定义在 `.milkdown` 上（不是 `:root` ✓），只覆盖父容器的话编辑器内部仍用它自己的配色 ✗。
+ */
+.kn-root .kn-editor-rich,
+.kn-root .kn-editor-rich .milkdown {
+  --crepe-color-background: var(--dsw-alias-bg-layer-1);
+  --crepe-color-on-background: var(--dsw-alias-label-primary);
+  --crepe-color-surface: var(--dsw-alias-bg-layer-1);
+  --crepe-color-surface-low: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  --crepe-color-on-surface: var(--dsw-alias-label-primary);
+  --crepe-color-on-surface-variant: var(--dsw-alias-label-secondary);
+  --crepe-color-outline: var(--dsw-alias-border-l2);
+  --crepe-color-primary: var(--dsw-alias-brand-primary);
+  --crepe-color-secondary: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  --crepe-color-on-secondary: var(--dsw-alias-label-primary);
+  --crepe-color-inverse: var(--dsw-alias-label-primary);
+  --crepe-color-on-inverse: var(--dsw-alias-bg-layer-1);
+  --crepe-color-inline-code: var(--dsw-alias-state-error-primary);
+  --crepe-color-error: var(--dsw-alias-state-error-primary);
+  --crepe-color-hover: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  --crepe-color-selected: color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent);
+}
+
+/* ------------------------- ② 正文宽度：先干掉 Crepe 的宽页面内边距 ------------------------- */
+
+/*
+ * **这是"表格挤成窄条、中文逐字换行"的真正原因** ✗（实测 ✓）：
+ * Crepe 的 `reset.css` 给正文设了 `padding: 60px 120px` ✓ —— 那是给**宽页面**文章用的 ✓，
+ * 在 440px 侧栏里：438(rich) − 36(本容器内边距) − **240**(这条) ⇒ 正文只剩 **162px** ✗
+ * ⇒ 两列表格每列 ~72px、单元格再扣 24px 内边距 ⇒ 一个字一行 ✓。
+ *
+ * 所以侧栏里只保留**块操作手柄需要的那点**空间 ✓（不清零 ✓，手柄/列表缩进都还要位置 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown .ProseMirror {
+  padding: 8px 6px 28px;
+  /*
+   * 字号**必须写在能赢的位置** ✗：Crepe 的 `reset.css` 在 `.milkdown .ProseMirror` 上
+   * 设了 16px ✓，只写在外层容器上会被它压掉 ✗（实测过：外层写 15px、生效仍是 16px ✓）。
+   * 文档建议 15–16px ✓，这里统一取 15px ✓。
+   */
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+/*
+ * **不做基于 `@container` 的"阅读宽度"** ✗（文档第 4 节点名 ✓）：
+ * 外围容器宽 ≠ 处于展开模式 ✓（图谱并排时外围很宽，编辑器仍是 440px 侧栏 ✓）
+ * ⇒ 那样会把侧栏正文也套上宽页面的居中版式 ✓。
+ * 真要"展开书写"就用**显式的编辑模式**控制 ✓ —— 那个功能目前没做 ✓（如实记录 ✓）。
+ */
+
+/* ------------------------- ③ 表格：恢复原生布局，滚动交给外层 ------------------------- */
+
+/*
+ * **table 本体保持 `display: table`** ✗（第二次翻车的点 ✓）：
+ * 之前写 `display: block` 是为了让它自己横向滚动 ✗，但那会破坏原生表格盒子的宽度计算 ✓，
+ * 列宽、colgroup、编辑器的表格测量都会受影响 ✓。
+ * 正确做法：滚动交给 Crepe 的表格外层容器 ✓（实测类是 `.milkdown-table-block` 里的
+ * `.table-wrapper` ✓），本体老老实实做表格 ✓；列宽不够时**只有表格外层**横滚 ✓，
+ * 编辑器整页不跟着横滚 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown table {
+  display: table;
+  width: auto;
+  max-width: none;
+  border-collapse: collapse;
+}
+
+.kn-root .kn-editor-rich .milkdown .table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* 短表格用自然宽度 ✓（不机械填满 ✓）；单元格留出**文字**空间 ✓ */
+.kn-root .kn-editor-rich .milkdown th,
+.kn-root .kn-editor-rich .milkdown td,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block td {
+  border: 1px solid var(--dsw-alias-border-l2);
+  /* 上下 8 / 左右 12：接近文档给的建议值 ✓ */
+  padding: 8px 12px;
+  /* 6em ≈ 90px：扣掉左右 24px 内边距后还有 ~66px 文字宽度 ⇒ 三个中文词不被迫逐字换行 ✓ */
+  min-width: 6em;
+  vertical-align: top;
+  box-sizing: border-box;
+  /* 中文正常换行 ✓、长英文词允许断开 ✓（不搞全局 word-break ✗） */
+  overflow-wrap: break-word;
+}
+
+/* 表头：浅底 + 加粗 ⇒ 和正文段落一眼区分 ✓ */
+.kn-root .kn-editor-rich .milkdown th,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th {
+  background: var(--dsw-alias-bg-layer-2);
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 鼠标所在行轻微高亮 ✓（真实 token 派生，亮暗都对 ✓） */
+.kn-root .kn-editor-rich .milkdown tbody tr:hover td {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+}
+
+/* 选中单元格：品牌色半透明 ✓（Crepe 自带的 ::after 太淡 ✗） */
+.kn-root .kn-editor-rich .milkdown .selectedCell::after,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block .selectedCell::after {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent);
+  opacity: 1;
+}
+
+/* 列宽拖拽手柄可见 ✓ */
+.kn-root .kn-editor-rich .milkdown .column-resize-handle {
+  background: var(--dsw-alias-brand-primary);
+  width: 2px;
+}
+
+/* 长公式同样允许横向滚动 ✓ */
+.kn-root .kn-editor-rich .milkdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+/* ------------------------- ④ 正文排版：接近"写一整篇文档"的手感 ------------------------- */
+
+/*
+ * 文档的设计建议 ✓：正文 15–16px / 行高 1.65–1.8 ✓，
+ * 窄侧栏**不靠缩小字号**解决布局 ✗（宽度问题已经在 ② 里解决 ✓）。
+ */
+/*
+ * 富编辑器容器：**不再自己滚动、也不留 min-height** ✗（文档第 2 节 ✓）。
+ * 原来这里 `flex:1; min-height:220px; overflow:auto` ✓ 会和正文视口叠加出第二条纵向滚动条 ✓。
+ * 现在它只是"自然撑高"的内容块 ✓，滚动由 `.kn-editor-body` 独家负责 ✓。
+ */
+.kn-root .kn-editor-rich {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 标题按层级递增、别过重 ✓ */
+.kn-root .kn-editor-rich .milkdown h1 { font-size: 1.6em; line-height: 1.35; font-weight: 650; margin: 0.6em 0 0.4em; }
+.kn-root .kn-editor-rich .milkdown h2 { font-size: 1.35em; line-height: 1.4; font-weight: 640; margin: 0.7em 0 0.35em; }
+.kn-root .kn-editor-rich .milkdown h3 { font-size: 1.18em; line-height: 1.45; font-weight: 620; margin: 0.6em 0 0.3em; }
+.kn-root .kn-editor-rich .milkdown h4,
+.kn-root .kn-editor-rich .milkdown h5,
+.kn-root .kn-editor-rich .milkdown h6 { font-size: 1.05em; font-weight: 620; margin: 0.5em 0 0.25em; }
+
+/* 段落的上下间距一致 ✓（不要一段挤一段 ✓） */
+.kn-root .kn-editor-rich .milkdown p { margin: 0.5em 0; }
+
+/* 引用：浅色竖线 + 次级文字色，正文仍可读 ✓（不整块变淡 ✗） */
+.kn-root .kn-editor-rich .milkdown blockquote {
+  margin: 0.6em 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 代码：等宽 + 低对比背景 ✓（代码/公式内部不套正文的折行规则 ✗） */
+.kn-root .kn-editor-rich .milkdown code,
+.kn-root .kn-editor-rich .milkdown pre {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Cascadia Mono", monospace;
+  font-size: 0.92em;
+}
+.kn-root .kn-editor-rich .milkdown :not(pre) > code {
+  background: var(--dsw-alias-bg-layer-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--dsw-alias-state-error-primary);
+}
+.kn-root .kn-editor-rich .milkdown pre {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.55;
+}
+
+/* ------------------------- ⑥ 排版收敛：不浪费空间，也不压缩阅读 ------------------------- */
+
+/*
+ * 文档第 4 节 ✓：
+ * - 标题与正文用**同一套系统无衬线字体** ✗（截图里那个衬线大标题是 Crepe 主题带的 ✓）；
+ * - 引用块竖线 2px + 左内边距 12px ✓（原来的粗线会压过正文 ✓）；
+ * - 首段不留无意义的巨大顶部空白 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown,
+.kn-root .kn-editor-rich .milkdown h1,
+.kn-root .kn-editor-rich .milkdown h2,
+.kn-root .kn-editor-rich .milkdown h3,
+.kn-root .kn-editor-rich .milkdown h4,
+.kn-root .kn-editor-rich .milkdown h5,
+.kn-root .kn-editor-rich .milkdown h6 {
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+.kn-root .kn-editor-rich .milkdown h1 { font-size: 1.45em; }
+.kn-root .kn-editor-rich .milkdown h2 { font-size: 1.3em; }
+.kn-root .kn-editor-rich .milkdown > :first-child,
+.kn-root .kn-editor-rich .milkdown .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.kn-root .kn-editor-rich .milkdown blockquote {
+  border-left-width: 2px;
+  padding-left: 12px;
+}
+
+/*
+ * 文档第 5 节 ✓：表格单元格里的段落 margin 要收敛 ✗ ——
+ * 否则空单元格会因为段间距被撑得很高 ✓（目标：普通空单元格自然行高 ≈32–40px ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown th,
+.kn-root .kn-editor-rich .milkdown td,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block td {
+  /* 竖向 5px + 行高 1.5 ⇒ 空单元格 ≈39px ✓（文档目标 32–40 ✓；41px 时超了 1px ✓） */
+  padding: 5px 12px;
+  line-height: 1.5;
+}
+
+.kn-root .kn-editor-rich .milkdown th p,
+.kn-root .kn-editor-rich .milkdown td p,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th p,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block td p {
+  margin: 0;
+  /* Crepe 给段落留了 4px 竖向 padding ✗ ⇒ 空单元格被撑到 42px ✓；去掉后 ≈32px ✓ */
+  padding: 0;
+}
+
+/* ------------------------- ⑦ 滚动条：细、低对比、可发现 ------------------------- */
+
+/*
+ * 文档第 3 节 ✓：正常正文只保留**一条**纵向滚动条（外层 `.kn-editor-body` ✓），
+ * 表格 / 公式 / 代码只在内容超宽时各自**横向**滚动 ✓；
+ * 滚动条统一做细（6–8px ✓）、轨道透明 ✓、滑块用主题次级色 ✓，悬停或聚焦时加深 ✓ ——
+ * 只用浏览器原生样式 ✓，不自制滚动条逻辑 ✗。
+ * 作用范围严格限制在本插件 Shadow DOM 内需要滚动的容器 ✓，不影响宿主全局 ✓。
+ */
+.kn-root .kn-editor-body,
+.kn-root .kn-editor-text,
+.kn-root .kn-editor-rich .milkdown .table-wrapper,
+.kn-root .kn-editor-rich .milkdown pre,
+.kn-root .kn-editor-rich .milkdown .katex-display,
+.kn-root .kn-editor-latest {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent) transparent;
+}
+
+.kn-root .kn-editor-body::-webkit-scrollbar,
+.kn-root .kn-editor-text::-webkit-scrollbar,
+.kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar,
+.kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar,
+.kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar,
+.kn-root .kn-editor-latest::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+/* 轨道透明 ✓（不再多画两条灰带 ✓）；箭头不占位 ✓（系统强制 / 高对比模式仍按系统走 ✓） */
+.kn-root .kn-editor-body::-webkit-scrollbar-track,
+.kn-root .kn-editor-text::-webkit-scrollbar-track,
+.kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-track,
+.kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-track,
+.kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-track,
+.kn-root .kn-editor-latest::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kn-root .kn-editor-body::-webkit-scrollbar-button,
+.kn-root .kn-editor-text::-webkit-scrollbar-button,
+.kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-button,
+.kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-button,
+.kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-button,
+.kn-root .kn-editor-latest::-webkit-scrollbar-button {
+  display: none;
+}
+
+.kn-root .kn-editor-body::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-text::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-latest::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent);
+  background-clip: content-box;
+}
+
+/* 悬停 / 聚焦 / 正在滚动时提高对比 ✓（可发现性 ✓） */
+.kn-root .kn-editor-body:hover::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-body:focus-within::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-text:hover::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown .table-wrapper:hover::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown pre:hover::-webkit-scrollbar-thumb,
+.kn-root .kn-editor-rich .milkdown .katex-display:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 46%, transparent);
+  background-clip: content-box;
+}
+
+/* ------------------- ⑧ 公式块：别把通用代码块的 UI 摆在用户面前 ------------------- */
+
+/*
+ * 背景（`design/math-editor-ui-design.md` ✓）：Crepe 的 latex 特性是**扩展 codeBlockSchema** ✓
+ * ⇒ 独立公式 `$$…$$` 在 DOM 里就是一个带 `data-language="LaTeX"` 的代码块 ✓，
+ * 于是语言选择器、"Search language"、Copy/Hide、「PREVIEW」大写标签、410px 高的语言列表
+ * 全都跟着露出来 ✗ —— 简单分数反而成了背景 ✓（用户截图 ✓）。
+ *
+ * 这里只按**稳定标识**（`data-language` ✓；不靠按钮文字匹配 ✗）改公式块 ✓：
+ * 1. 隐藏语言选择器 —— 普通代码块**保留** ✓（否则用户改不了真代码块的语言 ✗）；
+ * 2. 源码区最多约 6 行，再长就在源码区内部滚 ✓；
+ * 3. 结果面板是主角：透明底、居中、留白 ✓（不套深色代码编辑器底色 ✗）。
+ */
+/*
+ * **怎么认出"这是公式块"** ✗ —— 实测（真实 Crepe 渲染 ✓）：
+ * 块的 DOM 是 `.milkdown-code-block` ✓，里面 CodeMirror 的 `.cm-content` 上写着
+ * `data-language="stex"` ✓（CodeMirror 的 LaTeX 语言 id ✓）；
+ * 而**预览面板里一定有 `.katex-display`** ✓ —— 这条最可靠 ✓。
+ * 两个信号任取其一 ✓（`:is()` + `:has()` ✓），不靠按钮文字匹配 ✗。
+ * 注意：真正的代码块（python 等）**不会**命中 ✓，语言选择器照旧可用 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .language-picker,
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .language-button {
+  display: none;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .cm-editor {
+  /* 简单分数不该撑出几百像素高 ✓（文档：自然增高约 2–6 行 ✓） */
+  max-height: 7.5em;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .cm-scroller {
+  overflow: auto;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview-panel,
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview {
+  background: transparent;
+  text-align: center;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview {
+  padding: 10px 4px;
+}
+
+/* 「结果」标签：轻量小字 ✓（文案已用官方配置项换成中文 ✓，不再常驻大写 PREVIEW ✓） */
+.kn-root .kn-editor-rich .milkdown .preview-label {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/*
+ * 语言菜单（**普通代码块**用 ✓）：只让列表滚 ✓（搜索栏常驻可见 ✓）、
+ * 浮层不透明 ✓、别占满整个编辑区 ✓ —— 截图里那 410px 高的列表就是这么来的 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .language-picker .list-wrapper {
+  width: 220px;
+  max-height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.kn-root .kn-editor-rich .milkdown .language-picker .search-box {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-overlay);
+}
+
+.kn-root .kn-editor-rich .milkdown .language-picker .search-input {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+}
+
+/* 聚焦用主题色细边 ✓（截图里那个粗黑搜索框就是因为没主题化 ✓） */
+.kn-root .kn-editor-rich .milkdown .language-picker .search-input:focus {
+  border-color: var(--dsw-alias-brand-primary);
+  outline: none;
+}
+
+.kn-root .kn-editor-rich .milkdown .language-picker .language-list {
+  max-height: 210px;
+  overflow: auto;
+}
+
+/* ------------------- ⑨ 代码块 / 公式块：统一容器外观与工具条 ------------------- */
+
+/*
+ * `design/code-and-math-block-redesign.md` ✓ 的起始参数：
+ * 边框 1px ✓、圆角 6–8px ✓、内部横向留白 12px ✓、源码 13–14px / 行高 1.55–1.65 ✓、
+ * 容器底色与页面**轻微**区分 ✓。
+ * 源码主题（行号、活动行、选区、光标）走 CodeMirror 主题扩展 ✓（见 MarkdownRichEditor 的
+ * `KN_CODE_THEME` ✓），这里只补容器层 ✓ —— 两边都不重复定义同一件事 ✗。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block {
+  margin: 10px 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+}
+
+/* 顶部一行约 26–30px：左侧语言名、右侧复制 ✓；平时低调，悬停/聚焦才明显 ✓ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block > .tools {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: transparent;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .language-button {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  letter-spacing: 0;
+  /* 截图里左上角是空的 ✗：语言名默认被做成悬停项 ⇒ 常态也给个可见度 ✓（文档要求常态显示语言名 ✓） */
+  opacity: 0.85;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .language-button:hover {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  opacity: 1;
+}
+
+/* 源码紧随工具条 ✓（不在代码上方留大段空白 ✓） */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .codemirror-host {
+  padding: 6px 12px 8px;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-editor {
+  background: transparent;
+}
+
+/* 复制按钮：平时半透明，悬停/聚焦变清晰 ✓（不是大胶囊 ✓） */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .copy-button,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .preview-toggle-button {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:hover .copy-button,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:focus-within .copy-button,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:hover .preview-toggle-button,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:focus-within .preview-toggle-button {
+  opacity: 1;
+}
+
+/*
+ * **公式块**：融入页面 ✓ —— 容器不再套一层方框（结果就是正文内容 ✓），
+ * 只有**源码区**保留淡底作为"编辑工具"的提示 ✓（文档：源码区可淡底、结果区保持文档背景 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)) {
+  border: 0;
+  background: transparent;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  > .tools {
+  height: 20px;
+  padding-left: 0;
+  border-bottom: 0;
+  /* 常规态不挂工具 ✗（文档：只有结果 ✓）；悬停/聚焦再出现 ✓ */
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)):hover
+  > .tools,
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)):focus-within
+  > .tools {
+  opacity: 1;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .codemirror-host {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent);
+}
+
+/* 公式源码不要行号 ✓（主题里也关了 ✓，这里兜底 ✓） */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .cm-gutters {
+  display: none;
+}
+
+/*
+ * 「结果」标签：**只在聚焦时**出现 ✓（文档：常规态不需要说明 ✓）。
+ * 用 visibility 而不是 display ✗，免得布局跳动 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview-label {
+  visibility: hidden;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)):focus-within
+  .preview-label {
+  visibility: visible;
+}
+
+/*
+ * 结果区：**自然增高 + 不纵向滚动** ✗（简单分数绝不该出现纵向滚动条 ✓）；
+ * 长公式只在结果外层横向滚动 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview-panel {
+  min-height: 0;
+  overflow: visible;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview {
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 4px 12px;
+}
+
+/* 公式源码：一行就是一行高 ✓（不为凑高度制造空白 ✓）；多行最多约 6–8 行后内部滚动 ✓ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .cm-editor {
+  max-height: 8.5em;
+}
+
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .cm-scroller {
+  overflow-y: auto;
+}
+
+/* Node notes: compact document chrome and consistent Crepe controls. */
+.kn-root .kn-editor {
+  box-shadow: -8px 0 24px rgb(0 0 0 / 8%);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.kn-root .kn-editor-heading {
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  gap: 8px;
+}
+.kn-root .kn-editor-title { font-size: 13px; font-weight: 600; }
+.kn-root .kn-editor-tabs {
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.kn-root .kn-editor-tabs button { padding: 4px 7px; font-size: 11px; }
+.kn-root .kn-editor-tabs button.is-active {
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+}
+.kn-root .kn-editor-more, .kn-root .kn-editor-close { width: 28px; height: 28px; }
+.kn-root .kn-editor-foot { min-height: 40px; box-sizing: border-box; padding: 5px 12px; }
+.kn-root .kn-editor-status { font-size: 11px; }
+.kn-root .kn-editor-save {
+  padding: 5px 11px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.kn-root .kn-editor-save:not(:disabled) {
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, var(--dsw-alias-bg-layer-1));
+}
+.kn-root .kn-editor-save:not(:disabled):hover {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, var(--dsw-alias-bg-layer-1));
+}
+.kn-root .kn-editor-save:disabled { opacity: 0.6; }
+.kn-root .kn-editor button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+.kn-root .kn-editor-rich { padding: 16px 18px 0; }
+.kn-root .kn-editor-rich .milkdown {
+  --crepe-font-default: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --crepe-font-title: var(--crepe-font-default);
+  --crepe-font-code: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --crepe-base-font-size: 15px;
+}
+.kn-root .kn-editor-rich .milkdown .ProseMirror {
+  padding: 0 2px 48px;
+  font-family: var(--crepe-font-default);
+  line-height: 1.7;
+}
+.kn-root .kn-editor-rich .milkdown p { padding: 0; margin: 0.65em 0; }
+.kn-root .kn-editor-rich .milkdown :is(h1, h2, h3) { margin-top: 1.1em; margin-bottom: 0.45em; }
+.kn-root .kn-editor-rich .milkdown .ProseMirror > :first-child { margin-top: 0; }
+.kn-root .kn-editor-rich .milkdown :is(th, td) p { margin: 0; }
+.kn-root .kn-editor-rich .milkdown blockquote {
+  margin: 12px 0;
+  padding: 2px 0 2px 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+.kn-root .kn-editor-text { box-sizing: border-box; padding: 16px 20px 32px; font-size: 13px; }
+.kn-root .kn-editor-text:focus { padding-left: 20px; box-shadow: none; }
+.kn-root .kn-editor-details { font-size: 12px; padding: 10px 14px; }
+.kn-root .kn-editor-details .kn-editor-row { margin-top: 4px; color: var(--dsw-alias-label-secondary); }
+.kn-root .kn-editor-details .kn-editor-dim { padding: 8px 0 0; }
+
+/* Crepe tool buttons are children of tools-button-group, without copy-button classes. */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block {
+  padding: 0;
+  overflow: visible;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, var(--dsw-alias-bg-layer-1));
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block > .tools { height: 30px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .language-button { margin: 0; font-weight: 500; opacity: 1; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .tools .tools-button-group > button {
+  height: 24px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .tools .tools-button-group > button:hover,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:focus-within .tools .tools-button-group > button {
+  opacity: 1;
+  background: var(--crepe-color-hover);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .tools .tools-button-group > button svg { width: 12px; height: 12px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .codemirror-host { padding: 6px 8px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-editor { border-radius: 0 0 8px 8px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-scroller { font-size: 13px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .list-wrapper {
+  width: min(240px, calc(100vw - 64px));
+  padding: 8px 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-overlay);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .language-list { height: auto; max-height: 200px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .language-list-item { padding: 5px 12px; font-size: 12px; font-weight: 400; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .search-box { margin: 0 8px 6px; outline: 1px solid var(--dsw-alias-border-l2); }
+
+/* Formula results remain part of the document; source is a quiet local editing surface. */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)) {
+  background: transparent;
+  margin: 14px 0;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)) > .tools {
+  height: 26px;
+  opacity: 1;
+  justify-content: flex-end;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .preview-panel .preview-label { display: none; }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .preview-panel .preview-divider { margin: 8px 0; opacity: 1; background: var(--dsw-alias-border-l1); }
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .preview-panel .preview {
+  height: auto;
+  max-height: none;
+  padding: 12px 4px;
+  overflow-y: hidden;
+}
+.kn-root .kn-editor-rich .milkdown .katex-display { margin: 0.5em 0; overflow-y: hidden; }
+
+/* All editor-owned scroll surfaces, including CodeMirror and language menus. */
+.kn-root .kn-editor * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--dsw-alias-label-primary) 25%, transparent) transparent;
+}
+.kn-root .kn-editor *::-webkit-scrollbar { width: 6px; height: 6px; }
+.kn-root .kn-editor *::-webkit-scrollbar-track { background: transparent; }
+.kn-root .kn-editor *::-webkit-scrollbar-thumb { border: 0; border-radius: 6px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 25%, transparent); }
+.kn-root .kn-editor *::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .kn-root .kn-editor * { transition: none; }
+}

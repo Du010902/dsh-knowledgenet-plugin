@@ -95,7 +95,7 @@ describe("按钮样式与注册形状", () => {
     assert.match(css, /\.kn-add-library \{/);
     assert.match(css, /width: 28px; height: 28px/);
     assert.match(css, /border-radius: var\(--dsw-radius-sm/);
-    assert.match(css, /interactive-bg-hover/);
+    assert.match(css, /kn-hover/);
     assert.match(css, /mask: var\(--kn-libid-add-icon\)/, "图标用「图谱 + 加号」的合成字形");
     assert.match(css, /data-kn-error/, "失败时按钮自身要能显示错误色");
   });

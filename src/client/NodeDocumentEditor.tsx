@@ -127,16 +127,24 @@ export function NodeDocumentEditor(props: {
   const [richSyncToken, setRichSyncToken] = useState(0);
   /** 富编辑器状态：就绪 / 失败 / 输入法组合中 ✓（失败要可见、组合中要推迟保存 ✓） */
   const [richStatus, setRichStatus] = useState<MarkdownRichEditorStatus>({ ready: false, failed: false, composing: false });
-  /** 组合中被推迟的**统一待办**（保存 / 切源码 / 关闭 ✓ —— 不再各维护一套 ✗） */
-  const pendingActionRef = useRef<{ kind: "save" } | { kind: "action"; run: () => void } | null>(null);
+  /**
+   * 组合中被推迟的**统一待办**：只记**类型**，不存闭包 ✗ ——
+   * 组合结束补跑时**必须重走同一条"取快照 → 再执行"的流程** ✓
+   * （第三次复查 P2-1：直接跑原始闭包会跳过快照，等于拿旧正文离开 ✗）。
+   */
+  const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | null>(null);
   /**
    * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 默认停在源码模式 ✓。
    * 必须跟着 draft 走 ✗：只看载入基线的话，用户在源码里新加 HTML/脚注/指令后
    * 警告不会更新，切回正文也不会被拦 ✗（第二次复查 P2-3 ✓）。
    */
   const unsupported = useMemo(() => scanUnsupportedSyntax(state.draft).reasons, [state.draft]);
+  /** 已经为哪个节点做过"载入即判源码"的判定 ✓（每节点只判定一次 ✓） */
+  const autoSourceRef = useRef<string | null>(null);
   /** 用户显式点过"仍要用正文模式打开" ⇒ 允许这次有损风险 ✓（每次换节点重置 ✓） */
   const [richOverride, setRichOverride] = useState(false);
+  /** 详情面板是否展开 ✓（路径 / 修订号 / 快捷键按需查看 ✓） */
+  const [details, setDetails] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
 
   const fetcher = useMemo<FetchLike>(
@@ -238,6 +246,13 @@ export function NodeDocumentEditor(props: {
    */
   useEffect(() => {
     if (state.phase !== "ready") return;
+    /*
+     * **只在这个节点载入时判定一次** ✗（第三次复查 P2-2）：
+     * 之前依赖 `unsupported.length` ⇒ 用户编辑中途新出现一个潜在语法就会被**突然踢出正文** ✗。
+     * 编辑途中的变化只走"提示 + 进正文前的校验"✓，不主动切模式 ✓。
+     */
+    if (autoSourceRef.current === props.nodeId) return;
+    autoSourceRef.current = props.nodeId;
     if (unsupported.length > 0) setTab("source");
   }, [state.phase, props.nodeId, unsupported.length]);
 
@@ -393,8 +408,8 @@ export function NodeDocumentEditor(props: {
     if (pending === null) return;
     pendingActionRef.current = null;
     if (pending.kind === "save") void save();
-    else pending.run();
-    // withSnapshot 在下面定义（函数声明顺序不影响 effect 运行 ✓）
+    else leaveRich(pending.kind); /* 重走"再取一次快照"的完整流程 ✓ */
+    // leaveRich 在下面定义（函数声明顺序不影响 effect 运行 ✓）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [richStatus.composing, tab, save]);
 
@@ -490,10 +505,18 @@ export function NodeDocumentEditor(props: {
    * **离开富编辑器的统一入口**（复查 P1-2）：先取正文快照，再执行动作 ✓。
    * 用于切到源码、关闭编辑器 —— 不能只 `setTab` / 只调 `onClose` ✗（会丢最后一笔 ✓）。
    */
-  const withSnapshot = useCallback((action: () => void): void => {
+  const leaveRich = useCallback((kind: "source" | "close"): void => {
+    /**
+     * 真正执行"离开正文"。
+     * @param dirty - **刚刚算出来的**未保存状态（不依赖 React state 的旧值 ✓）。
+     */
+    const act = (dirty: boolean): void => {
+      if (kind === "source") setTab("source");
+      else props.onClose(dirty);
+    };
     /* 源码模式：草稿本身就是权威，直接执行 ✓ */
     if (tab === "source") {
-      action();
+      if (kind === "close") act(state.draft !== state.base);
       return;
     }
     const rich = richRef.current;
@@ -502,20 +525,21 @@ export function NodeDocumentEditor(props: {
      * ⇒ 允许动作（"切到源码"正是那条恢复路径 ✓，不能一概禁止回退 ✗）。
      */
     if (rich === null || rich.isReady() !== true) {
-      action();
+      act(state.draft !== state.base);
       return;
     }
     /*
      * **输入法正在组合**：既不能取半成品，更不能卸载编辑器 ✗ ⇒
-     * 记进**统一待办**，等组合结束再执行 ✓（第二次复查 P1-2 ✓）。
+     * 记进**统一待办**，等组合结束**重走本流程**（重新取快照 ✓，而不是直接执行 ✗）。
      */
     if (richStatus.composing) {
-      pendingActionRef.current = { kind: "action", run: action };
+      pendingActionRef.current = { kind };
       return;
     }
-    if (snapshotDraft() === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
-    action();
-  }, [snapshotDraft, tab, richStatus.composing]);
+    const live = snapshotDraft();
+    if (live === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
+    act(live !== state.base);
+  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.base, props.onClose]);
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
@@ -561,51 +585,87 @@ export function NodeDocumentEditor(props: {
       data-phase={state.phase}
       ref={(node) => { rootRef.current = node; }}
     >
+      {/*
+       * **紧凑标题栏**（约 44px ✓，`design/editor-content-density-and-scrollbar-design.md`）：
+       * 一行放完"节点标题 + 正文/源码切换 + 详情 + 关闭" ✓ ——
+       * 原来的「节点笔记」徽标、整行路径、独立高标签栏都撤掉 ✗（它们占了近 1/3 的正文高度 ✓）。
+       * 注意：这里的标题是**节点身份**（导航上下文 ✓），正文里的 Markdown 标题照旧按层级显示 ✓。
+       */}
       <div className="kn-editor-heading">
-        <div className="kn-editor-row">
-          <span className="kn-editor-tag">{t("notePanelTitle")}</span>
-          <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { withSnapshot(props.onClose); }}>
-            ×
+        <h2 className="kn-editor-title" title={state.title === "" ? props.nodeId : state.title}>
+          {state.title === "" ? props.nodeId : state.title}
+        </h2>
+        <div className="kn-editor-tabs" role="tablist" title={t("editorHint")}>
+          {/*
+           * **正文 / 源码**（不再是"编辑/预览"✗）：正文模式就是可直接编辑的格式化内容 ✓，
+           * 两者编辑**同一份草稿、基线与指纹** ✓，只是显示方式不同 ✓。
+           */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "rich"}
+            className={tab === "rich" ? "is-active" : ""}
+            onClick={() => {
+              /*
+               * 第二次复查 P2-3：进正文前必须按**当前草稿**再校验一次 ✗ ——
+               * 用户在源码里新加了 HTML/脚注/指令时，直接切过去会在富模式里被改写 ✗。
+               */
+              if (unsupported.length > 0 && !richOverride) {
+                setTab("source");
+                return;
+              }
+              /* 进正文只是换显示方式：草稿/基线/指纹都不变 ✓ ⇒ 不需要"离开快照"✓ */
+              setTab("rich");
+            }}
+          >
+            {t("tabRich")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "source"}
+            className={tab === "source" ? "is-active" : ""}
+            onClick={() => { leaveRich("source"); }}
+          >
+            {t("tabSource")}
           </button>
         </div>
-        <h2 className="kn-editor-title">{state.title === "" ? props.nodeId : state.title}</h2>
-        <div className="kn-editor-path">{state.path}</div>
+        <button
+          type="button"
+          className="kn-editor-more"
+          aria-label={t("details")}
+          aria-expanded={details}
+          title={t("details")}
+          onClick={() => { setDetails((value) => !value); }}
+        >
+          ⋯
+        </button>
+        <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
+          ×
+        </button>
       </div>
 
-      <div className="kn-editor-tabs" role="tablist">
-        {/*
-         * **正文 / 源码**（不再是"编辑/预览"✗ —— 文档要求：正文模式就是可直接编辑的格式化内容，
-         * 不需要写完再切去预览 ✓）。两者编辑**同一份草稿、基线与指纹** ✓，只是显示方式不同 ✓。
-         */}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "rich"}
-          className={tab === "rich" ? "is-active" : ""}
-          onClick={() => {
-            /*
-             * 第二次复查 P2-3：进正文前必须按**当前草稿**再校验一次 ✗ ——
-             * 用户在源码里新加了 HTML/脚注/指令时，直接切过去会在富模式里被改写 ✗。
-             */
-            if (unsupported.length > 0 && !richOverride) {
-              setTab("source");
-              return;
-            }
-            withSnapshot(() => setTab("rich"));
-          }}
-        >
-          {t("tabRich")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "source"}
-          className={tab === "source" ? "is-active" : ""}
-          onClick={() => { withSnapshot(() => setTab("source")); }}
-        >
-          {t("tabSource")}
-        </button>
-      </div>
+      {/*
+       * **详情**（按需展开 ✓）：路径、修订号、快捷键、Markdown 说明都搬到这里 ✓ ——
+       * 平时不占正文高度 ✓，但需要时一条不少 ✓（文档要求"移入详情"，不是删掉 ✗）。
+       */}
+      {details ? (
+        <div className="kn-editor-details">
+          <div className="kn-editor-row kn-editor-sub">
+            <span>{t("detailPath")}</span>
+            <span className="kn-editor-path" title={state.path}>{state.path}</span>
+          </div>
+          <div className="kn-editor-row kn-editor-sub">
+            <span>{t("detailRevision")}</span>
+            <span>{state.revision > 0 ? `rev ${state.revision}` : "—"}</span>
+          </div>
+          <div className="kn-editor-row kn-editor-sub">
+            <span>{t("detailShortcut")}</span>
+            <span>{t("saveShortcut")}</span>
+          </div>
+          <div className="kn-editor-dim">{t("editorHint")}</div>
+        </div>
+      ) : null}
 
       {state.conflicted ? (
         <div className="kn-editor-notice" role="alert">
@@ -633,8 +693,6 @@ export function NodeDocumentEditor(props: {
         </div>
       ) : null}
 
-      <div className="kn-editor-hint">{t("editorHint")}</div>
-
       {/*
        * 复查 P1-4 / P2-6：两条**必须让用户看见**的提示 ——
        * ① 正文里有富编辑器无法原样保留的语法 ⇒ 默认停在源码模式 ✓（并说明命中了什么 ✓）；
@@ -650,12 +708,12 @@ export function NodeDocumentEditor(props: {
               type="button"
               onClick={() => {
                 if (tab === "rich") {
-                  withSnapshot(() => setTab("source"));
+                  leaveRich("source");
                   return;
                 }
                 /* 用户明确承担改写风险 ⇒ 记下显式确认，再进正文 ✓ */
                 setRichOverride(true);
-                withSnapshot(() => setTab("rich"));
+                setTab("rich");
               }}
             >
               {tab === "rich" ? t("tabSource") : t("openRichAnyway")}
@@ -745,24 +803,23 @@ export function NodeDocumentEditor(props: {
         )}
       </div>
 
+      {/*
+       * **单行状态栏**（约 36px ✓）：左保存状态、右保存按钮 ✓；
+       * 快捷键与修订号已经在「详情」里 ✓ ⇒ 这里不再占一整行 ✗。
+       */}
       <div className="kn-editor-foot">
-        <div className="kn-editor-row">
-          <span className={state.conflicted ? "kn-editor-status is-conflict" : "kn-editor-status"}>
-            {statusText(state, t)}
-          </span>
-          <button
-            type="button"
-            className="kn-editor-save"
-            disabled={!canSave(state)}
-            onClick={() => { void save(); }}
-          >
-            {t("saveNote")}
-          </button>
-        </div>
-        <div className="kn-editor-row kn-editor-sub">
-          <span>{t("saveShortcut")}</span>
-          {state.revision > 0 ? <span>rev {state.revision}</span> : null}
-        </div>
+        <span className={state.conflicted ? "kn-editor-status is-conflict" : "kn-editor-status"}>
+          {statusText(state, t)}
+        </span>
+        <button
+          type="button"
+          className="kn-editor-save"
+          disabled={!canSave(state)}
+          title={t("saveShortcut")}
+          onClick={() => { void save(); }}
+        >
+          {t("saveNote")}
+        </button>
       </div>
 
       {confirmAdopt ? (
