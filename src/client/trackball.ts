@@ -21,6 +21,20 @@ export const IDENTITY: Quat = [0, 0, 0, 1];
 const UP: Vec3 = [0, 1, 0];
 const X_AXIS: Vec3 = [1, 0, 0];
 
+/*
+ * 缩放到光标要用的一点点向量算术。
+ * **刻意自带一份**（不复用上游 `camera.ts` 的 add/sub/…）：这个模块是**独立可测**的，
+ * 上游那几个函数只存在于被补丁注入的那个文件里，拿不到 ✓。
+ */
+function addVec(a: Vec3, b: Vec3): Vec3 { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function subVec(a: Vec3, b: Vec3): Vec3 { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function scaleVec(a: Vec3, s: number): Vec3 { return [a[0] * s, a[1] * s, a[2] * s]; }
+function dotVec(a: Vec3, b: Vec3): number { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function normalizeVec(a: Vec3): Vec3 {
+  const len = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / len, a[1] / len, a[2] / len];
+}
+
 /** 绕单位轴旋转的四元数 */
 export function quatFromAxisAngle(axis: Vec3, radians: number): Quat {
   const half = radians / 2;

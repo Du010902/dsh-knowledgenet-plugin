@@ -118,14 +118,21 @@ describe("Host 半产物形态", () => {
     assert.match(client, /postMessage/);
   });
 
-  it("空间视图改成四元数 trackball（构建期补丁；上游副本仍字节一致）", () => {
-    // 用户要求「任意方向拖拽都无限连贯」：上游是欧拉角 (angle, pitch) + WORLD_UP 叉乘推 right，
-    // 越过天顶会翻转（拖到一定角度「跳一下」）。补丁把 rotate() 与 orbitBasis() 换成四元数实现，
-    // 且**两个补丁都必须生效**——只解限位治不了奇点。
+  it("空间视图用内部导航（固定球心 + 抓取点投影约束），旧轨道补丁已清掉", () => {
+    /*
+     * 模型已按 `design/knowledgenet-interior-navigation.md` 换成：
+     * 固定球心 C + 相机位置 P + 视角 Q + 图谱旋转 S；滚轮只推相机、拖动只转图谱。
+     * 于是"绕 target 环绕 + 欧拉角/四元数姿态补丁"那套整体退场 ✓——
+     * 上游 `navigation.ts` 已无人引用（被 tree-shake），连带 `trackballStep` 也不在产物里 ✓。
+     */
     assert.ok(!client.includes("clampPitch"), "限位不该留在产物里");
-    assert.ok(!client.includes("this.camera.angle -= dx"), "欧拉角拖拽应已被替换");
-    for (const needle of ["trackballStep", "freeBasis", "quatFromAxisAngle", "rotateVec"]) {
-      assert.ok(client.includes(needle), `应包含 trackball 实现：${needle}`);
+    assert.ok(!client.includes("this.camera.angle -= dx"), "欧拉角拖拽应已退场");
+    assert.ok(!/zoomToCursor|zoomFloor|reanchorToCursor/.test(client), "旧的「朝光标缩放 / 重设轴心」补丁必须清掉");
+    for (const needle of ["dragAnchorTo", "effectiveBasis", "wheelTravel", "knInterior"]) {
+      assert.ok(client.includes(needle), `内部导航实现应在产物里：${needle}`);
+    }
+    for (const needle of ["freeBasis", "quatFromAxisAngle", "rotateVec"]) {
+      assert.ok(client.includes(needle), `自由姿态数学应在产物里：${needle}`);
     }
   });
 

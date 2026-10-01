@@ -420,6 +420,19 @@
   overflow: visible;
 }
 
+/*
+ * **鼠标点画布时去掉那圈焦点环**（用户反馈 2026-10："点击之后这个边框会变得高亮，很奇怪"）。
+ *
+ * 环来自上游 `graph.css:355` 的 `.universe:focus-visible`：画布必须在指针按下时拿到焦点，
+ * F / 方向键才生效（`graph3d/navigation.ts:221` 主动 focus），而浏览器把这次**脚本聚焦**
+ * 也算成 `:focus-visible` ✗。这里只压掉"被标记为鼠标点出来"的那一次 ✓
+ * —— 键盘 Tab 过来时属性不在，环照旧（可访问性不掉）✓。
+ * 特异性：`.kn-root` + 属性选择器 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。
+ */
+.kn-root .universe[data-pointer-focus="true"]:focus-visible {
+  outline: none;
+}
+
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
 
 .kn-warn-inline {

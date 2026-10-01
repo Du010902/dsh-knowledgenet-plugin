@@ -282,6 +282,58 @@ const SELECT_SCALE_PATCHED = [
 /** 补丁注入的辅助模块（插件自己的实现，与上游副本无关） */
 const TRACKBALL_IMPORT =  'import { freeBasis as knFreeBasis, trackballStep as knTrackballStep } from "../../../client/trackball.ts";\n';
 
+/**
+ * `engine.ts` 的导航入口（补丁点）：把上游 `SpaceNavigation` 换成插件自有的
+ * **内部导航控制器**（固定球心 C + 相机位置 P + 视角 Q + 图谱旋转 S，
+ * 见 `design/knowledgenet-interior-navigation.md` 与 `src/client/interior-controller.ts`）。
+ *
+ * 只换实现、不换接口：`camera` / `basis()` / `command()` / `fitAll()` / `setFrameContext()` /
+ * `update()` / `cancelPointer()` / `dispose()` 全部照旧，引擎侧一行都不用改 ✓。
+ * 滚轮（只推相机、可穿过球心）与拖动（抓取点投影约束求解）都在控制器里，
+ * 所以上游 `navigation.ts` 的滚轮/按下补丁**已经全部移除** ✓
+ * （`ContextHit` 仍从上游取，但那只是类型，编译期就擦除了 ✓）。
+ */
+const NAV_IMPORT_NEEDLE = 'import { SpaceNavigation, type ContextHit } from "./navigation.ts";';
+const NAV_IMPORT_PATCHED = [
+  'import { type ContextHit } from "./navigation.ts";',
+  'import { InteriorNavigation as SpaceNavigation } from "../../../client/interior-controller.ts";',
+].join("\n");
+
+/**
+ * `session.ts` 的相机克隆（补丁点）：**深复制**自由姿态与内部导航状态。
+ *
+ * 上游只复制 `target/distance/angle/pitch` ✗ —— 滚转（`q`）与"球心/相机位置/图谱旋转"
+ * 都会在切标签、切工作区后被丢掉（文档明确要求缓存深复制 P/Q/S/C）✓。
+ */
+const CLONE_CAMERA_NEEDLE = [
+  "function cloneCamera(state: CameraState): CameraState {",
+  "  return {",
+  "    target: [...state.target],",
+  "    distance: state.distance,",
+  "    angle: state.angle,",
+  "    pitch: state.pitch,",
+  "  };",
+  "}",
+].join("\n");
+const CLONE_CAMERA_PATCHED = [
+  "function cloneCamera(state: CameraState): CameraState {",
+  "  const extra = state;",
+  "  return {",
+  "    target: [...state.target],",
+  "    distance: state.distance,",
+  "    angle: state.angle,",
+  "    pitch: state.pitch,",
+  "    /* 自由姿态（滚转）必须带上 ✓ */",
+  "    ...(extra.q === undefined ? {} : { q: [...extra.q] }),",
+  "    /* 内部导航状态（C/P/Q/S）也一起带上：JSON 往返即深复制（都是普通数字数组）✓ */",
+  "    ...(extra.knInterior === undefined",
+  "      ? {}",
+  "      : { knInterior: JSON.parse(JSON.stringify(extra.knInterior)) }),",
+  "  };",
+  "}",
+].join("\n");
+
+
 /** 宿主模块表提供的基线模块（packages/client/web/src/platform.ts:8-14），一律 external */
 const CLIENT_BASELINE = [
   "react",
@@ -522,7 +574,33 @@ function freeRotationPatchPlugin() {
     name: "kn-free-rotation",
     transform(code, id) {
       const clean = String(id).split("?")[0].replaceAll("\\", "/");
+      if (clean.endsWith("/vendor/upstream/graph3d/engine.ts")) {
+        /* 换导航实现（只换实现不换接口）✓ */
+        if (!code.includes(NAV_IMPORT_NEEDLE)) {
+          throw new Error(
+            "上游 engine.ts 的导航导入写法变了：请同步更新 build.mjs 的补丁点。\n"
+            + `期望片段：\n${NAV_IMPORT_NEEDLE}`,
+          );
+        }
+        return { code: code.replace(NAV_IMPORT_NEEDLE, NAV_IMPORT_PATCHED), map: null };
+      }
+      if (clean.endsWith("/vendor/upstream/graph3d/session.ts")) {
+        /* 相机缓存深复制（补上自由姿态与 C/P/Q/S）✓ */
+        if (!code.includes(CLONE_CAMERA_NEEDLE)) {
+          throw new Error(
+            "上游 session.ts 的 cloneCamera 写法变了：请同步更新 build.mjs 的补丁点。\n"
+            + `期望片段：\n${CLONE_CAMERA_NEEDLE}`,
+          );
+        }
+        return { code: code.replace(CLONE_CAMERA_NEEDLE, CLONE_CAMERA_PATCHED), map: null };
+      }
       if (clean.endsWith("/vendor/upstream/graph3d/navigation.ts")) {
+        /*
+         * 上游导航类已经被 `InteriorNavigation` 取代（引擎的导入被换掉了）⇒
+         * 滚轮缩放与按下重设轴心的补丁**全部移除**（文档要求）✓。
+         * 这里只剩自由旋转那一处：万一该文件仍被打进产物（例如别的模块引用了它），
+         * 它的 `rotate()` 也保持四元数连续、不会退化回欧拉角奇点 ✓。
+         */
         return { code: patch(code, PITCH_CLAMP, TRACKBALL_CALL, "navigation.ts 的 rotate()"), map: null };
       }
       if (clean.endsWith("/vendor/upstream/graph3d/types.ts")) {

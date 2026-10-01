@@ -51,6 +51,12 @@ const SEARCH_LIMIT = 8;
 /** 候选列表的 id（输入框用 `aria-controls` / `aria-activedescendant` 指过来 ✓） */
 const SEARCH_LIST_ID = "kn-search-results";
 
+/**
+ * 「这次聚焦是鼠标点出来的」标记：打在画布根节点（`.universe`）上，
+ * 用来把**鼠标点击**那次 `:focus-visible` 的焦点环去掉（键盘 Tab 过来的仍然保留）✓。
+ */
+const POINTER_FOCUS_ATTR = "data-pointer-focus";
+
 const LITERAL: Record<string, string> = {
   focus: "聚焦",
   space: "空间",
@@ -285,6 +291,32 @@ function GraphPanelInner(props: {
     );
     observer.observe(node);
     return () => { observer.disconnect(); };
+  }, []);
+
+  /*
+   * **鼠标点画布时不要那一圈焦点环**（用户反馈 2026-10："在图谱区域点击之后这个边框会变得高亮，很奇怪"）。
+   *
+   * 为什么会有环：上游在**指针按下**时主动给画布 `element.focus({ preventScroll: true })`
+   * （`graph3d/navigation.ts:221`，目的是让 F / 方向键落到画布上），而浏览器把这次**脚本聚焦**
+   * 也算进 `:focus-visible` ⇒ 命中了 `graph.css:355` 的 `.universe:focus-visible { outline: 2px … }` ✗。
+   *
+   * 折中（可访问性不掉）：**只把"鼠标点出来的那一次"的环去掉** ✓ —— 键盘 Tab 过来时照样有可见焦点。
+   * 做法：在容器上**捕获** `pointerdown`（先于上游那次 focus 执行）打个标记，
+   * 画布失焦（`focusout` 冒泡）时清掉标记 ✓。
+   */
+  useEffect(() => {
+    const host = graphHostRef.current;
+    if (host === null) return undefined;
+    const canvas = (): Element | null => host.querySelector(".universe");
+    const markPointerFocus = (): void => { canvas()?.setAttribute(POINTER_FOCUS_ATTR, "true"); };
+    const clearPointerFocus = (): void => { canvas()?.removeAttribute(POINTER_FOCUS_ATTR); };
+    host.addEventListener("pointerdown", markPointerFocus, true);
+    /* focusout 会冒泡：焦点离开画布（去别处、或组件卸载）就把标记清掉，免得影响下一次键盘聚焦 ✓ */
+    host.addEventListener("focusout", clearPointerFocus, true);
+    return () => {
+      host.removeEventListener("pointerdown", markPointerFocus, true);
+      host.removeEventListener("focusout", clearPointerFocus, true);
+    };
   }, []);
 
   // 卸载时收尾：取消在飞的请求、清掉重试定时器（否则回调会打到已卸载的组件上 ✓）
