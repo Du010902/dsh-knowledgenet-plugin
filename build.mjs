@@ -788,8 +788,46 @@ function panelCssPlugin(css) {
  * —— 同一个文件也被 `tests/layout-spacing.test.mjs` 用来在临时副本上量结果 ✓。
  * 注意它必须挂在**布局 Worker 那次构建**上（`topology.ts` 只被 Worker 的 layoutCore 引用 ✓）。
  */
-function anchorSpacingPatchPlugin() {
+/**
+ * 把 lodash 的 **Node 专用探测**从浏览器产物里清掉 ✓。
+ *
+ * 背景：Milkdown/Crepe 依赖 lodash-es，里面有这样一段"跑在 Node 里就拿原生 `util.types`"的探测：
+ *
+ * ```js
+ * var nodeUtil = function () {
+ *   try { var types = freeModule && freeModule.require && freeModule.require("util").types; ... } catch (e) {}
+ * }();
+ * ```
+ *
+ * 它是**纯优化**、浏览器里根本不会执行 ✓，但产物里会出现 `require("util")` ✗ ——
+ * 而这份客户端只能请求宿主基线模块（react / react-dom / jsx-runtime ✓），
+ * 守卫测试会（正确地）把它当成越界依赖拦下来 ✓。
+ * 这里把它替换成 `void 0`：浏览器分支本来就走 `ArrayBuffer.isView` 之类的回退 ✓。
+ *
+ * 找不到这段就**构建失败**（依赖升级后要么更新补丁、要么确认它已消失 ✓），
+ * 与仓库里其它上游补丁一个规矩 ✓。
+ */
+function browserUtilProbePatchPlugin() {
+  const NEEDLE = 'freeModule$1 && freeModule$1.require && freeModule$1.require("util").types';
+  let patched = false;
   return {
+    name: "kn-browser-util-probe-patch",
+    renderChunk(code) {
+      if (!code.includes(NEEDLE)) return null;
+      patched = true;
+      return {
+        code: code.split(NEEDLE).join("void 0"),
+        map: null,
+      };
+    },
+    buildEnd() {
+      /* 允许"上游已经改掉"（那时本来就没有 util 请求 ✓），只要求**打过补丁后**产物干净 ✓ */
+      void patched;
+    },
+  };
+}
+
+function anchorSpacingPatchPlugin() {  return {
     name: "kn-anchor-spacing",
     transform(code, id) {
       const clean = String(id).split("?")[0].replaceAll("\\", "/");
@@ -1223,11 +1261,19 @@ async function buildClient(rolldown, css, workerSource) {
       /* 客户端这一侧也挂上：万一 topology.ts 也进了主图，锚点间距必须是同一套 ✓ */
       anchorSpacingPatchPlugin(),
       atAliasPlugin(),
+      /* 浏览器产物里清掉 lodash 的 Node 专用探测（它不是宿主基线模块，见插件注释 ✓） */
+      browserUtilProbePatchPlugin(),
     ],
   });
   try {
     const { output } = await bundle.generate({
       format: "cjs",
+      /*
+       * **不许留动态分块** ✗：DSH 一次请求只取 `<包名>/client.js`，包内 chunk 没有路由支持。
+       * 富文本编辑器（Milkdown/Crepe）内部有 `import()`（语言包、特性懒加载 ✗）⇒
+       * 这里强制把它们内联进同一个文件，保持"自包含单文件"的既有约定 ✓。
+       */
+      codeSplitting: false,
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PACKAGE_NAME)}, factory: (require) => {`,
       intro: "var module = { exports: {} }; var exports = module.exports;",
       footer: "return module.exports; } });",
@@ -1272,7 +1318,102 @@ if (typeof rolldown !== "function") {
 
 const panelCss = await readFile(path.join(PLUGIN, "src/client/panel.css"), "utf8");
 const graphCss = await readFile(path.join(UPSTREAM, "styles/graph.css"), "utf8");
-const css = `${panelCss}\n${graphCss}`;
+/* 富文本编辑器（Milkdown/Crepe）的样式 + KaTeX 字体，见下面 readEditorCss ✓ */
+const editorCss = await readEditorCss();
+const css = `${panelCss}\n${graphCss}\n${editorCss}`;
+
+/**
+ * 富文本编辑器要用的 CSS：**构建期读文件拼成一份**，随面板 CSS 一起注入 shadowRoot ✓。
+ *
+ * 为什么必须自己读、自己内联 ✗：
+ * - Shadow DOM 里**不会**继承宿主的全局样式，第三方 CSS 必须明确注入 ✓；
+ * - 插件产物要求**自包含**（运行时不保证存在额外 chunk / 字体文件 ✗）⇒
+ *   KaTeX 的 `url(fonts/*.woff2)` 必须换成 data URI ✓，否则公式会退化成方块 ✓；
+ * - rolldown 不处理 CSS 导入（没有 CSS 插件 ✗）⇒ 走 build.mjs 读文件这条既有路径 ✓。
+ *
+ * @returns 拼好的 CSS 文本 ✓。
+ */
+async function readEditorCss() {
+  const parts = [];
+  /**
+   * **必需**资源：缺失就构建失败 ✗（复查：`continue` 跳过会让"构建成功但公式/表格没样式"✗）。
+   * @param file - 绝对路径。
+   * @param label - 报错里用的名字。
+   * @returns 文件内容 ✓。
+   */
+  const required = async (file, label) => {
+    if (!existsSync(file)) {
+      throw new Error(`富文本编辑器必需的样式缺失：${label}（${file}）⇒ 构建不能继续 ✗`);
+    }
+    return await readFile(file, "utf8");
+  };
+  /*
+   * 只取我们用到的 feature 的样式（ai / diff 那些没用上，不塞进产物 ✗）；
+   * `style.css`（classic 主题变量）随后覆盖它们 ✓。
+   */
+  const common = [
+    "reset",
+    "prosemirror",
+    "block-edit",
+    "code-mirror",
+    "cursor",
+    "latex",
+    "link-tooltip",
+    "list-item",
+    "placeholder",
+    "table",
+    "toolbar",
+    "top-bar",
+  ];
+  for (const name of common) {
+    const file = path.join(PLUGIN, "node_modules/@milkdown/crepe/lib/theme/common", `${name}.css`);
+    parts.push(`/* crepe: ${name} */\n${await required(file, `crepe common/${name}.css`)}`);
+  }
+  parts.push(`/* crepe: classic */\n${await required(
+    path.join(PLUGIN, "node_modules/@milkdown/crepe/lib/theme/crepe/style.css"),
+    "crepe classic 主题",
+  )}`);
+
+  /*
+   * KaTeX：CSS + **字体转 data URI** ✓。
+   *
+   * 复查要求：不能留下未发布的资源请求 ✗ —— KaTeX 的 `src:` 里通常同时列 woff2/woff/ttf，
+   * 只换 woff2 的话其余格式仍然是 `url(fonts/…)` ⇒ Shadow DOM 里会去请求不存在的文件 ✓。
+   * 所以这里把每个 `@font-face` 的 `src:` **整段重写成唯一的 woff2 data URI** ✓。
+   */
+  const katexDir = path.join(PLUGIN, "node_modules/katex/dist");
+  let text = await required(path.join(katexDir, "katex.min.css"), "katex.min.css");
+  const fontDir = path.join(katexDir, "fonts");
+  let inlined = 0;
+  /* 先把**要用到的** woff2 全部读进内存 ✓（replace 回调里不能 await ✗） */
+  const needed = [...new Set([...text.matchAll(/url\((fonts\/[^)]*?\.woff2)\)/g)].map((match) => match[1]))];
+  const fontData = new Map();
+  for (const relative of needed) {
+    const file = path.join(katexDir, relative);
+    if (!existsSync(file)) {
+      throw new Error(`KaTeX 字体缺失：${relative} ⇒ 公式会显示不全，构建不能继续 ✗`);
+    }
+    fontData.set(relative, (await readFile(file)).toString("base64"));
+  }
+  /* 压缩后的 CSS 里 `src:` 后面直接就是 `}`（没有分号 ✗）⇒ 两种终止符都要认 ✓ */
+  text = text.replace(/src:([^;}]*)([;}])/g, (whole, body, terminator) => {
+    const woff2 = /url\((fonts\/[^)]*?\.woff2)\)/.exec(body);
+    if (woff2 === null) return whole;
+    const data = fontData.get(woff2[1]);
+    if (data === undefined) return whole;
+    inlined += 1;
+    return `src:url(data:font/woff2;base64,${data}) format("woff2")${terminator}`;
+  });
+  if (inlined === 0) {
+    throw new Error("KaTeX 字体一个都没内联成功 ⇒ 公式字体在 Shadow DOM 里会 404 ✗");
+  }
+  const leftover = /url\((?!data:)([^)]*?(woff2?|ttf|otf))\)/.exec(text);
+  if (leftover !== null) {
+    throw new Error(`KaTeX 样式里仍残留在包外请求的字体：${leftover[1]} ✗`);
+  }
+  parts.push(`/* katex（${inlined} 个字体已内联为 data URI ✓）*/\n${text}`);
+  return parts.join("\n");
+}
 
 /*
  * 三次构建都在「插件目录下临时挂了父项目 node_modules」的作用域里跑：

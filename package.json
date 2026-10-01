@@ -38,5 +38,12 @@
     "sync:check": "node scripts/sync-vendor.mjs --check",
     "build": "node build.mjs",
     "test": "node --test \"tests/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@milkdown/crepe": "7.22.2",
+    "@milkdown/kit": "7.22.2",
+    "d3-force-3d": "3.0.6",
+    "katex": "0.18.9",
+    "three": "0.186.0"
   }
 }

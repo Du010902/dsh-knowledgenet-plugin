@@ -15,6 +15,13 @@ import type { NodeDocument } from "./node-document-client.ts";
 export const EDITOR_LITERAL: Record<string, string> = {
   notePanelTitle: "节点笔记",
   closeEditor: "关闭编辑区",
+  tabRich: "正文",
+  richLoading: "正在准备正文编辑器…",
+  richFailed: "正文编辑器初始化失败：请切到「源码」继续编辑或复制内容（此时不会保存 ✗）",
+  unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已停在「源码」模式（原文一字不动 ✓）",
+  unsupportedRisk: "在「正文」模式下编辑并保存，可能会改写上面这些语法 ✗",
+  openRichAnyway: "仍要用正文模式打开",
+  tabSource: "源码",
   tabEdit: "编辑",
   tabPreview: "预览",
   editorHint: "支持 Markdown · 正文直接保存到这个节点的文档",
@@ -368,6 +375,85 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     default:
       return state;
   }
+}
+
+/* --------------------- 不支持语法：默认留在源码模式 --------------------- */
+
+/**
+ * 富编辑器（Milkdown/Crepe 的 commonmark + GFM + LaTeX）**不能完整往返**的语法特征 ✓。
+ *
+ * 复查 P1-4：随便把任意 Markdown 送进富编辑器，只要用户动一个普通段落，
+ * 整篇就会由 `getMarkdown()` 重新序列化 ⇒ 原始 HTML、自定义指令、脚注、注释这些
+ * 可能被规范化甚至丢掉 ✗。所以进富模式之前先**嗅探**，命中就默认停在源码模式 ✓
+ * （源码模式是同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
+ *
+ * 只做**保守**判断：宁可多留在源码模式，也不要有损改写 ✗。
+ *
+ * ## 实测（Crepe 7.22.2 + 本插件同一套内联 CSS，真实浏览器探针 ✓）
+ *
+ * | 样本 | 无操作往返 | 编辑别的段落后 |
+ * | --- | --- | --- |
+ * | 表格 + 行内/独立公式 + 代码块 | 列表标记 `-`→`*`、表头分隔 `---`→`-`（**语义不变** ✓） | 关键片段都在 ✓ |
+ * | 块级 HTML `<div …>` | 完全一致 ✓ | 原样保留 ✓ |
+ * | `:::note` 指令 | 完全一致 ✓ | 原样保留 ✓ |
+ * | 脚注 `[^1]:` | 完全一致 ✓ | 原样保留 ✓ |
+ * | **引用式链接定义** | **被改写** ✗（定义行内联进正文 ✓） | 链接地址仍在，**原文形式变了** ✗ |
+ * | HTML 注释 | 完全一致 ✓ | 原样保留 ✓ |
+ * | `$100` 货币 | 完全一致 ✓ | 未受影响 ✓ |
+ *
+ * ⇒ 结论：这一版 Crepe 对 HTML / 指令 / 脚注其实能原样保留 ✓，
+ * 但**引用式链接定义会被规范化** ✗、列表与表格分隔行也会被改写 ✓；
+ * 而这些"能保留"是**实现现状**、不是库的契约 ✗ ⇒ 仍然按保守口径处理：
+ * 命中就默认停在源码模式 ✓，并给一个"仍要用正文模式打开"的明确出口 ✓
+ * （用户自己承担改写风险，比我们替他决定安全 ✗）。
+ */
+export interface UnsupportedScan {
+  /** 命中的特征（用于给用户一句可读的说明 ✓） */
+  reasons: string[];
+}
+
+/**
+ * 扫描一份 Markdown 里"富编辑器可能无法原样保留"的语法。
+ * @param markdown - 节点正文。
+ * @returns 命中的特征清单（空 = 可以安全进富模式 ✓）。
+ */
+export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
+  /*
+   * **先把代码与公式挖掉再扫** ✗（第二次复查 P2-3）：正则会（错误地）把
+   * 围栏/行内代码里的 HTML、公式里的花括号当成"文档扩展" ⇒ 无理由地把文档锁在源码模式 ✗。
+   * 只对**普通 Markdown 上下文**做判断 ✓。
+   */
+  const stripped = markdown
+    .replace(/```[\s\S]*?```/g, "\n")
+    .replace(/~~~[\s\S]*?~~~/g, "\n")
+    .replace(/`[^`\n]*`/g, " ")
+    .replace(/\$\$[\s\S]*?\$\$/g, " ")
+    .replace(/(?<!\\)\$[^$\n]*\$/g, " ");
+  const reasons: string[] = [];
+  const test = (pattern: RegExp, reason: string): void => {
+    if (pattern.test(stripped) && !reasons.includes(reason)) reasons.push(reason);
+  };
+  /* 原始 HTML（注释与标签）—— 富编辑器会按自己的 schema 处理 ✗ */
+  test(/<!--[\s\S]*?-->/, "HTML 注释");
+  test(/<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/, "原始 HTML 标签");
+  /* 指令 / MDX 容器：`:::note`、`::youtube`、MDX 注释写法之类 ✗ */
+  test(/^\s*:::{1,3}/m, "自定义指令（:::）");
+  test(/^\s*\{/m, "模板 / MDX 语法");
+  /* 脚注定义与引用 ✗ */
+  test(/^\[\^[^\]]+\]:/m, "脚注定义");
+  test(/\[\^[^\]]+\](?!:)/, "脚注引用");
+  /* 引用式链接定义（往返形式会变 ✗） */
+  test(/^\s*\[[^\]]+\]:\s+\S+/m, "引用式链接定义");
+  /* LaTeX 宏定义：KaTeX 子集之外，序列化未必保留 ✗ */
+  test(/^\s*\\newcommand/m, "LaTeX 宏定义");
+  /* 正文里再出现 front-matter 分隔线 ⇒ 多半是用户手写的内容，交源码更稳 ✓ */
+  test(/^\s*---\s*$/m, "疑似 front-matter 分隔线");
+  return { reasons };
+}
+
+/** 这份文档能不能安全进富模式？ */
+export function canOpenRich(markdown: string): boolean {
+  return scanUnsupportedSyntax(markdown).reasons.length === 0;
 }
 
 /* ------------------------------ 草稿缓存 ------------------------------ */

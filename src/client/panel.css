@@ -890,6 +890,85 @@
   font-size: 11px;
 }
 
+/* ===================== 富文本编辑区（Milkdown / Crepe） ===================== */
+
+/*
+ * Typora 式即时编辑（`design/typora-style-markdown-editor-analysis.md`）。
+ *
+ * 第三方样式（Crepe 主题 + KaTeX，含 data URI 字体）由 **build.mjs 构建期读文件拼进面板 CSS** ✓：
+ * Shadow DOM 里不继承宿主全局样式，必须显式注入 ✓；KaTeX 字体也必须内联，否则公式退化成方块 ✗。
+ *
+ * 这里只做两件事：
+ * 1. 把 Crepe 的主题变量**接到宿主主题 token** 上 ⇒ 浅色/深色都跟主题走 ✓（不写死一套颜色 ✗）；
+ * 2. 让编辑区在窄面板里正确滚动、长表格与长公式可以横向滚动 ✓（不压缩到不可读 ✓）。
+ */
+/*
+ * ⚠️ 变量要同时落在 **`.milkdown` 这一层** ✗：Crepe 的 classic 主题正是把 `--crepe-color-*`
+ * 定义在 `.milkdown` 上（不是 `:root`）⇒ 只覆盖父容器的话，编辑器内部仍用**浅色主题**的
+ * 深色文字 ⇒ 暗色面板上正文几乎看不见 ✗（我在独立渲染页里就是这么发现的 ✓）。
+ */
+.kn-editor-rich,
+.kn-editor-rich .milkdown {
+  --crepe-color-background: var(--dsw-alias-bg-elevated, #191e1c);
+  --crepe-color-on-background: var(--dsw-alias-label-primary, #e4ebe6);
+  --crepe-color-surface: var(--dsw-alias-bg-elevated, #191e1c);
+  --crepe-color-surface-low: var(--dsw-alias-interactive-bg-hover, #27372e);
+  --crepe-color-on-surface: var(--dsw-alias-label-primary, #e4ebe6);
+  --crepe-color-on-surface-variant: var(--dsw-alias-label-secondary, #b5cfbd);
+  --crepe-color-outline: var(--dsw-alias-border-secondary, #303a35);
+  --crepe-color-primary: var(--dsw-alias-accent, #a9d3b9);
+  --crepe-color-secondary: var(--dsw-alias-interactive-bg-hover, #27372e);
+  --crepe-color-on-secondary: var(--dsw-alias-label-primary, #e4ebe6);
+  --crepe-color-inverse: var(--dsw-alias-label-primary, #e4ebe6);
+  --crepe-color-on-inverse: var(--dsw-alias-bg-elevated, #191e1c);
+  --crepe-color-inline-code: var(--dsw-alias-label-error, #f0a8a8);
+  --crepe-color-error: var(--dsw-alias-label-error, #f0a8a8);
+  --crepe-color-hover: var(--dsw-alias-interactive-bg-hover, #29352e);
+  --crepe-color-selected: var(--dsw-alias-interactive-bg-hover, #33413a);
+
+  flex: 1;
+  min-height: 220px;
+  padding: 4px 18px 20px;
+  overflow: auto;
+  color: var(--dsw-alias-label-primary, #e4ebe6);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+/* Crepe 自己的容器撑满可用高度，长文滚动发生在这一层 ✓ */
+.kn-editor-rich .milkdown {
+  height: 100%;
+  background: transparent;
+}
+
+.kn-editor-rich .milkdown .ProseMirror {
+  min-height: 220px;
+  padding: 0;
+  outline: none;
+}
+
+/* 表格与公式**允许横向滚动** ✓（窄面板里不压缩到不可读 ✗） */
+.kn-editor-rich .milkdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.kn-editor-rich .milkdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+/* 工具栏与浮层留在本插件容器内 ✓（不污染宿主全局样式 ✓） */
+.kn-editor-rich .milkdown-toolbar,
+.kn-editor-rich .milkdown-link-preview,
+.kn-editor-rich .milkdown-link-edit,
+.kn-editor-rich .milkdown-slash-menu,
+.kn-editor-rich .milkdown-block-handle {
+  z-index: 5;
+}
+
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */
 
 .kn-warn-inline {

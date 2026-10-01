@@ -22,16 +22,21 @@ import {
 } from "./node-document-client.ts";
 import { makeTranslator } from "./card-model.ts";
 import {
+  MarkdownRichEditor,
+  type MarkdownRichEditorHandle,
+  type MarkdownRichEditorStatus,
+} from "./MarkdownRichEditor.tsx";
+import {
   EDITOR_LITERAL,
   canSave,
   createLatestGuard,
   createSaveGate,
   editorReducer,
+  scanUnsupportedSyntax,
   failureKey,
   forgetDraft,
   initialEditorState,
   isDirty,
-  previewBlocks,
   recallDraft,
   rememberDraft,
   statusText,
@@ -76,7 +81,7 @@ export function NodeDocumentEditor(props: {
 }): ReactNode {
   const t = useMemo(() => makeTranslator(props.t, EDITOR_LITERAL), [props.t]);
   const [state, dispatch] = useReducer(editorReducer, props.nodeId, initialEditorState);
-  const [tab, setTab] = useState<"edit" | "preview">("edit");
+  const [tab, setTab] = useState<"rich" | "source">("rich");
   const [confirmAdopt, setConfirmAdopt] = useState(false);
   /** 复制草稿的反馈（null = 还没复制过 ✓） */
   const [copyState, setCopyState] = useState<"done" | "failed" | null>(null);
@@ -114,6 +119,24 @@ export function NodeDocumentEditor(props: {
   const saveOutcomeRef = useRef(props.onSaveOutcome);
   saveOutcomeRef.current = props.onSaveOutcome;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** 富文本编辑器的命令式句柄（flush / replace / focus ✓） */
+  const richRef = useRef<MarkdownRichEditorHandle | null>(null);
+  /** 编辑器最近一次交给我们的草稿：用来分辨"这次变化是不是用户敲的" ✓ */
+  const lastEditorDraftRef = useRef<string | null>(null);
+  /** 递增 ⇒ 富编辑器整体替换文档（只在"外部替换草稿"时用 ✓，绝不每次草稿变化都调 ✗） */
+  const [richSyncToken, setRichSyncToken] = useState(0);
+  /** 富编辑器状态：就绪 / 失败 / 输入法组合中 ✓（失败要可见、组合中要推迟保存 ✓） */
+  const [richStatus, setRichStatus] = useState<MarkdownRichEditorStatus>({ ready: false, failed: false, composing: false });
+  /** 组合中被推迟的**统一待办**（保存 / 切源码 / 关闭 ✓ —— 不再各维护一套 ✗） */
+  const pendingActionRef = useRef<{ kind: "save" } | { kind: "action"; run: () => void } | null>(null);
+  /**
+   * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 默认停在源码模式 ✓。
+   * 必须跟着 draft 走 ✗：只看载入基线的话，用户在源码里新加 HTML/脚注/指令后
+   * 警告不会更新，切回正文也不会被拦 ✗（第二次复查 P2-3 ✓）。
+   */
+  const unsupported = useMemo(() => scanUnsupportedSyntax(state.draft).reasons, [state.draft]);
+  /** 用户显式点过"仍要用正文模式打开" ⇒ 允许这次有损风险 ✓（每次换节点重置 ✓） */
+  const [richOverride, setRichOverride] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
 
   const fetcher = useMemo<FetchLike>(
@@ -207,6 +230,22 @@ export function NodeDocumentEditor(props: {
     onSaveableChangeRef.current?.(saveable);
   }, [saveable]);
 
+  /*
+   * 复查 P1-4：**不支持语法默认留在源码模式** ✗ —— 富编辑器不能表示原始 HTML、
+   * 自定义指令、脚注、引用式链接定义等，用户动一个普通段落后整篇会被重新序列化 ⇒
+   * 那些内容可能被规范化甚至丢掉 ✗。这里在正文到位后嗅探一次，命中就默认切源码 ✓
+   * （源码模式是同一份草稿的另一种编辑方式 ✓，原文一字不动 ✓）。
+   */
+  useEffect(() => {
+    if (state.phase !== "ready") return;
+    if (unsupported.length > 0) setTab("source");
+  }, [state.phase, props.nodeId, unsupported.length]);
+
+  /* 换节点 ⇒ 重新给一次"仍要用正文模式打开"的机会 ✓ */
+  useEffect(() => {
+    setRichOverride(false);
+  }, [props.nodeId]);
+
   /* 读取完成后把焦点给正文（设计稿要求 ✓） */
   useEffect(() => {
     if (state.phase !== "ready" || state.conflicted) return;
@@ -298,7 +337,66 @@ export function NodeDocumentEditor(props: {
     }
   }, [fetcher, props.libraryKey, props.nodeId]);
 
-  const save = useCallback((): Promise<boolean> => saveWith(state.draft, state.hash), [saveWith, state.draft, state.hash]);
+  /**
+   * **统一取出"当前正文快照"**（复查 P1-2/P1-3；第二次复查 P1-1 补上**按模式取值** ✓）。
+   * 普通保存、重试、保存并继续、合并保存、切到源码、关闭 —— 全都必须先经过这里 ✓。
+   *
+   * **按当前模式读** ✗（这是我上一版最大的错 ✗）：
+   * - **源码模式**：富编辑器**根本没挂载** ⇒ 直接读受控 textarea 的最新草稿（就是 `state.draft`）✓；
+   *   绝不能因为"富实例不在"就判定"取不到正文" ✗ —— 那会让源码模式、以及
+   *   "不支持语法自动转源码""初始化失败回退源码"三条路**全部无法保存** ✗✗；
+   * - **正文模式**：必须有就绪实例；`flush()` 返回 null（未就绪 / 失败 / 组合中）**才**报错 ✓。
+   *
+   * @returns 取到的 Markdown；正文模式下实例不可用时返回 null ✗。
+   */
+  const snapshotDraft = useCallback((): string | null => {
+    let live: string | null;
+    if (tab === "source") {
+      live = state.draft;
+    } else {
+      live = richRef.current?.flush() ?? null;
+      if (live === null) return null;
+    }
+    if (live !== state.draft) {
+      lastEditorDraftRef.current = live;
+      dispatch({ type: "edit", text: live });
+    }
+    return live;
+  }, [state.draft, tab]);
+
+  const save = useCallback((): Promise<boolean> => {
+    /*
+     * 输入法正在组合 ⇒ **等它结束再存** ✗（P2-7）：直接取会拿到半成品、或打断输入 ✓。
+     * 这条只对**正文模式**成立 ✗ —— 源码模式的 textarea 由我们自己受控，随时可读 ✓。
+     */
+    if (tab === "rich" && richStatus.composing) {
+      pendingActionRef.current = { kind: "save" };
+      return Promise.resolve(false);
+    }
+    const live = snapshotDraft();
+    if (live === null) {
+      /* 正文模式实例不可用 ⇒ 如实报错（父面板会收起离开弹窗 ✓），绝不静默保存旧内容 ✗ */
+      dispatch({ type: "save-failed", key: richStatus.failed ? "richFailed" : "richLoading" });
+      saveOutcomeRef.current?.(false, richStatus.failed ? "richFailed" : "richLoading");
+      return Promise.resolve(false);
+    }
+    return saveWith(live, state.hash);
+  }, [saveWith, snapshotDraft, state.hash, tab, richStatus.composing, richStatus.failed]);
+
+  /*
+   * **统一待办**：保存、切源码、关闭**共用一份** pending ✓ ——
+   * 组合结束后在这里补跑，不再各维护互相冲突的标志 ✓（第二次复查 P1-2 要求 ✓）。
+   */
+  useEffect(() => {
+    if (tab === "rich" && richStatus.composing) return;
+    const pending = pendingActionRef.current;
+    if (pending === null) return;
+    pendingActionRef.current = null;
+    if (pending.kind === "save") void save();
+    else pending.run();
+    // withSnapshot 在下面定义（函数声明顺序不影响 effect 运行 ✓）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [richStatus.composing, tab, save]);
 
   /* 「保存并继续」：saveNonce 变化 ⇒ 保存一次（首帧不触发 ✓） */
   const saveNonceRef = useRef(props.saveNonce ?? 0);
@@ -373,9 +471,51 @@ export function NodeDocumentEditor(props: {
       await refreshLatest();
       return;
     }
+    /*
+     * 复查 P1-3：合并保存**也必须**现取当前正文 ✗ —— 用户在富编辑器里改完最后一处
+     * 立刻点合并，state.draft 可能还是旧的 ⇒ 提交旧内容、还会把旧内容规范化同步回编辑器 ✗。
+     * 基线 hash 用 latest 的 ✓，正文快照一律走同一个入口 ✓。
+     */
+    const live = snapshotDraft();
+    if (live === null) {
+      dispatch({ type: "save-failed", key: richStatus.failed ? "richFailed" : "richLoading" });
+      saveOutcomeRef.current?.(false, "richLoading");
+      return;
+    }
     dispatch({ type: "merge-and-save" });
-    await saveWith(state.draft, state.latest.hash);
-  }, [refreshLatest, saveWith, state.draft, state.latest]);
+    await saveWith(live, state.latest.hash);
+  }, [refreshLatest, saveWith, snapshotDraft, state.latest, richStatus.failed]);
+
+  /**
+   * **离开富编辑器的统一入口**（复查 P1-2）：先取正文快照，再执行动作 ✓。
+   * 用于切到源码、关闭编辑器 —— 不能只 `setTab` / 只调 `onClose` ✗（会丢最后一笔 ✓）。
+   */
+  const withSnapshot = useCallback((action: () => void): void => {
+    /* 源码模式：草稿本身就是权威，直接执行 ✓ */
+    if (tab === "source") {
+      action();
+      return;
+    }
+    const rich = richRef.current;
+    /*
+     * 正文模式但实例**没就绪 / 初始化失败** ⇒ 编辑器里不可能有用户改动 ✓
+     * ⇒ 允许动作（"切到源码"正是那条恢复路径 ✓，不能一概禁止回退 ✗）。
+     */
+    if (rich === null || rich.isReady() !== true) {
+      action();
+      return;
+    }
+    /*
+     * **输入法正在组合**：既不能取半成品，更不能卸载编辑器 ✗ ⇒
+     * 记进**统一待办**，等组合结束再执行 ✓（第二次复查 P1-2 ✓）。
+     */
+    if (richStatus.composing) {
+      pendingActionRef.current = { kind: "action", run: action };
+      return;
+    }
+    if (snapshotDraft() === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
+    action();
+  }, [snapshotDraft, tab, richStatus.composing]);
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
@@ -399,7 +539,19 @@ export function NodeDocumentEditor(props: {
     );
   }, [state.draft]);
 
-  const blocks = useMemo(() => previewBlocks(state.draft), [state.draft]);
+  /*
+   * **草稿不是编辑器敲出来的**（采用最新正文 / 保存后规范化 / 恢复缓存 ⇒ 都算"外部替换"）⇒
+   * 让富编辑器整体同步一次 ✓；用户自己敲的变化绝不触发 ✗（否则丢光标与撤销栈 ✓）。
+   */
+  useEffect(() => {
+    if (lastEditorDraftRef.current === null) {
+      lastEditorDraftRef.current = state.draft;
+      return;
+    }
+    if (state.draft === lastEditorDraftRef.current) return;
+    lastEditorDraftRef.current = state.draft;
+    setRichSyncToken((value) => value + 1);
+  }, [state.draft]);
 
   return (
     <aside
@@ -412,7 +564,7 @@ export function NodeDocumentEditor(props: {
       <div className="kn-editor-heading">
         <div className="kn-editor-row">
           <span className="kn-editor-tag">{t("notePanelTitle")}</span>
-          <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={props.onClose}>
+          <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { withSnapshot(props.onClose); }}>
             ×
           </button>
         </div>
@@ -421,23 +573,37 @@ export function NodeDocumentEditor(props: {
       </div>
 
       <div className="kn-editor-tabs" role="tablist">
+        {/*
+         * **正文 / 源码**（不再是"编辑/预览"✗ —— 文档要求：正文模式就是可直接编辑的格式化内容，
+         * 不需要写完再切去预览 ✓）。两者编辑**同一份草稿、基线与指纹** ✓，只是显示方式不同 ✓。
+         */}
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "edit"}
-          className={tab === "edit" ? "is-active" : ""}
-          onClick={() => setTab("edit")}
+          aria-selected={tab === "rich"}
+          className={tab === "rich" ? "is-active" : ""}
+          onClick={() => {
+            /*
+             * 第二次复查 P2-3：进正文前必须按**当前草稿**再校验一次 ✗ ——
+             * 用户在源码里新加了 HTML/脚注/指令时，直接切过去会在富模式里被改写 ✗。
+             */
+            if (unsupported.length > 0 && !richOverride) {
+              setTab("source");
+              return;
+            }
+            withSnapshot(() => setTab("rich"));
+          }}
         >
-          {t("tabEdit")}
+          {t("tabRich")}
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "preview"}
-          className={tab === "preview" ? "is-active" : ""}
-          onClick={() => setTab("preview")}
+          aria-selected={tab === "source"}
+          className={tab === "source" ? "is-active" : ""}
+          onClick={() => { withSnapshot(() => setTab("source")); }}
         >
-          {t("tabPreview")}
+          {t("tabSource")}
         </button>
       </div>
 
@@ -469,6 +635,48 @@ export function NodeDocumentEditor(props: {
 
       <div className="kn-editor-hint">{t("editorHint")}</div>
 
+      {/*
+       * 复查 P1-4 / P2-6：两条**必须让用户看见**的提示 ——
+       * ① 正文里有富编辑器无法原样保留的语法 ⇒ 默认停在源码模式 ✓（并说明命中了什么 ✓）；
+       * ② 富编辑器初始化失败 ⇒ 明说、并指引去源码页继续编辑/复制 ✓（不许假装还能保存 ✗）。
+       */}
+      {unsupported.length > 0 ? (
+        <div className="kn-editor-notice" role="alert">
+          <div>{t("unsupportedNotice")}</div>
+          <div className="kn-editor-dim">{unsupported.join(" · ")}</div>
+          {tab === "rich" ? <div className="kn-editor-dim">{t("unsupportedRisk")}</div> : null}
+          <div className="kn-editor-notice-actions">
+            <button
+              type="button"
+              onClick={() => {
+                if (tab === "rich") {
+                  withSnapshot(() => setTab("source"));
+                  return;
+                }
+                /* 用户明确承担改写风险 ⇒ 记下显式确认，再进正文 ✓ */
+                setRichOverride(true);
+                withSnapshot(() => setTab("rich"));
+              }}
+            >
+              {tab === "rich" ? t("tabSource") : t("openRichAnyway")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "rich" && richStatus.failed ? (
+        <div className="kn-editor-error" role="alert">
+          <div>{t("richFailed")}</div>
+          <div className="kn-editor-notice-actions">
+            <button type="button" onClick={() => { setTab("source"); }}>{t("tabSource")}</button>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "rich" && !richStatus.ready && !richStatus.failed ? (
+        <div className="kn-editor-dim">{t("richLoading")}</div>
+      ) : null}
+
       <div className="kn-editor-body">
         {/* 载入中：只有在**还没有任何内容**时才占满（有草稿就必须露出来 ✓ —— 复查 P1-3 ✓） */}
         {state.phase === "loading" && state.draft === "" && state.base === "" ? (
@@ -490,7 +698,27 @@ export function NodeDocumentEditor(props: {
               </div>
             ) : null}
 
-            {tab === "edit" ? (
+            {tab === "rich" ? (
+              /*
+               * **正文模式**：Typora 式即时编辑 ✓（表格、公式、代码块直接编辑，不用切预览 ✓）。
+               * 实例由 `MarkdownRichEditor` 管；这里只喂初始正文与只读状态 ✓。
+               * 草稿变化**不**回写编辑器 ✗（否则丢光标/撤销栈/中文输入 ✓）；
+               * 只有"确认采用最新正文"那一次才用 syncToken 触发整体替换 ✓。
+               */
+              <MarkdownRichEditor
+                markdown={state.draft}
+                syncToken={richSyncToken}
+                readOnly={state.saving || state.frozen || state.phase !== "ready"}
+                handleRef={richRef}
+                onChange={(markdown) => {
+                  lastEditorDraftRef.current = markdown;
+                  dispatch({ type: "edit", text: markdown });
+                }}
+                onStatus={setRichStatus}
+                report={reportRef.current}
+              />
+            ) : (
+              /* **源码模式**：同一份草稿的另一种编辑方式 ✓（处理精确语法与保留未知扩展 ✓） */
               <textarea
                 ref={textareaRef}
                 className="kn-editor-text"
@@ -501,13 +729,6 @@ export function NodeDocumentEditor(props: {
                 value={state.draft}
                 onChange={(event) => dispatch({ type: "edit", text: event.target.value })}
               />
-            ) : (
-              <div className="kn-editor-preview">
-                <div className="kn-editor-dim">{t("previewSimplified")}</div>
-                {blocks.map((block, index) => (block.heading
-                  ? <h3 key={index}>{block.text}</h3>
-                  : <div key={index}>{block.text}</div>))}
-              </div>
             )}
 
             {/* 保存失败：显示在输入框旁，**重试执行保存**（不是重新读取 ✗）✓ */}

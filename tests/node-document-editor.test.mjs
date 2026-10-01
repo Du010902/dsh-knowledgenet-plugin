@@ -30,6 +30,8 @@ import {
   isDirty,
   migrateDraft,
   previewBlocks,
+  scanUnsupportedSyntax,
+  canOpenRich,
   recallDraft,
   rememberDraft,
   statusText,
@@ -42,6 +44,8 @@ const clientSource = await read("src/client/node-document-client.ts");
 const panelSource = await read("src/client/GraphPanel.tsx");
 const menuSource = await read("src/client/GraphContextMenu.tsx");
 const confirmSource = await read("src/client/ConfirmDialog.tsx");
+const richSource = await read("src/client/MarkdownRichEditor.tsx");
+const buildSource = await read("build.mjs");
 const css = await read("src/client/panel.css");
 const dictSource = await read("src/client/index.ts");
 
@@ -418,7 +422,7 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
 });
 
 describe("与设计稿对应的部件与入口", () => {
-  it("编辑器部件齐：标题 / 实际路径 / 编辑·预览 / 保存状态 / 冲突条 / 快捷键 / 提示行 ✓", () => {
+  it("编辑器部件齐：标题 / 实际路径 / **正文·源码** / 保存状态 / 冲突条 / 快捷键 / 提示行 ✓", () => {
     for (const piece of [
       "kn-editor-title",
       "kn-editor-path",
@@ -427,16 +431,179 @@ describe("与设计稿对应的部件与入口", () => {
       "kn-editor-latest",
       "kn-editor-hint",
       "kn-editor-text",
-      "kn-editor-preview",
+      "kn-editor-rich",
       "kn-editor-status",
       "kn-editor-save",
       "kn-editor-sub",
     ]) {
-      assert.ok(editorSource.includes(piece), `界面要有 ${piece} ✓`);
+      /* 富文本容器类名在 MarkdownRichEditor 里 ✓，其余在 NodeDocumentEditor ✓ */
+      const haystack = editorSource + richSource;
+      assert.ok(haystack.includes(piece), `界面要有 ${piece} ✓`);
       assert.ok(css.includes(`.${piece}`), `${piece} 要有样式 ✓`);
     }
     assert.ok(editorSource.includes('event.key.toLowerCase() !== "s"'), "Ctrl/⌘ + S 要接上 ✓");
-    assert.ok(editorSource.includes('role="tablist"'), "编辑/预览是标签 ✓");
+    assert.ok(editorSource.includes('role="tablist"'), "正文 / 源码是标签 ✓");
+  });
+
+  it("**Typora 式即时编辑**：正文直接编辑格式化内容，源码是同一份草稿的替代编辑方式 ✓", () => {
+    /* ① 两个模式 + 富编辑器接入 ✓ */
+    assert.ok(editorSource.includes('t("tabRich")') && editorSource.includes('t("tabSource")'), "标签是正文 / 源码 ✓");
+    assert.ok(editorSource.includes('useState<"rich" | "source">("rich")'), "默认进正文（可视化）模式 ✓");
+    assert.ok(editorSource.includes("<MarkdownRichEditor"), "正文模式用富文本编辑器 ✓");
+    assert.ok(richSource.includes('from "@milkdown/crepe"'), "用 Milkdown / Crepe ✓");
+    assert.ok(richSource.includes("features"), "表格 / 公式走 Crepe 的特性开关 ✓");
+    assert.ok(!editorSource.includes("previewBlocks("), "不再有「写完切预览」那条老路 ✗");
+    /* ② 两个模式共享同一份草稿 / 基线 / 指纹（不是两套状态 ✓） */
+    assert.ok(editorSource.includes('tab === "rich" ?'), "正文 / 源码只是显示方式切换 ✓");
+    assert.ok(
+      (editorSource.match(/value=\{state\.draft\}/g) ?? []).length === 1,
+      "源码模式仍绑同一份 draft ✓（不是另一份内容 ✗）",
+    );
+    /* ③ 草稿变化**不**整体回写编辑器（只在外部替换时用 syncToken ✓） */
+    assert.ok(richSource.includes("syncToken"), "要有显式的整体同步开关 ✓");
+    assert.ok(
+      richSource.includes("token === syncTokenRef.current") && richSource.includes("replaceAll(next)"),
+      "只有 token 变化才整体替换 ✓",
+    );
+    /* ④ 保存前现取当前 Markdown ✓（不用延迟缓存 ✓） */
+    assert.ok(editorSource.includes("richRef.current?.flush()"), "保存前 flush 一次 ✓");
+    /* ⑤ 保存期间富编辑器整体只读 ✓；异步初始化晚于卸载要销毁 ✓ */
+    assert.ok(
+      editorSource.includes('readOnly={state.saving || state.frozen || state.phase !== "ready"}'),
+      "保存 / 未就绪时只读 ✓",
+    );
+    assert.ok(richSource.includes("crepe.setReadonly"), "只读要作用到编辑器本身 ✓");
+    assert.ok(
+      richSource.includes("if (cancelled || disposedRef.current) {"),
+      "异步初始化晚于卸载（或本次已被取消）要立刻销毁 ✓",
+    );
+    assert.ok(richSource.includes("let cancelled = false;"), "取消标志要**按挂载实例**，不能用会被下一次 effect 重置的共享标志 ✗");
+    /* ⑥ 样式与字体是**构建期内联**的（Shadow DOM + 自包含 ✓） */
+    assert.ok(buildSource.includes("readEditorCss"), "build.mjs 要拼第三方样式 ✓");
+    assert.ok(buildSource.includes("data:font/woff2;base64"), "KaTeX 字体要转 data URI ✓");
+    assert.ok(buildSource.includes("codeSplitting: false"), "不许留动态分块（自包含单文件 ✓）");
+  });
+
+  it("**复查（富编辑器）**：不支持语法嗅探 —— 命中就默认留在源码模式 ✓", () => {
+    assert.deepEqual(scanUnsupportedSyntax("## 标题\n\n- 列表\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n$e=mc^2$\n").reasons, []);
+    assert.equal(canOpenRich("# 普通 Markdown ✓"), true);
+    const cases = [
+      ["<div class=\"x\">块级 HTML</div>", "原始 HTML 标签"],
+      ["正文\n<!-- 注释 -->\n正文", "HTML 注释"],
+      [":::note\n内容\n:::", "自定义指令（:::）"],
+      ["import X from './x'\n\n{value}", "模板 / MDX 语法"],
+      ["正文[^1]\n\n[^1]: 脚注内容", "脚注定义"],
+      ["引用式链接 [foo][1]\n\n[1]: https://example.com", "引用式链接定义"],
+      ["\\newcommand{\\R}{\\mathbb{R}}", "LaTeX 宏定义"],
+      ["正文\n\n---\n\n尾巴", "疑似 front-matter 分隔线"],
+    ];
+    for (const [sample, reason] of cases) {
+      const scan = scanUnsupportedSyntax(sample);
+      assert.ok(scan.reasons.includes(reason), `应当命中「${reason}」：${sample}`);
+      assert.equal(canOpenRich(sample), false);
+    }
+  });
+
+  it("**复查 P1-1**：异步初始化期间的同步不许丢（记账 + 补上 + 未就绪 flush 返回 null）✓", () => {
+    assert.ok(richSource.includes("pendingRef"), "未就绪的正文要记进 pendingRef ✓");
+    assert.ok(richSource.includes("const pending = pendingRef.current ?? markdownRef.current;"), "create 成功后要用最新那份补同步 ✓");
+    assert.ok(richSource.includes("if (pending !== crepe.getMarkdown()) {"), "补同步要走真正的 replaceAll ✓");
+    assert.ok(
+      richSource.includes("if (crepe === null || !readyRef.current || failedRef.current) return null;"),
+      "未就绪/失败时 flush 必须返回 null ✗（不许拿挂载时的旧正文当当前内容 ✗）",
+    );
+    assert.ok(richSource.includes("if (composingRef.current) return null;"), "输入法组合中也不许取值 ✗");
+  });
+
+  it("**复查 P2-5**：初始化与外部替换**不算用户修改**（同步期间忽略变更事件）✓", () => {
+    assert.ok(richSource.includes("syncingRef"), "要有同步来源标志 ✓");
+    assert.ok(richSource.includes("if (cancelled || syncingRef.current) return;"), "同步期间的 markdownUpdated 一律忽略 ✗");
+    assert.ok(richSource.includes("syncingRef.current = true;"), "外部替换要包在同步标志里 ✓");
+  });
+
+  it("**复查 P1-2/P1-3**：切源码 / 关闭 / 合并保存都先取同一个正文快照 ✓", () => {
+    assert.ok(editorSource.includes("const snapshotDraft = useCallback"), "要有统一的快照入口 ✓");
+    assert.ok(editorSource.includes("const withSnapshot = useCallback"), "离开富编辑器要有统一包装 ✓");
+    assert.ok(
+      editorSource.includes('onClick={() => { withSnapshot(() => setTab("source")); }}'),
+      "切源码前必须先取快照 ✗（复查 P1-2）",
+    );
+    assert.ok(editorSource.includes("onClick={() => { withSnapshot(props.onClose); }}"), "关闭前也要先取快照 ✓");
+    const mergeBlock = editorSource.slice(
+      editorSource.indexOf("const mergeAndSave = useCallback"),
+      editorSource.indexOf("const withSnapshot = useCallback"),
+    );
+    assert.ok(mergeBlock.includes("const live = snapshotDraft();"), "合并保存也要现取正文 ✗（复查 P1-3）");
+    assert.ok(!mergeBlock.includes("saveWith(state.draft"), "合并保存不许再用 state.draft 提交 ✗");
+    assert.ok(editorSource.includes('key: richStatus.failed ? "richFailed" : "richLoading"'), "取不到正文要报可见错误 ✓");
+  });
+
+  it("**复查 P1-4/P2-6**：不支持语法与初始化失败都要有可见提示与出口 ✓", () => {
+    assert.ok(
+      editorSource.includes("scanUnsupportedSyntax(state.draft)"),
+      "要按**当前草稿**嗅探（只看 base 会漏掉源码里新加的内容 ✗）",
+    );
+    assert.ok(editorSource.includes("useMemo(() => scanUnsupportedSyntax"), "每次草稿变化都重新算 ✓");
+    assert.ok(editorSource.includes('t("unsupportedNotice")'), "要说明为什么停在源码 ✓");
+    assert.ok(editorSource.includes('t("unsupportedRisk")'), "切回正文时要说清风险 ✓");
+    assert.ok(editorSource.includes('t("richFailed")') && editorSource.includes('t("richLoading")'), "初始化失败/加载中要可见 ✓");
+    assert.ok(editorSource.includes("onStatus={setRichStatus}"), "编辑器要上报状态 ✓");
+    assert.ok(richSource.includes("onCompositionEnd"), "组合结束要上报并补一次用户改动 ✓");
+  });
+
+  it("**复查（构建）**：必需样式缺失必须**构建失败**，字体不许留包外 URL ✓", () => {
+    assert.ok(buildSource.includes("富文本编辑器必需的样式缺失"), "必需资源缺失要抛错 ✗（不能静默跳过 ✓）");
+    assert.ok(buildSource.includes("KaTeX 字体缺失"), "字体缺失要抛错 ✓");
+    assert.ok(buildSource.includes("仍残留在包外请求的字体"), "构建后要校验没有包外字体 URL ✓");
+    assert.ok(buildSource.includes("一个都没内联成功"), "一个都没内联也要失败 ✓");
+  });
+
+  it("**复查（第二次）P1-1**：源码模式必须能保存（不许因为没有富实例就判「取不到正文」✗）", () => {
+    const snapshot = editorSource.slice(
+      editorSource.indexOf("const snapshotDraft = useCallback"),
+      editorSource.indexOf("const save = useCallback"),
+    );
+    assert.ok(snapshot.includes('if (tab === "source")'), "源码模式要直接读草稿 ✓");
+    assert.ok(snapshot.includes("live = state.draft;"), "源码模式的权威就是受控 textarea 的草稿 ✓");
+    assert.ok(snapshot.includes("richRef.current?.flush() ?? null"), "正文模式才要求有效实例 ✓");
+    /* 组合推迟只对正文模式成立 ✓（源码模式不归富实例管 ✓） */
+    assert.ok(
+      editorSource.includes('if (tab === "rich" && richStatus.composing)'),
+      "组合检查要带模式条件 ✗（否则源码模式也会被卡住 ✗）",
+    );
+    /* 三种"自动进源码"的路径因此都能保存 ✓ */
+    assert.ok(editorSource.includes('setTab("source")'), "不支持语法 / 初始化失败都要能停在源码并保存 ✓");
+  });
+
+  it("**复查（第二次）P1-2**：输入法组合期间不许卸载编辑器（统一待办，等组合结束再执行）✓", () => {
+    const withSnapshot = editorSource.slice(
+      editorSource.indexOf("const withSnapshot = useCallback"),
+      editorSource.indexOf("/** 放弃草稿并用最新正文"),
+    );
+    assert.ok(withSnapshot.includes('if (tab === "source")'), "源码模式直接执行 ✓");
+    assert.ok(withSnapshot.includes("rich.isReady() !== true"), "未就绪/失败允许动作（切源码是恢复路径 ✓）");
+    assert.ok(withSnapshot.includes("if (richStatus.composing)"), "组合中要挡住会卸载编辑器的动作 ✓");
+    assert.ok(
+      withSnapshot.includes('pendingActionRef.current = { kind: "action", run: action }'),
+      "组合中的动作要记进**统一待办**，等组合结束再跑 ✓",
+    );
+    assert.ok(withSnapshot.includes("if (snapshotDraft() === null) return;"), "取不到快照就不许执行 ✗");
+    /* 只有一份待办（保存/切模式/关闭共用 ✓） */
+    assert.ok(editorSource.includes("const pendingActionRef = useRef<"), "只有一处统一待办 ✓");
+    assert.ok(!editorSource.includes("pendingSaveRef"), "旧的「只推迟保存」那套必须删掉 ✗");
+    assert.ok(editorSource.includes('if (pending.kind === "save") void save();'), "组合结束后按待办类型补跑 ✓");
+  });
+
+  it("**复查（第二次）P2-3**：进正文前按**当前草稿**校验；代码块与公式不算不支持语法 ✓", () => {
+    /* 扫描器先挖掉代码与公式 ✓ */
+    const codeDoc = "说明：\n\n```html\n<div class=\"x\">代码里的 HTML</div>\n```\n\n以及行内 `<span>` 与公式 $\\{a\\}$。\n";
+    assert.deepEqual(scanUnsupportedSyntax(codeDoc).reasons, [], "代码块/行内代码/公式里的内容不该触发 ✗");
+    /* 但普通上下文里的 HTML 仍然命中 ✓ */
+    assert.equal(canOpenRich("正文\n\n<div>块级</div>\n"), false);
+    /* 进正文前要拿当前草稿校验，并且要显式确认才允许有损转换 ✓ */
+    assert.ok(editorSource.includes("if (unsupported.length > 0 && !richOverride)"), "进正文前按当前草稿拦一次 ✓");
+    assert.ok(editorSource.includes("setRichOverride(true)"), "用户显式确认才放行 ✓");
+    assert.ok(editorSource.includes("setRichOverride(false)"), "换节点要重置确认 ✓");
   });
 
   it("**两个入口**：选中区按钮 + 右键菜单项，走同一个动作 ✓", () => {
