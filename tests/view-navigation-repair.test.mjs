@@ -312,6 +312,102 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     assert.ok(Math.abs(carried.radius - 100) < 1e-6, `半径应是 100，实际 ${carried.radius}`);
   });
 
+  it("**双击节点**：转动中心就落在那个节点上 ✓（画面不跳、相机飞过去、半径按新中心量）", () => {
+    /*
+     * 用户 2026-10 明确要求："双击某个结点之后，将中心放在这个节点上" ✓
+     * （上一版把它做成"定位只动相机、球心不动" ✗，与要求相反，这里改回来 ✓）。
+     *
+     * 关键约束：换中心的那一刻**画面不许跳** ✗ —— 渲染用的是"布局空间里的相机"，
+     * 单独换 C 会让它整体位移；`recenterOn` 会把相机补偿回去 ✓。
+     */
+    const { navigation } = makeNavigation();
+    const layout = positionsOf([[0, 0, 0], [100, 0, 0]]);
+    navigation.fitAll(layout, 2, false, "initial");
+    assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6, "前置：初次取景采了布局中心 ✓");
+    /* 让取景距离可预测：包围半径 300 ⇒ clamp(40×2.6, 40, max(60,300)) = 104 ✓ */
+    navigation.setFrameContext(
+      { center: [50, 0, 0], radius: 300, min: [0, 0, 0], max: [100, 0, 0] },
+      { width: 800, height: 600 },
+      layout,
+      2,
+    );
+    const pictureBefore = [...navigation.basis().position];
+    const axesBefore = [...navigation.basis().right];
+
+    navigation.command({ type: "focusNode", nodeId: "n1", source: "toolbar" }, 1, layout, 2);
+
+    /* ① 中心 = 被双击节点的**布局**坐标 ✓ */
+    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "转动中心应当落在被双击的节点上 ✓");
+    /* ② 换中心这一刻画面逐像素不动：布局空间里的相机与朝向都不许变 ✗ */
+    assert.ok(
+      Math.hypot(
+        pictureBefore[0] - navigation.basis().position[0],
+        pictureBefore[1] - navigation.basis().position[1],
+        pictureBefore[2] - navigation.basis().position[2],
+      ) < 1e-9,
+      "换中心不许让画面跳 ✗",
+    );
+    assert.deepEqual([...navigation.basis().right], axesBefore, "朝向也不许跳 ✗");
+    /* ③ 半径按新中心量：max|X − C| = 100 ✓（操作球/取景/小地图共用它 ✓） */
+    assert.ok(
+      Math.abs(navigation.camera.knInterior.radius - 100) < 1e-6,
+      `半径要以新 C 为准，实际 ${navigation.camera.knInterior.radius}`,
+    );
+
+    /* ④ 相机飞过去并看向它（动画走完 ⇒ 停在节点前方 104 处 ✓） */
+    navigation.update(performance.now() + 5000);
+    const display = displayBasisOf(navigation);
+    const eye = display.position;
+    const distance = Math.hypot(eye[0] - 100, eye[1], eye[2]);
+    assert.ok(Math.abs(distance - 104) < 1.5, `应停在节点前方 104，实际 ${distance.toFixed(2)}`);
+    const toNode = [100 - eye[0], -eye[1], -eye[2]];
+    const length = Math.hypot(...toNode);
+    const facing = (toNode[0] * display.forward[0] + toNode[1] * display.forward[1] + toNode[2] * display.forward[2]) / length;
+    assert.ok(facing > 0.999, `视线应当正对节点，实际 cos=${facing.toFixed(4)}`);
+
+    /* ⑤ 之后拖动只转图谱：中心保持在这个节点上 ✓ */
+    navigation.setFrameContext(
+      { center: [100, 0, 0], radius: 100, min: [0, 0, 0], max: [100, 0, 0] },
+      { width: 800, height: 600 },
+      layout,
+      2,
+    );
+    const sceneBefore = [...navigation.camera.knInterior.scene];
+    navigation.command({ type: "focusNode", nodeId: "n1", source: "toolbar" }, 1, layout, 2);
+    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "再次定位仍然是同一个节点 ✓");
+    assert.deepEqual(navigation.camera.knInterior.scene, sceneBefore, "定位不改图谱旋转 ✓");
+
+    /* ⑥ 引擎自己发的收敛取景不许把它改回去 ✗ */
+    navigation.fitAll(positionsOf([[400, 0, 0], [500, 0, 0]]), 2, true, "settle");
+    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "收敛取景不许搬走中心 ✗");
+  });
+
+  it("**首次进入**的那一次收敛取景仍然采球心（有布局缓存、没有相机缓存的路径 ✓）", () => {
+    const fresh = makeNavigation();
+    fresh.navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
+    assert.ok(
+      Math.abs(fresh.navigation.camera.knInterior.center[0] - 500) < 1e-6,
+      "还没采过 + 用户没动过 ⇒ 第一次收敛取景采一次 ✓",
+    );
+    /* 采过之后，同样的收敛取景再也不能改它 ✗ */
+    fresh.navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "settle");
+    assert.ok(
+      Math.abs(fresh.navigation.camera.knInterior.center[0] - 500) < 1e-6,
+      "采过之后就不许再改（否则聚焦/换结构都会搬走中心 ✗）",
+    );
+  });
+
+  it("**initial 只会采一次**：第二次 initial 不许再挪球心 ✗", () => {
+    const { navigation } = makeNavigation();
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, false, "initial");
+    assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6, "第一次采 ✓");
+    navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, false, "initial");
+    assert.ok(
+      Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6,
+      "第二次 initial 不许改（一个实例只兑现一次 ✓）",
+    );
+  });
+
   it("首次取景（initial）在用户没操作过时采球心；操作过之后不再动", () => {
     const fresh = makeNavigation();
     fresh.navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "initial");

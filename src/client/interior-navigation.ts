@@ -1093,6 +1093,28 @@ export function advanceEye(state: InteriorState, travel: number, maxRange: numbe
 /* ------------------------------ 定位与取景 ------------------------------ */
 
 /**
+ * 把**转动中心 C** 搬到某个布局坐标上，并保持**当前看到的画面完全不动** ✓。
+ *
+ * 用户要求（2026-10）：双击/定位某个节点时，让转动中心就落在那个节点上 ——
+ * 之后拖动的环绕中心就是它 ✓。
+ *
+ * 为什么不能只改 `center` ✗：渲染用的是"布局空间里的相机"
+ * `effectiveBasis.position = C + S⁻¹(P − C)` ⇒ 单独换 C 会让画面整体跳一下 ✗。
+ * 这里先把旧中心的相机位置记下来，换完 C 再把 `eye` 补偿回去
+ * （`displayOf` 就是布局坐标 → 显示坐标的映射 ✓），于是 S/Q 不变、画面不跳 ✓，
+ * 变的只有"以后拖动绕着谁转" ✓。
+ *
+ * @param state - 就地更新 `center` 与 `eye`。
+ * @param layoutPoint - 新的转动中心（**布局**坐标，例如被双击节点的坐标 ✓）。
+ */
+export function recenterOn(state: InteriorState, layoutPoint: Vec3): void {
+  const before = effectiveBasis(state);
+  state.center = [...layoutPoint];
+  /* 补偿：换完中心后，把相机放回"布局空间里的原位置" ⇒ 画面逐像素不变 ✓ */
+  state.eye = displayOf(state, before.position);
+}
+
+/**
  * 定位到某个**布局坐标**的点：移动相机并转向它，**球心 C 与图谱旋转 S 都不变** ✓。
  * @param state - 就地更新 `eye` / `view`。
  * @param target - 布局坐标。

@@ -36,6 +36,7 @@ import {
   quatConjugate,
   quatSlerp,
   radiusAbout,
+  recenterOn,
   spinStep,
   wheelTravel,
   DEFAULT_WHEEL,
@@ -174,6 +175,14 @@ export class InteriorNavigation {
   private spinLastX = 0;
   private spinLastY = 0;
   private animation: Animation | null = null;
+  /**
+   * 这个实例是否**已经采纳过球心**。
+   *
+   * 承诺（文档 P2）：球心只在「**首次进入**」与「**明确点了重新整理之后**」变 ✓。
+   * 有了这个标记，引擎后续因为选中/聚焦/换结构而发的收敛取景就不会再改球心 ✗
+   * （用户 2026-10 复查："双击节点时旋转中心又被放到这个节点上" ✗）。
+   */
+  private centerAdopted = false;
   private suppressClick = false;
   private suppressedTimer: number | undefined;
   private disposed = false;
@@ -403,7 +412,20 @@ export class InteriorNavigation {
       positions[index * 3 + 1] ?? 0,
       positions[index * 3 + 2] ?? 0,
     ];
-    /* 定位：移动相机并转向它；**球心 C 与图谱旋转 S 都不动** ✓ */
+    /*
+     * 定位（双击节点 / 按 F / 选中搜索结果）：**把转动中心搬到这个节点上** ✓
+     * （用户 2026-10 明确要求：双击之后环绕中心就是该节点 ✓）。
+     *
+     * `recenterOn` 会同时补偿相机 ⇒ 换中心这一刻**画面不跳** ✓，
+     * 然后才做"飞过去并看向它"的动画（起点是补偿后的当前状态 ✓ 依然连续 ✓）。
+     * 半径按"以新 C 为中心"重新量（操作球 / 取景 / 小地图共用它 ✓）。
+     * 标记为"已采纳 / 用户动过"：引擎之后自己发的收敛取景不许再把它改掉 ✗。
+     */
+    recenterOn(this.state, target);
+    this.centerAdopted = true;
+    this.userInteracted = true;
+    this.radiusMeasured = false;
+    this.measureRadius(positions, count);
     const distance = clampNum(this.options.edgeLength * 2.6, 40, Math.max(60, this.bounds.radius));
     const from = { eye: [...this.state.eye] as Vec3, view: this.state.view };
     this.animateTo(from, this.aimTarget(target, distance), true);
@@ -444,12 +466,29 @@ export class InteriorNavigation {
      */
     const settlingRelayout = reason === "settle" && this.relayoutPending;
     const skipFraming = settlingRelayout && this.interactedSinceRelayout;
-    const adoptCenter = (reason === "initial" && !this.userInteracted)
-      || (reason === "settle" && (this.relayoutPending || !this.userInteracted));
+    /*
+     * 球心采纳规则（承诺：**只在「首次进入」与「明确重新整理之后」变** ✓）：
+     *
+     * 1. **还没采过 + 用户没动过** ⇒ 采一次（引擎的"初次取景" ✓；
+     *    也包括"有布局缓存但没有相机缓存"那种首次收敛 ✓）；
+     * 2. 收到过**明确的重新整理请求** + 这次是布局收敛 ⇒ 采新球心（承诺兑现 ✓，
+     *    即使用户在重排期间操作过也照样复位球心 ✓ —— 只是不抢镜头 ✓）。
+     *
+     * 其它情况一律不动 ✗ —— 尤其是引擎**自己**因为选中/聚焦/换结构而发的收敛取景 ✗：
+     * 旧规则里的 `|| !this.userInteracted` 会让"还没拖过"的用户的球心被反复改成
+     * **当前布局的包围盒中心** ✗，而聚焦时引擎给的常常是子集 ⇒
+     * 双击定位后旋转中心就像"跑到那个节点上"了 ✗（用户复查 ✓）。
+     */
+    const firstTime = !this.centerAdopted
+      && !this.userInteracted
+      && (reason === "initial" || reason === "settle");
+    const adoptCenter = firstTime || (reason === "settle" && this.relayoutPending);
     if (adoptCenter && Number.isFinite(bounds.radius) && bounds.radius > 0) {
       this.state.center = [...bounds.center];
       this.radiusMeasured = false;
       this.measureRadius(positions, count);
+      /* 首次那一采之后，只有"明确重新整理"能再改球心 ✓ */
+      if (firstTime) this.centerAdopted = true;
       /* 只有"布局收敛"这一次才算兑现了重排请求 ✓ */
       if (reason === "settle") {
         this.relayoutPending = false;

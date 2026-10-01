@@ -23,6 +23,7 @@ import {
   hasLever,
   layoutOf,
   projectDisplay,
+  recenterOn,
   solveDrag,
   wheelTravel,
 } from "../src/client/interior-navigation.ts";
@@ -419,5 +420,44 @@ describe("光标射线与姿态轴", () => {  it("画布中心的光标射线 = 
     const rolledRight = displayBasis(rolled).right;
     assert.ok(Math.abs(rolledRight[1]) > 0.3, "滚转后右轴应有明显的 y 分量（说明用的是姿态轴）");
     assert.ok(Math.abs(rotateVec(rolled.view, [1, 0, 0])[1] - rolledRight[1]) < 1e-12);
+  });
+});
+
+/* ============ 换转动中心（双击/定位节点）：画面不跳，之后绕它转 ============ */
+
+describe("把转动中心搬到某个节点上", () => {
+  it("换中心那一刻**画面逐像素不动**（布局空间里的相机与朝向都不变 ✓）", () => {
+    const state = makeState({ scene: quatFromAxisAngle([0, 1, 0.3], 0.7) });
+    const before = effectiveBasis(state);
+    const pictureBefore = [...before.position];
+    const axesBefore = { right: [...before.right], up: [...before.up], forward: [...before.forward] };
+
+    recenterOn(state, [120, -40, 60]);
+
+    const after = effectiveBasis(state);
+    for (let i = 0; i < 3; i += 1) {
+      assert.ok(Math.abs(after.position[i] - pictureBefore[i]) < 1e-9, `相机位置分量 ${i} 不许变 ✗`);
+      assert.ok(Math.abs(after.right[i] - axesBefore.right[i]) < 1e-12, "右轴不许变 ✗");
+      assert.ok(Math.abs(after.up[i] - axesBefore.up[i]) < 1e-12, "上轴不许变 ✗");
+      assert.ok(Math.abs(after.forward[i] - axesBefore.forward[i]) < 1e-12, "视线不许变 ✗");
+    }
+    /* 中心确实搬过去了 ✓，而且 S / Q 一位都没动 ✗ */
+    assert.deepEqual(state.center, [120, -40, 60], "中心要落在目标点上 ✓");
+    assert.deepEqual(state.scene, quatFromAxisAngle([0, 1, 0.3], 0.7), "图谱旋转不许变 ✗");
+  });
+
+  it("搬完之后，图谱绕**新中心**作刚体旋转（旧中心的相对关系不再保持 ✗）", () => {
+    const state = makeState();
+    recenterOn(state, [50, 0, 0]);
+    const node = [150, 0, 0];
+    const before = displayOf(state, node);
+    applySceneRotation(state, quatFromAxisAngle([0, 1, 0], 0.5));
+    const after = displayOf(state, node);
+    /* 绕 (50,0,0) 转 0.5 弧度：距离不变 ✓ */
+    const d0 = Math.hypot(before[0] - 50, before[1], before[2]);
+    const d1 = Math.hypot(after[0] - 50, after[1], after[2]);
+    assert.ok(Math.abs(d0 - d1) < 1e-9, "到新中心的距离应当守恒 ✓");
+    assert.ok(Math.abs(d0 - 100) < 1e-9, "节点到新中心 100 ✓");
+    assert.ok(Math.hypot(after[0] - before[0], after[2] - before[2]) > 10, "确实绕新中心转了 ✓");
   });
 });
