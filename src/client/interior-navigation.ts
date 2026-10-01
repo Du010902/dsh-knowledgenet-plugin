@@ -396,8 +396,34 @@ export interface DragSolution {
   delta: Quat;
   /** 求解出的两个角度（弧度）：[绕右轴, 绕上轴] */
   angles: { right: number; up: number };
-  /** 线性化矩阵是否接近奇异（此时只做限幅更新） */
+  /**
+   * 原始 J 的奇异值（**未经阻尼** ✗，单位：像素/弧度）。
+   *
+   * 文档要点：不能用"加阻尼后的行列式不为零"当投影可控性的证据 ——
+   * 正阻尼总能把退化矩阵变可逆，"有解"其实是没有可控方向 ✗。
+   */
+  spectrum: { max: number; min: number };
+  /** 条件尺度 σmin/σmax（1 = 各向同性；趋 0 = 病态） */
+  conditioning: number;
+  /** 病态到不值得走这一步（没有可控方向） */
+  illConditioned: boolean;
+  /** 锚点在相机后方（投影不出坐标） */
+  invisible: boolean;
+  /** 综合"没法用"（病态或不可见）——保留旧字段名给既有调用方 ✓ */
   singular: boolean;
+}
+
+/** 2×2 的奇异值（JᵀJ 的特征值开方，解析解 ✓） */
+function singularValues(j00: number, j01: number, j10: number, j11: number): { max: number; min: number } {
+  const a = j00 * j00 + j10 * j10;
+  const c = j01 * j01 + j11 * j11;
+  const b = j00 * j01 + j10 * j11;
+  const trace = a + c;
+  const gap = Math.hypot(a - c, 2 * b);
+  return {
+    max: Math.sqrt(Math.max(0, (trace + gap) / 2)),
+    min: Math.sqrt(Math.max(0, (trace - gap) / 2)),
+  };
 }
 
 /**
@@ -431,8 +457,18 @@ export function solveDrag(
   const basis = displayBasis(state);
   const lever = sub(anchor, state.center);
   const identity: Quat = [0, 0, 0, 1];
+  const empty = (extra: Partial<DragSolution>): DragSolution => ({
+    delta: identity,
+    angles: { right: 0, up: 0 },
+    spectrum: { max: 0, min: 0 },
+    conditioning: 0,
+    illConditioned: true,
+    invisible: false,
+    singular: true,
+    ...extra,
+  });
   /* 锚点几乎贴在球心上时没有旋转杠杆 ⇒ 交给调用方换虚拟球面锚点 ✓ */
-  if (length(lever) < 1e-3) return { delta: identity, angles: { right: 0, up: 0 }, singular: true };
+  if (length(lever) < 1e-3) return empty({});
 
   const project = (point: Vec3): { x: number; y: number } | null => {
     const projected = projectDisplay(state, viewport, fovDeg, point);
@@ -451,7 +487,7 @@ export function solveDrag(
 
   const epsilon = 1e-3; /* 差分角：只属于数值精度，不是用户灵敏度 ✓ */
   const base = at(0, 0);
-  if (base === null) return { delta: identity, angles: { right: 0, up: 0 }, singular: true };
+  if (base === null) return empty({ invisible: true });
   const alongRight = at(epsilon, 0) ?? base;
   const alongUp = at(0, epsilon) ?? base;
   const j00 = (alongRight.x - base.x) / epsilon;
@@ -459,7 +495,12 @@ export function solveDrag(
   const j01 = (alongUp.x - base.x) / epsilon;
   const j11 = (alongUp.y - base.y) / epsilon;
 
-  /* (JᵀJ + λI)，λ 按 J 的尺度取，避免量纲差 ⇒ 奇异时退化为小步 ✓ */
+  /* 可控性判定只看**原始 J** ✓（阻尼后的行列式会掩盖病态 ✗） */
+  const spectrum = singularValues(j00, j01, j10, j11);
+  const conditioning = spectrum.max > 1e-9 ? spectrum.min / spectrum.max : 0;
+  const illConditioned = spectrum.max < 1e-6 || conditioning < CONDITION_FLOOR;
+
+  /* (JᵀJ + λI)，λ 按 J 的尺度取，避免量纲差 ⇒ 病态时退化为小步 ✓ */
   const a11 = j00 * j00 + j10 * j10;
   const a12 = j00 * j01 + j10 * j11;
   const a22 = j01 * j01 + j11 * j11;
@@ -467,10 +508,9 @@ export function solveDrag(
   const m11 = a11 + lambda;
   const m22 = a22 + lambda;
   const det = m11 * m22 - a12 * a12;
-  const singular = !(Math.abs(det) > 1e-12);
   let thetaRight = 0;
   let thetaUp = 0;
-  if (!singular) {
+  if (Math.abs(det) > 1e-12) {
     /* θ = (JᵀJ + λI)⁻¹ Jᵀu，其中 Jᵀu = [j00·dx + j10·dy, j01·dx + j11·dy] */
     const r1 = j00 * dx + j10 * dy;
     const r2 = j01 * dx + j11 * dy;
@@ -493,8 +533,23 @@ export function solveDrag(
     quatFromAxisAngle(basis.up, thetaUp),
     quatFromAxisAngle(basis.right, thetaRight),
   ));
-  return { delta, angles: { right: thetaRight, up: thetaUp }, singular };
+  return {
+    delta,
+    angles: { right: thetaRight, up: thetaUp },
+    spectrum,
+    conditioning,
+    illConditioned,
+    invisible: false,
+    singular: illConditioned,
+  };
 }
+
+/**
+ * 条件尺度的下限（σmin/σmax 低于它算病态 ⇒ 由调用方切换交互阶段 ✓）。
+ * 插件拥有的参数：取得比较保守（0.01）—— 只有明显退化的方向才判病态，
+ * 主要靠"停滞/不可达"两个触发来切换阶段 ✓。
+ */
+export const CONDITION_FLOOR = 0.01;
 
 /** 把增量旋转作用到图谱旋转上：`S ← Δ × S` ✓ */
 export function applySceneRotation(state: InteriorState, delta: Quat): void {
@@ -515,27 +570,35 @@ export interface DragOptions {
 export interface DragResult {
   /** 实际迭代了几次（0 表示锚点一开始就在目标位置） */
   iterations: number;
-  /** 停止时的像素残差 */
+  /** 退出时的**真实**像素残差（每次都从已提交的状态重算 ✓） */
   error: number;
   /** 锚点掉到相机后方/退化 ⇒ 调用方应结束这次抓取 ✓ */
   lost: boolean;
+  /**
+   * **停滞**：目标不可达或已到投影边界 —— 试过缩短步长也没有任何进展 ✓。
+   * 调用方据此切到"连续旋转"阶段，而不是继续硬追一个几何上到不了的点 ✗。
+   */
+  stalled: boolean;
+  /** 本次调用是否有实质进展（残差下降） */
+  progressed: boolean;
 }
 
 /**
- * 把抓取点拖到指针处（文档 §拖动旋转算法 的 3~5 步）：
- * 反复"求解 → 限幅应用 → 复算误差"，直到锚点投影落到目标屏幕位置 ✓。
+ * 把抓取点拖到指针处 —— **带试探更新**（文档「可靠的投影抓取」）：
  *
- * 为什么要迭代：单步限幅会截断解（深度很大的锚点杠杆小、需要的角度大），
- * 只解一次会出现"跟不上一大段"的滞后 ✗；迭代几次就能追上，而单帧的角速度仍然被限住 ✓
- * （**不**用"球内/球外整体取反符号"这种补丁：近侧远侧的方向由投影自动给出 ✓）。
+ * 每一小步都在**临时状态**上先算候选旋转、重新投影、比较真实残差；
+ * **只有残差下降才提交** ✓；下降不了就缩短步长（最多几次），仍不行就判定"停滞"并**原样返回** ✓
+ * —— 绝不无条件修改正式 `scene` ✗（旧实现无条件提交 ⇒ 到了投影边界便停滞/振荡/回退 ✗）。
  *
- * @param state - 就地更新 `scene`。
+ * 退出时残差是**在已提交状态下重算**的 ✓（旧实现返回的是更新前的误差 ✗）。
+ *
+ * @param state - 就地更新 `scene`（只在残差真的下降时 ✓）。
  * @param viewport - 画布尺寸。
  * @param fovDeg - 垂直 FOV。
  * @param layoutAnchor - 抓取点的**布局**坐标（整次拖动期间不变）。
  * @param target - 指针希望锚点到达的屏幕位置（像素）。
  * @param options - 限幅/迭代参数。
- * @returns 迭代次数与最终残差（像素）；退化位形 ⇒ 提前结束且不产生 NaN ✓。
+ * @returns 迭代次数、真实残差、lost / stalled / progressed ✓。
  */
 export function dragAnchorTo(
   state: InteriorState,
@@ -548,22 +611,207 @@ export function dragAnchorTo(
   const maxAngle = options.maxAngle ?? 0.12;
   const maxIterations = options.maxIterations ?? 6;
   const tolerance = options.tolerance ?? 0.5;
-  let error = Number.POSITIVE_INFINITY;
+  /** 一步最多缩短几次（每次减半） */
+  const maxShrinks = 4;
+
+  /** 当前**已提交**状态下的真实残差 */
+  const residualNow = (): number | null => {
+    const current = projectDisplay(state, viewport, fovDeg, displayOf(state, layoutAnchor));
+    return current === null ? null : Math.hypot(target.x - current.x, target.y - current.y);
+  };
+
+  let error = residualNow();
+  if (error === null) {
+    return { iterations: 0, error: Number.POSITIVE_INFINITY, lost: true, stalled: false, progressed: false };
+  }
+  const startError = error;
+  if (error <= tolerance) {
+    return { iterations: 0, error, lost: false, stalled: false, progressed: false };
+  }
+
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    const display = displayOf(state, layoutAnchor);
-    const current = projectDisplay(state, viewport, fovDeg, display);
-    /* 锚点落到相机后面就无法再"跟手"了：交给调用方结束抓取（不硬算）✓ */
-    if (current === null) return { iterations: iteration, error, lost: true };
+    const current = projectDisplay(state, viewport, fovDeg, displayOf(state, layoutAnchor));
+    if (current === null) {
+      return { iterations: iteration, error, lost: true, stalled: false, progressed: error < startError - 1e-9 };
+    }
     const ux = target.x - current.x;
     const uy = target.y - current.y;
     error = Math.hypot(ux, uy);
-    if (error <= tolerance) return { iterations: iteration, error, lost: false };
-    const solution = solveDrag(state, viewport, fovDeg, display, ux, uy, maxAngle);
-    /* 奇异（锚点贴住球心）⇒ 如实返回，让调用方换虚拟球面锚点或结束 ✓ */
-    if (solution.singular) return { iterations: iteration, error, lost: true };
-    applySceneRotation(state, solution.delta);
+    if (error <= tolerance) {
+      return { iterations: iteration, error, lost: false, stalled: false, progressed: error < startError - 1e-9 };
+    }
+    const solution = solveDrag(state, viewport, fovDeg, displayOf(state, layoutAnchor), ux, uy, maxAngle);
+    /* 病态（没有可控方向）或不可见 ⇒ 如实上报，交给调用方切阶段 ✓ */
+    if (solution.singular) {
+      return { iterations: iteration, error, lost: true, stalled: true, progressed: error < startError - 1e-9 };
+    }
+    /* 试探：逐步缩短，直到候选旋转真的让残差下降 ✓ */
+    let committed = false;
+    let scale = 1;
+    const sceneBefore = state.scene;
+    for (let shrink = 0; shrink <= maxShrinks; shrink += 1) {
+      const angles = { right: solution.angles.right * scale, up: solution.angles.up * scale };
+      if (Math.abs(angles.right) < 1e-7 && Math.abs(angles.up) < 1e-7) break;
+      const basis = displayBasis(state);
+      const candidate = quatNormalize(quatMultiply(
+        quatFromAxisAngle(basis.up, angles.up),
+        quatFromAxisAngle(basis.right, angles.right),
+      ));
+      state.scene = quatNormalize(quatMultiply(candidate, sceneBefore));
+      const candidateError = residualNow();
+      if (candidateError !== null && candidateError < error - 1e-6) {
+        error = candidateError;
+        committed = true;
+        break;
+      }
+      state.scene = sceneBefore; /* 回退这次试探 ✓ */
+      scale *= 0.5;
+    }
+    if (!committed) {
+      /* 目标不可达 / 已在投影边界：**不提交、不改状态**，判定停滞 ✓ */
+      const finalError = residualNow();
+      return {
+        iterations: iteration + 1,
+        error: finalError ?? error,
+        lost: false,
+        stalled: true,
+        progressed: (finalError ?? error) < startError - 1e-9,
+      };
+    }
   }
-  return { iterations: maxIterations, error, lost: false };
+  const finalError = residualNow();
+  return {
+    iterations: maxIterations,
+    error: finalError ?? error,
+    lost: false,
+    stalled: false,
+    progressed: (finalError ?? error) < startError - 1e-9,
+  };
+}
+
+/**
+ * 目标屏幕位置对「锚点轨道球」是否**可达**（文档要求：偏轴相机用真实射线求交 ✓）。
+ *
+ * 只转图谱时，锚点到 C 的距离 r 恒定 ⇒ 它的显示位置永远在半径 r 的球面上，
+ * 从相机看过去只有有限一片轮廓 ⇒ 指针射线与那个球没有交点，就意味着"再怎么转也到不了" ✗。
+ * 提前判出来，就不必让求解器在边界上振荡 ✓。
+ *
+ * @param state - 当前状态。
+ * @param viewport - 画布尺寸。
+ * @param fovDeg - 垂直 FOV。
+ * @param layoutAnchor - 抓取点（布局坐标）。
+ * @param target - 目标屏幕位置（像素）。
+ * @returns 是否可达（r 退化到 0 ⇒ 不可达 ✓）。
+ */
+export function anchorReachable(
+  state: InteriorState,
+  viewport: { width: number; height: number },
+  fovDeg: number,
+  layoutAnchor: Vec3,
+  target: { x: number; y: number },
+): boolean {
+  const display = displayOf(state, layoutAnchor);
+  const radius = length(sub(display, state.center));
+  if (!(radius > 1e-3)) return false;
+  const ray = cursorRay(state, viewport, fovDeg, target.x, target.y);
+  const toCenter = sub(ray.origin, state.center);
+  const b = 2 * dot(toCenter, ray.direction);
+  const c = dot(toCenter, toCenter) - radius * radius;
+  return b * b - 4 * c >= 0;
+}
+
+/* ------------------------------ 连续旋转阶段 ------------------------------ */
+
+/**
+ * 连续旋转的**增益矩阵**：指针像素增量 → 绕屏幕轴的角度增量。
+ *
+ * 由最后一次「条件良好」的局部映射取逆得到 ✓ —— **不能**在投影极值附近取逆 ✗
+ * （那里导数趋零，逆会爆掉，角度突然巨大或换号 ✗）。
+ */
+export interface DragGain {
+  /** [θr; θu] = G · [dx; dy] */
+  grx: number;
+  gry: number;
+  gux: number;
+  guy: number;
+}
+
+/** 单次输入事件的总转角上限（弧度）—— 插件拥有的参数 ✓ */
+export const SPIN_MAX_ANGLE = 0.35;
+/** 增益上限（弧度/像素）：整矩阵等比限幅，防止极值附近放大不可靠的逆导数 ✓ */
+export const SPIN_MAX_GAIN = 0.02;
+/** 兜底增益（弧度/像素）：连参考区域都建不出来时用相机自身的轴 ✓（符号与 J 导出的约定一致 ✓） */
+export const SPIN_FALLBACK_GAIN: DragGain = { grx: 0, gry: 0.006, gux: 0.006, guy: 0 };
+
+/**
+ * 在某个锚点处取「像素 → 角度」的增益 ✓（用单位像素各解一次，即 J⁻¹ 的两列 ✓）。
+ *
+ * @param state - 当前状态。
+ * @param viewport - 画布尺寸。
+ * @param fovDeg - 垂直 FOV。
+ * @param layoutAnchor - 参考锚点（布局坐标）——通常是抓取点，或「按下时的球面参考区域」✓。
+ * @returns 增益；参考点不可见或映射病态 ⇒ null（调用方改用别的参考或兜底增益 ✓）。
+ */
+export function dragGainAt(
+  state: InteriorState,
+  viewport: { width: number; height: number },
+  fovDeg: number,
+  layoutAnchor: Vec3,
+): DragGain | null {
+  const display = displayOf(state, layoutAnchor);
+  if (projectDisplay(state, viewport, fovDeg, display) === null) return null;
+  const unlimited = Number.POSITIVE_INFINITY;
+  const columnX = solveDrag(state, viewport, fovDeg, display, 1, 0, unlimited);
+  const columnY = solveDrag(state, viewport, fovDeg, display, 0, 1, unlimited);
+  if (columnX.singular || columnY.singular) return null;
+  let gain: DragGain = {
+    grx: columnX.angles.right,
+    gry: columnY.angles.right,
+    gux: columnX.angles.up,
+    guy: columnY.angles.up,
+  };
+  /* 整矩阵等比限幅（保方向 ✓）：单位像素能达到的最大角度不超过 SPIN_MAX_GAIN ✓ */
+  const worst = Math.max(Math.hypot(gain.grx, gain.gux), Math.hypot(gain.gry, gain.guy));
+  if (worst > SPIN_MAX_GAIN) {
+    const k = SPIN_MAX_GAIN / worst;
+    gain = { grx: gain.grx * k, gry: gain.gry * k, gux: gain.gux * k, guy: gain.guy * k };
+  }
+  return gain;
+}
+
+/**
+ * 连续旋转一步：`θ = G · u`（`u` 是**相邻事件**的增量 ✓，不是追赶固定绝对目标 ✓），限幅后合成增量四元数 ✓。
+ *
+ * @param state - 当前状态（只读，用来取相机轴 ✓）。
+ * @param gain - 增益矩阵。
+ * @param dx - 本事件水平增量（像素）。
+ * @param dy - 本事件垂直增量（像素）。
+ * @param maxAngle - 单事件总转角上限。
+ * @returns 增量旋转与两个**带符号**角度（便于断言方向稳定 ✓）。
+ */
+export function spinStep(
+  state: InteriorState,
+  gain: DragGain,
+  dx: number,
+  dy: number,
+  maxAngle = SPIN_MAX_ANGLE,
+): { delta: Quat; angles: { right: number; up: number } } {
+  let right = gain.grx * dx + gain.gry * dy;
+  let up = gain.gux * dx + gain.guy * dy;
+  const magnitude = Math.hypot(right, up);
+  if (Number.isFinite(maxAngle) && magnitude > maxAngle) {
+    const k = maxAngle / magnitude;
+    right *= k;
+    up *= k;
+  }
+  const basis = displayBasis(state);
+  return {
+    delta: quatNormalize(quatMultiply(
+      quatFromAxisAngle(basis.up, up),
+      quatFromAxisAngle(basis.right, right),
+    )),
+    angles: { right, up },
+  };
 }
 
 /* ------------------------------- 小地图截面 ------------------------------- */

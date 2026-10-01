@@ -510,16 +510,30 @@
 }
 
 /*
- * **鼠标点画布时去掉那圈焦点环**（用户反馈 2026-10："点击之后这个边框会变得高亮，很奇怪"）。
+ * **画布不要那圈焦点环**（用户两次反馈："点击之后这个边框会变得高亮，很奇怪" / "怎么又变成高亮了"）。
  *
- * 环来自上游 `graph.css:355` 的 `.universe:focus-visible`：画布必须在指针按下时拿到焦点，
- * F / 方向键才生效（`graph3d/navigation.ts:221` 主动 focus），而浏览器把这次**脚本聚焦**
- * 也算成 `:focus-visible` ✗。这里只压掉"被标记为鼠标点出来"的那一次 ✓
- * —— 键盘 Tab 过来时属性不在，环照旧（可访问性不掉）✓。
- * 特异性：`.kn-root` + 属性选择器 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。
+ * 环来自上游 `graph.css` 的 `.universe:focus-visible`：画布需要在指针按下时拿到焦点，
+ * F / 方向键才生效（`graph3d/navigation.ts` 主动 focus）✓。
+ *
+ * 之前只压"鼠标点出来的那一次"（靠 `[data-pointer-focus]`）✗ —— 不够：
+ * **宿主/脚本聚焦**画布时（切标签、侧栏重排后自动聚焦）浏览器同样算 `:focus-visible` ✗，
+ * 那时标记不在，环就又出来了。
+ * 所以这里**不再依赖浏览器的 `:focus-visible` 启发式** ✗：
+ * `:focus` 与 `:focus-visible` 一起压掉 ✓，键盘可达性改用**我们自己打的标记**给提示 ✓。
+ * 特异性：`.kn-root` 前缀 ⇒ 高于上游那条单类规则，与两份样式的先后无关 ✓。
  */
-.kn-root .universe[data-pointer-focus="true"]:focus-visible {
+.kn-root .universe:focus,
+.kn-root .universe:focus-visible {
   outline: none;
+}
+
+/*
+ * 键盘 Tab 聚焦时才给可见提示 ✓（标记由面板在捕获阶段打：Tab 打上、指针按下清掉 ✓）。
+ * 可访问性不掉：键盘用户仍然看得见焦点在哪。
+ */
+.kn-root .universe[data-keyboard-focus="true"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 /* 面板不做「换库」：它跟随当前工作区，所以没有输入框那一行（曾经的 .kn-root-form/.kn-input 已删） */

@@ -451,6 +451,84 @@ const LAYOUT_KEY_SUBSTITUTIONS = [
 ];
 
 /**
+ * **重新整理的完成通知**必须与"自动取景"开关**分开**（补丁点）。
+ *
+ * 复查指出的漏洞：上游 `relayout()` 会把 `autoFit` 强制清零 ✗，而布局完成的通知
+ * 恰恰挂在 `if (status === "settled" && this.autoFit)` 里 ✗ ⇒ 重排之后
+ * `pendingSettleFit` 永远不会被立起 ⇒ 插件加的 `"settle"` 取景**一次都不会被调用** ✗
+ * —— 球心自然也就永远不更新（按钮的承诺落空 ✗）。
+ *
+ * 修法：另立一条**与相机无关**的通知链 ✓
+ * `relayout()` 立 `knAwaitRelayoutSettle` → 布局真的结算时立 `knPendingRelayoutFit`
+ * → 下一帧拿**最新坐标**调 `fitAll(..., true, "settle")` ✓。
+ * 相机要不要动仍由控制器决定（用户在重排期间操作过就跳过取景 ✓）。
+ */
+const SETTLE_FIELD_NEEDLE = "  private pendingSettleFit = false;";
+const SETTLE_FIELD_PATCHED = [
+  "  private pendingSettleFit = false;",
+  "  /** 「重新整理」等新布局结算（与 autoFit 无关 ✓） */",
+  "  private knAwaitRelayoutSettle = false;",
+  "  /** 新布局已结算、待下一帧用最新坐标通知插件 ✓ */",
+  "  private knPendingRelayoutFit = false;",
+].join("\n");
+
+const RELAYOUT_ARM_NEEDLE = [
+  "    // 只是重排布局：相机是使用者当前的观看位置，不该顺手拉走",
+  "    this.autoFit = false;",
+].join("\n");
+const RELAYOUT_ARM_PATCHED = [
+  "    // 只是重排布局：相机是使用者当前的观看位置，不该顺手拉走",
+  "    this.autoFit = false;",
+  "    /* 但**完成通知**要照发：插件要用它重设球心 ✓（与取景开关无关 ✓） */",
+  "    this.knAwaitRelayoutSettle = true;",
+].join("\n");
+
+const SETTLE_BRANCH_NEEDLE = [
+  "        if (status === \"settled\" && this.autoFit) {",
+  "          this.autoFit = false;",
+  "          this.autoFitCount += 1;",
+  "          this.pendingSettleFit = true;",
+  "          this.wake();",
+  "        }",
+].join("\n");
+const SETTLE_BRANCH_PATCHED = [
+  "        if (status === \"settled\" && this.autoFit) {",
+  "          this.autoFit = false;",
+  "          this.autoFitCount += 1;",
+  "          this.pendingSettleFit = true;",
+  "          this.wake();",
+  "        }",
+  "        /*",
+  "         * 重新整理的完成通知：**不看 autoFit** ✓。",
+  "         * 上游把重排后的自动取景关掉是对的（不该抢使用者的视角），",
+  "         * 但「新布局结算了」这件事插件必须知道 ⇒ 这里单独通知一次 ✓。",
+  "         */",
+  "        if (status === \"settled\" && this.knAwaitRelayoutSettle) {",
+  "          this.knAwaitRelayoutSettle = false;",
+  "          this.knPendingRelayoutFit = true;",
+  "          this.wake();",
+  "        }",
+].join("\n");
+
+const SETTLE_FIT_BLOCK_NEEDLE = [
+  "    if (this.pendingSettleFit && count > 0) {",
+  "      this.pendingSettleFit = false;",
+  "      this.navigation.fitAll(this.positions, count, true);",
+  "    }",
+].join("\n");
+const SETTLE_FIT_BLOCK_PATCHED = [
+  "    if (this.pendingSettleFit && count > 0) {",
+  "      this.pendingSettleFit = false;",
+  "      this.navigation.fitAll(this.positions, count, true, \"settle\");",
+  "    }",
+  "    /* 重新整理完成：用**这一帧的坐标**通知插件（它据此采新球心并按需取景 ✓） */",
+  "    if (this.knPendingRelayoutFit && count > 0) {",
+  "      this.knPendingRelayoutFit = false;",
+  "      this.navigation.fitAll(this.positions, count, true, \"settle\");",
+  "    }",
+].join("\n");
+
+/**
  * 取景的**原因**显式传给导航（补丁点）。
  *
  * 上游在三个不同时机调用 `fitAll`：初次取景、布局**收敛后**取景、以及工具栏的"适应窗口/重新整理"
@@ -461,8 +539,8 @@ const LAYOUT_KEY_SUBSTITUTIONS = [
 const FIT_REASON_SUBSTITUTIONS = [
   ["      this.navigation.fitAll(this.positions, count, false);",
     "      this.navigation.fitAll(this.positions, count, false, \"initial\");"],
-  ["      this.navigation.fitAll(this.positions, count, true);",
-    "      this.navigation.fitAll(this.positions, count, true, \"settle\");"],
+  /* 结算那一次由 SETTLE_FIT_BLOCK_PATCHED 一起改（顺带插入"重新整理完成"的通知块 ✓），
+     所以这里**不**再单独替换 `..., true);` ✗（否则第二次替换找不到目标 ⇒ 构建期会报错 ✓）。 */
 ];
 
 const CAMERA_FIELD_NEEDLE = "  private layoutSettled = false;";
@@ -825,10 +903,14 @@ function freeRotationPatchPlugin() {
           [NAV_IMPORT_NEEDLE, "导航导入"],
           [ENGINE_OPTIONS_FIELD_NEEDLE, "选项接口"],
           [CAMERA_FIELD_NEEDLE, "实例字段"],
+          [SETTLE_FIELD_NEEDLE, "结算标记字段"],
           [CAMERA_RESTORE_NEEDLE, "相机恢复"],
           [CAMERA_STORE_NEEDLE, "相机保存"],
           [FRAME_CONTEXT_NEEDLE, "每帧上下文"],
           [NAV_OPTIONS_NEEDLE, "导航选项"],
+          [RELAYOUT_ARM_NEEDLE, "重排入口"],
+          [SETTLE_BRANCH_NEEDLE, "布局结算分支"],
+          [SETTLE_FIT_BLOCK_NEEDLE, "结算取景块"],
         ]) {
           if (!code.includes(needle)) {
             throw new Error(
@@ -840,10 +922,14 @@ function freeRotationPatchPlugin() {
           .replace(NAV_IMPORT_NEEDLE, `${NAV_IMPORT_PATCHED}\n${VIEW_CACHE_IMPORT}`)
           .replace(ENGINE_OPTIONS_FIELD_NEEDLE, ENGINE_OPTIONS_FIELD_PATCHED)
           .replace(CAMERA_FIELD_NEEDLE, CAMERA_FIELD_PATCHED)
+          .replace(SETTLE_FIELD_NEEDLE, SETTLE_FIELD_PATCHED)
           .replace(CAMERA_RESTORE_NEEDLE, CAMERA_RESTORE_PATCHED)
           .replace(CAMERA_STORE_NEEDLE, CAMERA_STORE_PATCHED)
           .replace(FRAME_CONTEXT_NEEDLE, FRAME_CONTEXT_PATCHED)
-          .replace(NAV_OPTIONS_NEEDLE, NAV_OPTIONS_PATCHED);
+          .replace(NAV_OPTIONS_NEEDLE, NAV_OPTIONS_PATCHED)
+          .replace(RELAYOUT_ARM_NEEDLE, RELAYOUT_ARM_PATCHED)
+          .replace(SETTLE_BRANCH_NEEDLE, SETTLE_BRANCH_PATCHED)
+          .replace(SETTLE_FIT_BLOCK_NEEDLE, SETTLE_FIT_BLOCK_PATCHED);
         for (const [needle, replacement] of [...LAYOUT_KEY_SUBSTITUTIONS, ...FIT_REASON_SUBSTITUTIONS]) {
           if (!patched.includes(needle)) {
             throw new Error(

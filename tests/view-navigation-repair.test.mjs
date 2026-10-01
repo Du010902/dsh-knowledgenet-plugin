@@ -245,6 +245,72 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     assert.ok(Math.abs(carried.radius - 100) < 1e-6, `半径应是 max|X−C| = 100，实际 ${carried.radius}`);
   });
 
+  it("**引擎链路**：重排完成的通知与自动取景开关分开（否则通知发不出来 ✗）", () => {
+    /*
+     * 复查指出的漏洞：上游 `relayout()` 会把 `autoFit` 清零 ✗，而"布局结算"的通知
+     * 挂在 `if (status === "settled" && this.autoFit)` 里 ⇒ 重排后 `pendingSettleFit`
+     * 永远立不起来 ⇒ 插件的 `"settle"` 取景一次都不会被调用 ✗。
+     * 修法是另立一条与相机无关的通知链 ⇒ 这里逐段核对它的接线 ✓。
+     */
+    assert.ok(buildSource.includes("private knAwaitRelayoutSettle = false;"), "要有「等新布局结算」的标记");
+    assert.ok(buildSource.includes("private knPendingRelayoutFit = false;"), "要有「待通知插件」的标记");
+    assert.ok(buildSource.includes("this.knAwaitRelayoutSettle = true;"), "relayout() 要立起等待标记");
+    /* 通知分支必须**自己一个 if**，不能挂在 autoFit 那个分支里 ✗（在产物里核对真实代码 ✓） */
+    assert.ok(
+      bundle.includes('if (status === "settled" && this.knAwaitRelayoutSettle)'),
+      "结算通知必须独立于 autoFit ✓",
+    );
+    assert.ok(
+      bundle.includes("if (this.knPendingRelayoutFit && count > 0)"),
+      "下一帧要用最新坐标通知插件 ✓",
+    );
+    /* 产物里两段都在（构建期补丁真的生效了 ✓） */
+    assert.ok(bundle.includes("knAwaitRelayoutSettle"), "产物里要有等待标记");
+    assert.ok(bundle.includes("knPendingRelayoutFit"), "产物里要有待通知标记");
+    assert.ok(
+      (bundle.match(/fitAll\(this\.positions, count, true, "settle"\)/g) ?? []).length >= 2,
+      "结算取景与重排通知都要带上 settle 原因 ✓",
+    );
+  });
+
+  it("**先保存判断再清标记**：重排期间操作过的用户不会被拉走镜头", () => {
+    /*
+     * 复查指出的次序问题：先 `relayoutPending = false` 再算 `skipFraming` ⇒ 恒为 false ✗。
+     * 这里走完整链路：初始取景 → 用户操作 → 重排请求 → 立即取景 → 用户在重排期间再操作
+     * → 结算通知 ⇒ 球心照旧复位，但**相机一位都不许动** ✓。
+     */
+    const { navigation, element, handlers } = makeNavigation();
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
+    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    dispatchRelayoutForKey(handlers, "");
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "command");
+    /* 用户在重排期间又操作了一次 ⇒ 结算时不该再取景 ✓ */
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
+    element.emit("pointermove", { pointerId: 1, clientX: 480, clientY: 320 });
+    const before = { ...displayBasisOf(navigation) };
+    navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
+    const after = displayBasisOf(navigation);
+    assert.ok(
+      Math.abs(after.position[0] - before.position[0]) < 1e-9
+        && Math.abs(after.position[1] - before.position[1]) < 1e-9
+        && Math.abs(after.position[2] - before.position[2]) < 1e-9,
+      `结算通知不该移动相机（旧实现会拉走 ✗）：${before.position} → ${after.position}`,
+    );
+    assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 500) < 1e-6, "球心仍要按承诺复位到新中心 ✓");
+  });
+
+  it("**引擎链路**（无用户干预）：结算通知真的会把球心采成新布局中心", () => {
+    const { navigation, element, handlers } = makeNavigation();
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
+    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    dispatchRelayoutForKey(handlers, "");
+    navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "command");
+    navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
+    const carried = navigation.camera.knInterior;
+    assert.ok(Math.abs(carried.center[0] - 500) < 1e-6, `球心应是 500，实际 ${carried.center[0]}`);
+    assert.ok(Math.abs(carried.radius - 100) < 1e-6, `半径应是 100，实际 ${carried.radius}`);
+  });
+
   it("首次取景（initial）在用户没操作过时采球心；操作过之后不再动", () => {
     const fresh = makeNavigation();
     fresh.navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "initial");

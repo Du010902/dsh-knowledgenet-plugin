@@ -24,8 +24,11 @@ import {
   advanceEye,
   aimAt,
   anchorFromRay,
+  anchorReachable,
+  applySceneRotation,
   displayBasis,
   dragAnchorTo,
+  dragGainAt,
   effectiveBasis,
   fitSphere,
   grabAnchor,
@@ -33,8 +36,11 @@ import {
   quatConjugate,
   quatSlerp,
   radiusAbout,
+  spinStep,
   wheelTravel,
   DEFAULT_WHEEL,
+  SPIN_FALLBACK_GAIN,
+  type DragGain,
   type GrabAnchor,
   type InteriorState,
 } from "./interior-navigation.ts";
@@ -153,6 +159,18 @@ export class InteriorNavigation {
   private state: InteriorState;
   private pointer: PointerState | null = null;
   private grab: GrabAnchor | null = null;
+  /**
+   * 拖动阶段（文档 §建议的交互与实现）：
+   * - `"grab"`：抓取点跟手（局部投影约束求解 ✓）；
+   * - `"spin"`：连续增量旋转（抓取点不可达/停滞/病态后切换 ✓）。
+   * 一次拖动里**只在进入时切一次** ✓（直到松开；不在中途反复重抓 ✗）。
+   */
+  private dragPhase: "grab" | "spin" = "grab";
+  /** 连续阶段用的增益（由最后可信的局部映射取逆 ✓） */
+  private spinGain: DragGain | null = null;
+  /** 连续阶段的增量起点（切换时重置 ⇒ 不补算历史上到不了的位移 ✓） */
+  private spinLastX = 0;
+  private spinLastY = 0;
   private animation: Animation | null = null;
   private suppressClick = false;
   private suppressedTimer: number | undefined;
@@ -416,6 +434,13 @@ export class InteriorNavigation {
      * - 收到过**明确的重新整理请求**、并且这次是**布局收敛后**的取景 ⇒ 采新球心 ✓（承诺兑现 ✓）；
      * - 其它情况（尤其"命令"那次立即取景）⇒ **什么都不动** ✓。
      */
+    /*
+     * **先保存判断，再清标记**（复查指出的次序问题 ✗）：
+     * 这两个判断都依赖 `relayoutPending`，而它会在下面被清掉 ⇒ 必须先算再用 ✓
+     * （否则"用户在重排期间操作过就跳过取景"永远失效，完成时照样把镜头拉走 ✗）。
+     */
+    const settlingRelayout = reason === "settle" && this.relayoutPending;
+    const skipFraming = settlingRelayout && this.interactedSinceRelayout;
     const adoptCenter = (reason === "initial" && !this.userInteracted)
       || (reason === "settle" && (this.relayoutPending || !this.userInteracted));
     if (adoptCenter && Number.isFinite(bounds.radius) && bounds.radius > 0) {
@@ -431,8 +456,6 @@ export class InteriorNavigation {
       /* 球心不动，但半径始终按"以 C 为中心"量 ✓（操作球 / 取景 / 小地图共用它 ✓） */
       this.measureRadius(positions, count);
     }
-    /* 用户在重排期间自己操作过 ⇒ 别再自动取景覆盖他的视角（文档要求）✓ */
-    const skipFraming = this.relayoutPending && this.interactedSinceRelayout;
     if (reason === "settle") this.interactedSinceRelayout = false;
     if (skipFraming) {
       this.syncCamera();
@@ -567,6 +590,9 @@ export class InteriorNavigation {
      * 指针已经离开节点几十像素，节点上就抓不到了（实测会退化成球面锚点 ✗）。
      */
     this.grab = event.shiftKey ? null : this.buildGrab(point.x, point.y);
+    /* 每次按下都从"抓取阶段"开始 ✓（连续阶段只在一次拖动里切一次 ✓） */
+    this.dragPhase = "grab";
+    this.spinGain = null;
     this.pointer = {
       id: event.pointerId,
       startX: point.x,
@@ -600,26 +626,36 @@ export class InteriorNavigation {
           const unit = clampNum(this.state.radius, 30, 400) * 0.0016;
           panEye(this.state, point.x - pointer.lastX, point.y - pointer.lastY, unit);
         } else if (this.grab !== null) {
-          /* 目标 = 抓取点初始屏幕位置 + **从按下点到当前位置的总位移**（不累加增量，避免漂移 ✓） */
-          const target = {
-            x: this.grab.screen.x + dx,
-            y: this.grab.screen.y + dy,
-          };
-          const result = dragAnchorTo(this.state, this.viewport, FOV_DEG, this.grab.layout, target);
-          /*
-           * 锚点掉到相机后方 / 杠杆失效（贴近球心）⇒ 按文档改用**虚拟球面锚点**继续，
-           * 并以当前位置为新基准（不跳帧）；球面也解不出来才结束这次抓取 ✓。
-           */
-          if (result.lost) {
-            const rebuilt = anchorFromRay(this.state, this.viewport, FOV_DEG, point.x, point.y);
-            if (rebuilt === null) {
-              this.grab = null;
-            } else {
-              this.grab = rebuilt;
-              pointer.startX = point.x;
-              pointer.startY = point.y;
-              if (rebuilt.screen !== undefined) this.grab.screen = rebuilt.screen;
+          if (this.dragPhase === "grab") {
+            /*
+             * 第一阶段：**抓取点跟手**（局部投影约束）。
+             * 目标 = 抓取点初始屏幕位置 + 从按下点到当前位置的**总位移** ✓。
+             */
+            const target = { x: this.grab.screen.x + dx, y: this.grab.screen.y + dy };
+            /*
+             * 先做**可达性**判断：只转图谱时锚点始终在半径 r 的球面上，
+             * 指针射线与那个球无交点 ⇒ 几何上永远到不了 ✗（提前判出来，别让求解器在边界振荡 ✓）。
+             */
+            const reachable = anchorReachable(this.state, this.viewport, FOV_DEG, this.grab.layout, target);
+            const result = reachable
+              ? dragAnchorTo(this.state, this.viewport, FOV_DEG, this.grab.layout, target)
+              : { iterations: 0, error: Number.POSITIVE_INFINITY, lost: false, stalled: true, progressed: false };
+            /*
+             * **随手保存最后一次「条件良好」的映射**（文档要求 ✓）：
+             * 连续阶段的增益必须来自这里 —— 到边界时那个 J 已经退化，
+             * 拿它取逆会得到方向乱跳的角度（实测符号会翻 ✗）。
+             */
+            if (!result.stalled && !result.lost) {
+              const refresh = dragGainAt(this.state, this.viewport, FOV_DEG, this.grab.layout);
+              if (refresh !== null) this.spinGain = refresh;
             }
+            /*
+             * 不可达 / 停滞 / 病态 / 掉到相机后面 ⇒ 切到**连续旋转阶段** ✓
+             * （不重置 scene、不动球心与相机、也不补算历史上到不了的位移 ✓）。
+             */
+            if (result.lost || result.stalled) this.enterContinuousSpin(point);
+          } else {
+            this.applyContinuousSpin(point);
           }
         }
         this.syncCamera();
@@ -637,6 +673,70 @@ export class InteriorNavigation {
   /** 建立抓取点：节点优先，其次操作包围球面 ✓ */
   private buildGrab(x: number, y: number): GrabAnchor | null {
     return grabAnchor(this.state, this.viewport, FOV_DEG, this.options.getProjected(), x, y);
+  }
+
+  /**
+   * 切到**连续旋转阶段**（文档 §第二阶段）。
+   *
+   * - 把当前位置设为新的**增量起点** ✓（后续用相邻事件的 dx/dy，不再追赶按下时的绝对目标 ✓）；
+   * - 增益取自"最后一次条件良好的局部映射" ✓：优先用抓取点当前的 J，
+   *   没有就用**按下时的球面参考区域**（相机射线命中的近侧/内壁 ✓），
+   *   再没有才用相机自身轴的兜底增益 ✓；
+   * - 不重置 scene、不动 C/P/Q ✓。
+   *
+   * @param point - 切换发生时的指针位置（画布内坐标）。
+   */
+  private enterContinuousSpin(point: { x: number; y: number }): void {
+    this.dragPhase = "spin";
+    this.spinLastX = point.x;
+    this.spinLastY = point.y;
+    const grab = this.grab;
+    /*
+     * 增益优先用抓取阶段**最后保存的那份条件良好的映射** ✓
+     * —— 到边界时才现算的 J 已经退化，方向会乱跳（实测符号会翻 ✗）。
+     */
+    if (this.spinGain === null && grab !== null) {
+      /* 一次都没保存过（例如按下就立刻不可达）⇒ 用"按下时的球面参考区域"重建映射 ✓ */
+      const reference = anchorFromRay(this.state, this.viewport, FOV_DEG, grab.screen.x, grab.screen.y);
+      this.spinGain = reference === null
+        ? null
+        : dragGainAt(this.state, this.viewport, FOV_DEG, reference.layout);
+    }
+    if (this.spinGain === null) this.spinGain = SPIN_FALLBACK_GAIN;
+  }
+
+  /**
+   * 连续旋转一步：用**相邻事件**的增量映射成角度增量 ✓，限幅后累积到 `scene` ✓。
+   * @param point - 当前指针位置（画布内坐标）。
+   */
+  private applyContinuousSpin(point: { x: number; y: number }): void {
+    const gain = this.spinGain ?? SPIN_FALLBACK_GAIN;
+    const dx = point.x - this.spinLastX;
+    const dy = point.y - this.spinLastY;
+    this.spinLastX = point.x;
+    this.spinLastY = point.y;
+    if (dx === 0 && dy === 0) return;
+    const step = spinStep(this.state, gain, dx, dy);
+    applySceneRotation(this.state, step.delta);
+  }
+
+  /** 只读快照（诊断与测试用；不外泄可变引用 ✓） */
+  interiorSnapshot(): {
+    center: Vec3;
+    eye: Vec3;
+    view: Quat;
+    scene: Quat;
+    radius: number;
+    dragPhase: "none" | "grab" | "spin";
+  } {
+    return {
+      center: [...this.state.center],
+      eye: [...this.state.eye],
+      view: [...this.state.view],
+      scene: [...this.state.scene],
+      radius: this.state.radius,
+      dragPhase: this.pointer === null || this.grab === null ? "none" : this.dragPhase,
+    };
   }
 
   private hitTest(x: number, y: number): ContextHit {
@@ -667,6 +767,9 @@ export class InteriorNavigation {
     if (pointer === null || pointer.id !== event.pointerId) return;
     this.pointer = null;
     this.grab = null;
+    /* 连续旋转阶段只活在一次拖动里 ✓（下次按下重新选新的可见区域 ✓） */
+    this.dragPhase = "grab";
+    this.spinGain = null;
     delete this.options.element.dataset.dragging;
     if (pointer.captured && this.options.element.hasPointerCapture(event.pointerId)) {
       this.options.element.releasePointerCapture(event.pointerId);
@@ -740,10 +843,13 @@ export class InteriorNavigation {
   private onWheel = (event: WheelEvent): void => {
     event.preventDefault();
     this.animation = null;
+    /* 滚轮打断当前拖动（两个阶段的状态一起清 ✓） */
     this.grab = null;
+    this.dragPhase = "grab";
+    this.spinGain = null;
     this.options.onUserCameraInput?.();
     this.userInteracted = true;
-        this.interactedSinceRelayout = true;
+    this.interactedSinceRelayout = true;
     const spacing = clampNum(this.options.edgeLength, 8, 200);
     const travel = wheelTravel(event.deltaY, event.deltaMode, this.viewport.height, {
       ...DEFAULT_WHEEL,
@@ -792,6 +898,11 @@ export class InteriorNavigation {
   cancelPointer(): void {
     this.pointer = null;
     this.grab = null;
+    /* 两个阶段的状态一起清（失焦/取消/滚轮打断都不该留下半个连续阶段 ✓） */
+    this.dragPhase = "grab";
+    this.spinGain = null;
+    this.spinLastX = 0;
+    this.spinLastY = 0;
     delete this.options.element.dataset.dragging;
   }
 

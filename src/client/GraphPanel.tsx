@@ -65,10 +65,20 @@ const SEARCH_LIMIT = 8;
 const SEARCH_LIST_ID = "kn-search-results";
 
 /**
- * 「这次聚焦是鼠标点出来的」标记：打在画布根节点（`.universe`）上，
- * 用来把**鼠标点击**那次 `:focus-visible` 的焦点环去掉（键盘 Tab 过来的仍然保留）✓。
+ * 「这次聚焦是鼠标点出来的」标记：打在画布根节点（`.universe`）上。
+ *
+ * 现在只作**诊断与兼容**用途（CSS 已经不看它来决定压不压环了 ✗）：
+ * 环改成"`:focus` / `:focus-visible` 一律不画"，键盘提示改由 `KEYBOARD_FOCUS_ATTR` 承担 ✓。
  */
 const POINTER_FOCUS_ATTR = "data-pointer-focus";
+
+/**
+ * 「这次聚焦是键盘 Tab 过来的」标记：只有它存在时才画可见焦点环 ✓。
+ *
+ * 为什么要自己打标记：浏览器把**脚本聚焦**（宿主切标签后自动聚焦画布）也算 `:focus-visible` ✗，
+ * 只靠 `:focus-visible` 判断"是不是键盘"会把环错误地显示出来 ✓（用户两次反馈的就是这个）。
+ */
+const KEYBOARD_FOCUS_ATTR = "data-keyboard-focus";
 
 const LITERAL: Record<string, string> = {
   focus: "聚焦",
@@ -317,28 +327,41 @@ function GraphPanelInner(props: {
   }, []);
 
   /*
-   * **鼠标点画布时不要那一圈焦点环**（用户反馈 2026-10："在图谱区域点击之后这个边框会变得高亮，很奇怪"）。
+   * **画布不要那圈焦点环**（用户两次反馈："点击之后这个边框会变得高亮" / "怎么又变成高亮了"）。
    *
-   * 为什么会有环：上游在**指针按下**时主动给画布 `element.focus({ preventScroll: true })`
-   * （`graph3d/navigation.ts:221`，目的是让 F / 方向键落到画布上），而浏览器把这次**脚本聚焦**
-   * 也算进 `:focus-visible` ⇒ 命中了 `graph.css:355` 的 `.universe:focus-visible { outline: 2px … }` ✗。
+   * 环来自上游的 `.universe:focus-visible`：画布要在指针按下时拿到焦点，F / 方向键才生效
+   * （`graph3d/navigation.ts` 主动 focus）✓。
    *
-   * 折中（可访问性不掉）：**只把"鼠标点出来的那一次"的环去掉** ✓ —— 键盘 Tab 过来时照样有可见焦点。
-   * 做法：在容器上**捕获** `pointerdown`（先于上游那次 focus 执行）打个标记，
-   * 画布失焦（`focusout` 冒泡）时清掉标记 ✓。
+   * 只压"鼠标点出来的那一次"不够 ✗：**宿主/脚本聚焦**画布时（切标签、侧栏重排后自动聚焦）
+   * 浏览器同样算 `:focus-visible` ✗ ⇒ 环又冒出来。所以：
+   * - CSS 里 `:focus` 与 `:focus-visible` **一起压掉**（不再依赖浏览器的启发式 ✗）；
+   * - 键盘可达性由**我们自己打的标记**承担：Tab 键打上 `data-keyboard-focus`、指针按下清掉 ✓。
    */
   useEffect(() => {
     const host = graphHostRef.current;
     if (host === null) return undefined;
     const canvas = (): Element | null => host.querySelector(".universe");
-    const markPointerFocus = (): void => { canvas()?.setAttribute(POINTER_FOCUS_ATTR, "true"); };
+    const markPointerFocus = (): void => {
+      const element = canvas();
+      if (element === null) return;
+      element.setAttribute(POINTER_FOCUS_ATTR, "true");
+      /* 指针来了 ⇒ 这不是键盘聚焦 ⇒ 撤掉键盘提示 ✓ */
+      element.removeAttribute(KEYBOARD_FOCUS_ATTR);
+    };
     const clearPointerFocus = (): void => { canvas()?.removeAttribute(POINTER_FOCUS_ATTR); };
+    /* 键盘 Tab：下一次聚焦按"键盘聚焦"处理（Tab 之后浏览器才会把焦点移过去 ✓） */
+    const markKeyboardFocus = (event: KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      canvas()?.setAttribute(KEYBOARD_FOCUS_ATTR, "true");
+    };
     host.addEventListener("pointerdown", markPointerFocus, true);
     /* focusout 会冒泡：焦点离开画布（去别处、或组件卸载）就把标记清掉，免得影响下一次键盘聚焦 ✓ */
     host.addEventListener("focusout", clearPointerFocus, true);
+    window.addEventListener("keydown", markKeyboardFocus, true);
     return () => {
       host.removeEventListener("pointerdown", markPointerFocus, true);
       host.removeEventListener("focusout", clearPointerFocus, true);
+      window.removeEventListener("keydown", markKeyboardFocus, true);
     };
   }, []);
 
