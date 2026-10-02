@@ -18,8 +18,25 @@ export const EDITOR_LITERAL: Record<string, string> = {
   richLoading: "正在准备正文编辑器…",
   richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
   unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
+  /*
+   * **还在正文模式**时用这一句 ✓（`design/code-block-copy-paste-analysis.md` ✓）：
+   * 自动切模式只在节点载入时判一次 ✓ ⇒ 编辑途中新出现的语法可能仍在正文里 ✓，
+   * 那时说"已自动改用纯文本"就是假话 ✗。
+   * ⚠️ 这条**必须同时进回落字典** ✗：截图里显示成字面键名 `unsupportedNoticeRich` ✓
+   * 就是因为它当时漏在这份 `EDITOR_LITERAL` 里 ✓（`makeTranslator` 找不到就回键名 ✓）。
+   */
+  unsupportedNoticeRich: "正文里出现了正文编辑器无法原样保留的语法（下面列出的这些）。当前仍是正文模式，保存时这一处可能被改写；想逐字保留请点「改回纯文本」，或先把这些语法删掉。",
   /* 换行标签 <br> 是支持写法 ✓（实测可逐字往返 ✓），不进这条提示 ✓ */
   unsupportedRisk: "在正文里编辑并保存会改写上面这些语法 ✗",
+  /* 粘贴被 Markdown 拆散时的补救入口 ✓（`design/code-block-copy-paste-analysis.md`「更小的第一步」✓） */
+  pasteAsCodeBlock: "把刚才粘进来的内容作为代码块插入",
+  /*
+   * 表格入口的两条 ✓ —— 它们也是**经编辑器这个 `t`** 翻译的 ✓
+   * （`MarkdownRichEditor` / `TableMenu` 拿到的就是这份翻译函数 ✓），
+   * 所以同样必须在这份回落字典里 ✓（缺了就会显示成字面键名 ✗，与截图那次同一类 bug ✓）。
+   */
+  tableMenuLabel: "表格操作",
+  tableEntryDisabled: "编辑器暂时不能改表格（正在保存或只读）",
   openRichAnyway: "仍要用正文编辑（可能改写上面的语法）",
   backToPlainText: "改回纯文本（不改写语法）",
   tabEdit: "编辑",

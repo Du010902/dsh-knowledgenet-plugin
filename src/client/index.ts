@@ -52,6 +52,10 @@ const DICT_ZH: Record<string, string> = {
   richLoading: "正在准备正文编辑器…",
   richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
   unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
+  /* **还在正文模式**时不许说"已自动改用纯文本" ✗（复查：提示要与实际模式一致 ✓） */
+  unsupportedNoticeRich: "正文里出现了正文编辑器无法原样保留的语法（下面列出的这些）。**当前仍是正文模式**，保存时这一处可能被改写；想逐字保留请点「退回纯文本」，或先把这些语法删掉。",
+  /* 粘贴被 Markdown 拆散时的一键补救 ✓（`design/code-block-copy-paste-analysis.md` ✓） */
+  pasteAsCodeBlock: "把刚才粘进来的内容作为代码块插入",
   unsupportedRisk: "在正文里编辑并保存会改写上面这些语法 ✗",
   openRichAnyway: "仍要用正文编辑（可能改写上面的语法）",
   backToPlainText: "改回纯文本（不改写语法）",
@@ -167,6 +171,10 @@ const DICT_EN: Record<string, string> = {
   richLoading: "Preparing the rich editor…",
   richFailed: "The rich editor failed to start, so plain-text editing is used (nothing is lost and saving still works ✓; reopen the node to retry)",
   unsupportedNotice: "This note uses syntax the rich editor cannot preserve byte-for-byte, so plain-text editing is used automatically (your text is untouched)",
+  /* Only claim the automatic switch when it actually happened ✓ */
+  unsupportedNoticeRich: "This note now contains syntax the rich editor cannot preserve byte-for-byte. You are **still in rich mode**, so saving may rewrite those parts; switch to plain text to keep them verbatim, or remove that syntax first.",
+  /* One-click remedy when a paste got split by Markdown ✓ */
+  pasteAsCodeBlock: "Insert what I just pasted as a code block",
   unsupportedRisk: "Editing and saving in the rich editor will rewrite the syntax listed above ✗",
   openRichAnyway: "Use the rich editor anyway (may rewrite the syntax)",
   backToPlainText: "Back to plain text (no rewrite)",

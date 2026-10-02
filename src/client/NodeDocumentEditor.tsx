@@ -133,6 +133,8 @@ export function NodeDocumentEditor(props: {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** 富文本编辑器的命令式句柄（flush / replace / focus ✓） */
   const richRef = useRef<MarkdownRichEditorHandle | null>(null);
+  /** 最近一次粘贴进来的纯文本 ✓（粘贴被 Markdown 拆散时，提示条上给"作为代码块插入"✓） */
+  const [lastPaste, setLastPaste] = useState("");
   /** 编辑器最近一次交给我们的草稿：用来分辨"这次变化是不是用户敲的" ✓ */
   const lastEditorDraftRef = useRef<string | null>(null);
   /** 递增 ⇒ 富编辑器整体替换文档（只在"外部替换草稿"时用 ✓，绝不每次草稿变化都调 ✗） */
@@ -851,16 +853,32 @@ export function NodeDocumentEditor(props: {
 
       {/*
        * 复查 P1-4 / P2-6：两条**必须让用户看见**的提示 ——
-       * ① 正文里有富编辑器无法原样保留的语法 ⇒ 自动改用**纯文本**编辑 ✓（并说明命中了什么 ✓）；
+       * ① 正文里有富编辑器无法原样保留的语法 ⇒ 按**实际所处模式**分别说明 ✓；
        * ② 富编辑器初始化失败 ⇒ 明说"已改用纯文本、内容不会丢" ✓（不许假装还能保存 ✗）。
        * 两条都不给"挑模式"的入口 ✗：正常只有正文；纯文本只是这两条路上不丢内容的兜底 ✓。
+       *
+       * ⚠️ **不许在还没切换时宣称已经切换** ✗
+       * （`design/code-block-copy-paste-analysis.md`「提示与实际模式不一致」✓）：
+       * 自动切模式只在**节点载入时**判一次 ✓（编辑途中不突然切换 ✓），
+       * 所以编辑途中新出现的语法可能**仍在正文模式** ✓ —— 那时说"已自动改用纯文本编辑"就是假话 ✗。
        */}
       {unsupported.length > 0 ? (
         <div className="kn-editor-notice" role="alert">
-          <div>{t("unsupportedNotice")}</div>
+          <div>{t(tab === "source" ? "unsupportedNotice" : "unsupportedNoticeRich")}</div>
           <div className="kn-editor-dim">{unsupported.join(" · ")}</div>
           <div className="kn-editor-dim">{t("unsupportedRisk")}</div>
           <div className="kn-editor-notice-actions">
+            {tab === "rich" && lastPaste !== "" ? (
+              /*
+               * **粘贴被 Markdown 拆散**时的补救 ✓（复查「更小的第一步」✓）：
+               * 把刚才粘进来的原文整体作为**一个代码块**插入 ✓（走事务 ⇒ 可撤销 ✓），
+               * 比"退回纯文本"轻，也不用重新粘贴 ✓。
+               */
+              <button
+                type="button"
+                onClick={() => { richRef.current?.insertCodeBlock(lastPaste); setLastPaste(""); }}
+              >{t("pasteAsCodeBlock")}</button>
+            ) : null}
             {tab === "rich" ? (
               /* 已经在正文里 ⇒ 给一条"退回纯文本、不改写语法"的路 ✓（回来随时可以 ✓） */
               <button type="button" onClick={() => { leaveRich("source"); }}>{t("backToPlainText")}</button>
@@ -928,6 +946,12 @@ export function NodeDocumentEditor(props: {
                 syncToken={richSyncToken}
                 readOnly={state.saving || state.frozen || state.phase !== "ready"}
                 handleRef={richRef}
+                /*
+                 * **粘贴进来的纯文本**留着 ✓（`design/code-block-copy-paste-analysis.md` ✓）：
+                 * 万一它被 Markdown 拆成段落 + `Text` 块（截图那样 ✓），
+                 * 下面那条提示里就给一个"作为代码块插入"的一键补救 ✓（可撤销 ✓）。
+                 */
+                onPasteText={(text) => { setLastPaste(text); }}
                 t={props.t}
                 /*
                  * **编辑器报来它自己的规范化结果** ✓：末尾换行这类差异是编辑器写的、不是用户改的 ✗

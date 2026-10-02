@@ -39,6 +39,14 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
+import {
+  KN_CODE_BLOCK_MIME,
+  codeBlockHtml,
+  encodeCodeBlockPayload,
+  codeBlockFromClipboardHtml,
+  insideCodeBlock,
+  parseCodeBlockPayload,
+} from "./code-block-clipboard.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
 import {
   caretTargetForClick,
@@ -107,8 +115,95 @@ function activeCellTable(view: ProseMirrorView): HTMLTableElement | null {
   }
 }
 
-/** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */
-function selectionTableBlock(view: ProseMirrorView): HTMLElement | null {
+/**
+ * 从代码块节点视图的 DOM **反查它对应的 `code_block` 节点** ✓
+ * （`design/code-block-copy-paste-analysis.md` ✓）。
+ *
+ * 为什么以**节点**为准 ✗：CodeMirror 的 DOM 里可能是折叠 / 高亮后的视图文本 ✓，
+ * 而我们要写进剪贴板的是**原文** ✓ ⇒ 从 `view.posAtDOM` 找到节点、取 `textContent` ✓。
+ */
+function codeBlockAt(view: ProseMirrorView, host: HTMLElement): { language: string; code: string } | null {
+  try {
+    const pos = view.posAtDOM(host, 0);
+    const $pos = view.state.doc.resolve(pos);
+    let node = view.state.doc.nodeAt(pos);
+    if (node?.type.name !== "code_block") {
+      node = null;
+      for (let depth = $pos.depth; depth > 0; depth -= 1) {
+        const ancestor = $pos.node(depth);
+        if (ancestor.type.name === "code_block") {
+          node = ancestor;
+          break;
+        }
+      }
+    }
+    if (node === null || node.type.name !== "code_block") return null;
+    const language = typeof node.attrs.language === "string" ? node.attrs.language : "";
+    return { language, code: node.textContent };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 写剪贴板：**纯文本 + HTML + 本插件载荷** ✓，逐级降级 ✓。
+ *
+ * 复查（`design/code-block-copy-paste-analysis.md` ✓）要求：
+ * ① 纯文本那份必须是**裸代码** ✓（粘到终端 / IDE 的体验一点不能变 ✗）；
+ * ② HTML 那份要**转义** ✓（不直接插入执行 ✓）；
+ * ③ 自定义格式**不是唯一方案** ✗ ⇒ 浏览器拒绝时退回"纯文本 + HTML"，再退回纯文本 ✓；
+ * ④ **不伪造** `vscode-editor-data` ✗（那是别人的格式 ✓）。
+ */
+async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
+  if (clipboard?.write !== undefined && Item !== null) {
+    try {
+      await clipboard.write([new Item({
+        "text/plain": new Blob([payload.code], { type: "text/plain" }),
+        "text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
+        [KN_CODE_BLOCK_MIME]: new Blob([encodeCodeBlockPayload(payload)], { type: KN_CODE_BLOCK_MIME }),
+      })]);
+      return;
+    } catch {
+      try {
+        await clipboard.write([new Item({
+          "text/plain": new Blob([payload.code], { type: "text/plain" }),
+          "text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
+        })]);
+        return;
+      } catch {
+        /* 再不行就退回纯文本 ✓（与改造前一致 ✓） */
+      }
+    }
+  }
+  await clipboard?.writeText?.(payload.code);
+}
+
+/** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */
+function currentBlockName(view: ProseMirrorView): string | undefined {
+  try {
+    const $from = view.state.selection.$from;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      const node = $from.node(depth);
+      if (node.isBlock) return node.type.name;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 用**事务**插入一个完整代码块 ✓（可撤销 ✓；语言与原文一字不改 ✓） */
+function insertCodeBlockNode(view: ProseMirrorView, payload: { language: string; code: string }): void {
+  const type = view.state.schema.nodes.code_block;
+  if (type === undefined) return;
+  const text = payload.code === "" ? undefined : view.state.schema.text(payload.code);
+  const node = type.create(payload.language === "" ? null : { language: payload.language }, text);
+  view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+}
+
+/** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */function selectionTableBlock(view: ProseMirrorView): HTMLElement | null {
   const anchorNode = view.domAtPos(view.state.selection.from).node;
   const element = anchorNode.nodeType === 1 ? (anchorNode as HTMLElement) : anchorNode.parentElement;
   return element?.closest<HTMLElement>(".milkdown-table-block") ?? null;
@@ -134,8 +229,7 @@ function activeCellRect(view: ProseMirrorView): { top: number; bottom: number; r
   }
 }
 
-/** 移动类动作用不了时的**原因**（文案 key ✓；复查要求边界时禁用并说清为什么 ✓） */
-function moveReason(move: TableMoveState | null, action: TableMenuAction): string {
+/** 移动类动作用不了时的**原因**（文案 key ✓；复查要求边界时禁用并说清为什么 ✓） */function moveReason(move: TableMoveState | null, action: TableMenuAction): string {
   if (move === null) return "tableMoveUnavailable";
   if (move.blockedKey === "tableMoveSpan") return "tableMoveSpan";
   const isRow = action === "row-up" || action === "row-down";
@@ -214,6 +308,12 @@ export interface MarkdownRichEditorHandle {
   replaceMarkdown: (markdown: string) => void;
   /** 聚焦正文 ✓ */
   focus: () => void;
+  /**
+   * 把一段文本**作为代码块插入** ✓（粘贴被拆散后的一键补救 ✓）。
+   * @param code - 文本原文 ✓（缩进 / 空行一字不改 ✓）。
+   * @param language - 语言标识（可选 ✓，留空就是「没有语言」✓）。
+   */
+  insertCodeBlock: (code: string, language?: string) => void;
   /** 实例是否已就绪 ✓ */
   isReady: () => boolean;
 }
@@ -261,6 +361,12 @@ export function MarkdownRichEditor(props: {
   handleRef?: RefObject<MarkdownRichEditorHandle | null> | undefined;
   onStatus?: ((status: MarkdownRichEditorStatus) => void) | undefined;
   onBaseline?: ((ingested: string, canonical: string) => void) | undefined;
+  /**
+   * 粘贴进来的**纯文本**上报 ✓（`design/code-block-copy-paste-analysis.md` ✓）：
+   * 没命中本插件载荷、也没被拦下的粘贴（就是普通 Markdown 粘贴 ✓）把原文交给父组件 ✓，
+   * 万一被拆成段落 + `Text` 块（截图那样 ✓），提示条上还能一键"作为代码块插入"✓。
+   */
+  onPasteText?: ((text: string) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
   t?: unknown;
 }): ReactNode {
@@ -875,6 +981,68 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("mouseup", onMouseUpFallback, true);
 
     /*
+     * **代码块"复制"改写成多格式剪贴板** ✓
+     * （`design/code-block-copy-paste-analysis.md` ✓）。
+     *
+     * Crepe 的按钮只 `navigator.clipboard.writeText(裸代码)` ✗ ⇒ 剪贴板里没有"这是个 C++ 代码块"✓
+     * ⇒ 粘回正文时被当 Markdown 解析、拆成段落 + 一个 `Text` 块 ✓（用户截图 ✓）。
+     * 这里在**捕获阶段**接住这个按钮的点击 ✓：Vue 的处理器挂在按钮自己身上 ✓，
+     * 捕获先跑到我们 ✓ ⇒ `stopPropagation()` 之后它不再执行 ✗，
+     * 由我们写"纯文本 + HTML + 本插件载荷"三份 ✓（终端体验不变 ✓、正文粘贴保持完整块 ✓）。
+     */
+    const onCopyClick = (event: Event): void => {
+      const view = viewRef.current;
+      const target = event.target as Element | null;
+      if (view === null || target === null || typeof target.closest !== "function") return;
+      const button = target.closest<HTMLElement>(".copy-button");
+      if (button === null) return;
+      const host = button.closest<HTMLElement>(".milkdown-code-block");
+      if (host === null) return;
+      const payload = codeBlockAt(view, host);
+      if (payload === null) return;
+      event.stopPropagation();
+      event.preventDefault();
+      void writeCodeBlockClipboard(payload)
+        .then(() => { reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length }); })
+        .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
+    };
+    root.addEventListener("click", onCopyClick, true);
+
+    /*
+     * **粘贴本插件的代码块载荷** ⇒ 直接用事务插入完整 `code_block` ✓
+     * （语言、缩进、空行、尖括号一字不改 ✓，不再被 Markdown 拆散 ✓）。
+     *
+     * 其它情况**一律放行** ✗：
+     * ① 光标在代码块里 ⇒ 只插字符、不嵌套新块 ✓（验收要求 ✓）；
+     * ② 外部复制的 Markdown / HTML ⇒ 继续走 milkdown 原有粘贴 ✓
+     *    （也不能把所有多行文本都当代码 ✗，复查要求 ✓）。
+     */
+    const onPastePayload = (event: Event): void => {
+      const view = viewRef.current;
+      const clip = (event as ClipboardEvent).clipboardData;
+      if (view === null || !readyRef.current || clip === null || clip === undefined) return;
+      if (insideCodeBlock(currentBlockName(view))) return;
+      /*
+       * ① 本插件载荷（自定义格式 ✓）⇒ 最可靠 ✓；
+       * ② 没有载荷（浏览器拒了多格式、或粘贴来自别的应用 ✓）⇒ 看 `text/html`：
+       *    整段就是 `<pre><code class="language-…">` 时照样能还原 ✓（复查方案里写的就是这条降级 ✓）。
+       */
+      const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
+        ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
+      if (payload === null) {
+        /* 没命中载荷 ⇒ **不拦** ✓，只把纯文本记下来（万一被 Markdown 拆散，提示条上还能一键补救 ✓） */
+        const plain = clip.getData("text/plain");
+        if (plain !== "") props.onPasteText?.(plain);
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      insertCodeBlockNode(view, payload);
+      reportRef.current?.("code-block-paste", { language: payload.language, chars: payload.code.length, viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === "" });
+    };
+    root.addEventListener("paste", onPastePayload, true);
+
+    /*
      * 复查要求的两条"容器变化"通知 ✓：
      * ① 面板宽度变了不一定有 `window.resize` ⇒ 用 `ResizeObserver` 盯住正文容器 ✓；
      * ② `.table-wrapper` 横向滚动会改变"可见表格范围"⇒ 用**捕获**阶段接住后代滚动 ✓。
@@ -1014,6 +1182,8 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("pointerdown", onPointerDownRecord, true);
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
+      root.removeEventListener("click", onCopyClick, true);
+      root.removeEventListener("paste", onPastePayload, true);
       document.removeEventListener("selectionchange", onSelectionChanged);
       shadowRoot?.removeEventListener("selectionchange", onSelectionChanged);
       window.removeEventListener("resize", onSelectionChanged);
@@ -1106,6 +1276,18 @@ export function MarkdownRichEditor(props: {
     },
     focus: () => {
       hostRef.current?.querySelector<HTMLElement>(".ProseMirror, [contenteditable='true']")?.focus();
+    },
+    /*
+     * **把某段文本作为代码块插入** ✓（`design/code-block-copy-paste-analysis.md`
+     * 「更小的第一步」✓）：粘贴被 Markdown 拆散之后，提示条上给一个一键补救 ✓。
+     * 走的是同一条事务路径 ✓（可撤销 ✓），语言留空由用户自己选 ✓。
+     */
+    insertCodeBlock: (code: string, language = "") => {
+      const view = viewRef.current;
+      if (view === null || !readyRef.current || failedRef.current) return;
+      if (code === "") return;
+      insertCodeBlockNode(view, { language, code });
+      scheduleMenu();
     },
     isReady: () => readyRef.current && !failedRef.current,
   }), [scheduleMenu]);

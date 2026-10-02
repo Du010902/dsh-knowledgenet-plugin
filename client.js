@@ -193717,6 +193717,148 @@ Expected function or array of functions, received type ${typeof value}.`);
 		};
 		Crepe.Feature = CrepeFeature;
 		//#endregion
+		//#region src/client/code-block-clipboard.ts
+		/**
+		* **代码块的复制 / 粘贴语义** ✓
+		* （`design/code-block-copy-paste-analysis.md` ✓）。
+		*
+		* 复查确认的问题：Crepe 的代码块"复制"按钮只调 `navigator.clipboard.writeText(text)` ✗
+		* ⇒ 剪贴板里**只有裸代码字符** ✓，没有"这是一个 C++ 代码块"的信息 ✓；
+		* 粘回正文时 milkdown 的剪贴板插件把纯文本当 **Markdown** 解析 ✗
+		* ⇒ 四空格缩进变成缩进代码块、空行分段、`<iostream>` 触发原始 HTML 检测 ✓
+		* —— 一份代码被拆成段落 + 一个显示 `Text` 的块 ✓（用户截图 ✓）。
+		*
+		* 这里不去动"复制裸代码"这条路 ✗（粘到终端 / IDE 就该是裸代码 ✓），
+		* 而是**同时**写入一份结构化载荷 ✓：
+		*
+		* | 剪贴板格式 | 内容 | 谁用 |
+		* | --- | --- | --- |
+		* | `text/plain` | 裸代码 ✓ | 终端 / IDE / 其它应用 ✓（与原来一样 ✓） |
+		* | `text/html` | 转义后的 `<pre><code class="language-…">` ✓ | 富文本编辑器 / 文档 ✓ |
+		* | `web application/x-dsh-kn-codeblock+json` | 本插件自己的载荷（语言 + 代码 + 版本 ✓） | **本插件正文里粘贴** ✓ |
+		*
+		* 为什么自定义格式带 `web ` 前缀 ✗：Chrome 只允许 `web ` 开头的自定义剪贴板类型 ✓，
+		* 否则 `ClipboardItem` 直接抛 `NotAllowedError` ✓。
+		* 自定义格式**不是唯一方案** ✗：不支持多格式时退回"纯文本 + HTML"，再不行退回纯文本 ✓。
+		*
+		* 本文件只有**纯逻辑** ✓（不碰 DOM / React / 编辑器 ✓）⇒ 可以离线单测 ✓。
+		*/
+		/** 本插件代码块载荷的剪贴板 MIME ✓（必须 `web ` 前缀 ✓） */
+		const KN_CODE_BLOCK_MIME = "web application/x-dsh-kn-codeblock+json";
+		/**
+		* 语言标识要不要丢掉 ✓：只接受"字母 / 数字 / `+` `#` `-` `_` `.`"这些常见字符 ✓，
+		* 其余（含引号、尖括号、换行 ✓）一律当成"没有语言" ✗ ——
+		* 载荷会被写进 HTML 的 `class` 属性 ✓，不校验就等于给了注入点 ✗。
+		*
+		* @param value - 原始语言字符串 ✓。
+		* @returns 安全的语言标识；不安全或为空 ⇒ `""` ✓。
+		*/
+		function safeLanguage(value) {
+			if (typeof value !== "string") return "";
+			const trimmed = value.trim();
+			if (trimmed === "" || trimmed.length > 32) return "";
+			return /^[A-Za-z0-9+#._-]+$/.test(trimmed) ? trimmed : "";
+		}
+		/** HTML 文本转义 ✓（`<iostream>` 这类内容必须原样显示、不能被当标签 ✗） */
+		function escapeHtml(text) {
+			return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+		}
+		/**
+		* 生成 `text/html` 那份剪贴板内容 ✓：`<pre><code class="language-…">` ✓，
+		* 代码与语言都**转义** ✓（不直接插入执行 ✓，复查要求 ✓）。
+		*
+		* @param payload - 语言 + 代码 ✓。
+		* @returns 转义后的 HTML 片段 ✓。
+		*/
+		function codeBlockHtml(payload) {
+			const language = safeLanguage(payload.language);
+			return `<pre><code${language === "" ? "" : ` class="language-${escapeHtml(language)}"`}>${escapeHtml(payload.code)}</code></pre>`;
+		}
+		/** 把载荷序列化成剪贴板字符串 ✓ */
+		function encodeCodeBlockPayload(payload) {
+			return JSON.stringify({
+				v: 1,
+				kind: "kn-code-block",
+				language: safeLanguage(payload.language),
+				code: payload.code
+			});
+		}
+		/**
+		* 解析剪贴板里的本插件载荷 ✓（**校验 + 限长** ✓，复查要求 ✓）。
+		*
+		* 失败一律返回 `null` ✓ ⇒ 调用方**放行**给原有的 Markdown 粘贴 ✗
+		* （宁可当普通文本，也不要拿一段不认识的 JSON 去改文档 ✓）。
+		*
+		* @param raw - 剪贴板里那种格式的字符串 ✓。
+		* @returns 语言 + 代码；不是本插件载荷 / 版本不认识 / 超长 ⇒ `null` ✓。
+		*/
+		function parseCodeBlockPayload(raw) {
+			if (typeof raw !== "string" || raw === "") return null;
+			if (raw.length > 262144) return null;
+			let parsed;
+			try {
+				parsed = JSON.parse(raw);
+			} catch {
+				return null;
+			}
+			if (parsed === null || typeof parsed !== "object") return null;
+			const record = parsed;
+			if (record.kind !== "kn-code-block") return null;
+			if (record.v !== 1) return null;
+			if (typeof record.code !== "string" || record.code.length > 262144) return null;
+			return {
+				language: safeLanguage(record.language),
+				code: record.code
+			};
+		}
+		/**
+		* 光标是不是在**代码块里面** ✓。
+		*
+		* 用途：粘进已有代码块时只插字符 ✗（不许嵌套新代码块 ✓，复查验收要求 ✓）。
+		*
+		* @param nodeName - 选区所在"最内层块节点"的类型名 ✓（由调用方从编辑器状态里取 ✓）。
+		* @returns 在代码块里 ⇒ `true` ✓。
+		*/
+		function insideCodeBlock(nodeName) {
+			return nodeName === "code_block";
+		}
+		/** 反转义 HTML 实体 ✓（`text/html` 那份是我们自己转义的 ✓，还原时一一对应 ✓） */
+		function unescapeHtml(text) {
+			return text.replace(/&#39;/g, "'").replace(/&quot;/g, "\"").replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+		}
+		/**
+		* 从 `text/html` 那份里**认出"这本来就是一个代码块"** ✓
+		* （`design/code-block-copy-paste-analysis.md` ✓）。
+		*
+		* 为什么需要它 ✗：自定义剪贴板格式**不是所有环境都让写** ✓
+		* （Chrome 会拒绝没带 `web ` 前缀的类型、有的宿主还会整体拒绝多格式 ✓）——
+		* 那时我们写进去的就是"纯文本 + HTML" ✓，粘贴时只有 HTML 能说明语言 ✓。
+		* 所以这里把 HTML 也当成一条**可恢复**的线索 ✓（复查方案里正是这么写的 ✓）。
+		*
+		* **只在"整段就是一个 `<pre><code>`"时才认** ✗：别把从浏览器 / 文档里复制的富 HTML
+		* 误判成代码块 ✓（那种情况继续交给 milkdown 原有粘贴 ✓）。
+		*
+		* @param html - 剪贴板里的 `text/html` ✓。
+		* @returns 语言 + 代码；认不出 ⇒ `null` ✓。
+		*/
+		function codeBlockFromClipboardHtml(html) {
+			if (typeof html !== "string" || html.trim() === "") return null;
+			const trimmed = html.trim();
+			if (trimmed.length > 262144) return null;
+			const match = /^\s*(?:<meta[^>]*>\s*)*<pre[^>]*>\s*<code([^>]*)>([\s\S]*)<\/code>\s*<\/pre>\s*$/i.exec(trimmed);
+			if (match === null) return null;
+			const attrs = match[1] ?? "";
+			const body = match[2] ?? "";
+			if (body.includes("<")) return null;
+			const languageMatch = /class\s*=\s*(["'])[^"']*language-([A-Za-z0-9+#._-]+)[^"']*\1/i.exec(attrs);
+			const code = unescapeHtml(body).replace(/\r\n/g, "\n");
+			if (code.length > 262144) return null;
+			return {
+				language: safeLanguage(languageMatch?.[2] ?? ""),
+				code
+			};
+		}
+		//#endregion
 		//#region src/client/table-menu.ts
 		/**
 		* **表格操作菜单**的纯逻辑（`design/table-caret-and-interaction-design.md` ✓）。
@@ -194627,8 +194769,89 @@ Expected function or array of functions, received type ${typeof value}.`);
 				return null;
 			}
 		}
-		/** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */
-		function selectionTableBlock(view) {
+		/**
+		* 从代码块节点视图的 DOM **反查它对应的 `code_block` 节点** ✓
+		* （`design/code-block-copy-paste-analysis.md` ✓）。
+		*
+		* 为什么以**节点**为准 ✗：CodeMirror 的 DOM 里可能是折叠 / 高亮后的视图文本 ✓，
+		* 而我们要写进剪贴板的是**原文** ✓ ⇒ 从 `view.posAtDOM` 找到节点、取 `textContent` ✓。
+		*/
+		function codeBlockAt(view, host) {
+			try {
+				const pos = view.posAtDOM(host, 0);
+				const $pos = view.state.doc.resolve(pos);
+				let node = view.state.doc.nodeAt(pos);
+				if (node?.type.name !== "code_block") {
+					node = null;
+					for (let depth = $pos.depth; depth > 0; depth -= 1) {
+						const ancestor = $pos.node(depth);
+						if (ancestor.type.name === "code_block") {
+							node = ancestor;
+							break;
+						}
+					}
+				}
+				if (node === null || node.type.name !== "code_block") return null;
+				return {
+					language: typeof node.attrs.language === "string" ? node.attrs.language : "",
+					code: node.textContent
+				};
+			} catch {
+				return null;
+			}
+		}
+		/**
+		* 写剪贴板：**纯文本 + HTML + 本插件载荷** ✓，逐级降级 ✓。
+		*
+		* 复查（`design/code-block-copy-paste-analysis.md` ✓）要求：
+		* ① 纯文本那份必须是**裸代码** ✓（粘到终端 / IDE 的体验一点不能变 ✗）；
+		* ② HTML 那份要**转义** ✓（不直接插入执行 ✓）；
+		* ③ 自定义格式**不是唯一方案** ✗ ⇒ 浏览器拒绝时退回"纯文本 + HTML"，再退回纯文本 ✓；
+		* ④ **不伪造** `vscode-editor-data` ✗（那是别人的格式 ✓）。
+		*/
+		async function writeCodeBlockClipboard(payload) {
+			const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
+			const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
+			if (clipboard?.write !== void 0 && Item !== null) try {
+				await clipboard.write([new Item({
+					"text/plain": new Blob([payload.code], { type: "text/plain" }),
+					"text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
+					[KN_CODE_BLOCK_MIME]: new Blob([encodeCodeBlockPayload(payload)], { type: KN_CODE_BLOCK_MIME })
+				})]);
+				return;
+			} catch {
+				try {
+					await clipboard.write([new Item({
+						"text/plain": new Blob([payload.code], { type: "text/plain" }),
+						"text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" })
+					})]);
+					return;
+				} catch {}
+			}
+			await clipboard?.writeText?.(payload.code);
+		}
+		/** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */
+		function currentBlockName(view) {
+			try {
+				const $from = view.state.selection.$from;
+				for (let depth = $from.depth; depth > 0; depth -= 1) {
+					const node = $from.node(depth);
+					if (node.isBlock) return node.type.name;
+				}
+				return;
+			} catch {
+				return;
+			}
+		}
+		/** 用**事务**插入一个完整代码块 ✓（可撤销 ✓；语言与原文一字不改 ✓） */
+		function insertCodeBlockNode(view, payload) {
+			const type = view.state.schema.nodes.code_block;
+			if (type === void 0) return;
+			const text = payload.code === "" ? void 0 : view.state.schema.text(payload.code);
+			const node = type.create(payload.language === "" ? null : { language: payload.language }, text);
+			view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+		}
+		/** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */ function selectionTableBlock(view) {
 			const anchorNode = view.domAtPos(view.state.selection.from).node;
 			return (anchorNode.nodeType === 1 ? anchorNode : anchorNode.parentElement)?.closest(".milkdown-table-block") ?? null;
 		}
@@ -194654,8 +194877,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				return null;
 			}
 		}
-		/** 移动类动作用不了时的**原因**（文案 key ✓；复查要求边界时禁用并说清为什么 ✓） */
-		function moveReason(move, action) {
+		/** 移动类动作用不了时的**原因**（文案 key ✓；复查要求边界时禁用并说清为什么 ✓） */ function moveReason(move, action) {
 			if (move === null) return "tableMoveUnavailable";
 			if (move.blockedKey === "tableMoveSpan") return "tableMoveSpan";
 			if ((action === "row-up" || action === "row-down") && move.rowIndex === 0 && !move.rowUp && !move.rowDown) return "tableMoveHeader";
@@ -195233,6 +195455,49 @@ Expected function or array of functions, received type ${typeof value}.`);
 					});
 				};
 				root.addEventListener("mouseup", onMouseUpFallback, true);
+				const onCopyClick = (event) => {
+					const view = viewRef.current;
+					const target = event.target;
+					if (view === null || target === null || typeof target.closest !== "function") return;
+					const button = target.closest(".copy-button");
+					if (button === null) return;
+					const host = button.closest(".milkdown-code-block");
+					if (host === null) return;
+					const payload = codeBlockAt(view, host);
+					if (payload === null) return;
+					event.stopPropagation();
+					event.preventDefault();
+					writeCodeBlockClipboard(payload).then(() => {
+						reportRef.current?.("code-block-copy", {
+							language: payload.language,
+							chars: payload.code.length
+						});
+					}).catch((error) => {
+						reportRef.current?.("code-block-copy-failed", String(error));
+					});
+				};
+				root.addEventListener("click", onCopyClick, true);
+				const onPastePayload = (event) => {
+					const view = viewRef.current;
+					const clip = event.clipboardData;
+					if (view === null || !readyRef.current || clip === null || clip === void 0) return;
+					if (insideCodeBlock(currentBlockName(view))) return;
+					const payload = parseCodeBlockPayload(clip.getData("web application/x-dsh-kn-codeblock+json")) ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
+					if (payload === null) {
+						const plain = clip.getData("text/plain");
+						if (plain !== "") props.onPasteText?.(plain);
+						return;
+					}
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					insertCodeBlockNode(view, payload);
+					reportRef.current?.("code-block-paste", {
+						language: payload.language,
+						chars: payload.code.length,
+						viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === ""
+					});
+				};
+				root.addEventListener("paste", onPastePayload, true);
 				const container = root.closest(".kn-editor-body");
 				const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
 					scheduleMenu();
@@ -195329,6 +195594,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 					root.removeEventListener("pointerdown", onPointerDownRecord, true);
 					root.removeEventListener("mousedown", onPointerDownRecord, true);
 					root.removeEventListener("mouseup", onMouseUpFallback, true);
+					root.removeEventListener("click", onCopyClick, true);
+					root.removeEventListener("paste", onPastePayload, true);
 					document.removeEventListener("selectionchange", onSelectionChanged);
 					shadowRoot?.removeEventListener("selectionchange", onSelectionChanged);
 					window.removeEventListener("resize", onSelectionChanged);
@@ -195395,6 +195662,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 				focus: () => {
 					hostRef.current?.querySelector(".ProseMirror, [contenteditable='true']")?.focus();
 				},
+				insertCodeBlock: (code, language = "") => {
+					const view = viewRef.current;
+					if (view === null || !readyRef.current || failedRef.current) return;
+					if (code === "") return;
+					insertCodeBlockNode(view, {
+						language,
+						code
+					});
+					scheduleMenu();
+				},
 				isReady: () => readyRef.current && !failedRef.current
 			}), [scheduleMenu]);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -195439,7 +195716,11 @@ Expected function or array of functions, received type ${typeof value}.`);
 			richLoading: "正在准备正文编辑器…",
 			richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
 			unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
+			unsupportedNoticeRich: "正文里出现了正文编辑器无法原样保留的语法（下面列出的这些）。当前仍是正文模式，保存时这一处可能被改写；想逐字保留请点「改回纯文本」，或先把这些语法删掉。",
 			unsupportedRisk: "在正文里编辑并保存会改写上面这些语法 ✗",
+			pasteAsCodeBlock: "把刚才粘进来的内容作为代码块插入",
+			tableMenuLabel: "表格操作",
+			tableEntryDisabled: "编辑器暂时不能改表格（正在保存或只读）",
 			openRichAnyway: "仍要用正文编辑（可能改写上面的语法）",
 			backToPlainText: "改回纯文本（不改写语法）",
 			tabEdit: "编辑",
@@ -196082,6 +196363,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const textareaRef = (0, react.useRef)(null);
 			/** 富文本编辑器的命令式句柄（flush / replace / focus ✓） */
 			const richRef = (0, react.useRef)(null);
+			/** 最近一次粘贴进来的纯文本 ✓（粘贴被 Markdown 拆散时，提示条上给"作为代码块插入"✓） */
+			const [lastPaste, setLastPaste] = (0, react.useState)("");
 			/** 编辑器最近一次交给我们的草稿：用来分辨"这次变化是不是用户敲的" ✓ */
 			const lastEditorDraftRef = (0, react.useRef)(null);
 			/** 递增 ⇒ 富编辑器整体替换文档（只在"外部替换草稿"时用 ✓，绝不每次草稿变化都调 ✗） */
@@ -196742,7 +197025,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 						className: "kn-editor-notice",
 						role: "alert",
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("unsupportedNotice") }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t(tab === "source" ? "unsupportedNotice" : "unsupportedNoticeRich") }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "kn-editor-dim",
 								children: unsupported.join(" · ")
@@ -196751,9 +197034,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 								className: "kn-editor-dim",
 								children: t("unsupportedRisk")
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "kn-editor-notice-actions",
-								children: tab === "rich" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								children: [tab === "rich" && lastPaste !== "" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => {
+										richRef.current?.insertCodeBlock(lastPaste);
+										setLastPaste("");
+									},
+									children: t("pasteAsCodeBlock")
+								}) : null, tab === "rich" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									type: "button",
 									onClick: () => {
 										leaveRich("source");
@@ -196765,7 +197055,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 										setTab("rich");
 									},
 									children: t("openRichAnyway")
-								})
+								})]
 							})
 						]
 					}) : null,
@@ -196810,6 +197100,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 								syncToken: richSyncToken,
 								readOnly: state.saving || state.frozen || state.phase !== "ready",
 								handleRef: richRef,
+								onPasteText: (text) => {
+									setLastPaste(text);
+								},
 								t: props.t,
 								onBaseline: (ingested, canonical) => {
 									dispatch({
@@ -198057,6 +198350,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			richLoading: "正在准备正文编辑器…",
 			richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
 			unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
+			unsupportedNoticeRich: "正文里出现了正文编辑器无法原样保留的语法（下面列出的这些）。**当前仍是正文模式**，保存时这一处可能被改写；想逐字保留请点「退回纯文本」，或先把这些语法删掉。",
+			pasteAsCodeBlock: "把刚才粘进来的内容作为代码块插入",
 			unsupportedRisk: "在正文里编辑并保存会改写上面这些语法 ✗",
 			openRichAnyway: "仍要用正文编辑（可能改写上面的语法）",
 			backToPlainText: "改回纯文本（不改写语法）",
@@ -198161,6 +198456,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			richLoading: "Preparing the rich editor…",
 			richFailed: "The rich editor failed to start, so plain-text editing is used (nothing is lost and saving still works ✓; reopen the node to retry)",
 			unsupportedNotice: "This note uses syntax the rich editor cannot preserve byte-for-byte, so plain-text editing is used automatically (your text is untouched)",
+			unsupportedNoticeRich: "This note now contains syntax the rich editor cannot preserve byte-for-byte. You are **still in rich mode**, so saving may rewrite those parts; switch to plain text to keep them verbatim, or remove that syntax first.",
+			pasteAsCodeBlock: "Insert what I just pasted as a code block",
 			unsupportedRisk: "Editing and saving in the rich editor will rewrite the syntax listed above ✗",
 			openRichAnyway: "Use the rich editor anyway (may rewrite the syntax)",
 			backToPlainText: "Back to plain text (no rewrite)",

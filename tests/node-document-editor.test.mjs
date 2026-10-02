@@ -557,7 +557,16 @@ describe("与设计稿对应的部件与入口", () => {
       editorSource.includes('onClick={() => { setTab("rich"); }}>{t("openRichAnyway")}'),
       "回正文要**显式点一次**（有损转换要有同意 ✓）",
     );
-    assert.ok(editorSource.includes('t("unsupportedNotice")') && editorSource.includes('t("unsupportedRisk")'), "两条提示都在 ✓");
+    /*
+     * **提示要与实际模式一致** ✗（`design/code-block-copy-paste-analysis.md` ✓）：
+     * 自动切模式只在载入时判一次 ✓ ⇒ 编辑途中新出现的语法可能仍在正文模式 ✓，
+     * 那时说"已自动改用纯文本编辑"就是假话 ✓ ⇒ 两种模式各一句 ✓。
+     */
+    assert.ok(
+      editorSource.includes('t(tab === "source" ? "unsupportedNotice" : "unsupportedNoticeRich")'),
+      "提示要**按实际模式**分别说 ✓",
+    );
+    assert.ok(editorSource.includes('t("unsupportedRisk")'), "风险说明还在 ✓");
     /* 提示条里不许再出现"切到源码"这类让用户自己挑模式的说法 ✓ */
     for (const key of ["tabRich", "tabSource"]) {
       assert.ok(!editorSource.includes(`t("${key}")`), `${key} 已撤掉 ✗`);
@@ -679,7 +688,7 @@ describe("与设计稿对应的部件与入口", () => {
       "要按**当前草稿**嗅探（只看 base 会漏掉纯文本里新加的内容 ✗）",
     );
     assert.ok(editorSource.includes("useMemo(() => scanUnsupportedSyntax"), "每次草稿变化都重新算 ✓");
-    assert.ok(editorSource.includes('t("unsupportedNotice")'), "要说明为什么改用纯文本 ✓");
+    assert.ok(editorSource.includes('t(tab === "source" ? "unsupportedNotice" : "unsupportedNoticeRich")'), "要按**当前模式**说明（还在正文时不许宣称已改用纯文本 ✗）");
     assert.ok(editorSource.includes('t("unsupportedRisk")'), "回正文前要说清风险 ✓");
     assert.ok(editorSource.includes('t("backToPlainText")'), "还要给一条退回纯文本的路 ✓");
     assert.ok(editorSource.includes('t("richFailed")') && editorSource.includes('t("richLoading")'), "初始化失败/加载中要可见 ✓");
@@ -1121,7 +1130,7 @@ describe("与设计稿对应的部件与入口", () => {
     /* `saveNote` 已随保存按钮撤掉 ⇒ 换成仍在使用的那几条 ✓ */
     for (const key of [
       "editNote", "notePanelTitle", "statusDirty", "statusSaving", "saveShortcut",
-      "unsupportedNotice", "unsupportedRisk", "openRichAnyway", "backToPlainText",
+      "unsupportedNotice", "unsupportedNoticeRich", "unsupportedRisk", "openRichAnyway", "backToPlainText",
       "richFailed", "conflictNotice", "leaveDiscard",
     ]) {
       const zh = dictSource.slice(dictSource.indexOf("const DICT_ZH"), dictSource.indexOf("const DICT_EN"));
