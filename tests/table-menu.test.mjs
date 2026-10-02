@@ -31,6 +31,9 @@ import {
   TABLE_POPOVER_HEIGHT,
   movePayload,
   pathHitsNodes,
+  pickBodyTable,
+  resolveTableTarget,
+  tableEntryHideReason,
   readTableContext,
   readTableMoveState,
   tableEntryPosition,
@@ -107,9 +110,16 @@ describe("表格上下文：入口显隐与对齐高亮只来自编辑器 select
     assert.deepEqual(readTableContext(undefined), { inTable: false, alignment: "left" });
   });
 
-  it("显隐与高亮**不问鼠标**（不依赖悬停）✗", () => {
-    assert.ok(!menuLogicSource.includes("hover"), "上下文只能来自 selection ✗");
-    assert.ok(!menuLogicSource.includes("mouse"), "不许用鼠标位置推断结构状态 ✗");
+  it("结构状态（对齐 / 移动可用性）只来自 **selection** ✗，鼠标只管「用哪张表格的入口」✓", () => {
+    /*
+     * 复查（`design/table-entry-hidden-preview-table-analysis.md` ✓）之后的规则：
+     * **入口锚点**可以是"鼠标悬停的那张表格"✓（用户指着谁就是谁 ✓）；
+     * 但**结构状态**（列对齐高亮、行列移动能不能用）只能来自**目标表格里的 selection** ✗ ——
+     * 悬停 B、光标还在 A 时，不许拿 A 的状态去点亮 B 的菜单 ✓。
+     */
+    assert.ok(menuLogicSource.includes("readTableContext"), "结构状态仍来自 selection ✓");
+    assert.ok(menuLogicSource.includes("readTableMoveState"), "移动可用性仍由选区（`selectedRect`）算 ✓");
+    assert.ok(!menuLogicSource.includes("mouseover"), "解析逻辑不许掺鼠标事件 ✗");
   });
 });
 
@@ -418,7 +428,63 @@ describe("长表格滚动：入口必须留在正文视口里（复查实测 ✓
     /* 旧实现是"表格顶的内容坐标"⇒ 视口里等于 -600，完全在裁切区外 ✗（复查实测 0…24 ✓） */
     const oldTop = -600 - body.top + 644;
     assert.ok(toViewport(entry, body, 644) > oldTop + 400, `入口要跟着可见单元格走 ✓（旧值 ${oldTop} ✗）`);
-    assert.equal(Math.round(toViewport(entry, body, 644)), 500, "活跃单元格可见 ⇒ 纵向就贴它 ✓");
+    /* 现在默认放在这一格**上方**（右上角外侧 ✓）⇒ 底边不超过单元格上沿 ✓，不挡正在编辑的格子 ✓ */
+    assert.equal(Math.round(toViewport(entry, body, 644)), 500 - TABLE_ENTRY_SIZE - TABLE_ENTRY_GAP);
+    assert.ok(
+      toViewport(entry, body, 644) + TABLE_ENTRY_SIZE <= 500,
+      "入口**不许盖住正在编辑的那一格** ✗（用户实测）",
+    );
+    assert.equal(entry.compact, false, "有地方就放完整胶囊（带文字 ✓）");
+  });
+
+  it("**横向也贴活跃单元格** ✓：入口右边贴这一格的右边（不是整张表 / 容器右边 ✗）", () => {
+    /* 表格比正文宽、还横向滚过：单元格右边可见 ✓ */
+    const table = { top: 195, bottom: 500, left: 44, right: 900 };
+    const cell = { top: 230, bottom: 264, right: 277 };
+    const entry = tableEntryPosition(table, body, 0, null, undefined, undefined, undefined, cell);
+    assert.notEqual(entry, null);
+    /* 入口**右边**（视口坐标）= 容器右边 - right ✓，应当贴着格子右边（内缩 2px ✓） */
+    const entryRight = body.right - entry.right;
+    assert.equal(entryRight, cell.right - 2, "右边要贴这一格的右边 ✓（截图里那种飘到远处 ✗）");
+    /* 纵向默认在格子**上方**（右上角外侧 ✓）⇒ 不挡这一格 ✓ */
+    assert.equal(toViewport(entry, body, 0), cell.top - TABLE_ENTRY_SIZE - TABLE_ENTRY_GAP);
+    assert.equal(entry.compact, false);
+
+    /* 格子右边在视口外（横向滚动后更常见 ✓）⇒ 夹到"整块可见"的最右位置 ✓ */
+    const offscreen = tableEntryPosition(table, body, 0, null, undefined, undefined, undefined, { top: 230, bottom: 264, right: 1200 });
+    assert.notEqual(offscreen, null, "不许因为格子右边在视口外就把入口藏掉 ✗");
+    assert.ok(body.right - offscreen.right - TABLE_ENTRY_WIDTH >= 44, "入口整块都要在可见区内 ✓");
+    assert.ok(body.right - offscreen.right <= body.right - 2, "也不许越出容器右边 ✓");
+  });
+
+  it("**上面真没地方**（格子就在视口最顶上）⇒ 压在格子角上但**收成小图标** ✓", () => {
+    /* 格子顶 == 正文视口顶 ⇒ 上方放不下 24+4 ✓（截图里的情形 ✓） */
+    const entry = tableEntryPosition(
+      { top: 44, bottom: 400, left: 44, right: 900 },
+      body,
+      0,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      { top: 44, bottom: 78, right: 277 },
+    );
+    assert.notEqual(entry, null);
+    assert.equal(entry.compact, true, "没地方就必须收成小图标 ✓（少挡字 ✓）");
+    assert.equal(entry.inside, true, "压在表格上 ⇒ 半透明样式 ✓");
+    assert.ok(toViewport(entry, body, 0) >= body.top, "仍然留在可见区里 ✓");
+    /* 这一格太窄也一样走小图标 ✓（放不下整条胶囊 ✓） */
+    const narrow = tableEntryPosition(
+      { top: 195, bottom: 500, left: 44, right: 900 },
+      body,
+      0,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      { top: 230, bottom: 264, right: 100 },
+    );
+    assert.equal(narrow.compact, true, "格子可见部分太窄 ⇒ 小图标 ✓");
   });
 
   it("活跃单元格在视口外 ⇒ 夹进可见带（仍可见 ✓，不外溢 ✗）", () => {
@@ -502,14 +568,102 @@ describe("长表格滚动：入口必须留在正文视口里（复查实测 ✓
   });
 });
 
+describe("正文表格 vs 隐藏预览表（复查实测的入口消失 ✗）", () => {
+  /** 复查给出的真实结构：`.drag-preview > table` 排在正文 table **前面** ✓ 且尺寸为零 ✓ */
+  const hiddenPreview = { hidden: true, inWrapper: true, width: 0, height: 0 };
+  const bodyTable = { hidden: false, inWrapper: true, width: 244, height: 101 };
+
+  it("**必须跳过隐藏预览表** ✓（原来「块里第一张 table」拿到的正是它 ✗）", () => {
+    assert.equal(pickBodyTable([hiddenPreview, bodyTable]), bodyTable, "顺序无关：隐藏的排前面也要跳过 ✓");
+    assert.equal(pickBodyTable([bodyTable, hiddenPreview]), bodyTable);
+    assert.equal(pickBodyTable([hiddenPreview]), undefined, "只有隐藏预览 ⇒ 没有正文表格 ✓");
+    assert.equal(pickBodyTable([]), undefined);
+  });
+
+  it("**不在 wrapper 里的 table 也不算** ✓（避免误选别的结构表 ✓）", () => {
+    const stray = { hidden: false, inWrapper: false, width: 300, height: 120 };
+    assert.equal(pickBodyTable([stray, bodyTable]), bodyTable);
+    assert.equal(pickBodyTable([stray]), undefined, "全都不在 wrapper 里 ⇒ 没有正文表格 ✓");
+  });
+
+  it("**尺寸为零**的正文候选也不算 ✓（`display:none` 的表格量不出可见带 ✓）", () => {
+    const zero = { hidden: false, inWrapper: true, width: 0, height: 0 };
+    assert.equal(pickBodyTable([zero]), undefined, "零尺寸 ⇒ 不能拿来定位 ✓");
+    assert.equal(pickBodyTable([zero, bodyTable]), bodyTable, "旁边有正常的就用正常的 ✓");
+  });
+
+  it("**原因分开报** ✓：没找到正文表格 / 尺寸为零 / 整张滚出去 / 放不下按钮", () => {
+    const body = { hidden: false, inWrapper: true, width: 244, height: 101 };
+    assert.equal(tableEntryHideReason({ candidates: [] }), "no-block", "连块都没有 ✓");
+    assert.equal(tableEntryHideReason({ candidates: [hiddenPreview] }), "no-body-table", "只有隐藏预览表 ✗（这正是复查那一幕 ✓）");
+    assert.equal(
+      tableEntryHideReason({ candidates: [{ hidden: false, inWrapper: true, width: 0, height: 0 }] }),
+      "no-body-table",
+      "零尺寸候选 ⇒ 归到「没找到正文表格」（候选本身不合格 ✓）",
+    );
+    /* 表格在视口上方外面 ⇒ 与视口不相交 ✓ */
+    assert.equal(
+      tableEntryHideReason({
+        candidates: [body],
+        visible: { top: -900, bottom: -800 },
+        viewport: { top: 44, bottom: 777 },
+      }),
+      "table-out-of-view",
+    );
+    /* 相交但只剩几个像素 ⇒ 放不下按钮 ✓ */
+    assert.equal(
+      tableEntryHideReason({
+        candidates: [body],
+        visible: { top: 40, bottom: 60 },
+        viewport: { top: 44, bottom: 777 },
+      }),
+      "no-visible-band",
+    );
+    /* 一切正常 ⇒ 不该报隐藏 ✓ */
+    assert.equal(
+      tableEntryHideReason({
+        candidates: [hiddenPreview, body],
+        visible: { top: 195, bottom: 297 },
+        viewport: { top: 44, bottom: 777 },
+      }),
+      null,
+    );
+  });
+
+  it("锚点规则：**菜单开着就锁定** ✓；否则悬停优先 ✓、再退选区 ✓", () => {
+    const a = { id: "A" };
+    const b = { id: "B" };
+    assert.equal(resolveTableTarget({ locked: b, hovered: a, selection: a }), b, "开着菜单期间不许被悬停带跑 ✗");
+    assert.equal(resolveTableTarget({ locked: null, hovered: b, selection: a }), b, "悬停的那张优先 ✓");
+    assert.equal(resolveTableTarget({ locked: null, hovered: null, selection: a }), a, "没悬停才退到选区 ✓");
+    assert.equal(resolveTableTarget({ locked: null, hovered: null, selection: null }), null);
+  });
+
+  it("**实在没地方才收成小图标** ✓：文字收起来、`title` / `aria-label` 还在 ✓", () => {
+    assert.ok(richSource.includes("compact={menu.entry.compact}"), "位置算出的 compact 要传给入口 ✓");
+    assert.ok(menuSource.includes("props.compact ? null :"), "小图标模式收起文字标签 ✓");
+    assert.ok(menuSource.includes("aria-label={props.t(\"tableMenuLabel\")}"), "收起文字也要有可访问名字 ✓");
+    assert.ok(panel.includes(".kn-table-entry.is-compact"), "要有一条小图标样式 ✓");
+  });
+
+  it("接线：锁 / 解锁、原因分档、诊断只在原因变化时上报 ✓", () => {
+    assert.ok(richSource.includes("menuBlockRef.current = locked;"), "点开菜单要锁定目标 ✓");
+    assert.ok(richSource.includes("menuBlockRef.current = null;"), "关掉菜单要解锁 ✓");
+    assert.ok(richSource.includes("const hideEntry = useCallback"), "收起要说明原因 ✓");
+    assert.ok(richSource.includes("if (hideReasonRef.current === reason) return;"), "原因没变就不重复上报 ✓（不刷屏 ✓）");
+    assert.ok(richSource.includes('reportRef.current?.("table-entry-hidden", { reason })'), "原因要带进留痕 ✓");
+    assert.ok(!richSource.includes('outcome: "table-entry-hidden", reason: "no-visible-band"'), "不许再一律报 no-visible-band ✗");
+  });
+});
+
 describe("入口可发现性（复查 P2a ✓）", () => {
   it("悬停表格也能看到入口，且**悬停不改选区** ✓", () => {
     assert.ok(richSource.includes("pointerover"), "要监听悬停 ✓");
     assert.ok(richSource.includes('closest<HTMLElement>(".milkdown-table-block")'), "悬停找表格块 ✓");
     assert.ok(richSource.includes("hoverBlockRef"), "记住悬停的那张表格 ✓");
     assert.ok(
-      richSource.includes("const block = selectionBlock ?? hoverBlockRef.current;"),
-      "锚点：光标所在表格优先，其次悬停的表格 ✓",
+      richSource.includes("const block = resolveTableTarget({"),
+      "锚点要走纯函数：锁定 → 悬停 → 选区 ✓",
     );
     assert.ok(
       richSource.includes("const onPointerOver"),
@@ -532,8 +686,7 @@ describe("入口可发现性（复查 P2a ✓）", () => {
   it("入口显眼：带文字标签、有边框底色；只读 / 保存中禁用并说明 ✓", () => {
     assert.ok(menuSource.includes("kn-table-entry-label"), "入口要带文字标签（复查：只有图标认不出来 ✗）✓");
     assert.ok(menuSource.includes("disabled={props.disabled}"), "只读 / 保存中要禁用 ✓");
-    assert.ok(menuSource.includes("hint"), "禁用理由写在 title 上 ✓");
-    assert.ok(/\.kn-table-entry \{[^}]*border: 1px solid var\(--dsw-alias-border-l2\)/s.test(panel), "要有可见边框 ✓");
+    assert.ok(menuSource.includes("hint"), "禁用理由写在 title 上 ✓");    assert.ok(/\.kn-table-entry \{[^}]*border: 1px solid var\(--dsw-alias-border-l2\)/s.test(panel), "要有可见边框 ✓");
     assert.ok(/\.kn-table-entry \{[^}]*background: var\(--dsw-alias-bg-layer-1\)/s.test(panel), "要有不透明底色 ✓");
     assert.ok(!/\.kn-table-entry \{[^}]*opacity: 0\.45/s.test(panel), "不再默认 45% 透明 ✗");
     assert.ok(richSource.includes("const busy = readOnlyRef.current;"), "只读状态进锚点 ✓");
@@ -649,8 +802,13 @@ describe("交互契约：一个入口、点开才展开、Esc 回正文", () => 
     assert.ok(richSource.includes("tableEntryPosition(") && richSource.includes("tablePopoverPosition("), "定位走纯函数 ✓");
   });
 
-  it("入口锚点用**表格本体 ∩ wrapper 可见区**，并按上一块的下沿判断上方空间 ✓", () => {
-    assert.ok(richSource.includes('block?.querySelector<HTMLElement>("table")'), "锚的是表格本体，不是整块容器 ✓");
+  it("入口锚在**正文表格**（不是隐藏预览表）∩ wrapper 可见区，并按上一块的下沿判断上方空间 ✓", () => {
+    assert.ok(
+      richSource.includes("const body = cellTable ?? pickBodyTable(candidates)?.el ?? null;"),
+      "锚的是**正文表格**本体，不是整块容器、也不是隐藏预览表 ✓",
+    );
+    assert.ok(richSource.includes("collectTableCandidates(block)"), "候选由 DOM 层收集、判定交给纯函数 ✓");
+    assert.ok(!richSource.includes('querySelector<HTMLElement>("table")'), "不许再用「块里第一张 table」✗（那是隐藏预览表 ✓）");
     assert.ok(richSource.includes('closest<HTMLElement>(".table-wrapper")'), "与横向滚动容器求交 ✓");
     assert.ok(richSource.includes("block.previousElementSibling"), "用上一块的下沿判断上方有没有空白 ✓");
     assert.ok(panel.includes("position: relative"), "正文容器要能当定位父级 ✓");

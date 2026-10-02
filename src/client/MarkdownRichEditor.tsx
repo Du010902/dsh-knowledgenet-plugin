@@ -55,12 +55,57 @@ import {
   pathHitsNodes,
   readTableContext,
   readTableMoveState,
+  pickBodyTable,
+  resolveTableTarget,
+  tableEntryHideReason,
   tableEntryPosition,
   tablePopoverPosition,
   type TableAlignment,
+  type TableEntryHideReason,
   type TableMenuAction,
   type TableMoveState,
 } from "./table-menu.ts";
+
+/**
+ * 收集一个表格块里的 **table 候选** ✓
+ * （`design/table-entry-hidden-preview-table-analysis.md` ✓）。
+ *
+ * 块里除了正文表格，还有 `.drag-preview > table` 那张**隐藏预览表** ✗ ——
+ * 它排在正文表格**前面** ✓，而 `querySelector("table")` 只看顺序、看不见 `display:none` ✗
+ * ⇒ 拿到零矩形 ⇒ 入口被判成"没空间"、直接不显示 ✓（实测入口数 = 0 ✓）。
+ * 这里把"隐藏 / 在不在 wrapper 里 / 有没有尺寸"都标出来 ✓，判定交给纯函数 ✓。
+ */
+function collectTableCandidates(block: HTMLElement): Array<{
+  el: HTMLTableElement;
+  hidden: boolean;
+  inWrapper: boolean;
+  width: number;
+  height: number;
+}> {
+  const wrapper = block.querySelector<HTMLElement>(".table-wrapper");
+  return Array.from(block.querySelectorAll<HTMLTableElement>("table")).map((el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      el,
+      hidden: el.closest(".drag-preview") !== null,
+      inWrapper: wrapper !== null && wrapper.contains(el),
+      width: rect.width,
+      height: rect.height,
+    };
+  });
+}
+
+/** **活跃单元格**所在的正文表格 ✓（复查建议：有单元格时优先用它 ✓，最不依赖层级 ✓） */
+function activeCellTable(view: ProseMirrorView): HTMLTableElement | null {
+  try {
+    const node = view.domAtPos(view.state.selection.from).node;
+    const element = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+    const table = element?.closest("table") ?? null;
+    return table instanceof HTMLTableElement ? table : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */
 function selectionTableBlock(view: ProseMirrorView): HTMLElement | null {
@@ -183,8 +228,8 @@ export interface MarkdownRichEditorStatus {
 
 /** 表格入口与弹出菜单在正文容器里的锚点（**内容坐标** ✓；`null` = 不显示 ✓） */
 interface TableMenuAnchor {
-  /** 入口按钮 ✓ */
-  entry: { top: number; right: number; inside: boolean };
+  /** 入口按钮 ✓（`compact` = 实在没地方、只能压在单元格上 ⇒ 收成小图标 ✓） */
+  entry: { top: number; right: number; inside: boolean; compact: boolean };
   /** 点开后弹出的菜单 ✓ */
   popover: { top: number; right: number };
   alignment: TableAlignment;
@@ -240,6 +285,27 @@ export function MarkdownRichEditor(props: {
   const hoverBlockRef = useRef<HTMLElement | null>(null);
   /** "入口刚因为看不见而收起"是否已经上报过 ✓（避免每帧刷满诊断环形缓冲 ✗） */
   const entryHiddenReportedRef = useRef(false);
+  /** 上次上报的"隐藏原因" ✓（只在**原因变化**时上报 ✓ —— 复查要求几种情况分开 ✓，但也不许刷屏 ✗） */
+  const hideReasonRef = useRef<TableEntryHideReason | null>(null);
+  /**
+   * **打开菜单期间锁定的那张表格块** ✓（复查"避免跨表格误操作"✓）：
+   * 菜单开着的时候鼠标飘到别的表格上也不换锚点 ✗；关掉菜单就解锁 ✓。
+   */
+  const menuBlockRef = useRef<HTMLElement | null>(null);
+
+  /**
+   * 收起入口并说明**为什么** ✓（原因只在变化时上报一次 ✓）。
+   * @param reason - 见 `TableEntryHideReason` ✓。
+   */
+  const hideEntry = useCallback((reason: TableEntryHideReason): void => {
+    setMenu(null);
+    setMenuOpen(false);
+    menuBlockRef.current = null;
+    if (hideReasonRef.current === reason) return;
+    hideReasonRef.current = reason;
+    entryHiddenReportedRef.current = true;
+    reportRef.current?.("table-entry-hidden", { reason });
+  }, []);
   /**
    * **最近一次落点在表格单元格里的普通点击** ✓（屏幕坐标 + 时间 ✓）。
    *
@@ -325,31 +391,48 @@ export function MarkdownRichEditor(props: {
     const view = viewRef.current;
     const host = hostRef.current;
     if (view === null || host === null || !readyRef.current || failedRef.current) {
-      setMenu(null);
-      setMenuOpen(false);
+      hideEntry("no-block");
       return;
     }
     const context = readTableContext(view.state);
-    /* 光标在表格里 ⇒ 就以那张表格为准 ✓；否则用鼠标悬停的那张 ✓（两者都没有才收起 ✓） */
+    /*
+     * **锚在哪张表格** ✓（复查"多表格切换"那条 ✓）：
+     * 菜单打开期间**锁定** ✓ → 否则**鼠标悬停的那张优先** ✓（用户指着谁就是谁 ✓）
+     * → 都没有才退回**选区所在的表格** ✓。
+     */
     const selectionBlock = context.inTable ? selectionTableBlock(view) : null;
-    const block = selectionBlock ?? hoverBlockRef.current;
-    const table = block?.querySelector<HTMLElement>("table") ?? null;
+    const block = resolveTableTarget({
+      locked: menuBlockRef.current,
+      hovered: hoverBlockRef.current,
+      selection: selectionBlock,
+    });
     const container = host.closest<HTMLElement>(".kn-editor-body");
-    if (block === null || table === null || container === null) {
-      setMenu(null);
-      setMenuOpen(false);
+    if (block === null || container === null) {
+      hideEntry("no-block");
       return;
     }
+    /*
+     * **正文表格**：先按活跃单元格找 ✓（最稳 ✓，不依赖层级 ✓），
+     * 找不到再从块内候选里**过滤** ✓（排除 `.drag-preview` 里的隐藏预览表 ✓，要求非零尺寸 ✓）。
+     * 复查实测：原来 `querySelector("table")` 拿到的正是那张零尺寸的隐藏表 ✗ ⇒ 入口永远不显示 ✓。
+     */
+    const candidates = collectTableCandidates(block);
+    const cellTable = selectionBlock === null ? null : activeCellTable(view);
+    const body = cellTable ?? pickBodyTable(candidates)?.el ?? null;
+    if (body === null) {
+      hideEntry(candidates.length === 0 ? "no-body-table" : "zero-size");
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
     /* **可见**表格范围 = 表格矩形 ∩ 横向滚动容器的可见矩形 ✓ */
-    const tableRect = table.getBoundingClientRect();
-    const wrapperRect = table.closest<HTMLElement>(".table-wrapper")?.getBoundingClientRect() ?? tableRect;
+    const tableRect = body.getBoundingClientRect();
+    const wrapperRect = body.closest<HTMLElement>(".table-wrapper")?.getBoundingClientRect() ?? tableRect;
     const visible = {
       top: Math.max(tableRect.top, wrapperRect.top),
       bottom: Math.min(tableRect.bottom, wrapperRect.bottom),
       left: Math.max(tableRect.left, wrapperRect.left),
       right: Math.min(tableRect.right, wrapperRect.right),
     };
-    const containerRect = container.getBoundingClientRect();
     /* 表格**上一块**的下沿：判断"上方有没有真空白" ✓（不许拿覆盖正文换空间 ✗） */
     const before = block.previousElementSibling;
     const previousBottom = before === null ? null : before.getBoundingClientRect().bottom;
@@ -364,25 +447,25 @@ export function MarkdownRichEditor(props: {
        而不是把内容坐标夹到 >0 了事 ✗ —— 那正是复查看到的裁切外按钮 ✓） */
     const entry = tableEntryPosition(visible, containerRect, container.scrollTop, previousBottom, undefined, undefined, undefined, cell);
     if (entry === null) {
-      setMenu(null);
-      setMenuOpen(false);
       /*
-       * **只在"刚刚变成隐藏"时留痕** ✓：`syncMenu` 每帧、每次滚动都会跑 ✓，
-       * 每次都上报会把客户端诊断的环形缓冲刷满 ✗ —— 实测就是这样把 `note-open-*` 计时全挤掉了 ✓
-       * （`design/plugin-note-editor-loading-recheck.md` 问题三 ✓）。
+       * **把"为什么没显示"分开报** ✓（复查要求：别都报 `no-visible-band` ✗ ——
+       * 查询到隐藏预览表那种错误会被这条笼统原因掩盖 ✓）。
        */
-      if (!entryHiddenReportedRef.current) {
-        entryHiddenReportedRef.current = true;
-        reportRef.current?.("table-entry-hidden", { reason: "no-visible-band" });
-      }
+      const viewport = { top: containerRect.top, bottom: containerRect.bottom };
+      hideEntry(tableEntryHideReason({ candidates, visible, viewport }) ?? "no-visible-band");
       return;
     }
     entryHiddenReportedRef.current = false;
+    hideReasonRef.current = null;
     const popover = tablePopoverPosition(entry, containerRect, container.scrollTop);
-    const alignment: TableAlignment = selectionBlock === null ? "left" : context.alignment;
-    /* 移动类动作的可用性：**由当前选区算** ✓（悬停进来的话选区还没在表格里 ⇒ 先全禁用 ✓，
-       用户点开菜单时 `openMenu` 会把光标放进去，这一项随之重算 ✓） */
-    const move = selectionBlock === null ? null : readTableMoveState(view.state);
+    /*
+     * 对齐高亮与"行列移动能不能用"都**只看目标表格里的选区** ✓：
+     * 悬停的是 B、光标还在 A 时，先不要拿 A 的状态去点亮 B 的菜单 ✗
+     * （用户点开菜单时 `openMenu` 会把光标放进 B ✓，这一项随之重算 ✓）。
+     */
+    const selectionInTarget = selectionBlock !== null && selectionBlock === block;
+    const alignment: TableAlignment = selectionInTarget ? context.alignment : "left";
+    const move = selectionInTarget ? readTableMoveState(view.state) : null;
     const disabledActions: Partial<Record<TableMenuAction, string>> = {};
     for (const item of TABLE_MENU_ITEMS) {
       if (item.move !== true) continue;
@@ -400,6 +483,7 @@ export function MarkdownRichEditor(props: {
       if (
         current !== null
         && current.entry.top === entry.top && current.entry.right === entry.right && current.entry.inside === entry.inside
+        && current.entry.compact === entry.compact
         && current.popover.top === popover.top && current.popover.right === popover.right
         && current.alignment === alignment && current.busy === busy
         && sameReasons(current.disabledActions, disabledActions)
@@ -419,10 +503,22 @@ export function MarkdownRichEditor(props: {
   const openMenu = useCallback((): void => {
     const view = viewRef.current;
     if (view === null) return;
-    const target = readTableContext(view.state).inTable ? null : hoverBlockRef.current;
-    if (target !== null) {
+    const inTable = readTableContext(view.state).inTable;
+    const selectionBlock = inTable ? selectionTableBlock(view) : null;
+    /*
+     * **锁定操作对象** ✓（复查"打开菜单期间锁定操作对象，避免跨表格误操作"✓）：
+     * 锚定"现在就用的那张"（悬停优先 → 选区 ✓，与 `syncMenu` 同一套规则 ✓）。
+     */
+    const locked = resolveTableTarget({ locked: null, hovered: hoverBlockRef.current, selection: selectionBlock });
+    menuBlockRef.current = locked;
+    /*
+     * 光标**不在**这张表格里（悬停就显示入口的情形 ✓）⇒ 先把光标放进它的第一个单元格 ✓。
+     * 复查要求"操作目标来自最后有效单元格选区，**不能通过改变选区来显示入口**"✓：
+     * 显示入口时一个事务都不发 ✓，只有用户点开才动这一下 ✓。
+     */
+    if (locked !== null && selectionBlock !== locked) {
       try {
-        const tablePos = view.posAtDOM(target, 0);
+        const tablePos = view.posAtDOM(locked, 0);
         const caret = firstCaretInTable(view.state, tablePos);
         if (caret !== null) {
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, caret)));
@@ -454,6 +550,8 @@ export function MarkdownRichEditor(props: {
   /** 关掉菜单并把焦点还给正文 ✓（Esc / 点外面 / 执行完动作都走它 ✓） */
   const dismissMenu = useCallback((): void => {
     setMenuOpen(false);
+    /* 关掉菜单 ⇒ **解锁**操作对象 ✓（下次按悬停/选区重新决定 ✓） */
+    menuBlockRef.current = null;
     viewRef.current?.focus();
   }, []);
 
@@ -1027,6 +1125,7 @@ export function MarkdownRichEditor(props: {
           right={menu.entry.right}
           inside={menu.entry.inside}
           open={menuOpen}
+          compact={menu.entry.compact}
           disabled={menu.busy}
           hint={menu.busy ? t("tableEntryDisabled") : t("tableMenuLabel")}
           t={t}

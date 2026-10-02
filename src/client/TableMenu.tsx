@@ -141,12 +141,16 @@ function keepSelection(event: { preventDefault: () => void }): void {
  * @param props.nodeRef - 把真实节点交出去 ✓：判"点的是不是菜单内部"必须按**节点引用** ✗
  *   （Shadow DOM 里 `event.target` 到 `document` 已被重定向成 host ✓，
  *   见 `design/table-menu-shadow-dom-review.md` ✓）。
+ * @param props.compact - **收成小图标** ✓（用户实测："别挡住我要编辑的格子" ✗ ——
+ *   有地方就把入口放到格子外面 ✓，实在没地方才压在格子角上、并且缩到最小 ✓；
+ *   文字标签这时收起来 ✓，`title` / `aria-label` 照旧说明它是「表格操作」✓）。
  */
 export function TableEntry(props: {
   top: number;
   right: number;
   inside: boolean;
   open: boolean;
+  compact: boolean;
   disabled: boolean;
   hint: string;
   t: (key: string) => string;
@@ -156,7 +160,7 @@ export function TableEntry(props: {
   return (
     <button
       type="button"
-      className={`kn-table-entry${props.inside ? " is-inside" : ""}${props.open ? " is-open" : ""}`}
+      className={`kn-table-entry${props.inside ? " is-inside" : ""}${props.compact ? " is-compact" : ""}${props.open ? " is-open" : ""}`}
       style={{ top: `${props.top}px`, right: `${props.right}px` }}
       title={props.hint}
       aria-label={props.t("tableMenuLabel")}
@@ -168,7 +172,7 @@ export function TableEntry(props: {
       onClick={props.onToggle}
     >
       {ENTRY_ICON}
-      <span className="kn-table-entry-label">{props.t("tableMenuLabel")}</span>
+      {props.compact ? null : <span className="kn-table-entry-label">{props.t("tableMenuLabel")}</span>}
     </button>
   );
 }

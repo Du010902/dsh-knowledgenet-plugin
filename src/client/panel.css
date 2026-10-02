@@ -1033,9 +1033,24 @@
   outline-offset: 1px;
 }
 
-/* 压进表格右上角那一支：默认半透明，悬停 / 展开 / 键盘聚焦时实体化 ✓ */
+/*
+ * 压进**单元格右上角**那一支 ✓：默认半透明（不许把格子里的字盖住 ✓），
+ * 悬停 / 展开 / 键盘聚焦时实体化 ✓。位置由 `tableEntryPosition` 的"贴活跃单元格"分支给 ✓。
+ */
 .kn-table-entry.is-inside {
-  opacity: 0.78;
+  opacity: 0.72;
+}
+
+/*
+ * **实在没地方**（这一格就在视口最顶上、右边也没有空白 ✓）⇒ 压在格子角上，
+ * 但**收成小图标** ✓（用户实测："别挡住我要编辑的格子" ✗ ⇒ 空间不够时把自己缩到最小 ✓）。
+ * 文字标签由组件收起来 ✓，悬停时的 `title` 仍然写着「表格操作」✓。
+ */
+.kn-table-entry.is-compact {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  justify-content: center;
 }
 
 .kn-table-entry.is-inside:hover,

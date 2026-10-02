@@ -246,6 +246,12 @@ export function movePayload(
   return null;
 }
 
+/**
+ * 入口在"实在没地方、只能压在单元格上"时收成的**小图标尺寸** ✓
+ * （用户实测："别挡住我要编辑的格子" ✗ ⇒ 有地方就放到格子外面 ✓，没地方就把自己缩到最小 ✓）。
+ */
+export const TABLE_ENTRY_COMPACT_SIZE = 22;
+
 /** 入口按钮的高度（复查要求"轻量按钮" ✓；横向定位用下面的估算宽度 ✓） */
 export const TABLE_ENTRY_SIZE = 24;
 /**
@@ -258,6 +264,106 @@ export const TABLE_ENTRY_WIDTH = 78;
 export const TABLE_ENTRY_GAP = 4;
 /** 弹出菜单的高度上限（与 CSS 的 max-height 一致 ✓；超了在菜单里滚 ✓） */
 export const TABLE_POPOVER_HEIGHT = 264;
+
+/**
+ * **一个 table 候选**（DOM 层负责收集 ✓，这里只做判定 ✓ ⇒ 可离线单测 ✓）。
+ *
+ * 为什么需要它（`design/table-entry-hidden-preview-table-analysis.md` ✓）：
+ * 表格块里**正文表格之前还有一张隐藏的拖拽预览 table** ✗
+ * （`.drag-preview > table`，`editor-overrides.css` 把它 `display:none` ✓）
+ * ⇒ 原来的 `querySelector("table")` 拿到的是它 ✓，矩形 `0×0` ✓，
+ * 于是"可见带小于按钮高度" ⇒ 入口被判成不可显示 ⇒ 用户根本看不到入口 ✓（实测入口数 = 0 ✓）。
+ * 复查要求：**别依赖"第一张 / 最后一张"** ✗，按标记过滤 ✓。
+ */
+export interface TableCandidate {
+  /** 是不是 `.drag-preview`（或它里面）那张隐藏预览表 ✓ */
+  hidden: boolean;
+  /** 是不是在 `.table-wrapper` 里 ✓（正文表格一定在 ✓） */
+  inWrapper: boolean;
+  /** 视口矩形的宽高（`0` ⇒ 没尺寸、量不了 ✓） */
+  width: number;
+  height: number;
+}
+
+/**
+ * 从候选里挑出**正文表格** ✓。
+ *
+ * 规则（顺序即优先级 ✓）：排除隐藏预览 ✓ → 必须在 `.table-wrapper` 里 ✓ → **必须有非零尺寸** ✓。
+ * 全都不合格 ⇒ `undefined` ✓（调用方据此报"没找到正文表格"或"尺寸为零" ✓，而不是笼统的"没空间" ✗）。
+ *
+ * @param candidates - 块内收集到的所有 table 候选 ✓（**顺序无关** ✓）。
+ * @returns 正文表格候选；没有返回 `undefined` ✓。
+ */
+export function pickBodyTable<T extends TableCandidate>(candidates: readonly T[]): T | undefined {
+  const usable = candidates.filter((item) => item.hidden !== true && item.inWrapper === true);
+  return usable.find((item) => item.width > 0 && item.height > 0);
+}
+
+/**
+ * 入口该锚在哪张表格 ✓（复查"多表格切换"那条 ✓）。
+ *
+ * - **菜单打开期间锁定** ✓：`locked` 有效就一直用它 ✗（否则鼠标一飘就换表、可能误操作 ✓）；
+ * - 否则**鼠标悬停的那张优先** ✓（用户指着谁就是谁 ✓ —— 复查指出原来"选区优先"会让人以为
+ *   悬停的表格没有菜单 ✓）；没有悬停（或刚移出表格）再退回**选区所在的表格** ✓。
+ *
+ * @param args - 三个候选（同一形状 ✓；没有就传 `null` ✓）。
+ * @returns 该用的那张；都没有 ⇒ `null` ✓。
+ */
+export function resolveTableTarget<T>(args: {
+  locked: T | null;
+  hovered: T | null;
+  selection: T | null;
+}): T | null {
+  return args.locked ?? args.hovered ?? args.selection;
+}
+
+/** 入口**为什么没显示** ✓（复查要求把几种情况分开 ✗，别都报 `no-visible-band` ✓） */
+export type TableEntryHideReason =
+  /** 连表格块都没找到（选区不在表格里、也没悬停任何表格 ✓） */
+  | "no-block"
+  /** 块里没有合格的正文表格（只有隐藏预览 / 都不在 wrapper 里 ✓） */
+  | "no-body-table"
+  /** 找到了正文表格，但它量出来是零尺寸 ✓ */
+  | "zero-size"
+  /** 正文表格与正文视口**完全不相交**（整张滚出视口了 ✓） */
+  | "table-out-of-view"
+  /** 表格有可见部分，但放不下一个按钮 ✓ */
+  | "no-visible-band";
+
+/**
+ * 算出"没显示入口"的原因 ✓（纯函数 ✓）。
+ *
+ * @param args.candidates - 块内 table 候选 ✓（空数组 ⇒ `no-block` ✓）。
+ * @param args.visible - 正文表格 ∩ `.table-wrapper` 的**可见矩形**（视口坐标 ✓）。
+ * @param args.viewport - 正文滚动容器的可见范围 ✓。
+ * @param args.size - 按钮高度（默认 `TABLE_ENTRY_SIZE` ✓）。
+ * @returns 原因 ✓；一切正常（**应该显示**）⇒ `null` ✓。
+ */
+export function tableEntryHideReason(args: {
+  candidates: readonly TableCandidate[];
+  visible?: { top: number; bottom: number } | undefined;
+  viewport?: { top: number; bottom: number } | undefined;
+  size?: number;
+}): TableEntryHideReason | null {
+  const size = args.size ?? TABLE_ENTRY_SIZE;
+  if (args.candidates.length === 0) return "no-block";
+  const body = pickBodyTable(args.candidates);
+  if (body === undefined) {
+    /* 候选都不合格：有"合格形状但零尺寸"的 ⇒ 那是 zero-size 分支；否则就是没找到正文表格 ✓ */
+    const sized = args.candidates.some(
+      (item) => item.hidden !== true && item.inWrapper === true && item.width > 0 && item.height > 0,
+    );
+    return sized ? null : "no-body-table";
+  }
+  if (body.width <= 0 || body.height <= 0) return "zero-size";
+  const { visible, viewport } = args;
+  if (visible === undefined || viewport === undefined) return null;
+  const bandTop = Math.max(visible.top, viewport.top);
+  const bandBottom = Math.min(visible.bottom, viewport.bottom);
+  if (bandBottom <= bandTop) return "table-out-of-view";
+  if (bandBottom - bandTop < size) return "no-visible-band";
+  return null;
+}
 
 /** 一个矩形只需要这几个边 ✓（都用 `getBoundingClientRect()` 给 ✓） */
 export interface Box {
@@ -311,7 +417,7 @@ export function tableEntryPosition(
   gap: number = TABLE_ENTRY_GAP,
   width: number = TABLE_ENTRY_WIDTH,
   cell: Box | null = null,
-): { top: number; right: number; inside: boolean } | null {
+): { top: number; right: number; inside: boolean; compact: boolean } | null {
   /* 正文视口的纵向范围（视口坐标 ✓） */
   const viewTop = container.top;
   const viewBottom = container.bottom ?? container.top + size;
@@ -334,9 +440,51 @@ export function tableEntryPosition(
   /* 上一块下沿到表格上沿之间的距离 ✓（null ⇒ 表格是这一段的第一块 ✓） */
   const freeAbove = previousBottom === null ? Number.POSITIVE_INFINITY : table.top - previousBottom;
 
+  /*
+   * ⓪ **贴活跃单元格的「右上角外侧」** ✓（用户两次实测的要求合起来就是这句 ✓）：
+   * ① 不能飘到离被点的那一格很远的右边 ✗；
+   * ② 更**不能盖住正在编辑的那一格** ✗。
+   *
+   * 所以：
+   * - **纵向优先放在这一格的上方** ✓（入口底边 = 单元格上沿 − 间距 ✓）⇒ "右上角"✓ 且不挡这一格 ✓；
+   *   上面放不下（这一格就在可见区顶部 ✓）⇒ 再试**可见带上方** ✓（整张表格顶部之外 ✓，更不挡 ✓）；
+   * - **横向贴这一格的右边** ✓（不再贴整张表 / 容器右边 ✗）；格子右边在视口外 ⇒ 夹到"整块可见"的最右 ✓；
+   * - 上面**真的没地方**（这一格在视口最顶上、上方又被滚动压掉 ✓）⇒ 才压在这一格右上角，
+   *   但那时**收成小图标** ✓（`compact` ✓）—— 少挡字，而且仍然紧贴这一格 ✓；
+   * - 这一格本身太窄（放不下整条胶囊 ✓）⇒ 同上，走小图标 ✓。
+   *
+   * `inside` 表示"是否压在表格上"✓（CSS 据此用半透明样式 ✓，不遮住格子里的字 ✓）。
+   */
+  if (cell !== null && cell.top >= bandTop && cell.top <= bandBottom - size) {
+    const inset = 2;
+    const visibleLeft = Math.max(table.left ?? container.left ?? container.right - width, container.left ?? 0);
+    const maxRight = Math.max(inset, container.right - visibleLeft - width - inset);
+    /** 让入口**右边**贴着 `edge`（视口坐标 ✓），并保证整块可见 ✓ */
+    const rightFor = (edge: number): number => Math.min(Math.max(container.right - edge + inset, inset), maxRight);
+    const wideEnough = cell.right - visibleLeft >= width + inset * 2;
+    if (wideEnough) {
+      for (const wantedTop of [cell.top - size - gap, bandTop - size - gap]) {
+        if (wantedTop < viewTop) continue; /* 放上去会跑出可见区 ⇒ 换下一个锚 ✗ */
+        return {
+          top: Math.max(0, Math.round(wantedTop - viewTop + scrollTop)),
+          right: Math.max(0, Math.round(rightFor(cell.right))),
+          inside: wantedTop + size > table.top,
+          compact: false,
+        };
+      }
+    }
+    /* 上面没地方 / 这一格太窄 ⇒ 压在这一格右上角，但收成小图标 ✓（尽量少挡 ✓） */
+    return {
+      top: Math.max(0, Math.round(clampToView(cell.top + inset) - viewTop + scrollTop)),
+      right: Math.max(0, Math.round(rightFor(cell.right))),
+      inside: true,
+      compact: true,
+    };
+  }
+
   if (gutter >= width + gap) {
     /* ① 放右侧空白里：左边紧挨表格右边缘 ✓ */
-    return { top: Math.max(0, Math.round(contentTop)), right: Math.max(0, Math.round(gutter - gap - width)), inside: false };
+    return { top: Math.max(0, Math.round(contentTop)), right: Math.max(0, Math.round(gutter - gap - width)), inside: false, compact: false };
   }
   /*
    * ② 放表格上方 —— 两个前提都要满足 ✓：
@@ -346,10 +494,10 @@ export function tableEntryPosition(
    */
   const aboveTop = top - size - gap;
   if (freeAbove >= size + gap && table.top >= viewTop && aboveTop >= viewTop) {
-    return { top: Math.max(0, Math.round(aboveTop - viewTop + scrollTop)), right: Math.max(0, Math.round(gutter)), inside: false };
+    return { top: Math.max(0, Math.round(aboveTop - viewTop + scrollTop)), right: Math.max(0, Math.round(gutter)), inside: false, compact: false };
   }
   /* ③ 压表格右上角（只压表格，不压上一段 ✓） */
-  return { top: Math.max(0, Math.round(contentTop + 2)), right: Math.max(0, Math.round(gutter + 2)), inside: true };
+  return { top: Math.max(0, Math.round(contentTop + 2)), right: Math.max(0, Math.round(gutter + 2)), inside: true, compact: false };
 }
 
 /**
