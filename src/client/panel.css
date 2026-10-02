@@ -990,48 +990,70 @@
   overflow-y: auto;
 }
 
-/* ===================== 表格操作：一个入口 + 按需弹出（`design/node-editor-design-implementation-review.md` P2） ===================== */
+/* ===================== 表格操作：一个入口 + 按需弹出（`design/node-editor-design-implementation-review.md` P2 / `table-interaction-and-row-column-functions-review.md` P2a） ===================== */
 
 /*
- * **入口**：光标进了表格才出现的一个 24px 小按钮 ✓（显隐 / 位置由 `MarkdownRichEditor` 按
- * 编辑器 selection 与**可见表格范围**决定 ✓）。Crepe 那套常驻的十字线 / 加号 / 行列抓手
- * 已经整块撤掉 ✗（见 `editor-overrides.css`：连 `pointer-events` 一起停掉 ✓）。
+ * **入口**：光标进表格、或鼠标**悬停表格**时出现的一个小按钮 ✓
+ * （复查 P2a：原来只在"selection 被判在表格里"时才出现 ⇒ 用户找不到添加/删除行列 ✓）。
  *
- * 复查实测的问题：原来九个按钮的 240px 工具条常驻铺在表格上方、按整块容器定位 ⇒
- * 短表格也被贴到容器右边，还盖住了前一段引用 ✗。现在入口只占 24px，
- * 位置优先右侧空白 → 上方空白 → 表格自己的右上角 ✓（宁可靠在表格上，也不盖正文 ✓）。
+ * 复查还说它"24px + 透明背景 + opacity .45 + 没有文字 ⇒ 暗色表格上认不出来"✗
+ * ⇒ 现在带**文字标签**（「表格操作」✓）、有边框和底色、默认就有足够对比 ✓；
+ * 贴在表格右上角那一支（`is-inside`）才稍微轻一点，避免压住表格内容 ✓。
+ * 只读 / 保存中：**保留入口但禁用** ✓（禁用理由写在 title 上 ✓）。
  */
 .kn-table-entry {
   position: absolute;
   z-index: 3;
   display: flex;
+  gap: 4px;
   align-items: center;
-  justify-content: center;
-  width: 24px;
   height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
   cursor: pointer;
-  /* 轻量：不抢注意力 ✓（悬停 / 展开 / 键盘聚焦才实体化 ✓） */
-  opacity: 0.45;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
   transition: opacity 0.15s ease-in-out, background-color 0.15s ease-in-out;
 }
 
 .kn-table-entry:hover,
 .kn-table-entry:focus-visible,
 .kn-table-entry.is-open {
-  opacity: 1;
-  border-color: var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--dsw-alias-bg-layer-1));
 }
 
 .kn-table-entry:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;
+}
+
+/* 压进表格右上角那一支：默认半透明，悬停 / 展开 / 键盘聚焦时实体化 ✓ */
+.kn-table-entry.is-inside {
+  opacity: 0.78;
+}
+
+.kn-table-entry.is-inside:hover,
+.kn-table-entry.is-inside:focus-visible,
+.kn-table-entry.is-inside.is-open {
+  opacity: 1;
+}
+
+/* 只读 / 保存中：还在，但明确不可用 ✓ */
+.kn-table-entry:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.kn-table-entry-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*
@@ -1104,6 +1126,34 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 移动类动作：位置与插入/删除分开读 ✓ */
+.kn-table-menu-item.is-move {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.kn-table-menu-item.is-move:hover:not(:disabled),
+.kn-table-menu-item.is-move:focus-visible:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 动不了（边界 / 表头 / 多选或合并）：禁用 + 右侧一句"为什么" ✓ */
+.kn-table-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.kn-table-menu-item:disabled:hover {
+  background: transparent;
+}
+
+.kn-table-menu-why {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--dsw-alias-state-idle-primary);
+  font-size: 10px;
   white-space: nowrap;
 }
 

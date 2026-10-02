@@ -11,7 +11,8 @@
  * - 大文档有明确上限：超过就**拒绝**（读与写都拒），绝不静默截断后允许保存 ✗；
  * - 只认库内相对路径 ⇒ 由存储层按 `nodeId` 自己解析路径 ✗（不接受客户端给的绝对路径 ✓）。
  */
-import { readLibrary, writeNote, type V3Node } from "./v3/store.ts";
+import { readLibrary, readNodeFast, writeNote, type V3Node } from "./v3/store.ts";
+import { recordDocRead } from "./status.ts";
 
 /**
  * 正文大小上限（UTF-8 字节）。
@@ -40,7 +41,7 @@ export type DocumentResult =
   | { ok: true; document: NodeDocument }
   | {
     ok: false;
-    code: "not_library" | "unsupported_format" | "node_missing" | "too_large" | "conflict" | "write_failed" | "bad_body";
+    code: "not_library" | "unsupported_format" | "node_missing" | "too_large" | "conflict" | "write_failed" | "bad_body" | "read_failed";
     message: string;
     /** 冲突时回带磁盘上的**最新正文**（供比较 / 合并 ✓） */
     latest?: NodeDocument;
@@ -84,23 +85,80 @@ function utf8Bytes(text: string): number {
  * @param nodeId - 稳定节点 id。
  * @returns 文档，或带 code 的失败 ✓。
  */
-export async function readNodeDocument(root: string, nodeId: string): Promise<DocumentResult> {
+export async function readNodeDocument(
+  root: string,
+  nodeId: string,
+  timing: { requestId?: string } = {},
+): Promise<DocumentResult> {
   const id = typeof nodeId === "string" ? nodeId.trim() : "";
   if (id === "") return { ok: false, code: "node_missing", message: "缺少 nodeId" };
-  const library = await readLibrary(root, { withNotes: true });
-  if (library === undefined) {
+  const started = Date.now();
+  /** 客户端请求号 ✓（与 `noteApi` / 客户端 `note-open-*` 对齐用 ✓；这只是留痕，不参与判定 ✗） */
+  const requestId = typeof timing.requestId === "string" ? timing.requestId : "";
+  /*
+   * **不再为读一篇正文扫全库** ✗（`design/plugin-note-editor-loading-optimization.md` 优先优化一 ✓）：
+   * 先走索引（正常情况**只读目标文件** ✓，图谱刚扫过的话一个文件都不多扫 ✓）；
+   * 只有索引过期 / 身份对不上时才受控重扫 ✓，而"刚重扫过还是没有"就是权威结论 ✓。
+   */
+  const fast = await readNodeFast(root, id);
+  if (fast.ok === false && fast.code === "not_library") {
     return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${root}` };
   }
-  const node = library.nodes.find((item) => item.id === id);
-  if (node === undefined) return { ok: false, code: "node_missing", message: "没有找到这个知识点" };
+  let node: V3Node | undefined = fast.ok === true ? fast.node : undefined;
+  let mode: "index" | "index-miss" | "full-scan" = fast.ok === true ? "index" : "index-miss";
+  /*
+   * **兜底兜底**（极少走到 ✓）：索引里那个 id 指向的文件身份**没验证通过**
+   * （重复 ULID ✓、或建索引时有文件读不到 ✓）—— 这时"没有这个节点"不可信 ✗
+   * ⇒ 用全库扫描确认一次 ✓（权威、但慢，所以只在必要时 ✓）。
+   *
+   * ⚠️ 全库扫描**允许抛**（库里有读不了的文件就该报错 ✓，不许假装"没有这个节点" ✗）
+   * ⇒ 这里接住并转成明确的 `read_failed` ✓，别把异常丢给路由 ✓。
+   */
+  if (node === undefined && fast.ok === false && fast.unverified) {
+    try {
+      const library = await readLibrary(root, { withNotes: true });
+      if (library === undefined) {
+        return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${root}` };
+      }
+      node = library.nodes.find((item) => item.id === id);
+      mode = "full-scan";
+    } catch (error) {
+      recordDocRead({
+        at: started,
+        ms: Date.now() - started,
+        mode: "full-scan",
+        bytes: 0,
+        outcome: "read_failed",
+        requestId,
+      });
+      return {
+        ok: false,
+        code: "read_failed",
+        message: `读知识库时出错：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  if (node === undefined) {
+    recordDocRead({ at: started, ms: Date.now() - started, mode, bytes: 0, outcome: "node_missing", requestId });
+    return { ok: false, code: "node_missing", message: "没有找到这个知识点" };
+  }
   const document = docOf(node);
   if (utf8Bytes(document.text) > MAX_DOCUMENT_BYTES) {
+    recordDocRead({ at: started, ms: Date.now() - started, mode, bytes: utf8Bytes(document.text), outcome: "too_large", requestId });
     return {
       ok: false,
       code: "too_large",
       message: `正文超过 ${Math.round(MAX_DOCUMENT_BYTES / 1024)}KB，面板编辑器不处理这么大的文档`,
     };
   }
+  recordDocRead({
+    at: started,
+    ms: Date.now() - started,
+    mode,
+    bytes: utf8Bytes(document.text),
+    outcome: "ok",
+    requestId,
+  });
   return { ok: true, document };
 }
 

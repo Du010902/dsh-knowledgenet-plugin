@@ -17,11 +17,13 @@ import { mkdir } from "node:fs/promises";
 import { createSubdirectory } from "./create-dir.ts";
 import { createNodeFromUi } from "./mutate.ts";
 import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
+/* 轻量格式检查住在 store 里（只读 library.json ✓；库模块带 Node 参数属性 ⇒ 单测导不进来 ✗） */
+import { checkLibraryFormat } from "./v3/store.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation } from "./isolation-state.ts";
 import { listPlans } from "./plans.ts";
 import { graphPayload } from "./payload.ts";
-import { recordClientDiag, recordProbe } from "./status.ts";
+import { recordClientDiag, recordNoteApi, recordProbe } from "./status.ts";
 import type { KnowledgeNetConfig } from "./tools.ts";
 
 // 常量定义在 src/shared/routes.ts（客户端半也要用，而它不能引入宿主模块图）
@@ -321,6 +323,11 @@ export async function handleApiRequest(
     /** 节点正文编辑：完整正文与读取时的整文件指纹 ✓ */
     text?: unknown;
     hash?: unknown;
+    /**
+     * 客户端给的请求号 ✓（只用于留痕对齐：`noteApi` ↔ 客户端 `note-open-*` ✓；
+     * **不参与任何判定** ✗，见 `design/plugin-note-editor-loading-recheck.md` 问题三 ✓）。
+     */
+    requestId?: unknown;
   } | null | undefined;
   if (record === null || typeof record !== "object") {
     return { status: 200, body: { ok: false, error: { code: "bad_body", message: "请求体必须是对象" } } };
@@ -527,47 +534,52 @@ export async function handleApiRequest(
    * 只读写正文，front-matter 身份由存储层维护 ✗；路径由宿主按 nodeId 解析 ✓。
    */
   if (record.kind === "read-node-document" || record.kind === "save-node-document") {
+    const apiStarted = Date.now();
+    const requestId = typeof record.requestId === "string" ? record.requestId : "";
     const resolved = await resolveRequestedRoot(ctx, config, {
       root: typeof record.root === "string" ? record.root : undefined,
       sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
     });
+    const rootMs = Date.now() - apiStarted;
     if (resolved.root === undefined) {
       return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: "找不到知识库" } } };
     }
     /*
-     * v2（上游文件夹格式）是**只读兼容**：没有可写的正文文件概念，
-     * 明确告诉客户端"这个库不支持在这里编辑"，而不是假装能存 ✗。
-     * `loadLibrary` 对旧格式是**抛错**（`unsupported_format`）⇒ 这里如实转达 ✓。
+     * **不再为读写一篇正文加载整个图谱** ✗
+     * （`design/plugin-note-editor-loading-recheck.md` 问题一 ✓）：
+     * 原来这里 `loadLibrary(root)` 只是为了确认格式 ✗ —— 缓存过期（1.5s ✓）就全库扫一遍 ✓，
+     * 有扫描在飞还得等它 ✓（实测扫描能到 8 秒 ✓）。现在只读 `library.json` 一个小文件 ✓。
+     *
+     * 顺带把错误分类分清 ✗：旧格式 ⇒ `unsupported_format` ✓；不是知识库 ⇒ `library_unavailable` ✓；
+     * 读不了 ⇒ `read_failed` ✓（原来看不出区别，磁盘问题会伪装成格式问题 ✓）。
      */
-    try {
-      const loaded = await loadLibrary(resolved.root, {});
-      if (loaded.storage === "v2") {
-        return {
-          status: 200,
-          body: {
-            ok: false,
-            error: {
-              code: "unsupported_format",
-              message: "这个知识库还是旧格式（v2，只读兼容）⇒ 面板里不能编辑正文",
-            },
-          },
-        };
-      }
-    } catch (error) {
-      return {
-        status: 200,
-        body: {
-          ok: false,
-          error: {
-            code: "unsupported_format",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        },
-      };
+    const formatStarted = Date.now();
+    const format = await checkLibraryFormat(resolved.root);
+    const formatMs = Date.now() - formatStarted;
+    if (format.ok === false) {
+      recordNoteApi({
+        at: apiStarted,
+        requestId,
+        kind: record.kind === "read-node-document" ? "read" : "save",
+        totalMs: Date.now() - apiStarted,
+        rootMs,
+        formatMs,
+        outcome: format.code,
+      });
+      return { status: 200, body: { ok: false, error: { code: format.code, message: format.message } } };
     }
     const nodeId = typeof record.nodeId === "string" ? record.nodeId : "";
     if (record.kind === "read-node-document") {
-      const result = await readNodeDocument(resolved.root, nodeId);
+      const result = await readNodeDocument(resolved.root, nodeId, { requestId });
+      recordNoteApi({
+        at: apiStarted,
+        requestId,
+        kind: "read",
+        totalMs: Date.now() - apiStarted,
+        rootMs,
+        formatMs,
+        outcome: result.ok === true ? "ok" : result.code,
+      });
       return result.ok === true
         ? { status: 200, body: { ok: true, document: result.document } }
         : { status: 200, body: { ok: false, error: { code: result.code, message: result.message } } };
@@ -587,8 +599,26 @@ export async function handleApiRequest(
     if (result.ok === true) {
       /* 落盘成功 ⇒ 让面板下次取数拿到新修订 ✓（图谱不必重建布局 ✓） */
       invalidateLibrary(resolved.root);
+      recordNoteApi({
+        at: apiStarted,
+        requestId,
+        kind: "save",
+        totalMs: Date.now() - apiStarted,
+        rootMs,
+        formatMs,
+        outcome: "ok",
+      });
       return { status: 200, body: { ok: true, document: result.document } };
     }
+    recordNoteApi({
+      at: apiStarted,
+      requestId,
+      kind: "save",
+      totalMs: Date.now() - apiStarted,
+      rootMs,
+      formatMs,
+      outcome: result.code,
+    });
     return {
       status: 200,
       body: {

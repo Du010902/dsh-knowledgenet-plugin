@@ -25,7 +25,7 @@ import {
 import { scanLibrary } from "../vendor/upstream/data/v2/scanner.ts";
 import { NodeVfs } from "./node-vfs.ts";
 import { loadV3Library } from "./v3/adapter.ts";
-import { createLibrary as createV3Library } from "./v3/store.ts";
+import { createLibrary as createV3Library, seedNodeIndex } from "./v3/store.ts";
 import { recordScan } from "./status.ts";
 
 export interface LoadedLibrary {
@@ -144,8 +144,7 @@ async function readLegacyManifest(root: string): Promise<number | undefined> {
 export async function loadLibrary(
   root: string,
   options: { refresh?: boolean } = {},
-): Promise<LoadedLibrary> {
-  const started = Date.now();
+): Promise<LoadedLibrary> {  const started = Date.now();
   const cached = cache.get(root);
   if (options.refresh !== true && cached !== undefined && Date.now() - cached.at < CACHE_TTL_MS) {
     // 命中：记一条 ms=0 的指标，这样"缓存到底有没有起作用"能从 kn_status 直接读出来
@@ -193,6 +192,18 @@ export async function loadLibrary(
       v3.revision = revisionSeq;
       cache.set(root, { at: Date.now(), value: v3 });
       lastRoot = root;
+      /*
+       * **把这次扫描结果喂给单节点索引** ✓（`design/plugin-note-editor-loading-optimization.md` 优先优化一 ✓）：
+       * 图谱/工具本来就会扫全库 ✓ ⇒ 之后"点节点编辑读正文"就只读目标文件 ✓，不必再扫一遍 ✗。
+       */
+      seedNodeIndex(
+        root,
+        v3.snapshot.nodes.map((node: { id?: unknown; relativePath?: unknown }) => ({
+          id: String(node.id),
+          relativePath: String(node.relativePath),
+        })),
+        v3.manifest.libraryId,
+      );
       return v3;
     }
 

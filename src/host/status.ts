@@ -42,6 +42,63 @@ export interface RuntimeStatus {
    * "扫了多少节点/边、花了多少毫秒、目录多少" —— 这是"先采集聚合指标再决定优化"的落点。
    */
   scans: ScanLogEntry[];
+  /**
+   * 最近几次**读节点正文**的分阶段指标（环形缓冲 ✓）。
+   *
+   * 为什么要有（`design/plugin-note-editor-loading-optimization.md` 实施顺序第 1 条 ✓）：
+   * "点节点编辑要等多久"以前只能猜 ✓ —— 这里记录**走得哪条路**（索引直读 / 索引未命中重扫 / 全库兜底 ✓）、
+   * 花了多少毫秒、正文多大 ✓（**不含正文与路径** ✗），用来验证"不再扫全库"到底有没有效果 ✓。
+   */
+  docReads: DocReadLogEntry[];
+  /**
+   * 最近几次**正文接口的端到端指标**（环形缓冲 ✓）。
+   *
+   * 为什么单独一档（`design/plugin-note-editor-loading-recheck.md` 问题三 ✓）：
+   * `docReads` 只从 `readNodeDocument` 内部开始计时 ✗，而根目录解析、格式检查都发生在它**之前** ✓
+   * ⇒ 完全可能出现"客户端等了很久、`docReads` 却是 `mode=index, ms=3`"✓，
+   * 不能拿它当接口的端到端耗时 ✗。这一档把前置步骤也算进来 ✓，并按 `requestId` 与客户端对齐 ✓。
+   */
+  noteApi: NoteApiLogEntry[];
+}
+
+/**
+ * 一次正文接口（读或写）的端到端指标 ✓（不含正文与路径 ✗）。
+ * `requestId` 由客户端下发 ✓ ⇒ 可与 `clientDiag` 里的 `note-open-*` 对齐 ✓。
+ */
+export interface NoteApiLogEntry {
+  at: number;
+  /** 客户端给的请求号（没有就是空串 ✓） */
+  requestId: string;
+  /** read = 读正文；save = 保存正文 ✓ */
+  kind: "read" | "save";
+  /** **接口总耗时**（含根目录解析与格式检查 ✓） */
+  totalMs: number;
+  /** 根目录解析耗时 ✓ */
+  rootMs: number;
+  /** 格式检查耗时（轻量检查 ⇒ 正常是零点几毫秒 ✓） */
+  formatMs: number;
+  /** 结论：ok / conflict / 具体错误码 ✓ */
+  outcome: string;
+}
+
+/** 一次节点正文读取的聚合指标（不含正文内容与路径 ✓） */
+export interface DocReadLogEntry {
+  at: number;
+  /** 本次读取耗时（毫秒 ✓） */
+  ms: number;
+  /**
+   * 读取方式：
+   * - `index`：索引直读（只读目标文件 ✓，正常情况都是它 ✓）；
+   * - `index-miss`：索引里没有 / 身份没验证通过 ✓（已受控重扫 ✓）；
+   * - `full-scan`：全库兜底（只在"身份无法验证"时才会出现 ✓）。
+   */
+  mode: "index" | "index-miss" | "full-scan";
+  /** 正文 UTF-8 字节数（失败时为 0 ✓） */
+  bytes: number;
+  /** 结论：ok / node_missing / too_large ✓ */
+  outcome: string;
+  /** 客户端请求号（与 `noteApi` / `note-open-*` 对齐用 ✓；没有就是空串 ✓） */
+  requestId?: string;
 }
 
 /** 一次库扫描的聚合指标（不含任何节点文本/路径明细） */
@@ -110,6 +167,8 @@ export function recordIsolation(entry: Omit<IsolationLogEntry, "at">): void {
     clientDiag: current?.clientDiag ?? [],
     scans: current?.scans ?? [],
     isolation: [full, ...(current?.isolation ?? [])].slice(0, ISOLATION_LOG_LIMIT),
+    docReads: current?.docReads ?? [],
+    noteApi: current?.noteApi ?? [],
   };
 }
 
@@ -131,6 +190,8 @@ export function patchRuntimeStatus(patch: Partial<RuntimeStatus>): void {
     clientDiag: patch.clientDiag ?? current?.clientDiag ?? [],
     scans: patch.scans ?? current?.scans ?? [],
     isolation: patch.isolation ?? current?.isolation ?? [],
+    docReads: patch.docReads ?? current?.docReads ?? [],
+    noteApi: patch.noteApi ?? current?.noteApi ?? [],
   };
 }
 
@@ -144,6 +205,8 @@ export function recordProbe(entry: ProbeLogEntry): void {
     clientDiag: current?.clientDiag ?? [],
     scans: current?.scans ?? [],
     isolation: current?.isolation ?? [],
+    docReads: current?.docReads ?? [],
+    noteApi: current?.noteApi ?? [],
   };
 }
 
@@ -157,6 +220,8 @@ export function recordClientDiag(entry: ClientDiagEntry): void {
     clientDiag: [entry, ...(current?.clientDiag ?? [])].slice(0, CLIENT_DIAG_LIMIT),
     scans: current?.scans ?? [],
     isolation: current?.isolation ?? [],
+    docReads: current?.docReads ?? [],
+    noteApi: current?.noteApi ?? [],
   };
 }
 
@@ -169,8 +234,47 @@ export function recordScan(entry: ScanLogEntry): void {
     probes: current?.probes ?? [],
     clientDiag: current?.clientDiag ?? [],
     scans: [entry, ...(current?.scans ?? [])].slice(0, SCAN_LOG_LIMIT),
+    isolation: current?.isolation ?? [],
+    docReads: current?.docReads ?? [],
+    noteApi: current?.noteApi ?? [],
   };
 }
+
+/** 记录一次**读节点正文**的分阶段指标（最新的在前，最多 DOC_READ_LOG_LIMIT 条 ✓） */
+export function recordDocRead(entry: DocReadLogEntry): void {
+  current = {
+    api: current?.api ?? { path: "", registered: false },
+    prompts: current?.prompts ?? { section: false, perAgent: false },
+    startedAt: current?.startedAt ?? Date.now(),
+    probes: current?.probes ?? [],
+    clientDiag: current?.clientDiag ?? [],
+    scans: current?.scans ?? [],
+    isolation: current?.isolation ?? [],
+    docReads: [entry, ...(current?.docReads ?? [])].slice(0, DOC_READ_LOG_LIMIT),
+    noteApi: current?.noteApi ?? [],
+  };
+}
+
+/** 读正文指标的环形缓冲长度 ✓ */
+const DOC_READ_LOG_LIMIT = 16;
+
+/** 记录一次**正文接口端到端**指标（最新的在前，最多 NOTE_API_LOG_LIMIT 条 ✓） */
+export function recordNoteApi(entry: NoteApiLogEntry): void {
+  current = {
+    api: current?.api ?? { path: "", registered: false },
+    prompts: current?.prompts ?? { section: false, perAgent: false },
+    startedAt: current?.startedAt ?? Date.now(),
+    probes: current?.probes ?? [],
+    clientDiag: current?.clientDiag ?? [],
+    scans: current?.scans ?? [],
+    isolation: current?.isolation ?? [],
+    docReads: current?.docReads ?? [],
+    noteApi: [entry, ...(current?.noteApi ?? [])].slice(0, NOTE_API_LOG_LIMIT),
+  };
+}
+
+/** 正文接口指标的环形缓冲长度 ✓ */
+const NOTE_API_LOG_LIMIT = 16;
 
 export function runtimeStatus(): RuntimeStatus | undefined {
   return current;

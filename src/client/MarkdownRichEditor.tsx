@@ -26,6 +26,8 @@ import {
   addColBeforeCommand,
   addRowAfterCommand,
   addRowBeforeCommand,
+  moveColCommand,
+  moveRowCommand,
   setAlignCommand,
 } from "@milkdown/kit/preset/gfm";
 import { deleteColumn, deleteRow } from "@milkdown/kit/prose/tables";
@@ -38,15 +40,75 @@ import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
-import { caretTargetForClick, isPlainClick } from "./table-caret.ts";
+import {
+  caretTargetForClick,
+  caretTargetForSelection,
+  caretTargetForTextblockSelection,
+  firstCaretInTable,
+  isCellTextblockSelection,
+  isPlainClick,
+} from "./table-caret.ts";
 import {
   TABLE_LITERAL,
+  TABLE_MENU_ITEMS,
+  movePayload,
+  pathHitsNodes,
   readTableContext,
+  readTableMoveState,
   tableEntryPosition,
   tablePopoverPosition,
   type TableAlignment,
   type TableMenuAction,
+  type TableMoveState,
 } from "./table-menu.ts";
+
+/** 光标所在的那个表格块（DOM ✓）；不在表格里返回 `null` ✓ */
+function selectionTableBlock(view: ProseMirrorView): HTMLElement | null {
+  const anchorNode = view.domAtPos(view.state.selection.from).node;
+  const element = anchorNode.nodeType === 1 ? (anchorNode as HTMLElement) : anchorNode.parentElement;
+  return element?.closest<HTMLElement>(".milkdown-table-block") ?? null;
+}
+
+/**
+ * **活跃单元格**的矩形（视口坐标 ✓）；拿不到就返回 `null` ✓。
+ *
+ * 入口要跟着它走 ✓（`design/table-entry-scroll-visibility-review.md` 第 1 条 ✓）：
+ * 光标在哪一格，入口就在哪一格旁边 —— 长表格往下滚时它跟着可见的单元格 ✓，
+ * 而不是留在早已滚出视口的表格顶部被裁掉 ✗。
+ */
+function activeCellRect(view: ProseMirrorView): { top: number; bottom: number; right: number } | null {
+  try {
+    const node = view.domAtPos(view.state.selection.from).node;
+    const element = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+    const cell = element?.closest<HTMLElement>("td, th") ?? null;
+    if (cell === null) return null;
+    const rect = cell.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, right: rect.right };
+  } catch {
+    return null;
+  }
+}
+
+/** 移动类动作用不了时的**原因**（文案 key ✓；复查要求边界时禁用并说清为什么 ✓） */
+function moveReason(move: TableMoveState | null, action: TableMenuAction): string {
+  if (move === null) return "tableMoveUnavailable";
+  if (move.blockedKey === "tableMoveSpan") return "tableMoveSpan";
+  const isRow = action === "row-up" || action === "row-down";
+  if (isRow && move.rowIndex === 0 && !move.rowUp && !move.rowDown) return "tableMoveHeader";
+  return "tableMoveEdge";
+}
+
+/** 两次的"禁用原因"是否一样 ✓（一样就复用对象、不重渲染 ✓） */
+function sameReasons(
+  a: Partial<Record<TableMenuAction, string>>,
+  b: Partial<Record<TableMenuAction, string>>,
+): boolean {
+  const keys = new Set<string>([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (a[key as TableMenuAction] !== b[key as TableMenuAction]) return false;
+  }
+  return true;
+}
 
 /**
  * **代码/公式源码区的 CodeMirror 主题**（`design/code-and-math-block-redesign.md` ✓）。
@@ -126,6 +188,10 @@ interface TableMenuAnchor {
   /** 点开后弹出的菜单 ✓ */
   popover: { top: number; right: number };
   alignment: TableAlignment;
+  /** 移动类动作用不了的原因（文案 key ✓；能用的不在这里 ✓） */
+  disabledActions: Partial<Record<TableMenuAction, string>>;
+  /** 只读 / 保存中 ⇒ 入口禁用并说明状态 ✓ */
+  busy: boolean;
 }
 
 /**
@@ -167,6 +233,31 @@ export function MarkdownRichEditor(props: {
   const [menuOpen, setMenuOpen] = useState(false);
   /** rAF 合并：选区变化会连续触发，没必要每条都重算 ✓ */
   const menuFrameRef = useRef<number | null>(null);
+  /**
+   * **鼠标悬停的那张表格块** ✓（复查 P2a：悬停表格也要能看到入口 ✓）。
+   * 只用来"显示入口 / 打开菜单时把光标放进去"✗ —— 悬停本身**不改选区** ✓。
+   */
+  const hoverBlockRef = useRef<HTMLElement | null>(null);
+  /** "入口刚因为看不见而收起"是否已经上报过 ✓（避免每帧刷满诊断环形缓冲 ✗） */
+  const entryHiddenReportedRef = useRef(false);
+  /**
+   * **最近一次落点在表格单元格里的普通点击** ✓（屏幕坐标 + 时间 ✓）。
+   *
+   * 为什么需要它 ✗：上游节点视图 `TableNodeView.stopEvent` 会**吃掉** mousedown
+   * （ProseMirror 因此根本不处理这次点击 ✗），它自己在 rAF 之后派发一个"整段结构选择"✗。
+   * 我们在 `view.dispatch` 漏斗里改写它时需要点击坐标 ✓，也要靠时间戳把
+   * **键盘**造出来的块选择排除掉（那是正常操作 ✓，不许被改写 ✗）。
+   */
+  const lastClickRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  /**
+   * 入口按钮 / 菜单容器的**真实节点** ✓：判"点的是不是菜单内部"必须按引用 ✗ ——
+   * Shadow DOM 里事件到 `document` 时 `event.target` 已被重定向成 shadow host ✓
+   * （`design/table-menu-shadow-dom-review.md` 实测 ✓）。
+   */
+  const entryNodeRef = useRef<HTMLButtonElement | null>(null);
+  const menuNodeRef = useRef<HTMLDivElement | null>(null);
+  /** 时间窗：只认"点击之后这一小会儿"里冒出来的坏选区 ✓（键盘选的块不动 ✗） */
+  const CLICK_WINDOW_MS = 600;
   const readyRef = useRef(false);
   const failedRef = useRef(false);
   const composingRef = useRef(false);
@@ -217,35 +308,34 @@ export function MarkdownRichEditor(props: {
   };
 
   /**
-   * 重算表格入口的位置：**只看编辑器 selection** ✓。
-   * 不在表格里 / 未就绪 / 失败 / 只读 ⇒ 一律收起 ✓（保存期间也不该还在 ✓）。
+   * 重算表格入口的位置与状态 ✓。
    *
-   * 位置锚在**可见表格**上 ✗（不是整块容器 ✓）：
-   * `.table-wrapper` 承担横向滚动 ⇒ 表格可能有一部分在可视区外，先与它求交 ✓
-   * （复查实测：原来按整块容器定位，短表格也被贴到容器右边 ✗）。
-   * 纵向放哪由 `tableEntryPosition` 决定：右侧空白 → 上方空白 → 表格自己的右上角 ✓
-   * （宁可靠在表格上，也不盖住前一段正文 ✗）。
+   * 锚点优先级：**光标所在的表格** → **鼠标悬停的表格** ✓
+   * （复查 `design/table-interaction-and-row-column-functions-review.md` P2a ✓：
+   * 入口原来只在"selection 被判定在表格里"时才出现 ⇒ 悬停表格看不到入口，
+   * 用户以为添加/删除行列没了 ✓）。**选区本身不因为悬停而改变** ✗ ——
+   * 只有用户真的点开菜单时，才把光标放进那张表格（见 `openMenu` ✓）。
+   *
+   * 位置锚在**可见表格**上 ✗（不是整块容器 ✓）：`.table-wrapper` 承担横向滚动 ⇒
+   * 表格可能有一部分在可视区外，先与它求交 ✓。
+   *
+   * 只读 / 保存中：入口**仍然显示**但禁用 ✓（复查要求"禁用并明确状态"✗，不是"凭空消失"✓）。
    */
   const syncMenu = useCallback((): void => {
     const view = viewRef.current;
     const host = hostRef.current;
-    if (view === null || host === null || !readyRef.current || failedRef.current || readOnlyRef.current) {
+    if (view === null || host === null || !readyRef.current || failedRef.current) {
       setMenu(null);
       setMenuOpen(false);
       return;
     }
     const context = readTableContext(view.state);
-    if (!context.inTable) {
-      setMenu(null);
-      setMenuOpen(false);
-      return;
-    }
-    const container = host.closest<HTMLElement>(".kn-editor-body");
-    const anchorNode = view.domAtPos(view.state.selection.from).node;
-    const element = anchorNode.nodeType === 1 ? (anchorNode as HTMLElement) : anchorNode.parentElement;
-    const block = element?.closest<HTMLElement>(".milkdown-table-block") ?? null;
+    /* 光标在表格里 ⇒ 就以那张表格为准 ✓；否则用鼠标悬停的那张 ✓（两者都没有才收起 ✓） */
+    const selectionBlock = context.inTable ? selectionTableBlock(view) : null;
+    const block = selectionBlock ?? hoverBlockRef.current;
     const table = block?.querySelector<HTMLElement>("table") ?? null;
-    if (container === null || block === null || table === null) {
+    const container = host.closest<HTMLElement>(".kn-editor-body");
+    if (block === null || table === null || container === null) {
       setMenu(null);
       setMenuOpen(false);
       return;
@@ -263,18 +353,92 @@ export function MarkdownRichEditor(props: {
     /* 表格**上一块**的下沿：判断"上方有没有真空白" ✓（不许拿覆盖正文换空间 ✗） */
     const before = block.previousElementSibling;
     const previousBottom = before === null ? null : before.getBoundingClientRect().bottom;
-    const entry = tableEntryPosition(visible, containerRect, container.scrollTop, previousBottom);
+    /*
+     * **活跃单元格**的矩形 ✓（复查 `design/table-entry-scroll-visibility-review.md` 第 1 条 ✓）：
+     * 入口原来固定锚在**表格顶部** ✗ ⇒ 长表格滚到靠下的行时，入口留在早已滚出视口的表格顶上，
+     * 被正文的 `overflow-y:auto` 裁掉 ✓（复查实测入口 0…24、正文可见区 44…777，毫无交集 ✓）。
+     * 交给活跃单元格 ⇒ 用户点哪儿、入口就贴在哪儿附近 ✓（没有单元格就用可见带 ✓）。
+     */
+    const cell = selectionBlock === null ? null : activeCellRect(view);
+    /* 入口位置现在会**明确返回 `null`**（表格在正文视口里放不下按钮 ⇒ 收起入口 ✓，
+       而不是把内容坐标夹到 >0 了事 ✗ —— 那正是复查看到的裁切外按钮 ✓） */
+    const entry = tableEntryPosition(visible, containerRect, container.scrollTop, previousBottom, undefined, undefined, undefined, cell);
+    if (entry === null) {
+      setMenu(null);
+      setMenuOpen(false);
+      /*
+       * **只在"刚刚变成隐藏"时留痕** ✓：`syncMenu` 每帧、每次滚动都会跑 ✓，
+       * 每次都上报会把客户端诊断的环形缓冲刷满 ✗ —— 实测就是这样把 `note-open-*` 计时全挤掉了 ✓
+       * （`design/plugin-note-editor-loading-recheck.md` 问题三 ✓）。
+       */
+      if (!entryHiddenReportedRef.current) {
+        entryHiddenReportedRef.current = true;
+        reportRef.current?.("table-entry-hidden", { reason: "no-visible-band" });
+      }
+      return;
+    }
+    entryHiddenReportedRef.current = false;
     const popover = tablePopoverPosition(entry, containerRect, container.scrollTop);
+    const alignment: TableAlignment = selectionBlock === null ? "left" : context.alignment;
+    /* 移动类动作的可用性：**由当前选区算** ✓（悬停进来的话选区还没在表格里 ⇒ 先全禁用 ✓，
+       用户点开菜单时 `openMenu` 会把光标放进去，这一项随之重算 ✓） */
+    const move = selectionBlock === null ? null : readTableMoveState(view.state);
+    const disabledActions: Partial<Record<TableMenuAction, string>> = {};
+    for (const item of TABLE_MENU_ITEMS) {
+      if (item.move !== true) continue;
+      const allowed = move === null
+        ? false
+        : item.id === "row-up" ? move.rowUp
+          : item.id === "row-down" ? move.rowDown
+            : item.id === "col-left" ? move.colLeft
+              : move.colRight;
+      if (!allowed) disabledActions[item.id] = moveReason(move, item.id);
+    }
+    const busy = readOnlyRef.current;
     /* 位置与高亮都没变就**复用原对象** ⇒ React 不重渲染 ✓（选区一直在变 ✓） */
     setMenu((current: TableMenuAnchor | null) => {
       if (
         current !== null
         && current.entry.top === entry.top && current.entry.right === entry.right && current.entry.inside === entry.inside
         && current.popover.top === popover.top && current.popover.right === popover.right
+        && current.alignment === alignment && current.busy === busy
+        && sameReasons(current.disabledActions, disabledActions)
       ) {
-        return current.alignment === context.alignment ? current : { ...current, alignment: context.alignment };
+        return current;
       }
-      return { entry, popover, alignment: context.alignment };
+      return { entry, popover, alignment, disabledActions, busy };
+    });
+  }, []);
+
+  /**
+   * 打开菜单 ✓：如果光标**不在**这张表格里（悬停就显示入口的情形 ✓），
+   * 先把光标放进它的第一个单元格 ✓ —— 复查要求"操作目标来自最后有效单元格选区，
+   * 不能通过改变选区来显示入口"✓：显示入口时**没有**动选区，只有用户点开才动 ✓。
+   */
+  const syncMenuRef = useRef<() => void>(() => {});
+  const openMenu = useCallback((): void => {
+    const view = viewRef.current;
+    if (view === null) return;
+    const target = readTableContext(view.state).inTable ? null : hoverBlockRef.current;
+    if (target !== null) {
+      try {
+        const tablePos = view.posAtDOM(target, 0);
+        const caret = firstCaretInTable(view.state, tablePos);
+        if (caret !== null) {
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, caret)));
+          reportRef.current?.("table-entry-focus", { node: "table" });
+        }
+      } catch (error) {
+        /* 取不到位置（理论上不会 ✓）⇒ 菜单照开，动作那边还会再挡一次 ✗ */
+        reportRef.current?.("table-entry-focus-failed", String(error));
+      }
+    }
+    setMenuOpen(true);
+    /* 位置要等下一帧（光标可能刚被放进表格 ✓）⇒ 走同一套 rAF 合并 ✓ */
+    if (menuFrameRef.current !== null) return;
+    menuFrameRef.current = requestAnimationFrame(() => {
+      menuFrameRef.current = null;
+      syncMenuRef.current();
     });
   }, []);
 
@@ -293,6 +457,11 @@ export function MarkdownRichEditor(props: {
     viewRef.current?.focus();
   }, []);
 
+  /* `openMenu` 定义在前面 ⇒ 用 ref 指向最新的 `syncMenu` ✓（避免"先用后定义"✗） */
+  useEffect(() => {
+    syncMenuRef.current = syncMenu;
+  }, [syncMenu]);
+
   /**
    * **普通单击 → 直接落下合法文字位置** ✓（`design/table-click-jitter-and-caret-analysis.md` ✓）。
    *
@@ -307,6 +476,18 @@ export function MarkdownRichEditor(props: {
     if (!isPlainClick(event)) return false;
     const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
     const target = caretTargetForClick(view.state, coords ?? null);
+    /*
+     * **留痕**（复查明确要求：不能只以"注册了 handleClick"当完成证据 ✓）：
+     * 记下"这次点击有没有走到这里、坐标解析成什么、有没有算出位置"✓（不含正文 ✗）。
+     * 只在**表格相关**的点击上记 ✓（普通段落点击不刷屏 ✓）。
+     */
+    const inTable = readTableContext(view.state).inTable;
+    if (coords !== null && (coords.inside !== -1 || inTable)) {
+      reportRef.current?.("table-click-handle", {
+        inside: coords.inside,
+        target: target === null ? "none" : "caret",
+      });
+    }
     if (target === null) return false;
     /* 点一下本来就已经聚焦了 ⇒ 正常情况下这次 `focus()` 不会执行 ✓（只有键盘/外部触发才需要 ✓） */
     if (!view.hasFocus()) view.focus();
@@ -341,6 +522,21 @@ export function MarkdownRichEditor(props: {
       return;
     }
     try {
+      /*
+       * 移动类动作先算出参数（纯函数 ✓；复查要求"边界时禁用对应方向" ⇒ 这里再挡一次 ✗）。
+       * `moveRowCommand` / `moveColCommand` 最终落到 `prosemirror-tables` 的整体搬移 ✓：
+       * 单元格内容、列对齐、列宽跟着走，走事务 ⇒ 可撤销 ✓，不是删了再插、也不动 DOM ✗。
+       */
+      const moving = action === "row-up" || action === "row-down" || action === "col-left" || action === "col-right";
+      const moveState = moving ? readTableMoveState(view.state) : null;
+      const move = moving && moveState !== null ? movePayload(action, moveState) : null;
+      if (moving && move === null) {
+        /* 到了边界 / 选中的是多行多列 / 表里有合并单元格 ⇒ 不猜、不动 ✓ */
+        reportRef.current?.("table-action-blocked", { action });
+        setMenuOpen(false);
+        scheduleMenu();
+        return;
+      }
       crepe.editor.action((ctx: Ctx) => {
         const commands = ctx.get(commandsCtx);
         switch (action) {
@@ -351,6 +547,16 @@ export function MarkdownRichEditor(props: {
           case "align-left": commands.call(setAlignCommand.key, "left"); break;
           case "align-center": commands.call(setAlignCommand.key, "center"); break;
           case "align-right": commands.call(setAlignCommand.key, "right"); break;
+          case "row-up":
+          case "row-down": {
+            if (move !== null) commands.call(moveRowCommand.key, { from: move.from, to: move.to });
+            break;
+          }
+          case "col-left":
+          case "col-right": {
+            if (move !== null) commands.call(moveColCommand.key, { from: move.from, to: move.to });
+            break;
+          }
           case "row-delete": {
             const view = ctx.get(editorViewCtx) as ProseMirrorView;
             deleteRow(view.state, view.dispatch);
@@ -491,6 +697,84 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("compositionend", onSelectionChanged, true);
     document.addEventListener("selectionchange", onSelectionChanged);
     window.addEventListener("resize", onSelectionChanged);
+    /*
+     * **Shadow DOM 里的选区事件**：面板整个跑在 ShadowRoot 内 ✓，
+     * 选区变化不一定在 `document` 上冒出来（`document.getSelection()` 也看不到影子树里的选区 ✗）
+     * ⇒ 影子根上再挂一个 ✓（`design/table-menu-shadow-dom-review.md` 要求顺带检查这类逻辑 ✓）。
+     */
+    const shadowRoot = typeof ShadowRoot !== "undefined" && root.getRootNode() instanceof ShadowRoot
+      ? (root.getRootNode() as ShadowRoot)
+      : null;
+    shadowRoot?.addEventListener("selectionchange", onSelectionChanged);
+
+    /*
+     * **悬停表格 ⇒ 入口出现** ✓（复查 P2a：原来只有"selection 在表格里"才显示 ⇒ 用户找不到 ✓）。
+     * 只记 hover 的表格块，**不改选区** ✗（选区只在用户点开菜单时才动 ✓，见 `openMenu`）。
+     * 指针从表格移到入口那一瞬间会冒 `pointerleave` ✗ ⇒ 看 `relatedTarget`，是入口就不撤 ✓。
+     */
+    const onPointerOver = (event: Event): void => {
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      const block = target.closest<HTMLElement>(".milkdown-table-block");
+      if (block === hoverBlockRef.current) return;
+      hoverBlockRef.current = block;
+      scheduleMenu();
+    };
+    const onPointerLeaveRoot = (event: Event): void => {
+      const next = (event as PointerEvent).relatedTarget as Element | null;
+      if (next !== null && typeof next.closest === "function" && next.closest(".kn-table-entry, .kn-table-menu") !== null) {
+        return; /* 正要去点入口 / 菜单 ⇒ 保持锚点 ✓ */
+      }
+      if (hoverBlockRef.current === null) return;
+      hoverBlockRef.current = null;
+      scheduleMenu();
+    };
+    root.addEventListener("pointerover", onPointerOver, true);
+    root.addEventListener("pointerleave", onPointerLeaveRoot, true);
+
+    /*
+     * **记下"落点在单元格里的普通点击"** ✓（`design/table-functions-recheck-2.md` P1 ✓）。
+     *
+     * 上游 `TableNodeView.stopEvent` 在 mousedown / pointerdown 阶段就返回 `true` ✗
+     * ⇒ ProseMirror 不处理这次点击、我们挂在 `handleClick` 上的主路径**也不会被调用** ✓；
+     * 它自己在 rAF 之后派发一个"整段的结构选择"✗。改写它需要坐标 ⇒ 这里先记下来 ✓。
+     * 用**捕获**阶段：不管谁中间 `stopPropagation` 都拿得到 ✓。
+     */
+    const onPointerDownRecord = (event: Event): void => {
+      const mouse = event as MouseEvent;
+      if (!isPlainClick(mouse)) return;
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      /* 只记表格单元格里的点击（表格外的结构选择本来就是 ProseMirror 正常行为 ✓） */
+      if (target.closest("td, th") === null) {
+        lastClickRef.current = null;
+        return;
+      }
+      lastClickRef.current = { x: mouse.clientX, y: mouse.clientY, at: Date.now() };
+    };
+    root.addEventListener("pointerdown", onPointerDownRecord, true);
+    root.addEventListener("mousedown", onPointerDownRecord, true);
+
+    /*
+     * **兜底（复查 P1）**：`handleClick` 那条主路径在真实环境里可能没兜住（复查实测仍是整段选择 ✗）。
+     * 点击结束后看一眼**最终选区**：如果还是"单元格里 textblock 的结构选择"，就按点击坐标改成文字位置 ✓。
+     * 主路径成功时选区已经是 TextSelection ⇒ 这里什么都不做 ✗（不会产生第二次变化 ✓）。
+     */
+    const onMouseUpFallback = (event: MouseEvent): void => {
+      if (!isPlainClick(event)) return;
+      const { clientX, clientY } = event;
+      queueMicrotask(() => {
+        const view = viewRef.current;
+        if (view === null) return;
+        const coords = view.posAtCoords({ left: clientX, top: clientY });
+        const target = caretTargetForSelection(view.state, coords ?? null);
+        if (target === null) return;
+        reportRef.current?.("table-click-fallback", { action: "caret", node: view.state.selection.constructor.name });
+        if (!view.hasFocus()) view.focus();
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target)));
+      });
+    };
+    root.addEventListener("mouseup", onMouseUpFallback, true);
 
     /*
      * 复查要求的两条"容器变化"通知 ✓：
@@ -536,13 +820,56 @@ export function MarkdownRichEditor(props: {
           },
         });
         /*
+         * **主修复：包一层 `view.dispatch`（唯一漏斗 ✓）**
+         * （`design/table-functions-recheck-2.md` P1 ✓ —— 上游 `TableNodeView.stopEvent` 吃掉了
+         * mousedown，`handleClick` 那条路根本走不到 ✓；它自己那个"整段结构选择"是 rAF 之后才派发的 ✓，
+         * 所以 mouseup + 微任务的兜底也追不上 ✗）。
+         *
+         * 任何事务只要想把选区变成"单元格里 textblock 的结构选择"，就在这里先把点击坐标
+         * 折算成**最近的合法文字位置**再派发 ✓ —— 谁派发的、什么时候派发的都躲不开 ✗。
+         * 我们**另发一个干净事务** ⇒ 顺带丢掉上游那个 `scrollIntoView()` ✗（抖动的嫌疑之一 ✓）。
+         *
+         * 只认"点击之后一小会儿内"冒出来的那种坏选区 ✓：键盘 `Backspace` 之类造出块选择
+         * 是**正常**操作 ✗（那种不归我们管 ✓）。
+         */
+        const baseDispatch = view.dispatch.bind(view);
+        view.dispatch = (transaction: Parameters<ProseMirrorView["dispatch"]>[0]): void => {
+          const click = lastClickRef.current;
+          const fresh = click !== null && Date.now() - click.at <= CLICK_WINDOW_MS;
+          if (fresh && isCellTextblockSelection(transaction.selection)) {
+            const coords = view.posAtCoords({ left: click.x, top: click.y });
+            const target = caretTargetForTextblockSelection(transaction.doc, transaction.selection, coords ?? null);
+            if (target !== null) {
+              reportRef.current?.("table-click-rewritten", { changed: transaction.docChanged });
+              /* 只改选区的那个事务直接丢掉 ✓（否则它的 `scrollIntoView` 还会把正文拽一下 ✗） */
+              if (!transaction.docChanged) {
+                baseDispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target)));
+                return;
+              }
+              baseDispatch(transaction.setSelection(TextSelection.create(transaction.doc, target)));
+              return;
+            }
+          }
+          baseDispatch(transaction);
+        };
+        reportRef.current?.("table-caret-wired", { handleClick: true, dispatchFunnel: true });
+        /*
          * **补上初始化期间攒下的同步** ✗（P1-1）：这期间 reducer 可能已经换了正文
          * （恢复草稿、重试读取、确认采用最新版 ✓）⇒ 这里用**最新**那份整体替换 ✓。
+         *
+         * ⚠️ **别把刚喂进去的那份再解析一遍** ✗
+         * （`design/plugin-note-editor-loading-optimization.md` 优先优化二 ✓）：
+         * 创建时 `defaultValue` 就是 `initialRef.current` ⇒ 编辑器**已经解析过它** ✓；
+         * 而 `getMarkdown()` 回来的必然是**编辑器自己的写法**（末尾换行、列表标记 ✓）
+         * ⇒ 拿它跟输入逐字比一定不同 ✗，于是白跑一次 `replaceAll`（整篇重解析 + 一条事务 ✓）。
+         * 只有"初始化期间真的又同步过别的正文"（`pendingRef` 有值 ✓）或"要的正文不是创建时那份"时才替换 ✓。
          */
         const pending = pendingRef.current ?? markdownRef.current;
-        if (pending !== crepe.getMarkdown()) {
+        const resynced = pendingRef.current !== null || pending !== initialRef.current;
+        if (resynced && pending !== crepe.getMarkdown()) {
           echoRef.current = pending;
           crepe.editor.action(replaceAll(pending));
+          reportRef.current?.("markdown-editor-resync", { bytes: pending.length, phase: "init" });
         }
         pendingRef.current = null;
         syncingRef.current = false;
@@ -584,7 +911,13 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("keyup", onSelectionChanged, true);
       root.removeEventListener("focusin", onSelectionChanged, true);
       root.removeEventListener("compositionend", onSelectionChanged, true);
+      root.removeEventListener("pointerover", onPointerOver, true);
+      root.removeEventListener("pointerleave", onPointerLeaveRoot, true);
+      root.removeEventListener("pointerdown", onPointerDownRecord, true);
+      root.removeEventListener("mousedown", onPointerDownRecord, true);
+      root.removeEventListener("mouseup", onMouseUpFallback, true);
       document.removeEventListener("selectionchange", onSelectionChanged);
+      shadowRoot?.removeEventListener("selectionchange", onSelectionChanged);
       window.removeEventListener("resize", onSelectionChanged);
       resizeObserver?.disconnect();
       container?.removeEventListener("scroll", onSelectionChanged, true);
@@ -594,28 +927,30 @@ export function MarkdownRichEditor(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* 只读开关：保存期间**整块**不可编辑 ✓（不是只禁用工具栏 ✗）⇒ 表格入口与菜单一起收起 ✓ */
+  /* 只读开关：保存期间**整块**不可编辑 ✓（不是只禁用工具栏 ✗）⇒ 菜单收起、入口保留但禁用 ✓ */
   useEffect(() => {
     crepeRef.current?.setReadonly(props.readOnly);
-    if (props.readOnly) {
-      setMenu(null);
-      setMenuOpen(false);
-    } else {
-      scheduleMenu();
-    }
+    if (props.readOnly) setMenuOpen(false);
+    /* 只读 / 非只读都要重算一次：入口的状态（禁用 / 可用）跟着变 ✓ */
+    scheduleMenu();
   }, [props.readOnly, scheduleMenu]);
 
   /*
    * 菜单展开期间：**点菜单/入口以外任何地方就关掉** ✓（关掉不等于改选区 ✗）。
    * 用捕获阶段的 `pointerdown` ✓：比 blur 更可靠（点正文空白也不会触发 blur ✓）。
+   *
+   * ⚠️ 必须用 **`event.composedPath()` + 节点引用** ✗（`design/table-menu-shadow-dom-review.md` ✓）：
+   * 面板跑在 Shadow DOM 里，事件冒到 `document` 时 `event.target` 被**重定向成 shadow host** ✗
+   * ⇒ 用 `target.closest(".kn-table-entry, .kn-table-menu")` 永远匹配不到内部节点 ✓，
+   * 点菜单里的项也会被当成"点外面"、在 `click` 执行动作**之前**把菜单收掉 ✗。
+   * `composedPath()` 给的是**真实**路径 ✓，而且按我们自己那两个节点的**引用**判 ✗，
+   * 不会把同页面别的编辑器/别的实例的菜单误认成自己的 ✓。
    */
   useEffect(() => {
     if (!menuOpen) return undefined;
     const onPointerDown = (event: Event): void => {
-      const target = event.target as Element | null;
-      if (target !== null && typeof target.closest === "function" && target.closest(".kn-table-entry, .kn-table-menu") !== null) {
-        return;
-      }
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      if (pathHitsNodes(path, [entryNodeRef.current, menuNodeRef.current])) return;
       setMenuOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -692,8 +1027,11 @@ export function MarkdownRichEditor(props: {
           right={menu.entry.right}
           inside={menu.entry.inside}
           open={menuOpen}
+          disabled={menu.busy}
+          hint={menu.busy ? t("tableEntryDisabled") : t("tableMenuLabel")}
           t={t}
-          onToggle={() => { setMenuOpen((value: boolean) => !value); }}
+          nodeRef={entryNodeRef}
+          onToggle={() => { if (menuOpen) dismissMenu(); else openMenu(); }}
         />
       )}
       {menu === null || !menuOpen ? null : (
@@ -704,6 +1042,8 @@ export function MarkdownRichEditor(props: {
           t={t}
           onAction={runTableAction}
           onDismiss={dismissMenu}
+          disabledReasons={menu.disabledActions}
+          nodeRef={menuNodeRef}
         />
       )}
     </>

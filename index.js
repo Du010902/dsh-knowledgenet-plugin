@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path, { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -1471,11 +1471,18 @@ async function readLibrary(root, options = {}) {
 	} catch {
 		names = [];
 	}
+	const files = await mapLimit([...names].sort(), 8, async (name) => {
+		const abs = join(nodesDir, name);
+		return {
+			name,
+			abs,
+			text: await readFile(abs, "utf8")
+		};
+	});
 	const nodes = [];
 	const usedIds = /* @__PURE__ */ new Set();
-	for (const name of names.sort()) {
-		const abs = join(nodesDir, name);
-		const text = await readFile(abs, "utf8");
+	for (const file of files) {
+		const { abs, name, text } = file;
 		const parsed = parseDocument(text);
 		const relativePath = relative(base, abs).replace(/\\/g, "/");
 		let id = parsed.meta.id.trim();
@@ -1508,6 +1515,302 @@ async function readLibrary(root, options = {}) {
 		nodes,
 		edges: Array.isArray(graph?.edges) ? graph.edges : [],
 		graphRevision: typeof graph?.revision === "number" ? graph.revision : 0
+	};
+}
+const nodeIndexes = /* @__PURE__ */ new Map();
+/** 把文件名集合变成可比较的字符串 ✓（排序 ⇒ 与顺序无关 ✓） */
+function namesKeyOf(names) {
+	return [...names].sort().join("\n");
+}
+/** 用**已有扫描结果**喂索引 ✓（图谱/工具刚扫过 ⇒ 读正文不必再扫一遍 ✓） */
+function seedNodeIndex(root, nodes, libraryId = "") {
+	const paths = /* @__PURE__ */ new Map();
+	const names = [];
+	for (const node of nodes) {
+		paths.set(node.id, node.relativePath);
+		const name = node.relativePath.split("/").pop() ?? "";
+		if (name !== "") names.push(name);
+	}
+	nodeIndexes.set(assertRoot(root), {
+		at: Date.now(),
+		libraryId,
+		paths,
+		namesKey: namesKeyOf(names),
+		readFailed: 0
+	});
+}
+/** 让索引里的一条记录失效 / 失效整个库 ✓（写入、新建、删除之后必须调用 ✓） */
+function invalidateNodeIndex(root, nodeId) {
+	const base = assertRoot(root);
+	if (nodeId === void 0) {
+		nodeIndexes.delete(base);
+		return;
+	}
+	nodeIndexes.get(base)?.paths.delete(nodeId);
+}
+/**
+* 更新索引里的一条记录 ✓（**只在索引已经存在时**动它 ✗ ——
+* 没有索引就现建一个"只有这一条"的，会让别的节点看起来不存在 ✓）。
+*/
+function updateNodeIndexEntry(root, node) {
+	const index = nodeIndexes.get(assertRoot(root));
+	if (index === void 0) return;
+	index.paths.set(node.id, node.relativePath);
+	index.at = Date.now();
+	const name = node.relativePath.split("/").pop() ?? "";
+	const names = index.namesKey === "" ? [] : index.namesKey.split("\n");
+	if (name !== "" && !names.includes(name)) names.push(name);
+	index.namesKey = namesKeyOf(names);
+}
+/** 一次 `readdir` 比名字集合 ✓（**不读任何文件**✗）—— 目录变了就返回 `false` ✓ */
+async function namesUnchanged(base, expected) {
+	const nodesDir = join(base, V3_NODES_DIR);
+	let names = [];
+	try {
+		names = (await readdir(nodesDir)).filter((name) => name.toLowerCase().endsWith(".md"));
+	} catch {
+		return false;
+	}
+	return namesKeyOf(names) === expected;
+}
+/**
+* 建/重建索引时**每个文件只读头部多少字节** ✓
+* （复查指出：注释写着"只读 front-matter 需要的部分"，实际却 `readFile` 读了整份 markdown ✗）。
+* 4KB 足够覆盖正常 front-matter（十几个字段 ✓）；万一不够 ⇒ 退回读整份 ✓（正确性优先 ✓）。
+*/
+const INDEX_HEAD_BYTES = 4096;
+/**
+* **有界并发**跑异步任务，结果顺序与输入一致 ✓（limit 至少 1 ✓）。
+*
+* 为什么需要：原来索引与库扫描都是 `for (const name of names) await readFile(...)` ✗ ——
+* 一个文件一次往返、完全串行 ✓；冷盘 / 被别的进程抢 IO 时（实测见过 8 秒的扫描 ✓）
+* 串行往返会被线性放大 ✓。这里只并发**读**，**不并发决定身份** ✗：
+* 重复 ULID 的归属依赖排序规则 ✓，所以身份仍然按排序**串行**分配 ✓。
+*/
+async function mapLimit(items, limit, run) {
+	const results = new Array(items.length);
+	if (items.length === 0) return results;
+	const size = Math.max(1, Math.min(Math.floor(limit), items.length));
+	let next = 0;
+	const workers = Array.from({ length: size }, async () => {
+		for (;;) {
+			const index = next;
+			next += 1;
+			if (index >= items.length) return;
+			results[index] = await run(items[index], index);
+		}
+	});
+	await Promise.all(workers);
+	return results;
+}
+/** 只读文件**头部**（最多 `maxBytes` ✓）；读不到返回 `undefined` ✓ */
+async function readTextHead(abs, maxBytes) {
+	let handle;
+	try {
+		handle = await open(abs, "r");
+		const buffer = new Uint8Array(maxBytes);
+		const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+		return new TextDecoder("utf-8").decode(buffer.subarray(0, bytesRead));
+	} catch {
+		return;
+	} finally {
+		await handle?.close().catch(() => void 0);
+	}
+}
+/**
+* 从**文件头部**取出 front-matter 里的 `id` ✓（建立索引不该把整篇正文读进来 ✗）。
+* 内部直接复用 `parseDocument` ✓ ⇒ 与整文件解析的结果**逐字一致** ✓。
+* @param head - 文件头部文本 ✓。
+* @returns 去掉空白的 id ✓；头部里 front-matter 还没结束（或压根没有）⇒ `undefined` ✓（调用方退回读整份 ✓）。
+*/
+function idFromHead(head) {
+	const parsed = parseDocument(head);
+	if (!parsed.hasFrontMatter) return void 0;
+	return parsed.meta.id.trim();
+}
+/**
+* 建/重建索引：**每个文件只读头部** ✓（id 在 front-matter 里、文件名不含 id ✗，
+* 所以首次建立仍要过一遍文件 ✓ —— 但不再读整份正文 ✓，而且是**有界并发** ✓）。
+*/
+async function buildNodeIndex(base, libraryId) {
+	const nodesDir = join(base, V3_NODES_DIR);
+	let names = [];
+	try {
+		names = (await readdir(nodesDir)).filter((name) => name.toLowerCase().endsWith(".md"));
+	} catch {
+		names = [];
+	}
+	const sorted = [...names].sort();
+	let readFailed = 0;
+	const clues = await mapLimit(sorted, 8, async (name) => {
+		const abs = join(nodesDir, name);
+		const head = await readTextHead(abs, INDEX_HEAD_BYTES);
+		if (head === void 0) return {
+			name,
+			id: void 0,
+			present: false
+		};
+		const fromHead = idFromHead(head);
+		if (fromHead !== void 0) return {
+			name,
+			id: fromHead,
+			present: true
+		};
+		try {
+			return {
+				name,
+				id: parseDocument(await readFile(abs, "utf8")).meta.id.trim(),
+				present: true
+			};
+		} catch {
+			return {
+				name,
+				id: void 0,
+				present: false
+			};
+		}
+	});
+	const paths = /* @__PURE__ */ new Map();
+	const usedIds = /* @__PURE__ */ new Set();
+	for (const clue of clues) {
+		if (!clue.present) {
+			readFailed += 1;
+			continue;
+		}
+		const relativePath = relative(base, join(nodesDir, clue.name)).replace(/\\/g, "/");
+		let id = clue.id ?? "";
+		if (!isUlid(id) || usedIds.has(id)) id = `adopted-${contentHash(relativePath + clue.name)}`;
+		usedIds.add(id);
+		paths.set(id, relativePath);
+	}
+	const index = {
+		at: Date.now(),
+		libraryId,
+		paths,
+		namesKey: namesKeyOf(sorted),
+		readFailed
+	};
+	nodeIndexes.set(base, index);
+	return index;
+}
+/** 读索引指向的那**一个**文件 ✓；身份对不上返回 `undefined` ✓（调用方据此重扫 ✓） */
+async function readIndexedNode(base, relativePath, expectedId) {
+	let text = "";
+	try {
+		text = await readFile(join(base, relativePath), "utf8");
+	} catch {
+		return;
+	}
+	const parsed = parseDocument(text);
+	const name = relativePath.split("/").pop() ?? "";
+	const raw = parsed.meta.id.trim();
+	const id = isUlid(raw) ? raw : `adopted-${contentHash(relativePath + name)}`;
+	if (id !== expectedId) return void 0;
+	return {
+		id,
+		title: parsed.meta.title === "" ? name.replace(/\.md$/i, "") : parsed.meta.title,
+		status: parsed.meta.status === "" ? "todo" : parsed.meta.status,
+		aliases: parsed.meta.aliases,
+		createdAt: parsed.meta.createdAt,
+		updatedAt: parsed.meta.updatedAt,
+		rev: parsed.meta.rev,
+		relativePath,
+		hash: contentHash(text),
+		note: parsed.body.replace(/^\n+/, "")
+	};
+}
+/**
+* **按索引读一个节点** ✓：正常情况只读一个文件 ✓，绝不为了读一篇正文扫全库 ✗。
+*
+* @param root - 库根 ✓。
+* @param id - 节点身份（由宿主解析，**不接受客户端给的路径** ✗）。
+* @returns 节点；找不到时带 `unverified` ⇒ 调用方可以受控地做一次全库兜底 ✓。
+*/
+async function readNodeFast(root, id) {
+	const base = assertRoot(root);
+	const manifest = await readJson(join(base, V3_LIBRARY_FILE));
+	if (manifest === void 0 || manifest.formatVersion !== 3) return {
+		ok: false,
+		code: "not_library"
+	};
+	const libraryId = typeof manifest.libraryId === "string" ? manifest.libraryId : "";
+	let index = nodeIndexes.get(base);
+	let fresh = false;
+	if (index === void 0 || index.libraryId !== libraryId || Date.now() - index.at >= 6e5) {
+		index = await buildNodeIndex(base, libraryId);
+		fresh = true;
+	} else if (!await namesUnchanged(base, index.namesKey)) {
+		index = await buildNodeIndex(base, libraryId);
+		fresh = true;
+	}
+	let rescanned = fresh;
+	let unverified = false;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const relativePath = index.paths.get(id);
+		if (relativePath !== void 0) {
+			const node = await readIndexedNode(base, relativePath, id);
+			if (node !== void 0) return {
+				ok: true,
+				node
+			};
+			unverified = true;
+		}
+		if (fresh) break;
+		index = await buildNodeIndex(base, libraryId);
+		fresh = true;
+		rescanned = true;
+	}
+	return {
+		ok: false,
+		code: "node_missing",
+		rescan: rescanned,
+		unverified: unverified || index.readFailed > 0
+	};
+}
+/**
+* 轻量格式检查（**只读 library.json** ✓）。
+* @param root - 库根。
+* @returns 判定结果（见上面的错误分类 ✓）。
+*/
+async function checkLibraryFormat(root) {
+	const base = assertRoot(root);
+	const manifestPath = join(base, V3_LIBRARY_FILE);
+	let raw;
+	try {
+		raw = await readFile(manifestPath, "utf8");
+	} catch (error) {
+		const code = error.code;
+		if (code === "ENOENT") return {
+			ok: false,
+			code: "library_unavailable",
+			message: `这里还不是知识库：${base}`
+		};
+		return {
+			ok: false,
+			code: "read_failed",
+			message: `读不了 ${V3_LIBRARY_FILE}（${code ?? "未知错误"}）：${base}`
+		};
+	}
+	let formatVersion;
+	try {
+		formatVersion = JSON.parse(raw).formatVersion;
+	} catch {
+		return {
+			ok: false,
+			code: "unsupported_format",
+			message: `${V3_LIBRARY_FILE} 不是合法的 JSON：${base}`
+		};
+	}
+	if (formatVersion === 3) return { ok: true };
+	if (typeof formatVersion === "number") return {
+		ok: false,
+		code: "unsupported_format",
+		message: `这个知识库是老格式（formatVersion=${formatVersion}），当前版本只支持新格式：一节点一个 markdown（library.json 里 formatVersion: 3）。请把 ${base} 整个删掉，然后在面板里点「知识库图谱」重新创建。`
+	};
+	return {
+		ok: false,
+		code: "unsupported_format",
+		message: `${V3_LIBRARY_FILE} 里没有 formatVersion：${base}`
 	};
 }
 /**
@@ -1616,6 +1919,10 @@ async function createNode$1(root, input, now = Date.now()) {
 	const text = composeDocument(meta, input.note ?? "");
 	const relativePath = `${V3_NODES_DIR}/${fileName}`;
 	await writeAtomic(join(base, relativePath), text);
+	updateNodeIndexEntry(base, {
+		id,
+		relativePath
+	});
 	return {
 		ok: true,
 		node: {
@@ -1672,13 +1979,22 @@ async function writeNote$1(root, input, now = Date.now()) {
 }
 /** `writeNote` 的串行区实现（由上面的队列保证不并发 ✓） */
 async function writeNoteLocked(base, input, now) {
-	const library = await readLibrary(base, { withNotes: false });
-	if (library === void 0) return {
+	const located = await readNodeFast(base, input.id);
+	if (located.ok === false && located.code === "not_library") return {
 		ok: false,
 		code: "not_library",
 		message: `这里还不是 v3 知识库：${base}`
 	};
-	const node = library.nodes.find((item) => item.id === input.id);
+	let node = located.ok === true ? located.node : void 0;
+	if (node === void 0 && located.ok === false && located.unverified) {
+		const library = await readLibrary(base, { withNotes: false });
+		if (library === void 0) return {
+			ok: false,
+			code: "not_library",
+			message: `这里还不是 v3 知识库：${base}`
+		};
+		node = library.nodes.find((item) => item.id === input.id);
+	}
 	if (node === void 0) return {
 		ok: false,
 		code: "node_missing",
@@ -1712,6 +2028,10 @@ async function writeNoteLocked(base, input, now) {
 	const text = composeDocument(meta, input.text);
 	await writeAtomic(abs, text);
 	const normalizedBody = parseDocument(text).body;
+	updateNodeIndexEntry(base, {
+		id,
+		relativePath: node.relativePath
+	});
 	return {
 		ok: true,
 		node: {
@@ -1864,6 +2184,7 @@ async function removeNode(root, input) {
 	};
 	const abs = join(base, node.relativePath);
 	await unlink(abs).catch(() => void 0);
+	invalidateNodeIndex(base, node.id);
 	const graph = await readGraph(base);
 	const edges = graph.edges.filter((edge) => edge.fromId !== node.id && edge.toId !== node.id);
 	if (edges.length !== graph.edges.length) await writeAtomic(join(base, V3_GRAPH_FILE), `${JSON.stringify({
@@ -2139,7 +2460,9 @@ function recordIsolation(entry) {
 		probes: current?.probes ?? [],
 		clientDiag: current?.clientDiag ?? [],
 		scans: current?.scans ?? [],
-		isolation: [full, ...current?.isolation ?? []].slice(0, ISOLATION_LOG_LIMIT)
+		isolation: [full, ...current?.isolation ?? []].slice(0, ISOLATION_LOG_LIMIT),
+		docReads: current?.docReads ?? [],
+		noteApi: current?.noteApi ?? []
 	};
 }
 /** 隔离留痕的环形缓冲长度 */
@@ -2162,7 +2485,9 @@ function patchRuntimeStatus(patch) {
 		probes: patch.probes ?? current?.probes ?? [],
 		clientDiag: patch.clientDiag ?? current?.clientDiag ?? [],
 		scans: patch.scans ?? current?.scans ?? [],
-		isolation: patch.isolation ?? current?.isolation ?? []
+		isolation: patch.isolation ?? current?.isolation ?? [],
+		docReads: patch.docReads ?? current?.docReads ?? [],
+		noteApi: patch.noteApi ?? current?.noteApi ?? []
 	};
 }
 /** 记录一次路由请求（最新的在前，最多 PROBE_LOG_LIMIT 条） */
@@ -2180,7 +2505,9 @@ function recordProbe(entry) {
 		probes: [entry, ...current?.probes ?? []].slice(0, PROBE_LOG_LIMIT),
 		clientDiag: current?.clientDiag ?? [],
 		scans: current?.scans ?? [],
-		isolation: current?.isolation ?? []
+		isolation: current?.isolation ?? [],
+		docReads: current?.docReads ?? [],
+		noteApi: current?.noteApi ?? []
 	};
 }
 /** 记录一次客户端诊断（最新的在前，最多 CLIENT_DIAG_LIMIT 条） */
@@ -2198,7 +2525,9 @@ function recordClientDiag(entry) {
 		probes: current?.probes ?? [],
 		clientDiag: [entry, ...current?.clientDiag ?? []].slice(0, CLIENT_DIAG_LIMIT),
 		scans: current?.scans ?? [],
-		isolation: current?.isolation ?? []
+		isolation: current?.isolation ?? [],
+		docReads: current?.docReads ?? [],
+		noteApi: current?.noteApi ?? []
 	};
 }
 /** 记录一次库扫描指标（最新的在前，最多 SCAN_LOG_LIMIT 条） */
@@ -2215,9 +2544,56 @@ function recordScan(entry) {
 		startedAt: current?.startedAt ?? Date.now(),
 		probes: current?.probes ?? [],
 		clientDiag: current?.clientDiag ?? [],
-		scans: [entry, ...current?.scans ?? []].slice(0, SCAN_LOG_LIMIT)
+		scans: [entry, ...current?.scans ?? []].slice(0, SCAN_LOG_LIMIT),
+		isolation: current?.isolation ?? [],
+		docReads: current?.docReads ?? [],
+		noteApi: current?.noteApi ?? []
 	};
 }
+/** 记录一次**读节点正文**的分阶段指标（最新的在前，最多 DOC_READ_LOG_LIMIT 条 ✓） */
+function recordDocRead(entry) {
+	current = {
+		api: current?.api ?? {
+			path: "",
+			registered: false
+		},
+		prompts: current?.prompts ?? {
+			section: false,
+			perAgent: false
+		},
+		startedAt: current?.startedAt ?? Date.now(),
+		probes: current?.probes ?? [],
+		clientDiag: current?.clientDiag ?? [],
+		scans: current?.scans ?? [],
+		isolation: current?.isolation ?? [],
+		docReads: [entry, ...current?.docReads ?? []].slice(0, DOC_READ_LOG_LIMIT),
+		noteApi: current?.noteApi ?? []
+	};
+}
+/** 读正文指标的环形缓冲长度 ✓ */
+const DOC_READ_LOG_LIMIT = 16;
+/** 记录一次**正文接口端到端**指标（最新的在前，最多 NOTE_API_LOG_LIMIT 条 ✓） */
+function recordNoteApi(entry) {
+	current = {
+		api: current?.api ?? {
+			path: "",
+			registered: false
+		},
+		prompts: current?.prompts ?? {
+			section: false,
+			perAgent: false
+		},
+		startedAt: current?.startedAt ?? Date.now(),
+		probes: current?.probes ?? [],
+		clientDiag: current?.clientDiag ?? [],
+		scans: current?.scans ?? [],
+		isolation: current?.isolation ?? [],
+		docReads: current?.docReads ?? [],
+		noteApi: [entry, ...current?.noteApi ?? []].slice(0, NOTE_API_LOG_LIMIT)
+	};
+}
+/** 正文接口指标的环形缓冲长度 ✓ */
+const NOTE_API_LOG_LIMIT = 16;
 function runtimeStatus() {
 	return current;
 }
@@ -2347,6 +2723,10 @@ async function loadLibrary(root, options = {}) {
 				value: v3
 			});
 			lastRoot = root;
+			seedNodeIndex(root, v3.snapshot.nodes.map((node) => ({
+				id: String(node.id),
+				relativePath: String(node.relativePath)
+			})), v3.manifest.libraryId);
 			return v3;
 		}
 		const legacy = await readLegacyManifest(root);
@@ -4924,31 +5304,87 @@ function utf8Bytes(text) {
 * @param nodeId - 稳定节点 id。
 * @returns 文档，或带 code 的失败 ✓。
 */
-async function readNodeDocument(root, nodeId) {
+async function readNodeDocument(root, nodeId, timing = {}) {
 	const id = typeof nodeId === "string" ? nodeId.trim() : "";
 	if (id === "") return {
 		ok: false,
 		code: "node_missing",
 		message: "缺少 nodeId"
 	};
-	const library = await readLibrary(root, { withNotes: true });
-	if (library === void 0) return {
+	const started = Date.now();
+	/** 客户端请求号 ✓（与 `noteApi` / 客户端 `note-open-*` 对齐用 ✓；这只是留痕，不参与判定 ✗） */
+	const requestId = typeof timing.requestId === "string" ? timing.requestId : "";
+	const fast = await readNodeFast(root, id);
+	if (fast.ok === false && fast.code === "not_library") return {
 		ok: false,
 		code: "not_library",
 		message: `这里还不是 v3 知识库：${root}`
 	};
-	const node = library.nodes.find((item) => item.id === id);
-	if (node === void 0) return {
-		ok: false,
-		code: "node_missing",
-		message: "没有找到这个知识点"
-	};
+	let node = fast.ok === true ? fast.node : void 0;
+	let mode = fast.ok === true ? "index" : "index-miss";
+	if (node === void 0 && fast.ok === false && fast.unverified) try {
+		const library = await readLibrary(root, { withNotes: true });
+		if (library === void 0) return {
+			ok: false,
+			code: "not_library",
+			message: `这里还不是 v3 知识库：${root}`
+		};
+		node = library.nodes.find((item) => item.id === id);
+		mode = "full-scan";
+	} catch (error) {
+		recordDocRead({
+			at: started,
+			ms: Date.now() - started,
+			mode: "full-scan",
+			bytes: 0,
+			outcome: "read_failed",
+			requestId
+		});
+		return {
+			ok: false,
+			code: "read_failed",
+			message: `读知识库时出错：${error instanceof Error ? error.message : String(error)}`
+		};
+	}
+	if (node === void 0) {
+		recordDocRead({
+			at: started,
+			ms: Date.now() - started,
+			mode,
+			bytes: 0,
+			outcome: "node_missing",
+			requestId
+		});
+		return {
+			ok: false,
+			code: "node_missing",
+			message: "没有找到这个知识点"
+		};
+	}
 	const document = docOf(node);
-	if (utf8Bytes(document.text) > 524288) return {
-		ok: false,
-		code: "too_large",
-		message: `正文超过 ${Math.round(MAX_DOCUMENT_BYTES / 1024)}KB，面板编辑器不处理这么大的文档`
-	};
+	if (utf8Bytes(document.text) > 524288) {
+		recordDocRead({
+			at: started,
+			ms: Date.now() - started,
+			mode,
+			bytes: utf8Bytes(document.text),
+			outcome: "too_large",
+			requestId
+		});
+		return {
+			ok: false,
+			code: "too_large",
+			message: `正文超过 ${Math.round(MAX_DOCUMENT_BYTES / 1024)}KB，面板编辑器不处理这么大的文档`
+		};
+	}
+	recordDocRead({
+		at: started,
+		ms: Date.now() - started,
+		mode,
+		bytes: utf8Bytes(document.text),
+		outcome: "ok",
+		requestId
+	});
 	return {
 		ok: true,
 		document
@@ -5604,10 +6040,13 @@ async function handleApiRequest(ctx, config, request) {
 		}
 	}
 	if (record.kind === "read-node-document" || record.kind === "save-node-document") {
+		const apiStarted = Date.now();
+		const requestId = typeof record.requestId === "string" ? record.requestId : "";
 		const resolved = await resolveRequestedRoot(ctx, config, {
 			root: typeof record.root === "string" ? record.root : void 0,
 			sessionId: typeof record.sessionId === "string" ? record.sessionId : void 0
 		});
+		const rootMs = Date.now() - apiStarted;
 		if (resolved.root === void 0) return {
 			status: 200,
 			body: {
@@ -5618,32 +6057,42 @@ async function handleApiRequest(ctx, config, request) {
 				}
 			}
 		};
-		try {
-			if ((await loadLibrary(resolved.root, {})).storage === "v2") return {
-				status: 200,
-				body: {
-					ok: false,
-					error: {
-						code: "unsupported_format",
-						message: "这个知识库还是旧格式（v2，只读兼容）⇒ 面板里不能编辑正文"
-					}
-				}
-			};
-		} catch (error) {
+		const formatStarted = Date.now();
+		const format = await checkLibraryFormat(resolved.root);
+		const formatMs = Date.now() - formatStarted;
+		if (format.ok === false) {
+			recordNoteApi({
+				at: apiStarted,
+				requestId,
+				kind: record.kind === "read-node-document" ? "read" : "save",
+				totalMs: Date.now() - apiStarted,
+				rootMs,
+				formatMs,
+				outcome: format.code
+			});
 			return {
 				status: 200,
 				body: {
 					ok: false,
 					error: {
-						code: "unsupported_format",
-						message: error instanceof Error ? error.message : String(error)
+						code: format.code,
+						message: format.message
 					}
 				}
 			};
 		}
 		const nodeId = typeof record.nodeId === "string" ? record.nodeId : "";
 		if (record.kind === "read-node-document") {
-			const result = await readNodeDocument(resolved.root, nodeId);
+			const result = await readNodeDocument(resolved.root, nodeId, { requestId });
+			recordNoteApi({
+				at: apiStarted,
+				requestId,
+				kind: "read",
+				totalMs: Date.now() - apiStarted,
+				rootMs,
+				formatMs,
+				outcome: result.ok === true ? "ok" : result.code
+			});
 			return result.ok === true ? {
 				status: 200,
 				body: {
@@ -5678,6 +6127,15 @@ async function handleApiRequest(ctx, config, request) {
 		});
 		if (result.ok === true) {
 			invalidateLibrary(resolved.root);
+			recordNoteApi({
+				at: apiStarted,
+				requestId,
+				kind: "save",
+				totalMs: Date.now() - apiStarted,
+				rootMs,
+				formatMs,
+				outcome: "ok"
+			});
 			return {
 				status: 200,
 				body: {
@@ -5686,6 +6144,15 @@ async function handleApiRequest(ctx, config, request) {
 				}
 			};
 		}
+		recordNoteApi({
+			at: apiStarted,
+			requestId,
+			kind: "save",
+			totalMs: Date.now() - apiStarted,
+			rootMs,
+			formatMs,
+			outcome: result.code
+		});
 		return {
 			status: 200,
 			body: {
@@ -5959,7 +6426,13 @@ function apply(ctx, config = {}) {
 			reason: "等待 connection 服务"
 		},
 		prompts,
-		startedAt: Date.now()
+		startedAt: Date.now(),
+		probes: [],
+		clientDiag: [],
+		scans: [],
+		isolation: [],
+		docReads: [],
+		noteApi: []
 	});
 	if (typeof ctx.inject === "function") try {
 		ctx.inject(["connection"], (scoped) => {

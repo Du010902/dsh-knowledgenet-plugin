@@ -18,7 +18,7 @@
  * 本模块刻意保持"轻"：只依赖 node:fs/node:path/node:crypto 与同层的 frontmatter/ulid ✓，
  * 这样测试可以直接 import，不受打包产物影响 ✓。
  */
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { composeDocument, contentHash, emptyMeta, fileNameFromTitle, parseDocument, type FrontMatter } from "./frontmatter.ts";
@@ -161,16 +161,29 @@ export async function readLibrary(root: string, options: { withNotes?: boolean }
   const nodesDir = join(base, V3_NODES_DIR);
   let names: string[] = [];
   try {
-    names = (await readdir(nodesDir)).filter((name) => name.toLowerCase().endsWith(".md"));
+    names = (await readdir(nodesDir)).filter((name: string) => name.toLowerCase().endsWith(".md"));
   } catch {
     names = [];
   }
 
+  /*
+   * **有界并发读** ✓（`mapLimit` ✓）：这里必须读**整份**文件（要正文与整文件指纹 ✗），
+   * 但没必要一个文件一次串行往返 ✓ —— 冷盘 / 被别的进程抢 IO 时串行会被线性放大 ✓
+   * （实测见过 16 个节点扫 8 秒 ✓）。身份仍然按排序**串行**分配 ✓ ⇒ 语义一字不变 ✓。
+   *
+   * ⚠️ 读不出来的文件**照旧让它抛** ✓（不吞异常 ✗）：静默跳过等于让节点在图谱里凭空消失 ✓，
+   * 比"明确报错"更糟 ✓。索引那条路（`buildNodeIndex`）才允许跳过 ✓ —— 它只是"提示"✓，
+   * 而且会把"有文件读不到"记进 `readFailed` ✓，让读取走权威的全库兜底 ✓。
+   */
+  const files = await mapLimit([...names].sort(), LIBRARY_READ_CONCURRENCY, async (name: string) => {
+    const abs = join(nodesDir, name);
+    return { name, abs, text: await readFile(abs, "utf8") };
+  });
+
   const nodes: V3Node[] = [];
   const usedIds = new Set<string>();
-  for (const name of names.sort()) {
-    const abs = join(nodesDir, name);
-    const text = await readFile(abs, "utf8");
+  for (const file of files) {
+    const { abs, name, text } = file;
     const parsed = parseDocument(text);
     const relativePath = relative(base, abs).replace(/\\/g, "/");
     let id = parsed.meta.id.trim();
@@ -207,6 +220,387 @@ export async function readLibrary(root: string, options: { withNotes?: boolean }
     edges: Array.isArray(graph?.edges) ? graph.edges : [],
     graphRevision: typeof graph?.revision === "number" ? graph.revision : 0,
   };
+}
+
+/**
+ * **单节点索引**：nodeId → 相对路径 ✓
+ * （`design/plugin-note-editor-loading-optimization.md` 优先优化一 ✓）。
+ *
+ * 复查确认的问题：读**一篇**正文却 `readLibrary({withNotes:true})` **扫全库** ✗ ——
+ * 遍历所有节点文件、逐个读取解析，最后才找到目标节点 ✓。
+ * 现在改成"索引定位 + 只读那一个文件" ✓：
+ *
+ * - 索引只按**库身份 + 节点身份**解析路径 ✗（绝不接受客户端给的路径 ✓）；
+ * - 图谱扫描的结果可以直接**喂进来**（`seedNodeIndex` ✓）⇒ 面板已经扫过的话，读取正文一个文件都不用多扫 ✓；
+ * - 索引过期（TTL ✓）或文件被删 / 身份对不上 ⇒ **受控重扫一次**并更新索引 ✓；
+ * - 写入 / 新建 / 删除之后立刻失效或更新相关记录 ✓；
+ * - **保存路径不受影响** ✗：`writeNote` 仍然现场读磁盘文件再比指纹 ✓（缓存正文/缓存指纹都不能替代外部修改检测 ✗）。
+ */
+interface NodePathIndex {
+  at: number;
+  libraryId: string;
+  paths: Map<string, string>;
+  /** 建索引时 `Nodes/` 的文件名集合（排序后拼一起 ✓）—— 见下面的"目录变动检测" ✓ */
+  namesKey: string;
+  /**
+   * 建索引时**读不到**的文件数 ✓。
+   * `> 0` ⇒ "索引里没有这个 id"**不能当权威结论** ✗（也许正好是那个读不到的文件 ✓）
+   * ⇒ `readNodeFast` 报告 `unverified` ✓，调用方走权威的全库兜底 ✓（那里读不到会**抛错** ✓）。
+   */
+  readFailed: number;
+}
+
+const nodeIndexes = new Map<string, NodePathIndex>();
+
+/**
+ * 索引存活时间 ✓。
+ *
+ * 复查（`design/plugin-note-editor-loading-recheck.md` 问题二 ✓）指出：
+ * 原来定 1.5s、和图谱缓存一致 ✗ ⇒ 隔一会儿点开笔记就**又全量读一遍所有文件** ✓；
+ * 修掉 API 前置全库扫描之后，它就会变成下一处主要等待 ✓。
+ *
+ * 现在**和"图谱快照的新鲜度"彻底分开** ✓ —— 路径只是**提示** ✗，权威性靠这四条保证 ✓：
+ * ① 每次读都**现场读目标文件**、校验身份、现算指纹 ✓（`readIndexedNode` ✓）；
+ * ② 每次读都做一次**极廉价的目录变动检测** ✓（一次 `readdir` 比对名字集合 ✓，
+ *    新增 / 删除 / 改名 / 采用身份都会让它变 ✓ ⇒ 立刻重建 ✓；这也堵住了
+ *    "别的文件新增了相同 ULID、排序规则可能换掉归属"那个洞 ✓）；
+ * ③ 插件自己写盘之后**立刻更新或摘掉**记录 ✓（`writeNote` / `createNode` / `removeNode` ✓）；
+ * ④ `libraryId` 变了 ⇒ 整个索引作废 ✓。
+ */
+export const NODE_INDEX_TTL_MS = 10 * 60 * 1000;
+
+/** 把文件名集合变成可比较的字符串 ✓（排序 ⇒ 与顺序无关 ✓） */
+function namesKeyOf(names: readonly string[]): string {
+  return [...names].sort().join("\n");
+}
+
+/** 用**已有扫描结果**喂索引 ✓（图谱/工具刚扫过 ⇒ 读正文不必再扫一遍 ✓） */
+export function seedNodeIndex(
+  root: string,
+  nodes: readonly { id: string; relativePath: string }[],
+  libraryId = "",
+): void {
+  const paths = new Map<string, string>();
+  const names: string[] = [];
+  for (const node of nodes) {
+    paths.set(node.id, node.relativePath);
+    const name = node.relativePath.split("/").pop() ?? "";
+    if (name !== "") names.push(name);
+  }
+  nodeIndexes.set(assertRoot(root), { at: Date.now(), libraryId, paths, namesKey: namesKeyOf(names), readFailed: 0 });
+}
+
+/** 让索引里的一条记录失效 / 失效整个库 ✓（写入、新建、删除之后必须调用 ✓） */
+export function invalidateNodeIndex(root: string, nodeId?: string): void {
+  const base = assertRoot(root);
+  if (nodeId === undefined) {
+    nodeIndexes.delete(base);
+    return;
+  }
+  nodeIndexes.get(base)?.paths.delete(nodeId);
+}
+
+/**
+ * 更新索引里的一条记录 ✓（**只在索引已经存在时**动它 ✗ ——
+ * 没有索引就现建一个"只有这一条"的，会让别的节点看起来不存在 ✓）。
+ */
+export function updateNodeIndexEntry(root: string, node: { id: string; relativePath: string }): void {
+  const index = nodeIndexes.get(assertRoot(root));
+  if (index === undefined) return;
+  index.paths.set(node.id, node.relativePath);
+  index.at = Date.now();
+  /*
+   * 写入可能**改名**（标题变了 ⇒ 文件名变了 ✓）⇒ 名字集合要跟着更新 ✓，
+   * 否则下一次读会误判"目录变了"、白重建一次索引 ✗。
+   */
+  const name = node.relativePath.split("/").pop() ?? "";
+  const names = index.namesKey === "" ? [] : index.namesKey.split("\n");
+  if (name !== "" && !names.includes(name)) names.push(name);
+  index.namesKey = namesKeyOf(names);
+}
+
+/** 索引里记的**文件名集合**（目录变动检测用 ✓；没索引返回 `undefined` ✓） */
+function indexedNamesKey(root: string): string | undefined {
+  return nodeIndexes.get(assertRoot(root))?.namesKey;
+}
+
+/** 一次 `readdir` 比名字集合 ✓（**不读任何文件**✗）—— 目录变了就返回 `false` ✓ */
+async function namesUnchanged(base: string, expected: string): Promise<boolean> {
+  const nodesDir = join(base, V3_NODES_DIR);
+  let names: string[] = [];
+  try {
+    names = (await readdir(nodesDir)).filter((name: string) => name.toLowerCase().endsWith(".md"));
+  } catch {
+    return false;
+  }
+  return namesKeyOf(names) === expected;
+}
+
+/** 索引现状（只给诊断与测试看 ✓：条数与时间，**不含路径/文本** ✗） */
+export function peekNodeIndex(root: string): { size: number; at: number; libraryId: string } | undefined {
+  const index = nodeIndexes.get(assertRoot(root));
+  if (index === undefined) return undefined;
+  return { size: index.paths.size, at: index.at, libraryId: index.libraryId };
+}
+
+/**
+ * 建/重建索引时**每个文件只读头部多少字节** ✓
+ * （复查指出：注释写着"只读 front-matter 需要的部分"，实际却 `readFile` 读了整份 markdown ✗）。
+ * 4KB 足够覆盖正常 front-matter（十几个字段 ✓）；万一不够 ⇒ 退回读整份 ✓（正确性优先 ✓）。
+ */
+export const INDEX_HEAD_BYTES = 4096;
+
+/** 建立索引时的**有界并发** ✓（顺序交给下面的串行身份分配 ✓，语义与 `readLibrary` 完全一致 ✓） */
+export const INDEX_READ_CONCURRENCY = 8;
+
+/** 库扫描（图谱那条路 ✓）读文件时的有界并发 ✓ */
+export const LIBRARY_READ_CONCURRENCY = 8;
+
+/**
+ * **有界并发**跑异步任务，结果顺序与输入一致 ✓（limit 至少 1 ✓）。
+ *
+ * 为什么需要：原来索引与库扫描都是 `for (const name of names) await readFile(...)` ✗ ——
+ * 一个文件一次往返、完全串行 ✓；冷盘 / 被别的进程抢 IO 时（实测见过 8 秒的扫描 ✓）
+ * 串行往返会被线性放大 ✓。这里只并发**读**，**不并发决定身份** ✗：
+ * 重复 ULID 的归属依赖排序规则 ✓，所以身份仍然按排序**串行**分配 ✓。
+ */
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  if (items.length === 0) return results;
+  const size = Math.max(1, Math.min(Math.floor(limit), items.length));
+  let next = 0;
+  const workers = Array.from({ length: size }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await run(items[index] as T, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** 只读文件**头部**（最多 `maxBytes` ✓）；读不到返回 `undefined` ✓ */
+async function readTextHead(abs: string, maxBytes: number): Promise<string | undefined> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(abs, "r");
+    const buffer = new Uint8Array(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return new TextDecoder("utf-8").decode(buffer.subarray(0, bytesRead));
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+/**
+ * 从**文件头部**取出 front-matter 里的 `id` ✓（建立索引不该把整篇正文读进来 ✗）。
+ * 内部直接复用 `parseDocument` ✓ ⇒ 与整文件解析的结果**逐字一致** ✓。
+ * @param head - 文件头部文本 ✓。
+ * @returns 去掉空白的 id ✓；头部里 front-matter 还没结束（或压根没有）⇒ `undefined` ✓（调用方退回读整份 ✓）。
+ */
+export function idFromHead(head: string): string | undefined {
+  const parsed = parseDocument(head);
+  if (!parsed.hasFrontMatter) return undefined;
+  return parsed.meta.id.trim();
+}
+
+/**
+ * 建/重建索引：**每个文件只读头部** ✓（id 在 front-matter 里、文件名不含 id ✗，
+ * 所以首次建立仍要过一遍文件 ✓ —— 但不再读整份正文 ✓，而且是**有界并发** ✓）。
+ */
+async function buildNodeIndex(base: string, libraryId: string): Promise<NodePathIndex> {
+  const nodesDir = join(base, V3_NODES_DIR);
+  let names: string[] = [];
+  try {
+    names = (await readdir(nodesDir)).filter((name: string) => name.toLowerCase().endsWith(".md"));
+  } catch {
+    names = [];
+  }
+  const sorted = [...names].sort();
+  /* ① **并发**只取"身份线索"（头部 ✓；不够就退回整份 ✓） */
+  let readFailed = 0;
+  const clues = await mapLimit(sorted, INDEX_READ_CONCURRENCY, async (name: string) => {
+    const abs = join(nodesDir, name);
+    const head = await readTextHead(abs, INDEX_HEAD_BYTES);
+    if (head === undefined) return { name, id: undefined as string | undefined, present: false }; /* 读不到 ⇒ 计入 readFailed ✓ */
+    const fromHead = idFromHead(head);
+    if (fromHead !== undefined) return { name, id: fromHead, present: true };
+    /* 头部里 front-matter 没结束（超长 front-matter ✓）或压根没有 ⇒ 老老实实读整份 ✓ */
+    try {
+      const text = await readFile(abs, "utf8");
+      return { name, id: parseDocument(text).meta.id.trim(), present: true };
+    } catch {
+      return { name, id: undefined, present: false };
+    }
+  });
+  /* ② 身份**按排序串行**分配 ✓ ⇒ 与 `readLibrary` 同一套规则（合法 ULID / adopted / 重复 ULID ✓） */
+  const paths = new Map<string, string>();
+  const usedIds = new Set<string>();
+  for (const clue of clues) {
+    if (!clue.present) { readFailed += 1; continue; }
+    const relativePath = relative(base, join(nodesDir, clue.name)).replace(/\\/g, "/");
+    let id = clue.id ?? "";
+    if (!isUlid(id) || usedIds.has(id)) id = `adopted-${contentHash(relativePath + clue.name)}`;
+    usedIds.add(id);
+    paths.set(id, relativePath);
+  }
+  const index: NodePathIndex = { at: Date.now(), libraryId, paths, namesKey: namesKeyOf(sorted), readFailed };
+  nodeIndexes.set(base, index);
+  return index;
+}
+
+/** 读索引指向的那**一个**文件 ✓；身份对不上返回 `undefined` ✓（调用方据此重扫 ✓） */
+async function readIndexedNode(base: string, relativePath: string, expectedId: string): Promise<V3Node | undefined> {
+  let text = "";
+  try {
+    text = await readFile(join(base, relativePath), "utf8");
+  } catch {
+    return undefined; /* 文件没了 ⇒ 索引过期 ✓ */
+  }
+  const parsed = parseDocument(text);
+  const name = relativePath.split("/").pop() ?? "";
+  const raw = parsed.meta.id.trim();
+  const id = isUlid(raw) ? raw : `adopted-${contentHash(relativePath + name)}`;
+  if (id !== expectedId) return undefined; /* 重命名 / 身份被改 / 重复 ULID ⇒ 重扫 ✓ */
+  return {
+    id,
+    title: parsed.meta.title === "" ? name.replace(/\.md$/i, "") : parsed.meta.title,
+    status: parsed.meta.status === "" ? "todo" : parsed.meta.status,
+    aliases: parsed.meta.aliases,
+    createdAt: parsed.meta.createdAt,
+    updatedAt: parsed.meta.updatedAt,
+    rev: parsed.meta.rev,
+    relativePath,
+    hash: contentHash(text),
+    note: parsed.body.replace(/^\n+/, ""),
+  };
+}
+
+/** `readNodeFast` 的结果：找不到时区分"索引已重建确认没有"与"身份没验证通过" ✓ */
+export type FastNodeResult =
+  | { ok: true; node: V3Node }
+  | { ok: false; code: "not_library" }
+  | { ok: false; code: "node_missing"; rescan: boolean; unverified: boolean };
+
+/**
+ * **按索引读一个节点** ✓：正常情况只读一个文件 ✓，绝不为了读一篇正文扫全库 ✗。
+ *
+ * @param root - 库根 ✓。
+ * @param id - 节点身份（由宿主解析，**不接受客户端给的路径** ✗）。
+ * @returns 节点；找不到时带 `unverified` ⇒ 调用方可以受控地做一次全库兜底 ✓。
+ */
+export async function readNodeFast(root: string, id: string): Promise<FastNodeResult> {
+  const base = assertRoot(root);
+  const manifest = await readJson<{ formatVersion?: number; libraryId?: string }>(join(base, V3_LIBRARY_FILE));
+  if (manifest === undefined || manifest.formatVersion !== V3_FORMAT_VERSION) {
+    return { ok: false, code: "not_library" };
+  }
+  const libraryId = typeof manifest.libraryId === "string" ? manifest.libraryId : "";
+  let index = nodeIndexes.get(base);
+  let fresh = false;
+  if (index === undefined || index.libraryId !== libraryId || Date.now() - index.at >= NODE_INDEX_TTL_MS) {
+    index = await buildNodeIndex(base, libraryId);
+    fresh = true;
+  } else if (!(await namesUnchanged(base, index.namesKey))) {
+    /*
+     * **目录变动检测** ✓（复查问题二 ✓）：一次 `readdir` 就能发现新增 / 删除 / 改名 ✓
+     * ⇒ 立刻重建 ✓（不读任何文件 ✗）。这样索引可以活得很久 ✓，
+     * 又不会出现"别的文件新增了相同 ULID、归属被换掉却没人知道"✗。
+     */
+    index = await buildNodeIndex(base, libraryId);
+    fresh = true;
+  }
+  let rescanned = fresh;
+  let unverified = false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const relativePath = index.paths.get(id);
+    if (relativePath !== undefined) {
+      const node = await readIndexedNode(base, relativePath, id);
+      if (node !== undefined) return { ok: true, node };
+      unverified = true; /* 索引过期（重命名 / 删除 / 身份被改 ✓）⇒ 重扫一次 ✓ */
+    }
+    /* 索引是刚建的 ⇒ 它就是权威结果 ✓（不再重复扫 ✗）；否则受控重扫**一次** ✓ */
+    if (fresh) break;
+    index = await buildNodeIndex(base, libraryId);
+    fresh = true;
+    rescanned = true;
+  }
+  /* 索引里"有文件读不到" ⇒ 未命中不可信 ✗ ⇒ 让调用方走权威的全库兜底 ✓ */
+  return { ok: false, code: "node_missing", rescan: rescanned, unverified: unverified || index.readFailed > 0 };
+}
+
+/**
+ * **只做格式判定**的轻量检查 ✓
+ * （`design/plugin-note-editor-loading-recheck.md` 问题一 ✓）。
+ *
+ * 正文读/写接口原来先 `loadLibrary(root)` ✗ —— 目的只是"确认这是 v3 库"✓，
+ * 却顺手把**整个图谱**加载了一遍 ✓：缓存（1.5s ✓）过期就全库扫一遍 ✓，
+ * 有扫描在飞还得等它跑完 ✓ ⇒ "只读一篇笔记"也可能等上全库扫描的时间 ✓（实测见过 8 秒的扫描 ✓）。
+ *
+ * 现在只读 **`library.json` 一个小文件** ✓，**不加载图谱快照** ✗ —— 读/写正文与图谱快照本来就无关 ✓。
+ *
+ * 错误分类要分清 ✗（原来把任何异常都报成 `unsupported_format` ✗，
+ * 磁盘/权限问题会伪装成格式问题 ✓）：
+ * - `ok: true`：是 v3 库 ✓；
+ * - `unsupported_format`：旧格式（v2 ✓）或 `formatVersion` 不认识 / 不是合法 JSON ✓；
+ * - `library_unavailable`：目录里没有 `library.json` ✓；
+ * - `read_failed`：读不了（权限 / IO ✓）—— 不是格式问题 ✗。
+ */
+export type LibraryFormatCheck =
+  | { ok: true }
+  | { ok: false; code: "unsupported_format" | "library_unavailable" | "read_failed"; message: string };
+
+/**
+ * 轻量格式检查（**只读 library.json** ✓）。
+ * @param root - 库根。
+ * @returns 判定结果（见上面的错误分类 ✓）。
+ */
+export async function checkLibraryFormat(root: string): Promise<LibraryFormatCheck> {
+  const base = assertRoot(root);
+  const manifestPath = join(base, V3_LIBRARY_FILE);
+  let raw: string;
+  try {
+    raw = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "ENOENT") {
+      return { ok: false, code: "library_unavailable", message: `这里还不是知识库：${base}` };
+    }
+    /*
+     * 其余都算**读不了** ✗：权限（EACCES ✓）、同名目录（EISDIR ✓）、路径中间不是目录（ENOTDIR ✓）、
+     * IO 错误 ✓……它们与"这里不是知识库"是两件事 ✓（原来一律报成格式问题 ✗）。
+     */
+    return {
+      ok: false,
+      code: "read_failed",
+      message: `读不了 ${V3_LIBRARY_FILE}（${code ?? "未知错误"}）：${base}`,
+    };
+  }
+  let formatVersion: unknown;
+  try {
+    formatVersion = (JSON.parse(raw) as { formatVersion?: unknown }).formatVersion;
+  } catch {
+    return { ok: false, code: "unsupported_format", message: `${V3_LIBRARY_FILE} 不是合法的 JSON：${base}` };
+  }
+  if (formatVersion === V3_FORMAT_VERSION) return { ok: true };
+  if (typeof formatVersion === "number") {
+    return {
+      ok: false,
+      code: "unsupported_format",
+      message: `这个知识库是老格式（formatVersion=${formatVersion}），当前版本只支持新格式：`
+        + `一节点一个 markdown（library.json 里 formatVersion: ${V3_FORMAT_VERSION}）。`
+        + `请把 ${base} 整个删掉，然后在面板里点「知识库图谱」重新创建。`,
+    };
+  }
+  return { ok: false, code: "unsupported_format", message: `${V3_LIBRARY_FILE} 里没有 formatVersion：${base}` };
 }
 
 /**
@@ -315,6 +709,8 @@ export async function createNode(
   const text = composeDocument(meta, input.note ?? "");
   const relativePath = `${V3_NODES_DIR}/${fileName}`;
   await writeAtomic(join(base, relativePath), text);
+  /* 新节点立刻进索引 ✓（不然下一次读它要先扫全库 ✗） */
+  updateNodeIndexEntry(base, { id, relativePath });
 
   return {
     ok: true,
@@ -405,9 +801,22 @@ async function writeNoteLocked(
   input: { id: string; text: string; expectedHash?: string },
   now: number,
 ): Promise<V3Result<{ node: V3Node }> | { ok: false; code: "conflict"; message: string; actualHash: string }> {
-  const library = await readLibrary(base, { withNotes: false });
-  if (library === undefined) return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${base}` };
-  const node = library.nodes.find((item) => item.id === input.id);
+  /*
+   * 定位目标节点：**索引 + 只读那一个文件** ✓（加载优化文档优先优化一 ✓）。
+   * 这一步给的 `node.hash` 是**刚读到的文件**算出来的 ✓，而下面还会再读一次文件、再比一次 ✓ ——
+   * "检查到提交"这段窗口的守卫**一点没放松** ✗（缓存正文/缓存指纹都没有参与判定 ✓）。
+   */
+  const located = await readNodeFast(base, input.id);
+  if (located.ok === false && located.code === "not_library") {
+    return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${base}` };
+  }
+  let node = located.ok === true ? located.node : undefined;
+  if (node === undefined && located.ok === false && located.unverified) {
+    /* 索引里那个 id 指向的文件身份对不上（极少数 ✓）⇒ 受控全库确认一次 ✓ */
+    const library = await readLibrary(base, { withNotes: false });
+    if (library === undefined) return { ok: false, code: "not_library", message: `这里还不是 v3 知识库：${base}` };
+    node = library.nodes.find((item) => item.id === input.id);
+  }
   if (node === undefined) return { ok: false, code: "node_missing", message: "没有找到这个知识点" };
 
   if (typeof input.expectedHash === "string" && input.expectedHash !== "" && input.expectedHash !== node.hash) {
@@ -455,6 +864,8 @@ async function writeNoteLocked(
    * 界面"已保存"的基线就与磁盘不一致（复查指出的问题 ✓）。
    */
   const normalizedBody = parseDocument(text).body;
+  /* 写完立刻更新索引 ✓（标题被改 ⇒ 文件名也可能变 ✓；免得下一次读正文又全库重扫 ✗） */
+  updateNodeIndexEntry(base, { id, relativePath: node.relativePath });
   return {
     ok: true,
     node: {
@@ -582,6 +993,8 @@ export async function removeNode(
 
   const abs = join(base, node.relativePath);
   await unlink(abs).catch(() => undefined);
+  /* 删掉后把这条记录从索引里摘掉 ✓（不然下次读它要等重扫 ✗） */
+  invalidateNodeIndex(base, node.id);
 
   const graph = await readGraph(base);
   const edges = graph.edges.filter((edge) => edge.fromId !== node.id && edge.toId !== node.id);

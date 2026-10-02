@@ -37,6 +37,8 @@ export type DocumentFailure =
   | "conflict"
   | "write_failed"
   | "bad_body"
+  /* 宿主读库时出错（权限 / IO ✓）—— 不是"没有这个节点" ✗ */
+  | "read_failed"
   | "unknown";
 
 export type ReadOutcome =
@@ -123,15 +125,24 @@ async function post(
 /**
  * 读一个节点的正文文档。
  * @param nodeId - 稳定节点 id（重命名也追得住 ✓）。
+ * @param fetcher - fetch 注入点。
  * @param options - 目标库、序号守卫与取消信号 ✓。
+ * @param requestId - 请求号 ✓（只用于**两端留痕对齐**：宿主 `noteApi` ↔ 客户端 `note-open-*` ✓；
+ *   复查问题三要求"只有 requestId 对齐后才能可靠比较"✓ —— 它**不参与任何判定** ✗）。
  * @returns 文档或带 code 的失败；**过期响应会被丢弃**（返回 `stale` 语义由调用方判空 ✓）。
  */
 export async function readNodeDocument(
   nodeId: string,
   fetcher: FetchLike,
   options: RequestOptions = {},
+  requestId = "",
 ): Promise<ReadOutcome | undefined> {
-  const body = { kind: "read-node-document", nodeId, ...targetBody(options.target) };
+  const body = {
+    kind: "read-node-document",
+    nodeId,
+    ...(requestId === "" ? {} : { requestId }),
+    ...targetBody(options.target),
+  };
   const parsed = await post(fetcher, body, options);
   /* 过期响应：调用方已经切走了 ⇒ 直接丢弃，别写进状态 ✗ */
   if (options.isCurrent !== undefined && !options.isCurrent()) return undefined;

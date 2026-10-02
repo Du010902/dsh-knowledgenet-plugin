@@ -133,6 +133,14 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
     api: { path: GRAPH_API_PATH, registered: false, reason: "等待 connection 服务" },
     prompts,
     startedAt,
+    probes: [],
+    clientDiag: [],
+    scans: [],
+    isolation: [],
+    /* 读正文的分阶段指标（实施顺序第 1 条 ✓）：启动时为空 ✓ */
+    docReads: [],
+    /* 正文接口的端到端指标（问题三 ✓）：启动时为空 ✓ */
+    noteApi: [],
   });
 
   /*

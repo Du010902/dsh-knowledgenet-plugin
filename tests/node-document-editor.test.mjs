@@ -434,6 +434,37 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
   });
 });
 
+describe("加载体验：两段提示分开 + 分阶段计时（加载优化 ✓）", () => {
+  it("**读取阶段只显示「正在读取笔记」** ✗：准备编辑器的提示要等组件真的挂载", () => {
+    assert.ok(
+      editorSource.includes('{state.phase === "ready" && tab === "rich" && !richStatus.ready && !richStatus.failed ? ('),
+      "「正在准备编辑器」必须挂在 phase === ready 上 ✗（否则读取阶段会同时显示两条 ✓）",
+    );
+    assert.ok(editorSource.includes('t("richLoading")'), "准备提示的文案还在 ✓");
+    assert.ok(editorSource.includes('t("loadingDocument")'), "读取提示的文案还在 ✓");
+    /* 两段提示是**互斥**的：读取时 phase 还是 loading ⇒ 准备提示不出现 ✓ */
+    assert.ok(!editorSource.includes('{tab === "rich" && !richStatus.ready && !richStatus.failed ? ('), "旧的「无条件准备提示」必须删掉 ✗");
+  });
+
+  it("分阶段计时：请求往返 / 挂载 / 到首次可输入，都只记毫秒与身份 ✓", () => {
+    for (const event of ["note-open-start", "note-open-loaded", "note-open-ready", "note-open-failed"]) {
+      assert.ok(editorSource.includes(`"${event}"`), `${event} 要上报 ✓`);
+    }
+    assert.ok(editorSource.includes("ms: Date.now() - started"), "读取阶段要记耗时 ✓");
+    assert.ok(editorSource.includes("ms: Date.now() - openStartedRef.current"), "到可输入那一刻要记耗时 ✓");
+    assert.ok(editorSource.includes("bytes: outcome.document.text.length"), "只记**字节数**，不记正文 ✓");
+    assert.ok(!editorSource.includes("text: outcome.document.text"), "计时留痕里不许带正文 ✗");
+  });
+
+  it("富编辑器：创建时已经解析过的那份**不再解析第二遍** ✓", () => {
+    assert.ok(
+      richSource.includes("const resynced = pendingRef.current !== null || pending !== initialRef.current;"),
+      "要有「初始化期间是否真的又同步过」的判据 ✓",
+    );
+    assert.ok(richSource.includes('reportRef.current?.("markdown-editor-resync"'), "真的重解析要留痕（便于验证收益 ✓）");
+  });
+});
+
 describe("与设计稿对应的部件与入口", () => {
   it("编辑器部件齐：标题 / 未保存标记 / 正文 / 冲突条 / 快捷键 / 提示行 ✓", () => {
     for (const piece of [
@@ -598,7 +629,18 @@ describe("与设计稿对应的部件与入口", () => {
   it("**复查 P1-1**：异步初始化期间的同步不许丢（记账 + 补上 + 未就绪 flush 返回 null）✓", () => {
     assert.ok(richSource.includes("pendingRef"), "未就绪的正文要记进 pendingRef ✓");
     assert.ok(richSource.includes("const pending = pendingRef.current ?? markdownRef.current;"), "create 成功后要用最新那份补同步 ✓");
-    assert.ok(richSource.includes("if (pending !== crepe.getMarkdown()) {"), "补同步要走真正的 replaceAll ✓");
+    /*
+     * 补同步要走真正的 replaceAll ✓ —— 但**只在真的又同步过别的正文时** ✗：
+     * 创建时 `defaultValue` 就是那份正文、编辑器已经解析过它 ✓；
+     * 而 `getMarkdown()` 回来的是编辑器自己的写法（末尾换行 ✓）⇒ 逐字比一定不同 ✗，
+     * 无条件替换就是把同一篇正文解析两遍 ✓（加载优化文档点名要避免 ✓）。
+     */
+    assert.ok(richSource.includes("if (resynced && pending !== crepe.getMarkdown()) {"), "补同步要走真正的 replaceAll ✓");
+    assert.ok(
+      richSource.includes("const resynced = pendingRef.current !== null || pending !== initialRef.current;"),
+      "只有「初始化期间真的换过正文」才需要重新解析 ✗（同一篇别解析两遍 ✓）",
+    );
+    assert.ok(richSource.includes("crepe.editor.action(replaceAll(pending));"), "补同步的动作还在 ✓");
     assert.ok(
       richSource.includes("if (crepe === null || !readyRef.current || failedRef.current) return null;"),
       "未就绪/失败时 flush 必须返回 null ✗（不许拿挂载时的旧正文当当前内容 ✗）",

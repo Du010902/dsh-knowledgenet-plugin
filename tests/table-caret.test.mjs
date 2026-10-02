@@ -23,10 +23,16 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { Schema } from "@milkdown/kit/prose/model";
-import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
+import { EditorState, NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { tableNodes } from "@milkdown/kit/prose/tables";
 
-import { caretTargetForClick, isPlainClick } from "../src/client/table-caret.ts";
+import {
+  caretTargetForClick,
+  caretTargetForSelection,
+  caretTargetForTextblockSelection,
+  isCellTextblockSelection,
+  isPlainClick,
+} from "../src/client/table-caret.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, "..", "src", "client");
@@ -76,6 +82,11 @@ function docWithCell(cellBlocks) {
 }
 
 const stateOf = (doc) => EditorState.create({ doc, selection: TextSelection.near(doc.resolve(2)) });
+
+/** 第一个单元格里的文字（测试文档：段落 + 表格 ⇒ 表格是第二个孩子 ✓） */
+function cellText(doc) {
+  return doc.child(1).child(0).child(0).textContent;
+}
 
 /** 断言这个位置是"合法的文字插入点" ✓ */
 function assertIsCaret(state, target) {
@@ -152,6 +163,78 @@ describe("位置计算：最近的合法文字位置", () => {
   });
 });
 
+describe("dispatch 漏斗：改掉上游那个「整段结构选择」（真根因 ✓）", () => {
+  /**
+   * 复现上游 `TableNodeView` 的行为 ✓：它在 mousedown 里 `stopEvent` 吃掉事件，
+   * 然后 `NodeSelection.create(state.doc, cell.from + 1)` + rAF 派发 ✓。
+   */
+  function upstreamTransaction(state, cellStart) {
+    return state.tr.setSelection(NodeSelection.create(state.doc, cellStart));
+  }
+
+  it("**行为断言**：把上游那次事务折算成折叠光标后，输入只插入、原文一字不丢 ✓", () => {
+    const { doc, cellStart } = docWithCell([schema.nodes.paragraph.create(null, schema.text("git status"))]);
+    const state = stateOf(doc);
+    const upstream = upstreamTransaction(state, cellStart);
+    assert.equal(upstream.selection instanceof NodeSelection, true, "前置：上游就是整段结构选择 ✓");
+    assert.equal(isCellTextblockSelection(upstream.selection), true, "我们的判据必须认出它 ✗");
+
+    /* 漏斗的动作：按点击坐标算最近的合法文字位置 ✓ */
+    const target = caretTargetForTextblockSelection(upstream.doc, upstream.selection, { pos: cellStart, inside: cellStart });
+    assert.notEqual(target, null, "必须算得出光标位置 ✓");
+    const fixed = state.apply(state.tr.setSelection(TextSelection.create(state.doc, target)));
+    assert.equal(fixed.selection instanceof TextSelection, true);
+    assert.equal(fixed.selection.empty, true, "选区必须**折叠** ✓（复查的验收 ✓）");
+
+    /* **真输入**：敲一个字 ⇒ 只插入，原内容保留 ✓ */
+    const typed = fixed.apply(fixed.tr.insertText("X"));
+    assert.equal(cellText(typed.doc), "Xgit status", "原有文字不许被替换 ✗（只多一个 X ✓）");
+
+    /* 反例（对照，证明这条测试有意义 ✓）：不折算直接敲 ⇒ 整段被替换 ✗ */
+    const broken = state.apply(upstream);
+    const brokenTyped = broken.apply(broken.tr.insertText("X"));
+    assert.equal(cellText(brokenTyped.doc), "X", "这就是复查看到的坏结果 ✓");
+  });
+
+  it("判据只认「单元格里的 textblock 结构选择」✓（其它一律不动 ✗）", () => {
+    const { doc, cellStart } = docWithCell([
+      schema.nodes.paragraph.create(null, schema.text("文字")),
+      schema.nodes.image.create(),
+    ]);
+    const state = stateOf(doc);
+    /* ① 文字选区 ✓ */
+    assert.equal(isCellTextblockSelection(TextSelection.create(doc, cellStart + 1)), false);
+    /* ② 单元格里的**真原子块**（图片）⇒ 选中它是要的 ✓ */
+    const imagePos = cellStart + schema.nodes.paragraph.create(null, schema.text("文字")).nodeSize;
+    assert.equal(isCellTextblockSelection(NodeSelection.create(doc, imagePos)), false);
+    /* ③ 表格**外**的段落结构选择（键盘按块选 ⇒ 正常操作 ✓） */
+    assert.equal(isCellTextblockSelection(NodeSelection.create(doc, 0)), false);
+  });
+
+  it("接线：包住 `view.dispatch` 这只**唯一漏斗** ✓（上游 rAF 也躲不开 ✗）", () => {
+    assert.ok(richSource.includes("const baseDispatch = view.dispatch.bind(view);"), "要拿住原始 dispatch ✓");
+    assert.ok(richSource.includes("view.dispatch = ("), "要包一层 ✓");
+    assert.ok(richSource.includes("isCellTextblockSelection(transaction.selection)"), "判据用事务里的选区 ✓");
+    assert.ok(
+      richSource.includes("caretTargetForTextblockSelection(transaction.doc, transaction.selection"),
+      "用**事务里的文档与选区**折算 ✓（不是 current state ✗）",
+    );
+    assert.ok(richSource.includes('"table-click-rewritten"'), "改写了要留痕 ✓");
+    assert.ok(richSource.includes("if (!transaction.docChanged)"), "只改选区的事务直接丢掉 ✓（顺带丢掉 scrollIntoView ✗）");
+    assert.ok(richSource.includes('"table-caret-wired"'), "创建时留痕：接线到底装上没有 ✓");
+    assert.ok(
+      richSource.includes("CLICK_WINDOW_MS"),
+      "只认点击后一小会儿内的坏选区 ✓（键盘造出来的块选择不许动 ✗）",
+    );
+  });
+
+  it("根因写进了代码注释（上游 `stopEvent` 吃掉了 mousedown ✓）", () => {
+    assert.ok(caretSource.includes("stopEvent"), "注释要写明上游 stopEvent ✗");
+    assert.ok(caretSource.includes("TableNodeView"), "注释要写明是哪个节点视图 ✓");
+    assert.ok(caretSource.includes("requestAnimationFrame"), "注释要写明它是 rAF 之后才派发的 ✓");
+  });
+});
+
 describe("isPlainClick：只对「普通左键单击」动手", () => {
   const plain = { button: 0, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
 
@@ -195,13 +278,28 @@ describe("接线：在 handleClick 上直接落下文字选区（只变一次 �
     );
   });
 
-  it("**没有** mouseup + 微任务那套（复查点名的「两次变化」✗）", () => {
-    assert.ok(!richSource.includes("queueMicrotask"), "不许再用微任务补一刀 ✗");
-    assert.ok(!richSource.includes("onCaretMouseUp"), "mouseup 那套已经删掉 ✓");
-    assert.ok(!richSource.includes("onCaretMouseDown"), "mousedown 记坐标那套已经删掉 ✓");
-    assert.ok(!richSource.includes("mouseDownRef"), "也不再需要记按下坐标 ✓（拖选由 ProseMirror 判 ✓）");
+  it("主路径是 handleClick；**兜底**才用 mouseup + 微任务，而且只看最终选区 ✓", () => {
+    /* 复查 P1：真实点击仍然整段选择 ⇒ 主路径可能没兜住 ✓
+       ⇒ 保留第二条兜底，但**只在最终选区仍是结构选择时**才动 ✗（主路径成功时它什么都不做 ✓）。 */
+    assert.ok(richSource.includes("const onMouseUpFallback"), "要有兜底 ✓");
+    assert.ok(richSource.includes("caretTargetForSelection(view.state"), "兜底看的是**最终选区**✓");
+    const fallback = richSource.slice(
+      richSource.indexOf("const onMouseUpFallback"),
+      richSource.indexOf('root.addEventListener("mouseup", onMouseUpFallback, true)'),
+    );
+    assert.ok(fallback.includes("if (target === null) return;"), "不需要兜底就立刻返回 ✓");
+    assert.ok(fallback.includes("queueMicrotask("), "兜底要等 ProseMirror 处理完（微任务 ✓）");
+    /* 兜底不是"无条件纠正"：靠纯函数判"是不是结构选择"✓（旧版靠坐标 + 拖选阈值 ✗） */
+    assert.ok(caretSource.includes("if (!(selection instanceof NodeSelection)) return null;"), "只看结构选择 ✓");
+    assert.ok(!richSource.includes("shouldFixCaret"), "旧的「按坐标无条件纠正」已经换掉 ✓");
     assert.ok(!richSource.includes("caretFixTarget"), "旧 API 已经换掉 ✓");
-    assert.ok(!richSource.includes("shouldFixCaret"), "旧 API 已经换掉 ✓");
+  });
+
+  it("**诊断留痕**：主路径与兜底都要说清「走到哪一步、结果是什么」✓", () => {
+    assert.ok(richSource.includes('"table-click-handle"'), "主路径要留痕（复查要求：不能只以注册了当证据 ✓）");
+    assert.ok(richSource.includes('"table-click-fallback"'), "兜底触发要留痕 ✓");
+    assert.ok(richSource.includes("target: target === null ? \"none\" : \"caret\""), "要记下有没有算出位置 ✓");
+    assert.ok(richSource.includes("inside: coords.inside"), "要记下 posAtCoords 的 inside ✓");
   });
 
   it("只在确实没聚焦时才 focus ✓（点一下本来就已经聚焦了 ✓）", () => {

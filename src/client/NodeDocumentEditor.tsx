@@ -176,24 +176,62 @@ export function NodeDocumentEditor(props: {
     const controller = new AbortController();
     abortRef.current = controller;
     dispatch({ type: "load-start" });
+    /*
+     * **分阶段计时（客户端半）** ✓
+     * （`design/plugin-note-editor-loading-optimization.md` 实施顺序第 1 条 ✓）：
+     * "点节点编辑要等多久"以前只能猜 ✓ —— 这里记**请求往返 + 挂载**这一段的毫秒数 ✓，
+     * 宿主那一半记在 `status.docReads` 里（走了索引直读还是全库兜底 ✓），两边一对就知道瓶颈在哪 ✓。
+     * 只记数字与身份，**不记正文** ✗。
+     */
+    const started = Date.now();
+    /*
+     * **请求号** ✓（`design/plugin-note-editor-loading-recheck.md` 问题三 ✓）：
+     * 两端都带上它，就能把客户端 `note-open-*` 与宿主 `status.noteApi` 按**同一次请求**对起来 ✓ ——
+     * 只看宿主内部耗时会得出"接口很快"的错误结论 ✗（前置步骤没算进去 ✓）。
+     */
+    const requestId = `note-${started}-${seq}`;
+    reportRef.current?.("note-open-start", { nodeId: props.nodeId, requestId });
     try {
-      const outcome = await readNodeDocument(props.nodeId, fetcher, {
-        target: targetRef.current,
-        signal: controller.signal,
-        isCurrent: () => seq === seqRef.current,
-      });
+      const outcome = await readNodeDocument(
+        props.nodeId,
+        fetcher,
+        {
+          target: targetRef.current,
+          signal: controller.signal,
+          isCurrent: () => seq === seqRef.current,
+        },
+        requestId,
+      );
       if (outcome === undefined || seq !== seqRef.current) return;
       if (outcome.ok === true) {
         dispatch({ type: "load-ok", document: outcome.document });
         reportRef.current?.("node-document-read", { nodeId: props.nodeId, revision: outcome.document.revision });
+        reportRef.current?.("note-open-loaded", {
+          nodeId: props.nodeId,
+          requestId,
+          ms: Date.now() - started,
+          bytes: outcome.document.text.length,
+        });
         return;
       }
       dispatch({ type: "load-failed", key: failureKey(outcome.code) });
       reportRef.current?.("node-document-read-failed", { nodeId: props.nodeId, code: outcome.code });
+      reportRef.current?.("note-open-failed", {
+        nodeId: props.nodeId,
+        requestId,
+        code: outcome.code,
+        ms: Date.now() - started,
+      });
     } catch (error) {
       if (seq !== seqRef.current) return;
       dispatch({ type: "load-failed", key: "loadFailed" });
       reportRef.current?.("node-document-read-error", String(error));
+      reportRef.current?.("note-open-failed", {
+        nodeId: props.nodeId,
+        requestId,
+        code: "loadFailed",
+        ms: Date.now() - started,
+      });
     }
   }, [fetcher, props.nodeId]);
 
@@ -267,6 +305,21 @@ export function NodeDocumentEditor(props: {
   }, [dirty]);
   useEffect(() => () => { onDirtyChangeRef.current?.(false); }, []);
 
+  /** 打开这篇笔记的开始时刻 ✓（切节点时重置 ✓；用来算"从打开到可输入"的毫秒数 ✓） */
+  const openStartedRef = useRef(Date.now());
+  useEffect(() => {
+    openStartedRef.current = Date.now();
+  }, [targetKey]);
+
+  /*
+   * **"到首次可输入"那一刻** ✓（`design/plugin-note-editor-loading-optimization.md` 实施顺序第 1 条 ✓）：
+   * 与 `note-open-start` / `note-open-loaded` 配成三段 ✓ —— 读取（宿主索引直读 + 往返 ✓）、
+   * 挂载与 Crepe 创建 ✓。只记毫秒与身份，**不记正文** ✗。
+   */
+  useEffect(() => {
+    if (!richStatus.ready) return;
+    reportRef.current?.("note-open-ready", { nodeId: props.nodeId, ms: Date.now() - openStartedRef.current });
+  }, [richStatus.ready, props.nodeId]);
   /*
    * **冲突判定留痕**：只在状态**变化**时上报一次 ✓（不含正文 ✗；文档要求只记"指纹是否相等"这类事实 ✓）。
    * 排查"保存并关闭后重开怎么又冲突了"时，把 `node-document-cache-commit` / `node-document-leave-notify` /
@@ -829,7 +882,16 @@ export function NodeDocumentEditor(props: {
         </div>
       ) : null}
 
-      {tab === "rich" && !richStatus.ready && !richStatus.failed ? (
+      {/*
+         * **"正在准备编辑器"只在编辑器真的挂载之后才显示** ✗
+         * （`design/plugin-note-editor-loading-optimization.md` 加载体验修正 ✓）：
+         * `richStatus` 初始就是未就绪 ✓，而**正文还在读**的时候富编辑器根本还没挂载 ✓ ——
+         * 原来那种写法会同时显示"正在读取笔记"和"正在准备编辑器" ✗，
+         * 让人以为两段在并行（其实是一前一后 ✓）。
+         * 现在：读取阶段只有"正在读取笔记"✓；`phase === "ready"`（正文到手、组件已挂载 ✓）
+         * 之后才轮到"正在准备编辑器"✓。
+         */}
+      {state.phase === "ready" && tab === "rich" && !richStatus.ready && !richStatus.failed ? (
         <div className="kn-editor-dim">{t("richLoading")}</div>
       ) : null}
 
