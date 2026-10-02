@@ -159,10 +159,11 @@ let lastCopiedBlock: { language: string; code: string } | null = null;
 async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
   const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
+  const plain = payload.language.toLowerCase() === "latex" ? "$$\n" + payload.code + "\n$$" : payload.code;
   if (clipboard?.write !== undefined && Item !== null) {
     try {
       await clipboard.write([new Item({
-        "text/plain": new Blob([payload.code], { type: "text/plain" }),
+        "text/plain": new Blob([plain], { type: "text/plain" }),
         "text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
         [KN_CODE_BLOCK_MIME]: new Blob([encodeCodeBlockPayload(payload)], { type: KN_CODE_BLOCK_MIME }),
       })]);
@@ -170,7 +171,7 @@ async function writeCodeBlockClipboard(payload: { language: string; code: string
     } catch {
       try {
         await clipboard.write([new Item({
-          "text/plain": new Blob([payload.code], { type: "text/plain" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
           "text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
         })]);
         return;
@@ -179,7 +180,7 @@ async function writeCodeBlockClipboard(payload: { language: string; code: string
       }
     }
   }
-  await clipboard?.writeText?.(payload.code);
+  await clipboard?.writeText?.(plain);
 }
 
 /** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */
@@ -1029,10 +1030,14 @@ export function MarkdownRichEditor(props: {
        * ② 没有载荷（浏览器拒了多格式、或粘贴来自别的应用 ✓）⇒ 看 `text/html`：
        *    整段就是 `<pre><code class="language-…">` 时照样能还原 ✓（复查方案里写的就是这条降级 ✓）。
        */
+      const plain = clip.getData("text/plain");
+      // 系统可能保留 HTML 却移除语言信息；刚复制的原文匹配优先于 HTML 降级。
+      const remembered = lastCopiedBlock !== null
+        && (plain === lastCopiedBlock.code || (lastCopiedBlock.language.toLowerCase() === "latex"
+          && plain === "$$\n" + lastCopiedBlock.code + "\n$$")) ? lastCopiedBlock : null;
       const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
-        ?? codeBlockFromClipboardHtml(clip.getData("text/html"))
-        ?? (clip.getData("text/html") === "" && lastCopiedBlock !== null
-          && clip.getData("text/plain") === lastCopiedBlock.code ? lastCopiedBlock : null);
+        ?? remembered
+        ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
       if (payload === null) {
         /* 没命中载荷 ⇒ **不拦** ✓，只把纯文本记下来（万一被 Markdown 拆散，提示条上还能一键补救 ✓） */
         const plain = clip.getData("text/plain");

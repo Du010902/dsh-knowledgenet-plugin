@@ -159,7 +159,7 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
     assert.ok(richSource.includes('root.addEventListener("click", onCopyClick, true)'), "必须用**捕获**阶段 ✓");
     assert.ok(richSource.includes("codeBlockHtml(payload)"), "HTML 那份要转义生成 ✓");
     assert.ok(richSource.includes("encodeCodeBlockPayload(payload)"), "要有本插件载荷 ✓");
-    assert.ok(richSource.includes("writeText?.(payload.code)"), "最后要能退回**纯文本** ✓（终端体验不变 ✓）");
+    assert.ok(richSource.includes("writeText?.(plain)"), "最后要能退回**纯文本** ✓（终端体验不变 ✓）");
     assert.ok(!richSource.includes('"vscode-editor-data"'), "不许伪造别人的剪贴板格式 ✗（注释里提名字不算 ✓）");
   });
 

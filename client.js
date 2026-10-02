@@ -194813,9 +194813,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 		async function writeCodeBlockClipboard(payload) {
 			const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
 			const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
+			const plain = payload.language.toLowerCase() === "latex" ? "$$\n" + payload.code + "\n$$" : payload.code;
 			if (clipboard?.write !== void 0 && Item !== null) try {
 				await clipboard.write([new Item({
-					"text/plain": new Blob([payload.code], { type: "text/plain" }),
+					"text/plain": new Blob([plain], { type: "text/plain" }),
 					"text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" }),
 					[KN_CODE_BLOCK_MIME]: new Blob([encodeCodeBlockPayload(payload)], { type: KN_CODE_BLOCK_MIME })
 				})]);
@@ -194823,13 +194824,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			} catch {
 				try {
 					await clipboard.write([new Item({
-						"text/plain": new Blob([payload.code], { type: "text/plain" }),
+						"text/plain": new Blob([plain], { type: "text/plain" }),
 						"text/html": new Blob([codeBlockHtml(payload)], { type: "text/html" })
 					})]);
 					return;
 				} catch {}
 			}
-			await clipboard?.writeText?.(payload.code);
+			await clipboard?.writeText?.(plain);
 		}
 		/** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */
 		function currentBlockName(view) {
@@ -195484,7 +195485,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 					const clip = event.clipboardData;
 					if (view === null || !readyRef.current || clip === null || clip === void 0) return;
 					if (insideCodeBlock(currentBlockName(view))) return;
-					const payload = parseCodeBlockPayload(clip.getData("web application/x-dsh-kn-codeblock+json")) ?? codeBlockFromClipboardHtml(clip.getData("text/html")) ?? (clip.getData("text/html") === "" && lastCopiedBlock !== null && clip.getData("text/plain") === lastCopiedBlock.code ? lastCopiedBlock : null);
+					const plain = clip.getData("text/plain");
+					const remembered = lastCopiedBlock !== null && (plain === lastCopiedBlock.code || lastCopiedBlock.language.toLowerCase() === "latex" && plain === "$$\n" + lastCopiedBlock.code + "\n$$") ? lastCopiedBlock : null;
+					const payload = parseCodeBlockPayload(clip.getData("web application/x-dsh-kn-codeblock+json")) ?? remembered ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
 					if (payload === null) {
 						const plain = clip.getData("text/plain");
 						if (plain !== "") props.onPasteText?.(plain);
