@@ -210,11 +210,17 @@ export function NodeDocumentEditor(props: {
      */
     const cached = recallDraft(cacheKeyRef.current);
     if (cached !== undefined) {
-      dispatch({ type: "restore-draft", draft: cached.draft, base: cached.base, hash: cached.hash });
+      dispatch({
+        type: "restore-draft",
+        draft: cached.draft,
+        base: cached.base,
+        hash: cached.hash,
+        snapshot: cached.snapshot,
+      });
       /* 留痕：重开时到底恢复了什么（**不含正文** ✓，只看脏不脏 / 有没有指纹 ✓） */
       reportRef.current?.("node-document-draft-recall", {
         nodeId: props.nodeId,
-        dirty: cached.draft !== cached.base,
+        dirty: cached.draft !== cached.snapshot,
         hasHash: cached.hash !== "",
       });
     }
@@ -223,7 +229,7 @@ export function NodeDocumentEditor(props: {
       /* 留痕：编辑器何时因关闭/切换被卸载（与"缓存提交""通知离开"对照 ✓，不含正文 ✓） */
       reportRef.current?.("node-document-unmount", {
         nodeId: props.nodeId,
-        dirty: stateRef.current.draft !== stateRef.current.base,
+        dirty: isDirty(stateRef.current),
       });
       /* 卸载：让在飞的请求全部失效（成功与失败分支都过不去 ✓），草稿则留在缓存里 ✓ */
       seqRef.current += 1;
@@ -237,14 +243,20 @@ export function NodeDocumentEditor(props: {
    * 缓存只记**真正未保存**的内容 ✗（复查 P2-2）：
    * 刚读进来 / 已保存成功的正文不入缓存 ⇒ 重开不会无端要求合并 ✓；
    * 一旦变干净就把记录删掉 ✓。
+   * 记录里**两种基线都要存** ✓（磁盘基线管冲突、编辑器快照管"改没改" ✓）。
    */
   useEffect(() => {
     if (isDirty(state)) {
-      rememberDraft(cacheKeyRef.current, { draft: state.draft, base: state.base, hash: state.hash });
+      rememberDraft(cacheKeyRef.current, {
+        draft: state.draft,
+        base: state.base,
+        hash: state.hash,
+        snapshot: state.snapshot,
+      });
     } else {
       forgetDraft(cacheKeyRef.current);
     }
-  }, [state.draft, state.base, state.hash, state.conflicted]);
+  }, [state.draft, state.base, state.hash, state.snapshot, state.conflicted]);
 
   /* 有未保存修改就报给父面板（只影响"要不要拦"，不会触发重读 ✓） */
   const dirty = isDirty(state);
@@ -266,10 +278,10 @@ export function NodeDocumentEditor(props: {
     conflictRef.current = state.conflicted;
     reportRef.current?.(state.conflicted ? "node-document-conflict-detected" : "node-document-conflict-cleared", {
       nodeId: props.nodeId,
-      draftEqualsBase: state.draft === state.base,
+      dirty: isDirty(state),
       hasLatest: state.latest !== null,
     });
-  }, [state.conflicted, state.draft, state.base, state.latest, props.nodeId]);
+  }, [state.conflicted, state.draft, state.snapshot, state.latest, props.nodeId]);
 
   /*
    * 把"现在能不能保存"报给父面板 ✓：父面板据此**提前禁用**离开弹窗里的「保存并继续」✗
@@ -586,6 +598,10 @@ export function NodeDocumentEditor(props: {
   /**
    * **离开富编辑器的统一入口**（复查 P1-2）：先取正文快照，再执行动作 ✓。
    * 用于退回纯文本、关闭编辑器 —— 不能只 `setTab` / 只调 `onClose` ✗（会丢最后一笔 ✓）。
+   *
+   * ⚠️ "有没有未保存内容"比的是 **`snapshot`（编辑器侧的干净快照）** ✗，不是 `base`（磁盘正文）✓：
+   * 宿主保存时会去掉末尾空白/换行，而编辑器输出会补回末尾换行 ⇒ 拿磁盘正文比的话，
+   * **刚保存成功**再点叉号就又会被判成"有未保存修改"、弹窗又冒出来 ✓（用户实测 ✓）。
    */
   const leaveRich = useCallback((kind: "source" | "close"): void => {
     /**
@@ -598,7 +614,7 @@ export function NodeDocumentEditor(props: {
     };
     /* 纯文本兜底：草稿本身就是权威，直接执行 ✓ */
     if (tab === "source") {
-      if (kind === "close") act(state.draft !== state.base);
+      if (kind === "close") act(state.draft !== state.snapshot);
       return;
     }
     const rich = richRef.current;
@@ -607,7 +623,7 @@ export function NodeDocumentEditor(props: {
      * ⇒ 允许动作（"退回纯文本"正是那条恢复路径 ✓，不能一概禁止回退 ✗）。
      */
     if (rich === null || rich.isReady() !== true) {
-      act(state.draft !== state.base);
+      act(state.draft !== state.snapshot);
       return;
     }
     /*
@@ -620,8 +636,8 @@ export function NodeDocumentEditor(props: {
     }
     const live = snapshotDraft();
     if (live === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
-    act(live !== state.base);
-  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.base, props.onClose]);
+    act(live !== state.snapshot);
+  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.snapshot, props.onClose]);
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
@@ -851,6 +867,14 @@ export function NodeDocumentEditor(props: {
                 readOnly={state.saving || state.frozen || state.phase !== "ready"}
                 handleRef={richRef}
                 t={props.t}
+                /*
+                 * **编辑器报来它自己的规范化结果** ✓：末尾换行这类差异是编辑器写的、不是用户改的 ✗
+                 * ⇒ 由 reducer 在"草稿还是它吃掉的那份、而且当前干净"时采纳 ✓
+                 * （Host 落盘会去掉末尾空白，两份基线各管一件事 ✓）。
+                 */
+                onBaseline={(ingested, canonical) => {
+                  dispatch({ type: "editor-baseline", ingested, canonical });
+                }}
                 onChange={(markdown) => {
                   lastEditorDraftRef.current = markdown;
                   dispatch({ type: "edit", text: markdown });

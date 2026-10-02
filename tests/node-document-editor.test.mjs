@@ -246,7 +246,9 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
   });
 
   it("**复查 P1-2/3**：冲突里可以「已合并，基于最新版本保存」（换基线、留草稿 ✓）", () => {
-    const conflicted = editorReducer(fresh(), {
+    /* 真实场景：用户**改过**（草稿 ≠ 编辑器快照 ✓），保存时发现磁盘也变了 ✓ */
+    const typed = editorReducer(fresh(), { type: "edit", text: "我改的正文" });
+    const conflicted = editorReducer(typed, {
       type: "save-conflict",
       latest: { ...DOC, text: "外部的新正文", hash: "h2" },
     });
@@ -254,6 +256,7 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
     assert.equal(merged.draft, conflicted.draft, "合并后草稿仍是用户的 ✓");
     assert.equal(merged.hash, "h2", "基线指纹换成最新版本 ⇒ 才能提交 ✓");
     assert.equal(merged.conflicted, false, "解除冲突后可以保存 ✓");
+    assert.equal(isDirty(merged), true, "草稿还没保存成功 ⇒ 仍然算未保存 ✓（换基线不等于保存 ✗）");
     assert.equal(canSave(merged), true);
   });
 
@@ -301,7 +304,8 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
     const b = "libB::n1";
     rememberDraft(a, { draft: "库 A 的草稿", base: "旧的", hash: "h1" });
     rememberDraft(b, { draft: "库 B 的草稿", base: "旧的", hash: "h2" });
-    assert.deepEqual(recallDraft(a), { draft: "库 A 的草稿", base: "旧的", hash: "h1" });
+    /* 记录里两种基线都在 ✓（磁盘基线 + 编辑器快照 ✓；没给 snapshot 时回落成 base ✓） */
+    assert.deepEqual(recallDraft(a), { draft: "库 A 的草稿", base: "旧的", hash: "h1", snapshot: "旧的" });
     assert.equal(recallDraft(b).draft, "库 B 的草稿", "不同库里的同名节点不许串 ✗");
     forgetDraft(a);
     assert.equal(recallDraft(a), undefined, "放弃草稿后要清掉 ✓");
@@ -318,12 +322,13 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
     const record = recallDraft("L::n1");
     assert.notEqual(record, undefined, "空正文也必须留下记录（旧实现在这里返回 undefined ✗）");
     assert.equal(record.draft, "", "记录里就是空正文 ✓");
-    /* 重开：恢复空草稿 + 基线；磁盘没变 ⇒ 不是冲突，而且能保存 ✓ */
+    /* 重开：恢复空草稿 + 两种基线；磁盘没变 ⇒ 不是冲突，而且能保存 ✓ */
     const restored = editorReducer(initialEditorState("n1"), {
       type: "restore-draft",
       draft: record.draft,
       base: record.base,
       hash: record.hash,
+      snapshot: record.snapshot,
     });
     const loaded = editorReducer(restored, { type: "load-ok", document: { ...DOC, text: "旧的磁盘正文" } });
     assert.equal(loaded.draft, "", "空草稿必须恢复（不能被磁盘正文顶回来 ✗）");
@@ -364,9 +369,14 @@ describe("编辑器状态机：草稿保护（复查的六条 P1）", () => {
       document: { ...DOC, text: "正文", hash: "h4", revision: 6 },
       submitted: "\n\n正文\n\n\n",
     });
-    assert.equal(saved.draft, "正文", "草稿要同步成规范化正文 ✓（否则永远 dirty ✗）");
-    assert.equal(saved.base, "正文");
-    assert.equal(isDirty(saved), false, "保存后必须干净 ✓");
+    assert.equal(
+      saved.draft,
+      "\n\n正文\n\n\n",
+      "草稿保持**编辑器那一份** ✗（宿主规范化只在磁盘基线那边 ✓）",
+    );
+    assert.equal(saved.base, "正文", "**磁盘基线**用宿主规范化后的正文 ✓（冲突保护仍以它为准 ✓）");
+    assert.equal(saved.snapshot, "\n\n正文\n\n\n", "**编辑器快照** = 本次提交上去的那份 ✓（脏不脏就看它 ✓）");
+    assert.equal(isDirty(saved), false, "保存后必须干净 ✓（哪怕它与磁盘正文差着末尾空白 ✓）");
     /* 若草稿自提交后又变了（允许的情况下）⇒ 只保留新增部分，不吞掉 ✓ */
     const racing = editorReducer(
       { ...saving, draft: "提交后又敲的字", frozen: true },
@@ -856,12 +866,15 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(loadDeps[1].includes("props.nodeId"), "load 要依赖 nodeId ✓");
   });
 
-  it("**复查 P1-6**：草稿缓存在组件外、键含库身份；只缓存未保存内容 ✓", () => {
+  it("**复查 P1-6**：草稿缓存在组件外、键含库身份；只缓存未保存内容 ✓（两种基线都存 ✓）", () => {
     assert.ok(editorSource.includes("recallDraft(cacheKeyRef.current)"), "挂载时先恢复草稿 ✓");
     assert.ok(
-      editorSource.includes("rememberDraft(cacheKeyRef.current, { draft: state.draft, base: state.base, hash: state.hash })"),
+      editorSource.includes("rememberDraft(cacheKeyRef.current, {"),
       "只把**未保存**的草稿写进缓存（并且带基线 ✓）",
     );
+    for (const field of ["draft: state.draft", "base: state.base", "hash: state.hash", "snapshot: state.snapshot"]) {
+      assert.ok(editorSource.includes(field), `缓存记录要带 ${field} ✓（磁盘基线 + 编辑器快照 ✓）`);
+    }
     assert.ok(editorSource.includes("forgetDraft(cacheKeyRef.current);"), "变干净就删记录 ✓");
     assert.ok(panelSource.includes("libraryKey={libraryKey}"), "库身份要传下来（不串库 ✓）");
     assert.ok(panelSource.includes("key={`${libraryKey}::${editingNodeId}`}"), "换库/换节点要重挂 ✓");

@@ -61,6 +61,22 @@
 }
 
 /*
+ * **插入光标**（`design/table-click-jitter-and-caret-analysis.md` 建议 2/3 ✓）：
+ * 富编辑器现在走**原生光标** ✓（Crepe 的 Cursor 特性 `virtual: false` ⇒ 根本不装虚拟光标插件 ✓，
+ * 上游那段"启用虚拟光标时把原生光标设成透明"的规则也就不会命中 ✓）。
+ * 这里显式写死两件事 ✗：
+ * ① 原生光标颜色跟随**正文主文字色** ✓（不再让它落到边框色那种低对比上 ✓）；
+ * ② 万一将来又开虚拟光标，颜色也用正文色 ✓（Crepe 原来给的是 `--crepe-color-outline`，暗色下太淡 ✗）。
+ */
+.kn-root .kn-editor-rich .milkdown .ProseMirror {
+  caret-color: var(--dsw-alias-label-primary);
+}
+
+.kn-root .kn-editor-rich .milkdown .ProseMirror-focused {
+  --prosemirror-virtual-cursor-color: var(--dsw-alias-label-primary);
+}
+
+/*
  * **不做基于 `@container` 的"阅读宽度"** ✗（文档第 4 节点名 ✓）：
  * 外围容器宽 ≠ 处于展开模式 ✓（图谱并排时外围很宽，编辑器仍是 440px 侧栏 ✓）
  * ⇒ 那样会把侧栏正文也套上宽页面的居中版式 ✓。
@@ -299,7 +315,8 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper,
 .kn-root .kn-editor-rich .milkdown pre,
 .kn-root .kn-editor-rich .milkdown .katex-display,
-.kn-root .kn-editor-compare-body {
+.kn-root .kn-editor-compare-body,
+.kn-root .kn-table-menu {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent) transparent;
 }
@@ -309,7 +326,8 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar,
-.kn-root .kn-editor-compare-body::-webkit-scrollbar {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar,
+.kn-root .kn-table-menu::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
@@ -320,7 +338,8 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-track,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-track,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-track,
-.kn-root .kn-editor-compare-body::-webkit-scrollbar-track {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-track,
+.kn-root .kn-table-menu::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -329,7 +348,8 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-button,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-button,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-button,
-.kn-root .kn-editor-compare-body::-webkit-scrollbar-button {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-button,
+.kn-root .kn-table-menu::-webkit-scrollbar-button {
   display: none;
 }
 
@@ -338,7 +358,8 @@
 .kn-root .kn-editor-rich .milkdown .table-wrapper::-webkit-scrollbar-thumb,
 .kn-root .kn-editor-rich .milkdown pre::-webkit-scrollbar-thumb,
 .kn-root .kn-editor-rich .milkdown .katex-display::-webkit-scrollbar-thumb,
-.kn-root .kn-editor-compare-body::-webkit-scrollbar-thumb {
+.kn-root .kn-editor-compare-body::-webkit-scrollbar-thumb,
+.kn-root .kn-table-menu::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 8px;
   background: color-mix(in srgb, var(--dsw-alias-label-primary) 26%, transparent);

@@ -990,76 +990,121 @@
   overflow-y: auto;
 }
 
-/* ===================== 表格操作菜单（`design/table-caret-and-interaction-design.md`） ===================== */
+/* ===================== 表格操作：一个入口 + 按需弹出（`design/node-editor-design-implementation-review.md` P2） ===================== */
 
 /*
- * **只在光标进了表格时出现** ✓（显隐由 `MarkdownRichEditor` 按编辑器 selection 决定 ✓），
- * 挂在表格块右上角 ✓；Crepe 那套常驻的十字线/加号/行列抓手已经整块撤掉 ✗
- * （见 `editor-overrides.css`：连 `pointer-events` 一起停掉 ✓，不允许透明控件继续吃点击 ✗）。
+ * **入口**：光标进了表格才出现的一个 24px 小按钮 ✓（显隐 / 位置由 `MarkdownRichEditor` 按
+ * 编辑器 selection 与**可见表格范围**决定 ✓）。Crepe 那套常驻的十字线 / 加号 / 行列抓手
+ * 已经整块撤掉 ✗（见 `editor-overrides.css`：连 `pointer-events` 一起停掉 ✓）。
+ *
+ * 复查实测的问题：原来九个按钮的 240px 工具条常驻铺在表格上方、按整块容器定位 ⇒
+ * 短表格也被贴到容器右边，还盖住了前一段引用 ✗。现在入口只占 24px，
+ * 位置优先右侧空白 → 上方空白 → 表格自己的右上角 ✓（宁可靠在表格上，也不盖正文 ✓）。
  */
-.kn-table-menu {
+.kn-table-entry {
   position: absolute;
   z-index: 3;
   display: flex;
-  flex: none;
-  gap: 1px;
-  align-items: center;
-  padding: 3px 4px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
-  /* 轻量：不抢注意力，悬停/键盘进入才完全实体化 ✓ */
-  opacity: 0.92;
-  transition: opacity 0.15s ease-in-out;
-}
-
-.kn-table-menu:hover,
-.kn-table-menu:focus-within {
-  opacity: 1;
-}
-
-.kn-table-menu-sep {
-  width: 1px;
-  height: 14px;
-  margin: 0 3px;
-  background: var(--dsw-alias-border-l1);
-}
-
-.kn-table-menu-btn {
-  display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 0;
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+  /* 轻量：不抢注意力 ✓（悬停 / 展开 / 键盘聚焦才实体化 ✓） */
+  opacity: 0.45;
+  transition: opacity 0.15s ease-in-out, background-color 0.15s ease-in-out;
 }
 
-.kn-table-menu-btn:hover {
-  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+.kn-table-entry:hover,
+.kn-table-entry:focus-visible,
+.kn-table-entry.is-open {
+  opacity: 1;
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
+}
+
+.kn-table-entry:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/*
+ * **菜单**：点开才出现 ✓（文字 + 图标 ✓）；绝对定位在正文容器里，
+ * 高度有上限，超出就在菜单内部滚 ✓。
+ */
+.kn-table-menu {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 210px;
+  max-height: 264px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
+}
+
+.kn-table-menu-sep {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.kn-table-menu-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kn-table-menu-item:hover,
+.kn-table-menu-item:focus-visible {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+}
+
+.kn-table-menu-item:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
 }
 
 /* 当前列的对齐：点亮（不是"选中整块"那种重反馈 ✓） */
-.kn-table-menu-btn.is-active {
+.kn-table-menu-item.is-active {
   background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
-  color: var(--dsw-alias-label-primary);
 }
 
-/* 危险操作（删行/删列）用警示色，且标题已写明对象 ✓ */
-.kn-table-menu-btn.is-danger:hover {
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+/* 危险操作（删行/删列）用警示色，且文字已写明对象 ✓ */
+.kn-table-menu-item.is-danger {
   color: var(--dsw-alias-state-error-primary);
 }
 
-.kn-table-menu-btn:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
+.kn-table-menu-item.is-danger:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+}
+
+.kn-table-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kn-editor-text {

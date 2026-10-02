@@ -25,7 +25,9 @@ import {
   diffLines,
   draftKey,
   editorReducer,
+  forgetDraft,
   initialEditorState,
+  isDirty,
   leaveLabels,
   recallDraft,
   rememberDraft,
@@ -52,19 +54,21 @@ const DOC = {
 const fresh = () => editorReducer(initialEditorState("n1"), { type: "load-ok", document: { ...DOC, text: "原始正文", hash: "h1", revision: 1 } });
 
 describe("saveCommit：保存后该长什么样（reducer 与缓存共用同一套规则）", () => {
-  it("提交后没有新修改 ⇒ 草稿同步成宿主正文、记录变干净 ✓", () => {
+  it("提交后没有新修改 ⇒ 草稿保持编辑器那份、**磁盘基线与编辑器快照分开** ✓", () => {
     const commit = saveCommit("提交的那份", DOC, "提交的那份");
-    assert.equal(commit.draft, DOC.text, "草稿要跟宿主规范化后的正文一致 ✓（否则永远显示未保存 ✗）");
-    assert.equal(commit.base, DOC.text);
+    assert.equal(commit.draft, "提交的那份", "草稿保持编辑器那份 ✗（不再改写成磁盘正文 ✓）");
+    assert.equal(commit.base, DOC.text, "**磁盘基线**用宿主规范化后的正文 ✓");
+    assert.equal(commit.snapshot, "提交的那份", "**编辑器快照** = 提交上去的那份 ✓（脏不脏看它 ✓）");
     assert.equal(commit.hash, DOC.hash);
     assert.equal(commit.nodeId, DOC.nodeId);
-    assert.equal(commit.dirty, false, "干净 ⇒ 缓存要删 ✓");
+    assert.equal(commit.dirty, false, "提交后没再改 ⇒ 干净 ✓（哪怕与磁盘正文差着末尾空白 ✓）");
   });
 
-  it("提交之后又有新修改 ⇒ 保留新草稿、只换基线 ✓（不能无条件删缓存 ✗）", () => {
+  it("提交之后又有新修改 ⇒ 保留新草稿、快照仍是提交的那份 ✓（不能无条件删缓存 ✗）", () => {
     const commit = saveCommit("提交之后又敲的字", DOC, "提交的那份");
     assert.equal(commit.draft, "提交之后又敲的字", "新修改必须保留 ✗");
-    assert.equal(commit.base, DOC.text, "基线以宿主返回的为准 ✓");
+    assert.equal(commit.base, DOC.text, "磁盘基线以宿主返回的为准 ✓");
+    assert.equal(commit.snapshot, "提交的那份", "编辑器快照是提交的那份 ✓");
     assert.equal(commit.hash, DOC.hash);
     assert.equal(commit.dirty, true, "还有未保存内容 ⇒ 缓存必须留着 ✓");
   });
@@ -115,7 +119,7 @@ describe("commitSavedDraft：保存确认**同步**落缓存（保存后立即�
     assert.equal(recallDraft(key), undefined, "重开时不该再恢复旧草稿 ⇒ 不会把自己的保存误判成外部修改 ✗");
   });
 
-  it("提交后还有新修改 ⇒ 新记录带着**新基线**留着 ✓", () => {
+  it("提交后还有新修改 ⇒ 新记录带着**新基线**与**旧快照**留着 ✓", () => {
     clearDraftCache();
     const commit = saveCommit("又改了", DOC, "规范化");
     const key = draftKey("L", "n1");
@@ -125,6 +129,7 @@ describe("commitSavedDraft：保存确认**同步**落缓存（保存后立即�
       draft: "又改了",
       base: DOC.text,
       hash: DOC.hash,
+      snapshot: "规范化",
     });
   });
 
@@ -279,6 +284,216 @@ describe("离开弹窗文案：动作说清楚", () => {
       assert.equal(typeof EDITOR_LITERAL[key], "string", `回落文案要有 ${key} ✓`);
     }
     assert.ok(panelSource.includes("leaveLabels("), "面板要用同一套文案 ✓");
+  });
+});
+
+describe("端到端状态机：打开 → 编辑 → 保存 → 立即卸载 → 再打开", () => {
+  const KEY = draftKey("L", "n1");
+  const DISK_V1 = { ...DOC, text: "原始正文", hash: "h1", revision: 1 };
+  /** 宿主保存后返回的正文可能已被**规范化** ⇒ 与提交的那份不完全相同 ✓ */
+  const SAVED = { ...DOC, text: "原始正文 加了一行", hash: "h2", revision: 2 };
+
+  /** 编辑器挂载时真实做的事：先恢复缓存里的草稿（如果有 ✓），再读盘 ✓ */
+  function reopen(disk) {
+    let state = initialEditorState("n1");
+    const record = recallDraft(KEY);
+    if (record !== undefined) {
+      state = editorReducer(state, { type: "restore-draft", draft: record.draft, base: record.base, hash: record.hash });
+    }
+    return editorReducer(state, { type: "load-ok", document: disk });
+  }
+
+  /** 编辑期间的缓存 effect（组件里就是这一条规则 ✓） */
+  function cacheEffect(state) {
+    if (isDirty(state)) {
+      rememberDraft(KEY, { draft: state.draft, base: state.base, hash: state.hash });
+    } else {
+      forgetDraft(KEY);
+    }
+  }
+
+  it("**保存并关闭 → 立即卸载 → 再打开**：干净、没有星号、没有冲突 ✓（这就是复查要的端到端 ✓）", () => {
+    clearDraftCache();
+    /* ① 打开 + 编辑（草稿变脏 ⇒ 缓存写下旧基线与旧指纹 ✓） */
+    let state = reopen(DISK_V1);
+    state = editorReducer(state, { type: "edit", text: `${DISK_V1.text} 加了一行\n\n` });
+    cacheEffect(state);
+    assert.equal(isDirty(state), true);
+    assert.notEqual(recallDraft(KEY), undefined, "前置：编辑期缓存里确实有一条脏记录 ✓");
+
+    /* ② 保存确认：**先落缓存**（父面板马上卸载，effect 来不及跑 ✗） */
+    const commit = saveCommit(state.draft, SAVED, state.draft);
+    commitSavedDraft(KEY, KEY, commit);
+    /* ③ 父面板立刻卸载编辑器 —— 这里什么都不做，模拟"那条 effect 没有机会跑" ✓ */
+    state = editorReducer(state, { type: "save-ok", document: SAVED, submitted: state.draft });
+    assert.equal(isDirty(state), false, "界面这边已经干净 ✓");
+
+    /* ④ 再打开：缓存里不该再有旧记录 ⇒ 不会把自己的保存误判成外部修改 ✓ */
+    const again = reopen(SAVED);
+    assert.equal(recallDraft(KEY), undefined, "旧草稿记录必须已经被清掉 ✗");
+    assert.equal(again.conflicted, false, "**不许**出现冲突提示 ✗（复查截图里的问题 ✓）");
+    assert.equal(again.draft, SAVED.text, "显示的应当是确认保存后的正文 ✓");
+    assert.equal(isDirty(again), false, "也不该有未保存星号 ✓");
+  });
+
+  it("**反面对照**：漏掉「先落缓存」这一步就会复现冲突 ✓（证明上面那条真的在防回归 ✓）", () => {
+    clearDraftCache();
+    let state = reopen(DISK_V1);
+    state = editorReducer(state, { type: "edit", text: `${DISK_V1.text} 加了一行\n\n` });
+    cacheEffect(state);
+
+    /* 只走 dispatch、不落缓存（= 修复前的老行为 ✓），然后立刻卸载 ✓ */
+    state = editorReducer(state, { type: "save-ok", document: SAVED, submitted: state.draft });
+    assert.notEqual(recallDraft(KEY), undefined, "旧记录还在 ✓");
+
+    const again = reopen(SAVED);
+    assert.equal(again.conflicted, true, "老行为确实会把自己的保存当成外部修改 ✗（复查实测 ✓）");
+  });
+
+  it("保存**失败** ⇒ 草稿与缓存都留着，磁盘没变所以再打开也不冲突 ✓", () => {
+    clearDraftCache();
+    let state = reopen(DISK_V1);
+    state = editorReducer(state, { type: "edit", text: "改了但没存上" });
+    cacheEffect(state);
+    state = editorReducer(state, { type: "save-failed", key: "saveFailed" });
+    assert.equal(isDirty(state), true, "草稿必须还在 ✓");
+    assert.equal(state.saveErrorKey, "saveFailed");
+    assert.notEqual(recallDraft(KEY), undefined, "缓存也要留着 ✓");
+    /* 磁盘没变 ⇒ 恢复草稿后指纹一致 ⇒ 只是继续编辑 ✓ */
+    const again = reopen(DISK_V1);
+    assert.equal(again.conflicted, false, "不该误判成冲突 ✓");
+    assert.equal(again.draft, "改了但没存上", "恢复的仍是用户输入 ✓");
+  });
+
+  it("保存后**仍有新草稿** ⇒ 缓存带着新基线留着；再打开不冲突（但仍有星号 ✓）", () => {
+    clearDraftCache();
+    let state = reopen(DISK_V1);
+    state = editorReducer(state, { type: "edit", text: "第一次提交" });
+    cacheEffect(state);
+    /* 提交之后又有了新修改（冻结失效等边界）：保存确认要保留它 ✓ */
+    const submitted = "第一次提交";
+    const typedAfter = "提交之后又敲的字";
+    const commit = saveCommit(typedAfter, SAVED, submitted);
+    assert.equal(commit.dirty, true);
+    commitSavedDraft(KEY, KEY, commit);
+    /* 回调里读到的是**当下**这份草稿（比提交的那份新 ✓）——直接构造出这个状态 ✓ */
+    const saved = editorReducer({ ...state, draft: typedAfter }, { type: "save-ok", document: SAVED, submitted });
+    assert.equal(isDirty(saved), true, "保存确认后仍有未保存内容 ✓");
+
+    const again = reopen(SAVED);
+    assert.equal(again.conflicted, false, "基线是保存后的那份 ⇒ 不是冲突 ✓");
+    assert.equal(again.draft, "提交之后又敲的字", "新草稿必须保留 ✓");
+    assert.equal(isDirty(again), true, "还有未保存内容 ⇒ 该有星号 ✓");
+  });
+
+  it("身份被采用（adopted-* → ULID）后旧键不再冒出来 ✓", () => {
+    clearDraftCache();
+    const oldKey = draftKey("L", "adopted-1");
+    const newKey = draftKey("L", "01ULID");
+    let state = editorReducer(initialEditorState("adopted-1"), { type: "load-ok", document: { ...DISK_V1, nodeId: "adopted-1" } });
+    state = editorReducer(state, { type: "edit", text: "临时身份下写的" });
+    rememberDraft(oldKey, { draft: state.draft, base: state.base, hash: state.hash });
+
+    const adopted = { ...DOC, nodeId: "01ULID", text: "临时身份下写的", hash: "h5", revision: 3 };
+    const commit = saveCommit(state.draft, adopted, state.draft);
+    commitSavedDraft(oldKey, newKey, commit);
+    assert.equal(recallDraft(oldKey), undefined, "旧键必须删掉 ✗");
+    assert.equal(recallDraft(newKey), undefined, "干净 ⇒ 新键也不留 ✓");
+
+    /* 用新身份再打开：干净 ✓ */
+    const reopened = editorReducer(initialEditorState("01ULID"), { type: "load-ok", document: adopted });
+    assert.equal(reopened.conflicted, false);
+    assert.equal(isDirty(reopened), false);
+  });
+});
+
+describe("末尾换行不是用户修改（用户实测的那条 ✗）", () => {
+  /** 宿主落盘时去掉末尾空白 ✓；编辑器输出 Markdown 时补回末尾换行 ✓ */
+  const DISK = { ...DOC, text: "第一段\n\n第二段", hash: "h1", revision: 1 };
+  const EDITOR = `${DISK.text}\n`;
+
+  it("载入后编辑器报基线 ⇒ 草稿/快照一起对齐，但**磁盘基线保持不变** ✓", () => {
+    const loaded = editorReducer(initialEditorState("n1"), { type: "load-ok", document: DISK });
+    assert.equal(isDirty(loaded), false);
+    assert.equal(loaded.base, DISK.text, "磁盘基线就是宿主那份 ✓");
+
+    const aligned = editorReducer(loaded, { type: "editor-baseline", ingested: DISK.text, canonical: EDITOR });
+    assert.equal(aligned.draft, EDITOR, "草稿换成**编辑器自己的写法** ✓（末尾换行是它写的 ✓）");
+    assert.equal(aligned.snapshot, EDITOR, "快照同步 ✓");
+    assert.equal(aligned.base, DISK.text, "磁盘基线**不许**被编辑器写法污染 ✗（冲突保护要用它 ✓）");
+    assert.equal(isDirty(aligned), false, "这不是用户修改 ⇒ 不许有星号 ✗");
+  });
+
+  it("**保存成功之后**：磁盘正文没有末尾换行、编辑器那份有 ⇒ 仍然算干净 ✓（原问题 ✓）", () => {
+    const aligned = editorReducer(
+      editorReducer(initialEditorState("n1"), { type: "load-ok", document: DISK }),
+      { type: "editor-baseline", ingested: DISK.text, canonical: EDITOR },
+    );
+    /* 用户敲了一下 ⇒ 脏 ✓ */
+    const typed = editorReducer(aligned, { type: "edit", text: `${EDITOR}新的一行` });
+    assert.equal(isDirty(typed), true);
+
+    /* 保存：提交的是编辑器那份（带末尾换行 ✓），宿主返回的是规范化后的（没有末行换行 ✓） */
+    const saved = editorReducer(typed, {
+      type: "save-ok",
+      document: { ...DISK, text: `${DISK.text}\n新的一行`, hash: "h2", revision: 2 },
+      submitted: `${EDITOR}新的一行`,
+    });
+    assert.equal(saved.draft, `${EDITOR}新的一行`, "草稿保持编辑器那份 ✓");
+    assert.equal(saved.base, `${DISK.text}\n新的一行`, "磁盘基线是宿主规范化后的 ✓");
+    assert.equal(isDirty(saved), false, "**保存成功就是干净** ✗（原来会差一个末尾换行 ⇒ 又冒星号 ✓）");
+
+    /* 点叉号那一刻的判定：取到的编辑器正文与快照逐字相等 ⇒ **不弹"尚未保存"** ✓ */
+    const liveAtClose = saved.draft;
+    assert.equal(liveAtClose !== saved.snapshot, false, "关闭时不许再判定成「有未保存修改」✗");
+  });
+
+  it("真的改了内容 ⇒ 照样算脏 ✓（不许把差异一律当规范化 ✗）", () => {
+    const aligned = editorReducer(
+      editorReducer(initialEditorState("n1"), { type: "load-ok", document: DISK }),
+      { type: "editor-baseline", ingested: DISK.text, canonical: EDITOR },
+    );
+    assert.equal(isDirty(editorReducer(aligned, { type: "edit", text: `${EDITOR}` })), false, "原样 ⇒ 干净 ✓");
+    assert.equal(isDirty(editorReducer(aligned, { type: "edit", text: `${EDITOR}# 标题\n` })), true, "加了内容 ⇒ 脏 ✓");
+    assert.equal(isDirty(editorReducer(aligned, { type: "edit", text: "第一段\n\n第二段" })), true, "改了行内内容 ⇒ 脏 ✓");
+    /* 行首缩进 / 行内空格有语义 ⇒ 不能被"忽略空白"吞掉 ✗ */
+    assert.equal(isDirty(editorReducer(aligned, { type: "edit", text: `${DISK.text}\n 缩进了一行` })), true);
+  });
+
+  it("编辑器基线只在**该采纳**的时候采纳 ✓（脏草稿 / 过期回报一律不动 ✗）", () => {
+    const loaded = editorReducer(initialEditorState("n1"), { type: "load-ok", document: DISK });
+    /* ① 用户已经改过 ⇒ 不许被编辑器的规范化覆盖 ✗ */
+    const typed = editorReducer(loaded, { type: "edit", text: "用户写的内容" });
+    assert.equal(editorReducer(typed, { type: "editor-baseline", ingested: DISK.text, canonical: EDITOR }).draft, "用户写的内容");
+    /* ② 回报的 ingested 与当前草稿不一致（迟到的旧回报）⇒ 也不动 ✗ */
+    const other = editorReducer(loaded, { type: "editor-baseline", ingested: "别的正文", canonical: "别的正文\n" });
+    assert.equal(other.draft, DISK.text);
+    assert.equal(other.snapshot, DISK.text);
+  });
+
+  it("缓存往返也要带着编辑器快照 ✓（否则重开又会被当成有修改 ✗）", () => {
+    clearDraftCache();
+    const key = draftKey("L", "n1");
+    const DIskDoc = { ...DOC, text: "磁盘正文", hash: "h7", revision: 1 };
+    const loaded = editorReducer(initialEditorState("n1"), { type: "load-ok", document: DIskDoc });
+    const aligned = editorReducer(loaded, { type: "editor-baseline", ingested: DIskDoc.text, canonical: "磁盘正文\n" });
+    const typed = editorReducer(aligned, { type: "edit", text: "磁盘正文\n新内容\n" });
+    /* 组件的缓存 effect ✓ */
+    rememberDraft(key, { draft: typed.draft, base: typed.base, hash: typed.hash, snapshot: typed.snapshot });
+
+    /* 重开：恢复出来必须还是"脏"，但**不能被误判成冲突** ✓ */
+    const record = recallDraft(key);
+    let reopened = editorReducer(initialEditorState("n1"), {
+      type: "restore-draft",
+      draft: record.draft,
+      base: record.base,
+      hash: record.hash,
+      snapshot: record.snapshot,
+    });
+    assert.equal(isDirty(reopened), true, "真的有未保存内容 ✓");
+    reopened = editorReducer(reopened, { type: "load-ok", document: DIskDoc });
+    assert.equal(reopened.conflicted, false, "磁盘没变（指纹一致）⇒ 继续编辑 ✓");
+    assert.equal(reopened.draft, "磁盘正文\n新内容\n", "草稿保住 ✓");
   });
 });
 

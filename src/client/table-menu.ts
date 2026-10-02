@@ -99,33 +99,96 @@ export function readTableContext(state: EditorState | null | undefined): TableCo
   return { inTable: true, alignment: raw === "center" || raw === "right" ? raw : "left" };
 }
 
-/** 菜单实际高度（与 CSS 一致：22px 按钮 + 上下各 4px 内边距 ✓） */
-export const TABLE_MENU_HEIGHT = 30;
-/** 菜单与表格上沿的间距 ✓ */
-export const TABLE_MENU_GAP = 6;
+/** 入口按钮的边长（复查要求"约 24px 的轻量按钮" ✓） */
+export const TABLE_ENTRY_SIZE = 24;
+/** 入口 / 弹出层与表格之间的间距 ✓ */
+export const TABLE_ENTRY_GAP = 4;
+/** 弹出菜单的高度上限（与 CSS 的 max-height 一致 ✓；超了在菜单里滚 ✓） */
+export const TABLE_POPOVER_HEIGHT = 264;
+
+/** 一个矩形只需要这几个边 ✓（都用 `getBoundingClientRect()` 给 ✓） */
+export interface Box {
+  top: number;
+  right: number;
+  /** 可选：判定纵向空间时用 ✓ */
+  bottom?: number;
+  /** 可选：判定横向空间时用 ✓ */
+  left?: number;
+}
 
 /**
- * 菜单坐标：挂在**表格块的右上角** ✓。
+ * **入口按钮**该放哪儿 ✓（`design/node-editor-design-implementation-review.md` P2 ✓）。
  *
- * 坐标系是"正文滚动容器"的**内容坐标** ✓ —— 菜单是该容器的绝对定位子元素，
- * 因此跟着内容一起滚 ✓（不需要在滚动时重算 ✓）。
+ * 复查实测的问题：原来九个按钮的工具条按**整块容器**定位 ⇒ 短表格（右边缘在 x≈254）
+ * 也被贴到容器右边（x≈420），还压在前一段引用上 ✗。
  *
- * `top` 夹到 ≥ 0 ✓：表格正好贴顶时宁可轻压表格上沿，也不能算到滚动区外面看不见 ✗；
- * `right` 同理 ✓（超窄侧栏下贴着右边缘 ✓）。
+ * 现在按优先级：
+ * 1. **表格右侧的空白**（短表格最常见 ✓）⇒ 贴着表格右边缘外侧放，谁也不遮 ✓；
+ * 2. **表格上方的空白**（上一块与表格之间真的有 `size + gap` 的空 ✓）⇒ 放上方右对齐 ✓；
+ * 3. 都没有 ⇒ 压**表格自己的右上角**（宁可靠在表格上，也不许盖住前一段正文 ✗）。
  *
- * @param block - 表格块的 `getBoundingClientRect()`（视口坐标 ✓）。
- * @param container - 正文滚动容器的 `getBoundingClientRect()` ✓。
- * @param scrollTop - 该容器的 `scrollTop` ✓（把视口坐标换算成内容坐标 ✓）。
- * @returns 相对容器内容原点的 `top` / `right`（px，已取整 ✓）。
+ * 坐标与旧实现一样是"正文容器的**内容坐标**" ✓（跟着内容一起滚 ✓）。
+ *
+ * @param table - **可见**表格范围（已与 `.table-wrapper` 的可见区域求过交 ✓；横滚时不会算到看不见的列 ✓）。
+ * @param container - 正文滚动容器 ✓。
+ * @param scrollTop - 容器的 `scrollTop`（把视口坐标换算成内容坐标 ✓）。
+ * @param previousBottom - 表格**上一块**的下沿（视口坐标 ✓；没有就传 `null` ✓）——"上方有没有空白"看它 ✓。
+ * @param size - 按钮边长 ✓。
+ * @param gap - 间距 ✓。
+ * @returns `right` 是相对容器右边缘的偏移（CSS `right` ✓）；`inside` = 是否压在表格上 ✓。
  */
-export function menuPosition(
-  block: { top: number; right: number },
-  container: { top: number; right: number },
+export function tableEntryPosition(
+  table: Box,
+  container: Box,
   scrollTop: number,
-  height: number = TABLE_MENU_HEIGHT,
-  gap: number = TABLE_MENU_GAP,
+  previousBottom: number | null,
+  size: number = TABLE_ENTRY_SIZE,
+  gap: number = TABLE_ENTRY_GAP,
+): { top: number; right: number; inside: boolean } {
+  const contentTop = table.top - container.top + scrollTop;
+  /* 表格右侧的空白 ✓ */
+  const gutter = container.right - table.right;
+  /* 上一块下沿到表格上沿之间的距离 ✓（null ⇒ 表格是这一段的第一块 ✓） */
+  const freeAbove = previousBottom === null ? Number.POSITIVE_INFINITY : table.top - previousBottom;
+
+  if (gutter >= size + gap) {
+    /* ① 放右侧空白里：左边紧挨表格右边缘 ✓ */
+    return { top: Math.max(0, Math.round(contentTop)), right: Math.max(0, Math.round(gutter - gap - size)), inside: false };
+  }
+  if (freeAbove >= size + gap) {
+    /* ② 放表格上方（右对齐到表格右边缘 ✓） */
+    return { top: Math.max(0, Math.round(contentTop - size - gap)), right: Math.max(0, Math.round(gutter)), inside: false };
+  }
+  /* ③ 压表格右上角（只压表格，不压上一段 ✓） */
+  return { top: Math.max(0, Math.round(contentTop + 2)), right: Math.max(0, Math.round(gutter + 2)), inside: true };
+}
+
+/**
+ * **弹出菜单**该放哪儿 ✓：默认在入口**下方**，空间不够就翻到上方 ✓；
+ * 横向夹在容器里（右对齐到入口，太靠右/太靠左都收回来 ✓）。
+ *
+ * @param entry - 入口按钮的位置（内容坐标 ✓）。
+ * @param container - 正文滚动容器（内容坐标下的可见高度 = `bottom - top` ✓）。
+ * @param scrollTop - 容器的 `scrollTop` ✓。
+ * @param popoverHeight - 弹出层估计高度（`TABLE_POPOVER_HEIGHT` ✓）。
+ * @param popoverWidth - 弹出层宽度 ✓（夹横向用 ✓）。
+ * @param size - 入口边长 ✓。
+ * @param gap - 间距 ✓。
+ */
+export function tablePopoverPosition(
+  entry: { top: number; right: number },
+  container: Box,
+  scrollTop: number,
+  popoverHeight: number = TABLE_POPOVER_HEIGHT,
+  popoverWidth: number = 210,
+  size: number = TABLE_ENTRY_SIZE,
+  gap: number = TABLE_ENTRY_GAP,
 ): { top: number; right: number } {
-  const top = Math.max(0, Math.round(block.top - container.top + scrollTop - height - gap));
-  const right = Math.max(0, Math.round(container.right - block.right));
-  return { top, right };
+  const visibleHeight = (container.bottom ?? container.top) - container.top;
+  const maxTop = scrollTop + visibleHeight - popoverHeight - 2;
+  const below = entry.top + size + gap;
+  const top = below <= maxTop ? below : Math.max(0, entry.top - gap - popoverHeight);
+  const visibleWidth = container.right - (container.left ?? container.right - 400);
+  const maxRight = Math.max(0, visibleWidth - popoverWidth - 2);
+  return { top: Math.max(0, Math.round(top)), right: Math.round(Math.min(Math.max(0, entry.right), maxRight)) };
 }

@@ -87,8 +87,22 @@ export interface EditorState {
   nodeId: string;
   /** 手上这份草稿 */
   draft: string;
-  /** 基线：磁盘上那份的正文 ✓ */
+  /**
+   * **磁盘基线**：宿主规范化后的那份正文 ✓（冲突保护、比较区、合并都以它为准 ✓）。
+   */
   base: string;
+  /**
+   * **编辑器侧的干净快照**：最近一次"编辑器内容 == 已保存内容"时，**编辑器自己输出**的文本 ✓。
+   *
+   * 为什么不能拿 `base` 当"脏不脏"的判据 ✗（用户实测 ✓）：
+   * 宿主保存时会**去掉末尾空白与换行**（`src/host/node-document.ts` 的 `normalizeBody` ✓），
+   * 而富文本编辑器输出 Markdown 时**会补回末尾换行** ⇒ 保存成功之后再点关闭，
+   * 取到的编辑器正文与 `base` 差一个换行 ⇒ 又被判成"有未保存修改"、弹窗又冒出来 ✗。
+   *
+   * 所以两份基线各管一件事 ✓：`base` 管**磁盘与冲突**，`snapshot` 管**用户改没改** ✓。
+   * 也不能"干脆忽略所有空白差异" ✗ —— Markdown 里行内空格、行首缩进都有语义 ✓。
+   */
+  snapshot: string;
   /** 基线对应的**整文件指纹**（保存时必带 ✓） */
   hash: string;
   revision: number;
@@ -118,6 +132,7 @@ export function initialEditorState(nodeId = ""): EditorState {
     nodeId,
     draft: "",
     base: "",
+    snapshot: "",
     hash: "",
     revision: 0,
     path: "",
@@ -139,10 +154,16 @@ export type EditorAction =
   | { type: "load-ok"; document: NodeDocument }
   | { type: "load-failed"; key: string }
   /** 载入前先塞一份**恢复的草稿**（面板卸载后重开 ✓） */
-  | { type: "restore-draft"; draft: string; base: string; hash: string }
+  | { type: "restore-draft"; draft: string; base: string; hash: string; snapshot: string }
+  /**
+   * **编辑器报来它自己的规范化结果** ✓：`ingested` 是喂进去的那份正文，
+   * `canonical` 是编辑器渲染后吐出来的 Markdown（末尾换行之类 ✓）。
+   * 只有"草稿还是它吃掉的那份、而且当前是干净的"才采纳 ✓（用户已经改过就不许动 ✗）。
+   */
+  | { type: "editor-baseline"; ingested: string; canonical: string }
   | { type: "edit"; text: string }
   | { type: "save-start" }
-  /** `submitted` = 这次提交上去的文本（把宿主规范化后的正文同步回草稿要用 ✓） */
+  /** `submitted` = 这次提交上去的文本（它与宿主返回的 `document.text` 可能只差末尾空白 ✓） */
   | { type: "save-ok"; document: NodeDocument; submitted: string }
   | { type: "save-conflict"; latest: NodeDocument | null }
   | { type: "save-failed"; key: string }
@@ -154,9 +175,16 @@ export type EditorAction =
   | { type: "adopt-latest" }
   | { type: "merge-and-save" };
 
-/** 有未保存修改？ */
+/**
+ * 有未保存修改？—— **比的是"编辑器侧的干净快照"** ✓，不是磁盘正文 ✗。
+ *
+ * 用户实测的那条链路：宿主保存时去掉末尾空白与换行，富编辑器输出时又补回末尾换行 ⇒
+ * 拿磁盘正文当判据的话，**刚保存成功**就会立刻被判成"又有未保存修改" ✗
+ * （星号 + "尚未保存"弹窗 ✓）。所以脏不脏只问 `snapshot` ✓；
+ * 磁盘与冲突保护仍由 `base` / `hash` 负责 ✓。
+ */
 export function isDirty(state: EditorState): boolean {
-  return state.draft !== state.base;
+  return state.draft !== state.snapshot;
 }
 
 /**
@@ -329,10 +357,12 @@ export function diffLines(draft: string, latest: string): LineDiff {
  */
 export interface SaveCommit {
   nodeId: string;
-  /** 保存确认后的草稿（提交后没再改 ⇒ 用宿主规范化后的正文 ✓） */
+  /** 保存确认后的草稿（**保留编辑器那份** ✓；提交后没再改就与 `snapshot` 相等 ⇒ 干净 ✓） */
   draft: string;
-  /** 成功保存后的基线 ✓ */
+  /** 成功保存后的**磁盘基线**（宿主规范化后的正文 ✓） */
   base: string;
+  /** 成功保存后的**编辑器快照**：本次提交上去的那份 ✓（脏不脏就看它 ✓） */
+  snapshot: string;
   hash: string;
   revision: number;
   path: string;
@@ -344,11 +374,13 @@ export interface SaveCommit {
 /**
  * 算出一份"保存确认"。
  *
- * 规则（与文档「保存成功必须完成四件事」一致 ✓）：
- * - 基线 / 指纹 / 身份一律以**宿主返回的文档**为准 ✓；
- * - 若当前草稿就是本次提交的那份（`submitted`）⇒ 草稿同步成宿主规范化后的正文 ✓，记录变干净 ✓；
- * - 若提交之后又有了新修改 ⇒ 保留那份新草稿、只更新基线 ✓（只在保存期间被冻结时才会没有新修改 ✓，
- *   但不能拿"理论上不会有"当理由无条件删缓存 ✗）。
+ * 规则（与文档「保存成功必须完成四件事」一致 ✓，并按用户实测修正了"末尾换行"那条 ✗）：
+ * - `base` / `hash` / 身份一律以**宿主返回的文档**为准 ✓（冲突保护与比较区用它 ✓）；
+ * - `snapshot` = 本次**提交上去的编辑器正文** ✓ —— 宿主可能只把它"去掉末尾空白"再落盘 ✓，
+ *   所以两份基线**分开存**：磁盘管磁盘、编辑器管编辑器 ✓；
+ * - 草稿**保持编辑器那一份** ✗（不再改写成磁盘正文 ✓）：
+ *   若提交后再没有新修改，`draft === snapshot` ⇒ 干净 ✓（星号消失、关闭也不再弹窗 ✓）；
+ * - 若提交之后又有了新修改 ⇒ 草稿保留那份新文本、`snapshot` 仍是提交的那份 ⇒ `dirty` ✓。
  *
  * @param draft - **当前**草稿（调用方要取最新的那份，不是发起保存时的快照 ✗）。
  * @param document - 宿主确认保存后的文档 ✓。
@@ -356,16 +388,16 @@ export interface SaveCommit {
  * @returns 保存确认 ✓。
  */
 export function saveCommit(draft: string, document: NodeDocument, submitted: string): SaveCommit {
-  const next = draft === submitted ? document.text : draft;
   return {
     nodeId: document.nodeId,
-    draft: next,
+    draft,
     base: document.text,
+    snapshot: submitted,
     hash: document.hash,
     revision: document.revision,
     path: document.path,
     title: document.title,
-    dirty: next !== document.text,
+    dirty: draft !== submitted,
   };
 }
 
@@ -384,8 +416,28 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       /*
        * 恢复草稿时必须**连基线一起恢复** ✗（复查 P2-2）：
        * 只恢复文字的话，重开时无法区分"磁盘没变（继续编辑）"与"磁盘变了（真冲突）" ✓。
+       * `snapshot` 也要一起恢复 ✓ —— 它才是"用户改没改"的判据 ✓。
        */
-      return { ...state, draft: action.draft, base: action.base, hash: action.hash };
+      return {
+        ...state,
+        draft: action.draft,
+        base: action.base,
+        hash: action.hash,
+        snapshot: action.snapshot,
+      };
+    case "editor-baseline":
+      /*
+       * 编辑器报来"它把某份正文渲染成了什么"（末尾换行这类**编辑器自己的规范化** ✓）。
+       *
+       * 采纳条件**很窄**，两条都要满足：
+       * ① 当前是干净的（没有用户修改待处理 ✓）—— 脏草稿一律不动 ✗；
+       * ② 草稿还是它吃掉的那一份（`ingested` ✓）—— 期间用户改过就不许覆盖 ✗。
+       *
+       * 采纳时 **draft 与 snapshot 一起**更新 ✓：这是"同一份内容的另一种写法"，
+       * 不是用户的修改 ✗（否则刚打开就冒出星号 ✓）。
+       */
+      if (action.ingested !== state.draft || isDirty(state)) return state;
+      return { ...state, draft: action.canonical, snapshot: action.canonical };
     case "load-ok": {
       const document = action.document;
       if (!documentEditable(document)) {
@@ -400,19 +452,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         title: document.title,
         loadErrorKey: null,
       };
-      /* 手上还有没保存的内容 ⇒ **不覆盖** ✗（复查 P2-2：先分清三种情况，别一律判冲突 ✓） */
-      if (state.draft !== state.base || state.conflicted) {
+      /* 手上还有没保存的内容 ⇒ **不覆盖** ✗（判据是"编辑器快照"，不是磁盘正文 ✓） */
+      if (isDirty(state) || state.conflicted) {
         /* ① 磁盘没变（指纹还是手上这份）⇒ 只是继续编辑，不是冲突 ✓ */
         if (state.hash !== "" && state.hash === document.hash) {
           return { ...state, ...common, conflicted: false, latest: null, comparing: false };
         }
-        /* ② 草稿与磁盘其实一样 ⇒ 已经干净了，不该要求合并 ✓ */
+        /* ② 草稿与磁盘其实一样 ⇒ 已经干净了，不该要求合并 ✓（两边一起对齐 ⇒ 星号也消失 ✓） */
         if (state.draft === document.text) {
           return {
             ...state,
             ...common,
             base: document.text,
             hash: document.hash,
+            snapshot: state.draft,
             conflicted: false,
             latest: null,
             comparing: false,
@@ -427,11 +480,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
           comparing: false,
         };
       }
+      /*
+       * 干净载入：磁盘正文同时是草稿与**编辑器快照**的起点 ✓；
+       * 编辑器随后会报它自己的规范化结果（`editor-baseline` ✓），那时两边再一起对齐 ✓。
+       */
       return {
         ...state,
         ...common,
         draft: document.text,
         base: document.text,
+        snapshot: document.text,
         hash: document.hash,
         conflicted: false,
         latest: null,
@@ -455,7 +513,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const document = action.document;
       /*
        * 宿主会把正文**规范化**（去掉前导空行与尾部空白 ✓）之后再落盘，并把那份规范化正文回带 ✓。
-       * 成功后的"草稿 / 基线 / 指纹 / 身份"由 `saveCommit` 一处算出 ✓ ——
+       * 成功后的"草稿 / **磁盘基线** / **编辑器快照** / 指纹 / 身份"由 `saveCommit` 一处算出 ✓ ——
        * **缓存提交用同一套规则** ✗（两边各算一次迟早会算出不同结果 ✓，
        * 见 `design/save-and-close-reopen-conflict-optimization.md`）。
        */
@@ -469,6 +527,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         refreshing: false,
         nodeId: commit.nodeId,
         base: commit.base,
+        snapshot: commit.snapshot,
         hash: commit.hash,
         revision: commit.revision,
         path: commit.path,
@@ -524,6 +583,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         draft: state.latest.text,
         base: state.latest.text,
+        /* 采用最新版本 ⇒ **两边都对齐磁盘那份**：干净 ✓（编辑器随后会再报一次它的规范化结果 ✓） */
+        snapshot: state.latest.text,
         hash: state.latest.hash,
         revision: state.latest.revision,
         conflicted: false,
@@ -541,6 +602,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         base: state.latest.text,
+        /*
+         * **只换磁盘基线** ✗：草稿还是用户那份、还没保存成功 ⇒ `snapshot` 保持不动 ✓
+         * （这样它在保存成功前一直是"脏"的 ✓，星号不会提前消失 ✓；保存确认时才更新 ✓）。
+         */
         hash: state.latest.hash,
         revision: state.latest.revision,
         conflicted: false,
@@ -660,11 +725,17 @@ export function canOpenRich(markdown: string): boolean {
 
 /* ------------------------------ 草稿缓存 ------------------------------ */
 
-/** 一条草稿记录：**必须连基线一起存** ✗，否则重开时分不清"磁盘没变/磁盘变了/其实干净" ✓ */
+/**
+ * 一条草稿记录：**必须连两种基线一起存** ✗，否则重开时分不清
+ * "磁盘没变（继续编辑）/ 磁盘变了（真冲突）/ 其实干净（编辑器补了末尾换行）" ✓。
+ */
 export interface DraftRecord {
   draft: string;
+  /** 磁盘基线 ✓ */
   base: string;
   hash: string;
+  /** 编辑器侧的干净快照 ✓（判"用户改没改"用它 ✓） */
+  snapshot: string;
 }
 
 /**
@@ -705,7 +776,12 @@ export function commitSavedDraft(
   /* 身份被"采用"（adopted-* → ULID）⇒ 旧键必须删掉，不能复制后保留 ✗（复查 P2-4 ✓） */
   if (previousKey !== nextKey) forgetDraft(previousKey);
   if (commit.dirty) {
-    rememberDraft(nextKey, { draft: commit.draft, base: commit.base, hash: commit.hash });
+    rememberDraft(nextKey, {
+      draft: commit.draft,
+      base: commit.base,
+      hash: commit.hash,
+      snapshot: commit.snapshot,
+    });
     return { key: nextKey, kept: true };
   }
   /* 干净 ⇒ 立即删记录 ✓：重开时直接显示刚保存的正文，不再要求比较/合并 ✓ */
@@ -721,7 +797,13 @@ export function draftKey(libraryKey: string, nodeId: string): string {
 /** 记一份草稿（**只在真有未保存内容时调用** ✓；空正文同样要记 ✓） */
 export function rememberDraft(key: string, record: DraftRecord): void {
   drafts.delete(key);
-  drafts.set(key, { draft: record.draft, base: record.base, hash: record.hash });
+  drafts.set(key, {
+    draft: record.draft,
+    base: record.base,
+    hash: record.hash,
+    /* 老记录（这个方法刚加 `snapshot` 时写的）没有这一项 ⇒ 回落成基线 ✓ */
+    snapshot: record.snapshot ?? record.base,
+  });
   while (drafts.size > DRAFT_LIMIT) {
     const oldest = drafts.keys().next();
     if (oldest.done === true) break;

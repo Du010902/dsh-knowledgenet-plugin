@@ -1,19 +1,21 @@
 /**
- * **表格操作菜单**（`design/table-caret-and-interaction-design.md` 第 3 节 ✓）。
+ * **表格操作：一个入口 + 按需弹出的菜单**
+ * （`design/node-editor-design-implementation-review.md` P2 ✓）。
  *
- * 为什么要有它：Crepe 自带的表格结构控件是**常驻的横竖辅助线 + 加号 + 行列抓手** ✗ ——
- * 用户只是准备写字，却同时看到十字线、加号、整行整列底色 ⇒ 表格被拖进"排版模式" ✓。
- * 那些控件已经由 CSS 整块撤掉（含 `pointer-events: none`，不许透明控件继续吃点击 ✗），
- * 结构操作改由这里**按需出现**：光标进了表格才出现 ✓，键盘焦点进了表格同样能发现 ✓。
+ * 复查实测的问题：原来把九个图标按钮的 240px 工具条**常驻**铺在表格上方，
+ * 按"整块容器"定位 ⇒ 短表格也被贴到容器右边，还盖住了前一段引用 ✗。
  *
- * 界面约束（文档"视觉参数"✓）：
- * - 一个约 22px 的轻量按钮，图标 + `title` / `aria-label`（危险操作**写明对象** ✓）；
- * - 分组之间一条细分隔线（插行 / 插列 / 对齐 / 删除 ✓）；
- * - 当前列的对齐按钮点亮（`aria-pressed` ✓）；
- * - **按在菜单上不抢焦点** ✗：`pointerdown` 阻止默认 ⇒ 编辑器里的表格选区不被清掉 ✓
- *   （命令要作用在那个选区上 ✓）。
+ * 现在分两步：
+ * - `TableEntry`：**一个约 24px 的小按钮** ✓（光标进了表格才出现 ✓，键盘也能 Tab 到 ✓）。
+ *   位置由 `tableEntryPosition` 决定：优先表格右侧空白 → 表格上方空白 → 表格自己的右上角 ✓
+ *   （宁可靠在表格上，也不许盖住正文 ✓）。
+ * - `TableMenu`：**点开才出现**的完整动作菜单（文字 + 图标 ✓），
+ *   支持 Esc 关闭并回到正文、↑/↓ 在菜单里走 ✓；选中动作后才真正执行 ✓。
+ *
+ * 两者都**不抢焦点** ✗：`pointerdown` 只 `preventDefault` ⇒ 编辑器里的表格选区不被清掉 ✓
+ * （命令要作用在那个选区上 ✓）。
  */
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useRef, type ReactNode } from "react";
 
 import { TABLE_MENU_ITEMS, type TableAlignment, type TableMenuAction } from "./table-menu.ts";
 
@@ -28,7 +30,15 @@ function Icon(props: { children: ReactNode }): ReactNode {
   );
 }
 
-/** 动作 → 图标（行/列的形状 + 箭头 / 减号 ✓，语义由标题写清 ✓） */
+/** 入口按钮的图标（一张小表格 ✓） */
+const ENTRY_ICON = (
+  <Icon>
+    <rect x="2" y="3" width="12" height="10" rx="1.2" />
+    <path d="M2 6.4h12M6.6 6.4V13" />
+  </Icon>
+);
+
+/** 动作 → 图标（行/列的形状 + 箭头 / 减号 ✓，语义由文字标签写清 ✓） */
 const ICONS: Record<TableMenuAction, ReactNode> = {
   "row-before": (
     <Icon>
@@ -84,18 +94,53 @@ const ICONS: Record<TableMenuAction, ReactNode> = {
 };
 
 /** 只用到 `preventDefault`：不抢焦点、也不清掉表格选区 ✓ */
-function blockFocusSteal(event: { preventDefault: () => void }): void {
+function keepSelection(event: { preventDefault: () => void }): void {
   event.preventDefault();
 }
 
 /**
- * 渲染菜单。
- * @param props.top - 相对正文滚动容器内容原点的纵向位置 ✓。
- * @param props.right - 同上，距右边缘 ✓。
- * @param props.alignment - 当前列对齐（点亮对应按钮 ✓）。
- * @param props.t - 取文案（宿主 locale ✓）。
- * @param props.onAction - 执行动作（调用方负责取编辑器上下文并跑命令 ✓）。
- * @returns 菜单。
+ * 表格操作**入口**（一个 24px 的小按钮 ✓）。
+ * @param props.top - 内容坐标下的纵向位置 ✓。
+ * @param props.right - 相对容器右边缘的偏移 ✓。
+ * @param props.inside - 是否靠在表格右上角（供样式微调 ✓）。
+ * @param props.open - 菜单是否展开（`aria-expanded` ✓）。
+ * @param props.t - 取文案 ✓。
+ * @param props.onToggle - 开/关菜单 ✓。
+ */
+export function TableEntry(props: {
+  top: number;
+  right: number;
+  inside: boolean;
+  open: boolean;
+  t: (key: string) => string;
+  onToggle: () => void;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className={`kn-table-entry${props.inside ? " is-inside" : ""}${props.open ? " is-open" : ""}`}
+      style={{ top: `${props.top}px`, right: `${props.right}px` }}
+      title={props.t("tableMenuLabel")}
+      aria-label={props.t("tableMenuLabel")}
+      aria-haspopup="menu"
+      aria-expanded={props.open}
+      onPointerDown={keepSelection}
+      onClick={props.onToggle}
+    >
+      {ENTRY_ICON}
+    </button>
+  );
+}
+
+/**
+ * 表格操作**菜单**（点开才出现 ✓）。
+ * @param props.top - 内容坐标下的纵向位置 ✓。
+ * @param props.right - 相对容器右边缘的偏移 ✓。
+ * @param props.alignment - 当前列对齐（点亮对应项 ✓）。
+ * @param props.t - 取文案 ✓。
+ * @param props.onAction - 执行动作 ✓。
+ * @param props.onDismiss - Esc / 需要关闭（调用方负责把焦点还给正文 ✓）。
+ * @returns 弹出菜单。
  */
 export function TableMenu(props: {
   top: number;
@@ -103,17 +148,48 @@ export function TableMenu(props: {
   alignment: TableAlignment;
   t: (key: string) => string;
   onAction: (action: TableMenuAction) => void;
+  onDismiss: () => void;
 }): ReactNode {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  /** ↑/↓ 在菜单项之间走 ✓（在 Shadow DOM 里要用根的 activeElement ✗） */
+  const moveFocus = (delta: number): void => {
+    const list = listRef.current;
+    if (list === null) return;
+    const items = Array.from(list.querySelectorAll("button.kn-table-menu-item")) as HTMLButtonElement[];
+    if (items.length === 0) return;
+    const root = list.getRootNode() as Document | ShadowRoot;
+    const active = root.activeElement;
+    const current = active === null ? -1 : items.indexOf(active as HTMLButtonElement);
+    const next = (current + delta + items.length) % items.length;
+    items[next]?.focus();
+  };
+
   return (
     <div
       className="kn-table-menu"
-      role="toolbar"
+      role="menu"
       aria-label={props.t("tableMenuLabel")}
-      /* 坐标系在内容里 ✓（跟着正文一起滚 ✓） */
       style={{ top: `${props.top}px`, right: `${props.right}px` }}
+      ref={listRef}
       /* 不抢焦点、也不丢表格选区 ✗（命令要作用在当前选区上 ✓） */
-      onPointerDown={blockFocusSteal}
-      /* 菜单自己不是正文内容 ✓（编辑器不会把按键/输入算进文档 ✓） */
+      onPointerDown={keepSelection}
+      onKeyDown={(event: { key: string; preventDefault: () => void }) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onDismiss();
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFocus(1);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFocus(-1);
+        }
+      }}
       contentEditable={false}
     >
       {TABLE_MENU_ITEMS.map((item, index) => {
@@ -126,13 +202,14 @@ export function TableMenu(props: {
             ) : null}
             <button
               type="button"
-              className={`kn-table-menu-btn${item.danger === true ? " is-danger" : ""}${active ? " is-active" : ""}`}
+              role="menuitem"
+              className={`kn-table-menu-item${item.danger === true ? " is-danger" : ""}${active ? " is-active" : ""}`}
               title={props.t(item.labelKey)}
-              aria-label={props.t(item.labelKey)}
               aria-pressed={item.alignment === undefined ? undefined : active}
               onClick={() => { props.onAction(item.id); }}
             >
               {ICONS[item.id]}
+              <span className="kn-table-menu-label">{props.t(item.labelKey)}</span>
             </button>
           </Fragment>
         );

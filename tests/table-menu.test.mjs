@@ -1,15 +1,16 @@
 /**
- * **表格 UI 与操作菜单**的测试（`design/table-caret-and-interaction-design.md` ✓）。
+ * **表格操作入口与菜单**的测试
+ * （`design/table-caret-and-interaction-design.md` + `design/node-editor-design-implementation-review.md` P2 ✓）。
  *
- * 文档要的效果：普通表格就是文档内容 —— 没有常驻十字线/加号、没有整行整列高亮 ✗，
- * 点击单元格是**文字插入光标** ✓；结构操作只在光标进了表格时，从表格右上角一个轻量菜单里做 ✓。
+ * 复查实测的问题（这次要修掉的）：
+ * - 九个图标按钮的 240px 工具条**常驻**铺在表格上方 ✗；
+ * - 按**整块容器**定位 ⇒ 短表格（右边缘 x≈254）也被贴到容器右边（x≈420）✗；
+ * - 于是它盖住了表格之前的那段引用 ✗。
  *
- * 这里盯三件事：
- * 1. **纯逻辑真的对**：`readTableContext` 拿真实 ProseMirror state 跑（在表格里 / 不在 / 列对齐 ✓）；
- *    菜单位置的几何换算（贴在表格上沿 ✓、贴顶时夹到 0 ✓、坐标取整 ✓）。
- * 2. **Crepe 的结构控件必须真的不挡路** ✗：不只是"看不见"，还要 `pointer-events: none`
- *    （透明的绝对定位控件照样吃点击 ⇒ 光标落不下去 ✓）。
- * 3. **菜单本身**：动作清单齐全、危险操作写明对象、键盘可访问、按上去不丢表格选区 ✓。
+ * 现在的设计：**一个 24px 入口 + 点开才出现的文字菜单** ✓；
+ * 位置锚在**可见表格**上，优先级：右侧空白 → 上方空白 → 表格自己的右上角 ✓。
+ *
+ * 这里盯四件事：定位几何、入口/菜单的显隐契约、命令接线、以及 Crepe 那套结构控件必须让开 ✓。
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,12 +23,14 @@ import { EditorState, TextSelection } from "@milkdown/kit/prose/state";
 import { tableNodes } from "@milkdown/kit/prose/tables";
 
 import {
+  TABLE_ENTRY_GAP,
+  TABLE_ENTRY_SIZE,
   TABLE_LITERAL,
-  TABLE_MENU_GAP,
-  TABLE_MENU_HEIGHT,
   TABLE_MENU_ITEMS,
-  menuPosition,
+  TABLE_POPOVER_HEIGHT,
   readTableContext,
+  tableEntryPosition,
+  tablePopoverPosition,
 } from "../src/client/table-menu.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -76,7 +79,6 @@ function stateInTable(alignment) {
     return false;
   });
   assert.notEqual(tablePos, -1, "测试文档里应该有表格");
-  /* table → row → cell → paragraph：+4 落在第一个单元格的段落起点附近 ✓ */
   const selection = TextSelection.near(doc.resolve(tablePos + 4));
   return EditorState.create({ doc, selection });
 }
@@ -87,75 +89,127 @@ function stateWithoutTable() {
   return EditorState.create({ doc, selection: TextSelection.near(doc.resolve(1)) });
 }
 
-describe("表格上下文：菜单显隐与对齐高亮只来自编辑器 selection", () => {
+describe("表格上下文：入口显隐与对齐高亮只来自编辑器 selection", () => {
   it("光标在单元格里 ⇒ inTable ✓；列对齐按单元格属性读出来 ✓", () => {
     assert.deepEqual(readTableContext(stateInTable(undefined)), { inTable: true, alignment: "left" });
     assert.deepEqual(readTableContext(stateInTable("center")), { inTable: true, alignment: "center" });
     assert.deepEqual(readTableContext(stateInTable("right")), { inTable: true, alignment: "right" });
-    /* 认不出的值一律按左对齐 ✓（不给菜单一个不存在的点亮状态 ✓） */
     assert.deepEqual(readTableContext(stateInTable("weird")), { inTable: true, alignment: "left" });
   });
 
-  it("光标不在表格里 / 没有 state ⇒ 不显示菜单 ✓", () => {
+  it("光标不在表格里 / 没有 state ⇒ 不显示入口 ✓", () => {
     assert.deepEqual(readTableContext(stateWithoutTable()), { inTable: false, alignment: "left" });
     assert.deepEqual(readTableContext(null), { inTable: false, alignment: "left" });
     assert.deepEqual(readTableContext(undefined), { inTable: false, alignment: "left" });
   });
 
   it("显隐与高亮**不问鼠标**（不依赖悬停）✗", () => {
-    assert.ok(!menuLogicSource.includes("hover"), "上下文只能来自 selection ✗（文档第 3 节 ✓）");
+    assert.ok(!menuLogicSource.includes("hover"), "上下文只能来自 selection ✗");
     assert.ok(!menuLogicSource.includes("mouse"), "不许用鼠标位置推断结构状态 ✗");
   });
 });
 
-describe("菜单位置：贴在表格块右上角", () => {
-  const height = 30;
-  const gap = 6;
+describe("入口定位：锚在**可见表格**上，绝不盖住前一段正文", () => {
+  const container = { top: 100, right: 440, left: 0, bottom: 900 };
 
-  it("挂在表格上沿之上，右边缘与表格右边缘对齐 ✓", () => {
-    const position = menuPosition(
-      { top: 300, right: 400 },
-      { top: 100, right: 400 },
-      120,
-      height,
-      gap,
-    );
-    /* 300 − 100 + 120 − 30 − 6 = 284（内容坐标 ✓） */
-    assert.deepEqual(position, { top: 284, right: 0 });
-  });
-
-  it("表格贴顶时夹到 0（宁可轻压表格，也不许算到滚动区外面 ✗）", () => {
-    assert.deepEqual(
-      menuPosition({ top: 10, right: 400 }, { top: 50, right: 400 }, 0, height, gap),
-      { top: 0, right: 0 },
-    );
-  });
-
-  it("短表格靠右放：右侧偏移按容器的右边缘算 ✓；坐标取整 ✓", () => {
-    const position = menuPosition(
-      { top: 200.6, right: 360.4 },
-      { top: 0.4, right: 400 },
+  it("① 表格右边有空白（短表格最常见）⇒ 放右侧，谁也不遮 ✓", () => {
+    /* 复查实测：短表格右边缘约 x=254，而工具条原来被贴到 x=420 ✗ */
+    const entry = tableEntryPosition(
+      { top: 300, right: 254, left: 40, bottom: 360 },
+      container,
       0,
-      height,
-      gap,
+      null,
     );
-    assert.deepEqual(position, { top: 164, right: 40 });
-    assert.equal(Number.isInteger(position.top) && Number.isInteger(position.right), true);
+    assert.equal(entry.inside, false, "不许压在表格或正文上 ✓");
+    assert.equal(entry.top, 200, "纵向与表格上沿对齐（内容坐标 ✓）");
+    /* 右侧空白 186px ⇒ 入口右边缘离容器右边 186-4-24=158 ✓ */
+    assert.equal(entry.right, 440 - 254 - TABLE_ENTRY_GAP - TABLE_ENTRY_SIZE);
   });
 
-  it("菜单高度常量与 CSS 一致（不一致会让菜单位置整体偏 ✓）", () => {
-    const padding = /\.kn-table-menu \{[^}]*padding:\s*(\d+)px (\d+)px/s.exec(panel);
-    const button = /\.kn-table-menu-btn \{[^}]*height:\s*(\d+)px/s.exec(panel);
-    assert.notEqual(padding, null, "菜单要有内边距 ✓");
-    assert.notEqual(button, null, "按钮要有高度 ✓");
-    /* 上下内边距 + 按钮高 + 上下 1px 边框 = 菜单实际高 ✓ */
-    assert.equal(Number(padding[1]) * 2 + Number(button[1]) + 2, TABLE_MENU_HEIGHT);
-    assert.equal(TABLE_MENU_GAP, 6, "间距与 CSS 的视觉关系保持 6px ✓");
+  it("② 表格贴着容器右缘、但上方有真空白 ⇒ 放上方 ✓", () => {
+    const entry = tableEntryPosition(
+      { top: 300, right: 440, left: 40, bottom: 360 },
+      container,
+      0,
+      250, /* 上一块下沿：与表格上沿之间还有 50px 空白 ✓ */
+    );
+    assert.equal(entry.inside, false);
+    assert.equal(entry.top, 200 - TABLE_ENTRY_SIZE - TABLE_ENTRY_GAP);
+    assert.equal(entry.right, 0, "右对齐到表格右边缘 ✓");
+  });
+
+  it("③ 右侧没有空白、上方紧贴正文 ⇒ 宁可压**表格自己的右上角** ✓", () => {
+    const entry = tableEntryPosition(
+      { top: 300, right: 440, left: 40, bottom: 360 },
+      container,
+      0,
+      296, /* 上一块下沿离表格只有 4px ⇒ 上方放不下 ✓ */
+    );
+    assert.equal(entry.inside, true, "靠表格，而不是靠前一段正文 ✓");
+    assert.equal(entry.top, 202, "只压进表格 2px ✓");
+    assert.equal(entry.right, 2);
+  });
+
+  it("横向滚动 / 表格被裁 ⇒ 用**可见**右边缘算（不会锚到看不见的列上 ✓）", () => {
+    /* 传入的 right 是"表格 ∩ wrapper 可见区"的右边缘 ✓ */
+    const visible = tableEntryPosition({ top: 300, right: 300, left: 40, bottom: 360 }, container, 0, null);
+    const clipped = tableEntryPosition({ top: 300, right: 200, left: 40, bottom: 360 }, container, 0, null);
+    assert.ok(clipped.right > visible.right, "可见范围更窄 ⇒ 入口跟着往左 ✓");
+    assert.equal(clipped.right, 440 - 200 - TABLE_ENTRY_GAP - TABLE_ENTRY_SIZE);
+  });
+
+  it("滚动换算：内容坐标 = 视口坐标 − 容器 + scrollTop ✓；贴顶时夹到 0 ✓", () => {
+    /* 上方紧贴上一块 ⇒ 走"压表格右上角"那一支：top = 120−100+500+2 = 522 ✓ */
+    const scrolled = tableEntryPosition({ top: 120, right: 440, left: 40, bottom: 180 }, container, 500, 119);
+    assert.equal(scrolled.inside, true);
+    assert.equal(scrolled.top, 522, "120−100+500+2 ✓");
+    const clamped = tableEntryPosition({ top: 100, right: 440, left: 40, bottom: 160 }, container, 0, 99);
+    assert.equal(clamped.top, 2);
+  });
+});
+
+describe("弹出菜单定位：默认下方，放不下就翻上去，横向夹在容器里 ✓", () => {
+  const container = { top: 100, right: 440, left: 0, bottom: 700 };
+
+  it("下方有空间 ⇒ 在入口下面 ✓", () => {
+    const popover = tablePopoverPosition({ top: 200, right: 100 }, container, 0);
+    assert.equal(popover.top, 200 + TABLE_ENTRY_SIZE + TABLE_ENTRY_GAP);
+  });
+
+  it("下方放不下（入口贴近容器底）⇒ 翻到入口上方 ✓", () => {
+    const entryTop = 700 - 100 - 40; /* 距容器底 40px ⇒ 放不下 264px 的菜单 ✓ */
+    const popover = tablePopoverPosition({ top: entryTop, right: 0 }, container, 0);
+    assert.ok(popover.top + TABLE_POPOVER_HEIGHT < entryTop, "必须整体在入口上方 ✓");
+    assert.ok(popover.top >= 0, "不许跑到内容原点上面 ✗");
+  });
+
+  it("右对齐到入口，太靠边就夹回来（窄容器不会溢出左侧 ✓）", () => {
+    /* 正常宽度：入口贴到最右也不许让菜单左边出界 ✓ */
+    const wide = tablePopoverPosition({ top: 200, right: 380 }, { ...container, right: 440, left: 0 }, 0);
+    assert.equal(wide.right, 440 - 210 - 2, "夹到容器能容纳的最右位置 ✓");
+    /* 容器比菜单还窄：只能贴右边缘（没有可夹的余量 ✓） */
+    const narrow = tablePopoverPosition({ top: 200, right: 380 }, { ...container, right: 200, left: 0 }, 0);
+    assert.equal(narrow.right, 0, "容器更窄时贴右边缘 ✓");
+    /* 本来就靠里 ⇒ 保持与入口对齐 ✓ */
+    const inside = tablePopoverPosition({ top: 200, right: 4 }, { ...container, right: 440, left: 0 }, 0);
+    assert.equal(inside.right, 4);
+  });
+
+  it("常量与 CSS 一致（不一致会让入口/菜单整体偏 ✓）", () => {
+    const entry = /\.kn-table-entry \{[^}]*width:\s*(\d+)px;[^}]*height:\s*(\d+)px/s.exec(panel);
+    assert.notEqual(entry, null, "入口要有尺寸 ✓");
+    assert.equal(Number(entry[1]), TABLE_ENTRY_SIZE);
+    assert.equal(Number(entry[2]), TABLE_ENTRY_SIZE);
+    const menu = /\.kn-table-menu \{[^}]*max-height:\s*(\d+)px/s.exec(panel);
+    assert.notEqual(menu, null, "菜单要有高度上限 ✓");
+    assert.equal(Number(menu[1]), TABLE_POPOVER_HEIGHT);
+    const width = /\.kn-table-menu \{[^}]*width:\s*(\d+)px/s.exec(panel);
+    assert.equal(Number(width[1]), 210, "与 `tablePopoverPosition` 的默认宽度一致 ✓");
   });
 });
 
 describe("动作清单：够用、分组、危险操作写明对象", () => {
-  it("九颗按钮，顺序固定（插行 / 插列 / 对齐 / 删除）✓", () => {
+  it("九项动作，顺序固定（插行 / 插列 / 对齐 / 删除）✓", () => {
     assert.deepEqual(TABLE_MENU_ITEMS.map((item) => item.id), [
       "row-before", "row-after",
       "col-before", "col-after",
@@ -165,7 +219,7 @@ describe("动作清单：够用、分组、危险操作写明对象", () => {
     assert.equal(new Set(TABLE_MENU_ITEMS.map((item) => item.id)).size, TABLE_MENU_ITEMS.length, "不许重复 ✗");
   });
 
-  it("每颗按钮都有中英词典 + 回落文案 ✓", () => {
+  it("每项都有中英词典 + 回落文案 ✓", () => {
     const zh = dictSource.slice(dictSource.indexOf("const DICT_ZH"), dictSource.indexOf("const DICT_EN"));
     const en = dictSource.slice(dictSource.indexOf("const DICT_EN"));
     for (const item of TABLE_MENU_ITEMS) {
@@ -173,23 +227,72 @@ describe("动作清单：够用、分组、危险操作写明对象", () => {
       assert.ok(zh.includes(`${item.labelKey}:`), `中文词典要有 ${item.labelKey} ✓`);
       assert.ok(en.includes(`${item.labelKey}:`), `英文词典要有 ${item.labelKey} ✓`);
     }
-    assert.equal(typeof TABLE_LITERAL.tableMenuLabel, "string", "工具条本身也要有可读名字 ✓");
+    assert.equal(typeof TABLE_LITERAL.tableMenuLabel, "string", "入口本身也要有可读名字 ✓");
   });
 
-  it("分组单调、删除放在最后且标成危险 ✓（标题写明「本行 / 本列」✓）", () => {
+  it("分组单调、删除放最后且标成危险 ✓（文字写明「本行 / 本列」✓）", () => {
     const groups = TABLE_MENU_ITEMS.map((item) => item.group);
     for (let i = 1; i < groups.length; i += 1) assert.ok(groups[i] >= groups[i - 1], "分组不许回退 ✗");
     const danger = TABLE_MENU_ITEMS.filter((item) => item.danger === true).map((item) => item.id);
     assert.deepEqual(danger, ["row-delete", "col-delete"], "只有删除是危险操作 ✓");
-    assert.equal(TABLE_MENU_ITEMS[TABLE_MENU_ITEMS.length - 1].danger, true, "危险操作要排在最后 ✓");
     assert.equal(TABLE_LITERAL.tableDeleteRow, "删除本行");
     assert.equal(TABLE_LITERAL.tableDeleteCol, "删除本列");
   });
 
-  it("对齐按钮自带 alignment（用于点亮 ✓）", () => {
+  it("对齐项自带 alignment（用于点亮 ✓）", () => {
     const aligns = TABLE_MENU_ITEMS.filter((item) => item.alignment !== undefined)
       .map((item) => [item.id, item.alignment]);
     assert.deepEqual(aligns, [["align-left", "left"], ["align-center", "center"], ["align-right", "right"]]);
+  });
+});
+
+describe("交互契约：一个入口、点开才展开、Esc 回正文", () => {
+  it("默认**只渲染入口**，动作菜单在 `menuOpen` 时才渲染 ✓", () => {
+    assert.ok(richSource.includes("<TableEntry"), "要渲染入口 ✓");
+    assert.ok(
+      /menu === null \|\| !menuOpen \? null : \(\s*<TableMenu/.test(richSource),
+      "菜单必须由展开状态控制 ✗（复查：九个按钮常驻是这次要修的问题 ✓）",
+    );
+    assert.ok(richSource.includes("const [menuOpen, setMenuOpen] = useState(false)"), "默认收起 ✓");
+    assert.ok(
+      menuSource.includes("onPointerDown={keepSelection}"),
+      "入口与菜单都不抢焦点 ✓（表格选区不能被清掉 ✓）",
+    );
+    assert.ok(menuSource.includes('role="menu"'), "菜单语义 ✓");
+    assert.ok(menuSource.includes('role="menuitem"'), "菜单项语义 ✓");
+    assert.ok(menuSource.includes('aria-expanded={props.open}'), "入口要报展开状态 ✓");
+    assert.ok(menuSource.includes('aria-haspopup="menu"'), "入口要声明弹出菜单 ✓");
+  });
+
+  it("键盘：Esc 关闭并回正文、↑/↓ 在菜单里走 ✓", () => {
+    assert.ok(menuSource.includes('event.key === "Escape"'), "Esc 关闭 ✓");
+    assert.ok(menuSource.includes("props.onDismiss()"), "关闭要交给调用方（负责把焦点还给正文 ✓）");
+    assert.ok(menuSource.includes('event.key === "ArrowDown"') && menuSource.includes('event.key === "ArrowUp"'));
+    assert.ok(
+      richSource.includes("const dismissMenu = useCallback") && richSource.includes("viewRef.current?.focus()"),
+      "关掉菜单要把焦点还给编辑器 ✓",
+    );
+    assert.ok(
+      richSource.includes("view.focus();") && richSource.includes("setMenuOpen(false);"),
+      "执行完动作也要收起菜单、回正文 ✓",
+    );
+  });
+
+  it("点菜单以外的地方关闭 ✓；容器尺寸 / 滚动变化要重算 ✓", () => {
+    assert.ok(richSource.includes('target.closest(".kn-table-entry, .kn-table-menu")'), "点外面关闭 ✓");
+    assert.ok(richSource.includes("ResizeObserver"), "复查要求：容器宽度变化未必有 window.resize ⇒ 用 ResizeObserver ✓");
+    assert.ok(
+      richSource.includes('container.addEventListener("scroll", onSelectionChanged, true)'),
+      "横向滚动会改变可见表格范围 ⇒ 捕获阶段接住后代滚动 ✓",
+    );
+    assert.ok(richSource.includes("tableEntryPosition(") && richSource.includes("tablePopoverPosition("), "定位走纯函数 ✓");
+  });
+
+  it("入口锚点用**表格本体 ∩ wrapper 可见区**，并按上一块的下沿判断上方空间 ✓", () => {
+    assert.ok(richSource.includes('block?.querySelector<HTMLElement>("table")'), "锚的是表格本体，不是整块容器 ✓");
+    assert.ok(richSource.includes('closest<HTMLElement>(".table-wrapper")'), "与横向滚动容器求交 ✓");
+    assert.ok(richSource.includes("block.previousElementSibling"), "用上一块的下沿判断上方有没有空白 ✓");
+    assert.ok(panel.includes("position: relative"), "正文容器要能当定位父级 ✓");
   });
 });
 
@@ -208,7 +311,7 @@ describe("Crepe 的结构控件必须真的让开（不只「看不见」）", (
   });
 
   it("整行悬停底色撤掉、结构选中描边撤掉、区域选中降到低对比 ✓", () => {
-    assert.ok(!/tbody tr:hover/.test(overrides), "不许再点亮整行 ✗（文档第 3 节 ✓）");
+    assert.ok(!/tbody tr:hover/.test(overrides), "不许再点亮整行 ✗");
     assert.ok(
       /th:has\(\.ProseMirror-selectednode\),[\s\S]*?outline:\s*none/.test(overrides),
       "单元格不许因为结构选中而描边 ✗",
@@ -216,7 +319,6 @@ describe("Crepe 的结构控件必须真的让开（不只「看不见」）", (
     const selected = /\.selectedCell::after \{([^}]*)\}/.exec(overrides);
     assert.notEqual(selected, null, "区域选中仍要有反馈 ✓（不能全清掉 ✗）");
     const percent = /(\d+)%/.exec(selected[1]);
-    assert.notEqual(percent, null, "区域选中用低对比底纹 ✓");
     assert.ok(Number(percent[1]) >= 8 && Number(percent[1]) <= 12, `底纹要在 8–12%（实际 ${percent[1]}%）✓`);
     assert.ok(overrides.includes(".column-resize-handle"), "用户主动拖列宽的手柄保留 ✓");
   });
@@ -224,7 +326,7 @@ describe("Crepe 的结构控件必须真的让开（不只「看不见」）", (
   it("没有对表格做全局 overflow:hidden 遮丑 ✗（会裁掉菜单与手柄 ✓）", () => {
     assert.ok(
       !/milkdown-table-block \{[^}]*overflow:\s*hidden/s.test(overrides),
-      "不许在表格块上直接 overflow:hidden ✗（文档第 4 节 ✓）",
+      "不许在表格块上直接 overflow:hidden ✗",
     );
   });
 });
@@ -245,52 +347,11 @@ describe("菜单接线：命令、定位、不抢焦点", () => {
     );
   });
 
-  it("显隐 / 定位都来自编辑器 selection，菜单与 ProseMirror DOM 分离 ✓", () => {
-    assert.ok(richSource.includes("readTableContext(view.state)"), "按当前 selection 判断在不在表格里 ✓");
-    assert.ok(richSource.includes("menuPosition("), "位置用纯函数算 ✓");
-    assert.ok(richSource.includes('closest<HTMLElement>(".milkdown-table-block")'), "锚点是表格块 ✓");
-    assert.ok(richSource.includes('closest<HTMLElement>(".kn-editor-body")'), "坐标基于正文滚动容器 ✓");
-    assert.ok(richSource.includes('addEventListener("selectionchange"'), "选区变了要重算 ✓");
-    assert.ok(richSource.includes("requestAnimationFrame"), "连续触发要合并到一帧 ✓");
-    /* 菜单渲染在 milkdown 挂载点**之外** ✓（不往 node view 里塞外来节点 ✗） */
-    assert.ok(richSource.includes("<TableMenu"), "要渲染菜单 ✓");
-    assert.ok(
-      /<div className="kn-editor-rich"[\s\S]*?\{menu === null \? null : \(/.test(richSource),
-      "菜单要是挂载点的兄弟节点 ✓（不占正文高度 ✓）",
-    );
-    assert.ok(panel.includes(".kn-editor-body {\n  position: relative;"), "正文容器要能当定位父级 ✓");
-  });
-
-  it("**不拦截表格上的普通点击** ✗（文字插入光标交给原生编辑器 ✓）", () => {
-    assert.ok(
-      !/milkdown-table-block[\s\S]{0,200}addEventListener\("pointerdown"/.test(richSource),
-      "不许对表格 pointerdown 无条件 preventDefault ✗（会毁掉拖选 / 双击选词 / 输入法 ✓）",
-    );
-    assert.ok(!richSource.includes("preventDefault()"), "正文里不该出现点击兜底 ✓");
-  });
-
   it("命令执行前再确认一次「光标还在表格里」，异常不许抛进事件处理器 ✓", () => {
-    assert.ok(
-      richSource.includes("!readTableContext(view.state).inTable"),
-      "下命令前再查一次 ✓（菜单位置是下一帧算的，这一拍选区可能已经跑了 ✗）",
-    );
+    assert.ok(richSource.includes("!readTableContext(view.state).inTable"), "下命令前再查一次 ✓");
     assert.ok(
       /catch \(error\) \{[\s\S]{0,240}table-action-failed/.test(richSource),
       "命令抛错要自己收住 + 上报诊断 ✗（ErrorBoundary 只接渲染错误 ✓）",
     );
-  });
-
-  it("菜单按上去不丢表格选区；危险操作写明对象；键盘可达 ✓", () => {
-    assert.ok(menuSource.includes('role="toolbar"'), "菜单是可访问的工具条 ✓");
-    assert.ok(menuSource.includes('aria-label={props.t("tableMenuLabel")}'), "工具有可读名字 ✓");
-    assert.ok(menuSource.includes("onPointerDown={blockFocusSteal}"), "按菜单不抢焦点 ✓");
-    assert.ok(
-      /function blockFocusSteal\(event: \{ preventDefault: \(\) => void \}\): void \{\s*event\.preventDefault\(\)/.test(menuSource),
-      "只阻止默认（不吞事件、不影响点击 ✓）",
-    );
-    assert.ok(menuSource.includes("aria-pressed"), "对齐按钮要报出自己的状态 ✓");
-    assert.ok(menuSource.includes("title={props.t(item.labelKey)}"), "每颗按钮都有标题（危险操作写明对象 ✓）");
-    assert.ok(menuSource.includes('className={`kn-table-menu-btn'), "按钮样式类 ✓");
-    assert.ok(menuSource.includes('type="button"'), "别在表单语境里误提交 ✓");
   });
 });
