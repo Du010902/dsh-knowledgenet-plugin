@@ -229,7 +229,7 @@ describe("主题 token", () => {
      * （行内公式 `$…$` 没有 `.katex-display` 父级 ⇒ 不受影响 ✓）。
      */
     assert.ok(
-      /\.katex-display \.katex-html > \.newline \{[^}]*height: 1\.6em/s.test(overrides),
+      /\.katex-display \.katex-html > \.newline \{[^}]*height: 1em/s.test(overrides),
       "display 公式的换行要有行距 ✓（否则两行会贴在一起 ✗）",
     );
     assert.ok(

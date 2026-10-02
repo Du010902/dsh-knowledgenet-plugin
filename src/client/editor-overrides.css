@@ -212,7 +212,7 @@
 .kn-root .kn-editor-rich .milkdown .katex-display .katex-html > .katex-newline,
 .kn-root .kn-editor-rich .milkdown .katex-display .katex-html > .newline {
   display: block;
-  height: 1.6em;
+  height: 1em;
 }
 
 /* ------------------------- ④ 正文排版：接近"写一整篇文档"的手感 ------------------------- */
