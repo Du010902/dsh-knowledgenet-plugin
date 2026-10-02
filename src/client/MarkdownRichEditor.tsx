@@ -154,6 +154,8 @@ function codeBlockAt(view: ProseMirrorView, host: HTMLElement): { language: stri
  * ③ 自定义格式**不是唯一方案** ✗ ⇒ 浏览器拒绝时退回"纯文本 + HTML"，再退回纯文本 ✓；
  * ④ **不伪造** `vscode-editor-data` ✗（那是别人的格式 ✓）。
  */
+let lastCopiedBlock: { language: string; code: string } | null = null;
+
 async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
   const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
@@ -1003,7 +1005,7 @@ export function MarkdownRichEditor(props: {
       event.stopPropagation();
       event.preventDefault();
       void writeCodeBlockClipboard(payload)
-        .then(() => { reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length }); })
+        .then(() => { lastCopiedBlock = { ...payload }; reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length }); })
         .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
     };
     root.addEventListener("click", onCopyClick, true);
@@ -1028,7 +1030,9 @@ export function MarkdownRichEditor(props: {
        *    整段就是 `<pre><code class="language-…">` 时照样能还原 ✓（复查方案里写的就是这条降级 ✓）。
        */
       const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
-        ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
+        ?? codeBlockFromClipboardHtml(clip.getData("text/html"))
+        ?? (clip.getData("text/html") === "" && lastCopiedBlock !== null
+          && clip.getData("text/plain") === lastCopiedBlock.code ? lastCopiedBlock : null);
       if (payload === null) {
         /* 没命中载荷 ⇒ **不拦** ✓，只把纯文本记下来（万一被 Markdown 拆散，提示条上还能一键补救 ✓） */
         const plain = clip.getData("text/plain");

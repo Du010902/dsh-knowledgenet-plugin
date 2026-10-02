@@ -194809,6 +194809,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* ③ 自定义格式**不是唯一方案** ✗ ⇒ 浏览器拒绝时退回"纯文本 + HTML"，再退回纯文本 ✓；
 		* ④ **不伪造** `vscode-editor-data` ✗（那是别人的格式 ✓）。
 		*/
+		let lastCopiedBlock = null;
 		async function writeCodeBlockClipboard(payload) {
 			const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
 			const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
@@ -195468,6 +195469,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					event.stopPropagation();
 					event.preventDefault();
 					writeCodeBlockClipboard(payload).then(() => {
+						lastCopiedBlock = { ...payload };
 						reportRef.current?.("code-block-copy", {
 							language: payload.language,
 							chars: payload.code.length
@@ -195482,7 +195484,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					const clip = event.clipboardData;
 					if (view === null || !readyRef.current || clip === null || clip === void 0) return;
 					if (insideCodeBlock(currentBlockName(view))) return;
-					const payload = parseCodeBlockPayload(clip.getData("web application/x-dsh-kn-codeblock+json")) ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
+					const payload = parseCodeBlockPayload(clip.getData("web application/x-dsh-kn-codeblock+json")) ?? codeBlockFromClipboardHtml(clip.getData("text/html")) ?? (clip.getData("text/html") === "" && lastCopiedBlock !== null && clip.getData("text/plain") === lastCopiedBlock.code ? lastCopiedBlock : null);
 					if (payload === null) {
 						const plain = clip.getData("text/plain");
 						if (plain !== "") props.onPasteText?.(plain);
