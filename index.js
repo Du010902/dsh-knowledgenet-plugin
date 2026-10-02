@@ -148,7 +148,7 @@ function findCycleIfLinked(ws, fromId, toId) {
 	}
 	const prev = /* @__PURE__ */ new Map();
 	const queue = [toId];
-	const seen = /* @__PURE__ */ new Set([toId]);
+	const seen = new Set([toId]);
 	while (queue.length > 0) {
 		const cur = queue.shift();
 		if (cur === fromId) {
@@ -709,7 +709,7 @@ function sha256Hex(text) {
 	let h5 = 2600822924;
 	let h6 = 528734635;
 	let h7 = 1541459225;
-	const w = /* @__PURE__ */ new Uint32Array(64);
+	const w = new Uint32Array(64);
 	for (let offset = 0; offset < total; offset += 64) {
 		for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
 		for (let i = 16; i < 64; i += 1) {
@@ -1286,7 +1286,9 @@ function parseDocument(text) {
 			case "rev":
 				meta.rev = Number.parseInt(value, 10) || 0;
 				break;
-			default: meta.extra[key] = value;
+			default:
+				meta.extra[key] = value;
+				break;
 		}
 	}
 	return {
@@ -1838,7 +1840,7 @@ async function createLibrary$1(root, title, now = Date.now()) {
 		};
 	}
 	if (entries.length > 0) {
-		const ours = /* @__PURE__ */ new Set([
+		const ours = new Set([
 			V3_NODES_DIR,
 			V3_GRAPH_FILE,
 			"Backup",
@@ -2092,7 +2094,7 @@ async function addEdge(root, input, now = Date.now()) {
 		created: false
 	};
 	const reachable = (start, target) => {
-		const seen = /* @__PURE__ */ new Set([start]);
+		const seen = new Set([start]);
 		const queue = [start];
 		while (queue.length > 0) {
 			const current = queue.shift();
@@ -2182,8 +2184,7 @@ async function removeNode(root, input) {
 		code: "node_missing",
 		message: "没有找到这个知识点"
 	};
-	const abs = join(base, node.relativePath);
-	await unlink(abs).catch(() => void 0);
+	await unlink(join(base, node.relativePath)).catch(() => void 0);
 	invalidateNodeIndex(base, node.id);
 	const graph = await readGraph(base);
 	const edges = graph.edges.filter((edge) => edge.fromId !== node.id && edge.toId !== node.id);
@@ -2996,8 +2997,7 @@ function selectPlanItems(plan, selectedIds) {
 * @param plan - 计划。
 */
 async function savePlan(root, plan) {
-	const dir = join(root, PLANS_DIR);
-	await mkdir(dir, { recursive: true });
+	await mkdir(join(root, PLANS_DIR), { recursive: true });
 	const target = join(root, planRelPath(plan.id));
 	const temp = `${target}.tmp`;
 	await writeFile(temp, JSON.stringify(plan, null, 2), "utf8");
@@ -3043,7 +3043,7 @@ async function listPlans(root) {
 	return plans.sort((a, b) => b.createdAt - a.createdAt);
 }
 /** 兜底窗口：即使"轮"的边界没被识别到，也不会在短时间里无限新建 */
-const CREATION_WINDOW_MS = 6e5;
+const CREATION_WINDOW_MS = 600 * 1e3;
 /** 会话 → 最近新建节点的时间戳 */
 const creationLog = /* @__PURE__ */ new Map();
 /** 测试可调的上限（默认走 CREATION_QUOTA） */
@@ -5269,7 +5269,7 @@ async function createSubdirectory(input) {
 *
 * 512KB 远超正常笔记（几万字），但足以挡住"误把大文件塞进来"的情形 ✓。
 */
-const MAX_DOCUMENT_BYTES = 524288;
+const MAX_DOCUMENT_BYTES = 512 * 1024;
 /**
 * **正文口径**：读、写、返回三处必须完全一致 ✓。
 *

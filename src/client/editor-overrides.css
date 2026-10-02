@@ -77,11 +77,22 @@
 }
 
 /*
- * **不做基于 `@container` 的"阅读宽度"** ✗（文档第 4 节点名 ✓）：
- * 外围容器宽 ≠ 处于展开模式 ✓（图谱并排时外围很宽，编辑器仍是 440px 侧栏 ✓）
- * ⇒ 那样会把侧栏正文也套上宽页面的居中版式 ✓。
- * 真要"展开书写"就用**显式的编辑模式**控制 ✓ —— 那个功能目前没做 ✓（如实记录 ✓）。
+ * **阅读栏宽** ✓ —— 这一版才成立 ✗：编辑器现在**铺满**整个图谱区 ✓
+ * （`design/table-entry-hidden-preview-table-analysis.md` 那条之后的又一次布局调整 ✓），
+ * 所以 `.kn-graph` 的容器查询宽度**就是**编辑器的宽度 ✓。
+ * （以前不行：图谱并排时外围很宽、编辑器只有 440px 侧栏 ✓ ⇒ 套居中版式反而会把侧栏正文弄窄 ✗。）
+ *
+ * 面板够宽（≥720px ✓）⇒ 正文收成一条**居中的阅读栏** ✓（一行别拖太长 ✓）；
+ * 窄面板保持铺满 ✓。表格 / 代码块各自横滚 ✓，不受影响 ✓。
  */
+@container (min-width: 720px) {
+  .kn-root .kn-editor-rich .milkdown,
+  .kn-root .kn-editor-text {
+    width: 100%;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+}
 
 /* ------------------------- ③ 表格：恢复原生布局，滚动交给外层 ------------------------- */
 
@@ -92,12 +103,19 @@
  * 正确做法：滚动交给 Crepe 的表格外层容器 ✓（实测类是 `.milkdown-table-block` 里的
  * `.table-wrapper` ✓），本体老老实实做表格 ✓；列宽不够时**只有表格外层**横滚 ✓，
  * 编辑器整页不跟着横滚 ✓。
+ *
+ * **横向居中** ✓（用户实测：表格原来贴着正文左边缘 ✓，希望"优先居中显示"✓）：
+ * `display: table` 的元素是 shrink-to-fit ✓ ⇒ `margin-inline: auto` 就能在阅读栏里居中 ✓；
+ * 更妙的是——表格**比可视宽度还宽**时，auto 外边距按 0 处理 ✓
+ * ⇒ 它仍然从左边开始、由 `.table-wrapper` 横滚 ✓（不会把左边那截滚不到 ✗ ——
+ * 那正是用 flex `justify-content: center` 居中溢出内容时的经典毛病 ✓）。
  */
 .kn-root .kn-editor-rich .milkdown table {
   display: table;
   width: auto;
   max-width: none;
   border-collapse: collapse;
+  margin-inline: auto;
 }
 
 .kn-root .kn-editor-rich .milkdown .table-wrapper {
@@ -188,6 +206,13 @@
   max-width: 100%;
   overflow-x: auto;
   padding: 2px 0;
+}
+
+/* KaTeX 0.18 使用 katex-newline；保留旧类名兼容。仅为块公式的显式换行增加字号相对间距。 */
+.kn-root .kn-editor-rich .milkdown .katex-display .katex-html > .katex-newline,
+.kn-root .kn-editor-rich .milkdown .katex-display .katex-html > .newline {
+  display: block;
+  height: 1.6em;
 }
 
 /* ------------------------- ④ 正文排版：接近"写一整篇文档"的手感 ------------------------- */
@@ -434,6 +459,15 @@
   .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
   .preview {
   padding: 10px 4px;
+  /*
+   * **结果面板用正文字号** ✓（用户实测：公式挤成一小团、看着像"重叠" ✗）。
+   *
+   * Crepe 的公式块是**扩展代码块**来的 ✓ ⇒ 结果面板继承了代码块的
+   * `font-size: calc(var(--crepe-base-font-size,16px) * 0.875)`（≈13px ✗），
+   * `.katex` 再乘它自己的 1.21em ⇒ 显示数学反而比正文小一圈 ✓。
+   * 这里显式回到正文那档字号 ✓（正文规则里就是 15px ✓，两处一致 ✓）。
+   */
+  font-size: 15px;
 }
 
 /* 「结果」标签：轻量小字 ✓（文案已用官方配置项换成中文 ✓，不再常驻大写 PREVIEW ✓） */

@@ -47,6 +47,8 @@ const richSource = await read("src/client/MarkdownRichEditor.tsx");
 const stateSource = await read("src/client/node-document-state.ts");
 const buildSource = await read("build.mjs");
 const css = await read("src/client/panel.css");
+/** 正文/表格那套覆盖样式（阅读栏宽在里面 ✓） */
+const overridesSource = await read("src/client/editor-overrides.css");
 const dictSource = await read("src/client/index.ts");
 
 /** 假 fetch：记下请求体并回一个可控响应 ✓ */
@@ -787,17 +789,31 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(stateSource.includes("textWithoutBreaks"), "检测器要按同一份「安全能力范围」摘掉 br ✓");
   });
 
-  it("**复查（br/叠层）**：编辑器打开时图谱 HUD 让位、且窄面板不穿透 ✓", () => {
-    /* ① 编辑器层级高过上游 HUD（z-index 6）✓ */
+  it("**布局改版**：编辑器**铺满整个图谱区**，图谱层完全让位（看不见也不穿透）✓", () => {
+    /* ① 编辑器铺满（用户实测要求：不要再"左边一条图谱 + 右边一条编辑栏"✗） */
+    assert.ok(/\.kn-editor \{[^}]*inset: 0/s.test(css), "编辑器要四边贴满图谱区 ✓");
+    assert.ok(!/\.kn-editor \{[^}]*width: min\(440px/s.test(css), "不许再有 440px 侧栏宽度 ✗");
+    assert.ok(!css.includes("padding-right: 440px"), "图谱舞台不必再让位 ✗（它已经被完全盖住 ✓）");
+    /* ② 编辑器层级高过上游 HUD（z-index 6）✓ */
     assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-editor"), "编辑器要整体抬高 ✓");
     assert.ok(/z-index: 12/.test(css), "要真正高过 HUD 的 6 ✓");
-    /* ② 宽面板里让出编辑条 ✓ */
-    assert.ok(css.includes("right: 452px"), "HUD 要在宽面板里让出编辑条 ✓");
-    assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-minimap"), "右下小地图同样要让位 ✓");
-    /* ③ 窄面板：图谱层不接受指针 ✓ */
-    assert.ok(css.includes("pointer-events: none"), "被遮住的图谱控件不许穿透 ✓");
-    /* ④ 关掉编辑器后规则自动失效（不再依赖任何持久状态）✓ */
+    /* ③ 被盖住的图谱层：**不显示**、也不接受指针 ✓（不然 3D 节点会从边缘透出来 ✗） */
+    const hideBlock = /\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage,[\s\S]{0,240}?visibility: hidden;[\s\S]{0,80}?pointer-events: none;/;
+    assert.ok(hideBlock.test(css), "图谱舞台 / 小地图 / HUD 要一起隐藏并不接受指针 ✓");
+    assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-minimap"), "右下小地图点名列出 ✓");
+    /* ④ 用 `visibility` 而不是 `display`（画布尺寸不变 ⇒ 关掉编辑器回来不用重新测量 ✓） */
+    assert.ok(!/\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage \{[^}]*display: none/s.test(css), "别用 display:none 拆画布 ✗");
+    /* ⑤ 关掉编辑器后规则自动失效（不再依赖任何持久状态）✓ */
     assert.ok(css.includes(":has(.kn-editor)"), "用 :has 跟随编辑器存在与否 ⇒ 关闭即恢复 ✓");
+    assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-sel"), "选中信息条也要让位 ✓");
+  });
+
+  it("**阅读栏宽**：面板够宽时正文居中收窄（现在编辑器宽度 == 面板宽度 ✓）", () => {
+    assert.ok(
+      /@container \(min-width: 720px\)[\s\S]{0,400}?max-width: 860px/s.test(overridesSource),
+      "宽面板要把正文收成居中的阅读栏 ✓",
+    );
+    assert.ok(overridesSource.includes(".kn-root .kn-editor-text"), "纯文本兜底那条也要一起收窄 ✓");
   });
 
   it("**复查（第三次）P2-1**：组合结束的待办必须重新取快照；载入判定只做一次 ✓", () => {
@@ -1101,7 +1117,7 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(!onSavedBlock.includes("setEditingNodeId(null)"), "不该无条件关闭编辑器（要按待办走 ✓）");
   });
 
-  it("文案同时进中英词典 ✓；窄面板覆盖、宽面板并排 ✓", () => {
+  it("文案同时进中英词典 ✓；容器查询仍按**面板自己的宽度** ✓", () => {
     /* `saveNote` 已随保存按钮撤掉 ⇒ 换成仍在使用的那几条 ✓ */
     for (const key of [
       "editNote", "notePanelTitle", "statusDirty", "statusSaving", "saveShortcut",
@@ -1114,7 +1130,11 @@ describe("与设计稿对应的部件与入口", () => {
       assert.ok(en.includes(`${key}:`), `英文词典要有 ${key} ✓`);
     }
     assert.ok(css.includes("container-type: inline-size"), "按**面板自己的宽度**判断（容器查询 ✓）");
-    assert.ok(css.includes("@container (min-width: 720px)"), "宽面板并排 ✓");
+    /*
+     * 布局改版之后：编辑器**铺满**图谱区 ✓ ⇒ 容器宽度 == 编辑器宽度 ✓，
+     * "宽面板"这条容器查询现在用来决定**阅读栏宽**（不再决定"并排/覆盖"✗）。
+     */
+    assert.ok(css.includes("@container (min-width: 720px)") || overridesSource.includes("@container (min-width: 720px)"), "宽面板仍用容器查询 ✓");
     assert.ok(css.includes(".kn-sel"), "选中信息条要有样式 ✓");
     assert.ok(css.includes(".kn-root .sr-only"), "上游那个 sr-only 播报要真正隐藏 ✗（它没有样式会露出来 ✓）");
   });

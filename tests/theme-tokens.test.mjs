@@ -150,12 +150,13 @@ describe("主题 token", () => {
       "选择器要带插件作用域 ✓",
     );
     /*
-     * 但**不许**拿 `@container` 当"展开模式" ✗（文档第 4 节点名 ✓）：
-     * 外围容器宽 ≠ 编辑器变宽 ✓ ⇒ 会把 440px 侧栏也套上居中阅读版式 ✓。
+     * 布局改版（用户实测）之后：编辑器**铺满**整个图谱区 ✓ ⇒
+     * 面板的容器宽度**就是**编辑器宽度 ✓，所以"宽面板 ⇒ 居中阅读栏"这条 `@container`
+     * 不再是"拿外围宽度当展开模式" ✗（那条限制的前提已经消失 ✓）。
      */
     assert.ok(
-      !/^\s*@container/m.test(overrides),
-      "不要用 @container 判阅读版式 ✗（那是「外围多宽」，不是「是否展开」✓；注释里提到它不算 ✓）",
+      /@container \(min-width: 720px\)[\s\S]{0,400}?max-width: 860px/s.test(overrides),
+      "宽面板要给正文一条居中的阅读栏 ✓（现在容器宽度 == 编辑器宽度 ✓）",
     );
   });
 
@@ -170,6 +171,21 @@ describe("主题 token", () => {
       "横向滚动要落在 Crepe 的 .table-wrapper 上 ✓（实测它就是表格外层 ✓）",
     );
     assert.ok(!/\.kn-editor-rich \.milkdown table \{[^}]*overflow-x/s.test(overrides), "table 本体自己不该横滚 ✓");
+    /*
+     * **横向居中** ✓（用户实测：表格原来贴着阅读栏左边缘 ✗，要求"优先居中显示"✓）：
+     * 用 `margin-inline: auto` 而不是给外层加 flex 居中 ✓ ——
+     * `display: table` 是 shrink-to-fit ✓，有地方就居中 ✓；
+     * 表格比可视宽度还宽时 auto 外边距按 0 处理 ✓ ⇒ 仍从左开始、由 `.table-wrapper` 横滚 ✓
+     * （flex `justify-content: center` 会把溢出内容的左边那截滚不到 ✗）。
+     */
+    assert.ok(
+      /\.kn-editor-rich \.milkdown table \{[^}]*margin-inline: auto/s.test(overrides),
+      "短表格要在阅读栏里居中 ✓",
+    );
+    assert.ok(
+      !/table-wrapper \{[^}]*justify-content/s.test(overrides),
+      "别用 flex 居中表格 ✗（溢出时左边会滚不到 ✓）",
+    );
     assert.ok(/padding: 8px 12px/.test(overrides), "单元格内边距按设计建议 8/12 ✓");
     assert.ok(/min-width: 6em/.test(overrides), "列最小宽度要按字体算（em ✓），不是固定小像素 ✗");
     assert.ok(/font-size: 15px/.test(overrides), "正文 15px ✓（窄侧栏不靠缩字号解决布局 ✗）");
@@ -198,6 +214,28 @@ describe("主题 token", () => {
       "只在公式块里隐藏语言选择器 ✗（真代码块要保留 ✓）",
     );
     assert.ok(overrides.includes("max-height: 7.5em"), "公式源码最多约 6 行 ✓");
+    /*
+     * **结果面板要回到正文字号** ✓（用户实测：公式挤成一小团 ✗）：
+     * Crepe 的公式块扩自代码块 ⇒ 预览区继承 0.875em（≈13px ✗）⇒ 显示数学比正文小一圈 ✓。
+     */
+    assert.ok(
+      /:has\(\.preview \.katex-display\)\)\s*\n?\s*\.preview \{[^}]*font-size: 15px/s.test(overrides),
+      "公式结果面板要用正文字号 ✓（别继承代码块的 0.875em ✗）",
+    );
+    /*
+     * **`\\` 换行必须给出行距** ✓（用户实测："两行公式重叠了" ✗）：
+     * KaTeX 只给 `.katex .katex-html > .newline { display: block }` ✓ —— 高度 0 ✗，
+     * 第二行就紧贴第一行的分母 ✓。我们显式补一条高度 ✓，而且**只在 display 公式里** ✓
+     * （行内公式 `$…$` 没有 `.katex-display` 父级 ⇒ 不受影响 ✓）。
+     */
+    assert.ok(
+      /\.katex-display \.katex-html > \.newline \{[^}]*height: 1\.6em/s.test(overrides),
+      "display 公式的换行要有行距 ✓（否则两行会贴在一起 ✗）",
+    );
+    assert.ok(
+      !/\.newline \{[^}]*height: 0(?:px|em|;)/s.test(overrides),
+      "不许把换行高度设成 0 ✗",
+    );
     /* 普通代码块的语言菜单要收敛 ✓（截图里的 410px 列表 ✗） */
     assert.ok(/list-wrapper \{[^}]*max-height: 260px/s.test(overrides), "菜单高度上限 260px ✓");
     assert.ok(/list-wrapper \{[^}]*width: 220px/s.test(overrides), "菜单宽度 220px ✓");
