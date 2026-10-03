@@ -71,6 +71,11 @@ export function NodeDocumentEditor(props: {
   target?: DocumentTarget | undefined;
   draftKey?: string | undefined;
   onClose: () => void;
+  /**
+   * **点前置 / 被依赖列表里的节点 ⇒ 跳到那个节点的编辑界面** ✓（用户实测要求 ✓）。
+   * 只传 **node id** ✓；切不切得动由父面板决定 ✓（它有"未保存改动"的三选一 ✓）。
+   */
+  onOpenNode?: ((nodeId: string) => void) | undefined;
   onSaved?: (document: NodeDocument) => void;
   onDirtyChange?: ((dirty: boolean) => void) | undefined;
   /** 现在能不能保存（父面板据此提前禁用离开弹窗里的「保存并继续」✓） */
@@ -772,7 +777,7 @@ export function NodeDocumentEditor(props: {
             </sup>
           ) : null}
         </h2>
-        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} selection={noteSelection} />
+        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>

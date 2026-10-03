@@ -233,6 +233,21 @@ function GraphPanelInner(props: {
    * 请求进入某个节点的编辑器（或关闭）。
    * 有未保存改动时**不直接切**，先弹三选一 ✓（设计稿要求 ✓）。
    */
+  /**
+   * **真正切编辑器**：编辑目标与**图谱聚焦**必须一起改 ✓。
+   *
+   * 为什么不能只 `setEditingNodeId` ✗（用户实测："点一下抖一下、还停在原来那篇"✓）：
+   * 下面有一条 effect 是"图谱聚焦变了就切编辑器" ✓ —— 只改编辑目标的话，
+   * `effectiveFocus` 还是原来那个节点 ✓ ⇒ 新节点刚挂上就被立刻请求回去 ✗
+   * ⇒ 表现成"窗口抖一下、文档没换"✓。
+   * 两处**同时**改 ⇒ `effectiveFocus === editingNodeId` ✓，那条 effect 自然不动 ✓，
+   * 而且图谱高亮也跟着跳到被打开的那个节点 ✓（正是"跳转到对应节点"该有的样子 ✓）。
+   */
+  const applyEdit = useCallback((next: { kind: "open"; nodeId: string } | { kind: "close" }): void => {
+    if (next.kind === "open") setFocusId(next.nodeId);
+    setEditingNodeId(next.kind === "open" ? next.nodeId : null);
+  }, []);
+
   const requestEdit = useCallback((
     next: { kind: "open"; nodeId: string } | { kind: "close" },
     /*
@@ -246,8 +261,13 @@ function GraphPanelInner(props: {
       setLeaveDialog(next);
       return;
     }
-    setEditingNodeId(next.kind === "open" ? next.nodeId : null);
-  }, [editorDirty]);
+    /*
+     * 注意：**取消三选一时不许动聚焦** ✗ —— 聚焦改了、编辑器没切，
+     * 那条"聚焦变了就切"的 effect 又会立刻再弹一次 ✗（会变成死循环 ✓）。
+     * 所以聚焦只在**真正落地**的这两处跟着改 ✓（这里 + 保存后的待办 ✓）。
+     */
+    applyEdit(next);
+  }, [editorDirty, applyEdit]);
 
   /** 三选一：继续编辑 */
   const cancelLeave = useCallback((): void => {
@@ -411,8 +431,9 @@ function GraphPanelInner(props: {
     pendingEditRef.current = null;
     setLeaveDialog(null);
     if (editingNodeId !== null) forgetDraft(draftKey(libraryKey, editingNodeId));
-    if (pending !== null) setEditingNodeId(pending.kind === "open" ? pending.nodeId : null);
-  }, [leaveDialog, editingNodeId, libraryKey]);
+    /* 丢弃并继续 ⇒ 同样是"**真正落地**"的切换 ✓ ⇒ 走 applyEdit（聚焦一起改 ✓） */
+    if (pending !== null) applyEdit(pending);
+  }, [leaveDialog, editingNodeId, libraryKey, applyEdit]);
 
   /*
    * 注意：诊断上报必须在 `graph` / `effectiveFocus` 定义**之后**——
@@ -1175,6 +1196,12 @@ function GraphPanelInner(props: {
                 onDirtyChange={setEditorDirty}
                 onSaveOutcome={onEditorSaveOutcome}
                 onSaveableChange={setEditorSaveable}
+                /*
+                 * **前置 / 被依赖列表里点节点 ⇒ 切到那个节点的编辑界面** ✓（用户实测要求 ✓）。
+                 * 走的是同一条 `requestEdit` ✓ ⇒ 有未保存改动时先弹三选一 ✗
+                 * （不会因为"顺手点了个前置"就把正在写的草稿丢掉 ✓）。
+                 */
+                onOpenNode={(nodeId) => { requestEdit({ kind: "open", nodeId }); }}
                 onClose={(dirty) => { requestEdit({ kind: "close" }, dirty); }}
                 onSaved={(document) => {
                   /*
@@ -1198,7 +1225,15 @@ function GraphPanelInner(props: {
                     const next = pending.kind === "open"
                       ? (adopted && pending.nodeId === editingNodeId ? document.nodeId : pending.nodeId)
                       : null;
-                    if (!(adopted && next === document.nodeId)) setEditingNodeId(next);
+                    /*
+                     * 待办落地同样走 `applyEdit` ✓（**编辑目标 + 图谱聚焦一起改** ✗）：
+                     * 只改编辑目标的话，下面那条"聚焦变了就切编辑器"的 effect 会拿旧聚焦再请求一次 ✗
+                     * —— 就是"点前置抖一下、还停在原来那篇"的同一个坑 ✓。
+                     */
+                    if (!(adopted && next === document.nodeId)) {
+                      if (next === null) applyEdit({ kind: "close" });
+                      else applyEdit({ kind: "open", nodeId: next });
+                    }
                   }
                   void load({ refresh: true });
                 }}
@@ -1234,7 +1269,14 @@ function GraphPanelInner(props: {
               root={target !== undefined && target.kind === "root" ? target.value : undefined}
               sessionId={target !== undefined && target.kind === "session" ? target.value : props.sessionId}
               onChanged={() => { void load({ refresh: true }); }}
-              onEditNote={(nodeId) => { setFocusId(nodeId); requestEdit({ kind: "open", nodeId }); }}
+              onEditNote={(nodeId) => {
+              /*
+               * 聚焦不再**提前**改 ✓：`applyEdit` 会在"真正落地"时把编辑目标与聚焦一起改 ✓。
+               * 提前改的坏处：弹了三选一又被取消 ⇒ 聚焦已经跑了、编辑器还在原地 ✗
+               * ⇒ 那条"聚焦变了就切编辑器"的 effect 立刻再请求一次 ✗（取消也切、再弹一遍 ✓）。
+               */
+              requestEdit({ kind: "open", nodeId });
+            }}
               report={(step, detail) => { void reportDiag("graph-menu", step, detail ?? null); }}
               copy={{
                 nodeMenuTitle: t("nodeMenuTitle"),

@@ -873,7 +873,10 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(panelSource.includes("requestEdit({ kind: \"open\", nodeId: selectedNode.id })"), "按钮要真的打开编辑器 ✓");
     assert.ok(menuSource.includes("props.onEditNote?.(nodeId)"), "右键菜单要有同名入口 ✓");
     assert.ok(menuSource.includes("props.copy.editNote"), "菜单项文案走词典 ✓");
-    assert.ok(panelSource.includes("onEditNote={(nodeId) => { setFocusId(nodeId); requestEdit({ kind: \"open\", nodeId }); }}"), "面板要把它接到编辑器上 ✓");
+    assert.ok(
+      /onEditNote=\{\(nodeId\) => \{[\s\S]{0,400}?requestEdit\(\{ kind: "open", nodeId \}\);/.test(panelSource),
+      "面板要把它接到编辑器上 ✓（聚焦由 applyEdit 在落地时一起改 ✓，不再提前 setFocusId ✗）",
+    );
   });
 
   it("未保存时切节点/关闭：三选一（继续编辑 / 放弃修改 / 保存并继续 ✓）", () => {
@@ -901,10 +904,17 @@ describe("与设计稿对应的部件与入口", () => {
     /* 取到下一个顶层 const 为止（声明位置会调整，不能拿别的函数名当结尾 ✗） */
     const nextDecl = panelSource.indexOf("\n  const ", start + 10);
     const discard = panelSource.slice(start, nextDecl < 0 ? panelSource.length : nextDecl);
-    assert.ok(
-      discard.indexOf("forgetDraft") >= 0 && discard.indexOf("forgetDraft") < discard.indexOf("setEditingNodeId"),
-      "清理必须发生在关闭/切换**之前** ✓",
+    /*
+     * 切换那一步改走 `applyEdit` ✓（编辑目标 + 图谱聚焦要一起改 ✗，
+     * 见 `design/note-relations-navigation.md` 的"点一下抖一下"那条 ✓）——
+     * 但**清理仍然必须发生在切换之前** ✓，所以这里认的是两个动作的**先后** ✓，
+     * 不再写死"必须直接调 setEditingNodeId" ✗。
+     */
+    const forgetAt = discard.indexOf("forgetDraft");
+    const switchAt = Math.min(
+      ...[discard.indexOf("applyEdit"), discard.indexOf("setEditingNodeId")].filter((at) => at >= 0),
     );
+    assert.ok(forgetAt >= 0 && switchAt > forgetAt, "清理必须发生在关闭/切换**之前** ✓");
     /*
      * 依赖数组里引用了 `libraryKey` ⇒ 声明必须在它之前 ✓
      * （依赖数组在渲染期求值，顺序错了就是 `Cannot access 'libraryKey' before initialization`

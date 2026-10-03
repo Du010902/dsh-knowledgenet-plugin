@@ -4,7 +4,21 @@ import type { DocumentTarget } from "./node-document-client.ts";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 
 /** 笔记关系查看与添加；边 fromId 指向其前置 toId。 */
-export function NoteRelations(props: { nodeId: string; graph?: GraphSnapshot; target?: DocumentTarget; onChanged?: () => void; selection?: { text: string; top: number; left: number } | null }): ReactNode {
+export function NoteRelations(props: {
+  nodeId: string;
+  graph?: GraphSnapshot;
+  target?: DocumentTarget;
+  onChanged?: () => void;
+  /**
+   * **点列表里的节点 ⇒ 跳到那个节点的编辑界面** ✓（用户实测要求 ✓）。
+   *
+   * 这里只把 **node id** 交出去 ✓（标题可能重复 ✗、也可能被改名 ✓）：
+   * 真正切编辑器的是父面板 ✓ —— 它会先过"未保存改动"的三选一 ✓
+   * ⇒ 直接切不会悄悄丢掉正在编辑的草稿 ✓。
+   */
+  onOpenNode?: ((nodeId: string) => void) | undefined;
+  selection?: { text: string; top: number; left: number } | null;
+}): ReactNode {
   const [mode, setMode] = useState<"pre" | "depend" | "add" | null>(null);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -36,7 +50,21 @@ export function NoteRelations(props: { nodeId: string; graph?: GraphSnapshot; ta
         <input aria-label="前置节点名称" placeholder="搜索已有节点，或输入新节点名称" value={title} disabled={busy} onChange={e => setTitle(e.target.value)} />
         {candidates.map(n => <button type="button" key={n.id} disabled={busy} onClick={() => { void add(n.title, false); }}>{n.title}</button>)}
         <button type="button" disabled={busy || !title.trim()} onClick={() => { void add(title, true); }}>{busy ? "添加中…" : `新建「${title.trim() || "节点"}」并设为前置`}</button>
-      </> : items.length ? items.map(n => <div className="kn-note-relation-item" key={n!.id}>{n!.title}</div>) : <div className="kn-editor-dim">暂无关系</div>}
+      </> : items.length ? items.map(n => (
+        /*
+         * **列表项是按钮** ✓（原来是 `<div>` ✗ ⇒ 点不动 ✓，用户实测 ✓）：
+         * 点击跳到该节点的编辑界面 ✓；键盘也能 Tab 到、回车打开 ✓。
+         * 没有回调时（只读场景 ✓）退化成不可点的行 ✓（保留原来的样子 ✓）。
+         */
+        <button
+          type="button"
+          className="kn-note-relation-item"
+          key={n!.id}
+          disabled={props.onOpenNode === undefined}
+          title={props.onOpenNode === undefined ? undefined : `打开「${n!.title}」`}
+          onClick={() => { props.onOpenNode?.(n!.id); }}
+        >{n!.title}</button>
+      )) : <div className="kn-editor-dim">暂无关系</div>}
       {error ? <div role="alert" className="kn-editor-error">{error}</div> : null}
     </div> : null}
   </div>;

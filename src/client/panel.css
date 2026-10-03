@@ -1626,6 +1626,29 @@
 .kn-note-relations-popover > button { display: block; text-align: left; width: 100%; }
 .kn-note-relations-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .kn-note-relations-popover input { box-sizing: border-box; width: 100%; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 8px; background: transparent; color: inherit; margin-bottom: 8px; }
-.kn-note-relation-item { padding: 7px 0; }
+/*
+ * 关系列表项 = **可点的按钮** ✓（用户实测："前置和被依赖中的节点点不动"✗ ⇒ 点了要跳到那个节点 ✓）。
+ * 按钮要抹掉浏览器默认外观 ✓（原来的行就是个 div ✓）；悬停/聚焦给出可点反馈 ✓、
+ * 长标题允许换行 ✓（不撑破 300px 的浮层 ✓）；没有回调时 disabled ⇒ 退回"普通行"的样子 ✓。
+ */
+/* 选择器带上 .kn-note-relations ✓：权重高于上面那条通用 `button` 规则 ✗（否则颜色/内边距被它压住 ✓） */
+.kn-note-relations .kn-note-relation-item {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  /* 列表项是**正文内容** ✓ ⇒ 用主文字色（通用 button 规则给的是次级色 ✗） */
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.kn-note-relations .kn-note-relation-item:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent); }
+.kn-note-relations .kn-note-relation-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+.kn-note-relations .kn-note-relation-item:disabled { cursor: default; opacity: 1; }
 .kn-note-relations .kn-note-selection { position: fixed; z-index: 40; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 @container (max-width: 480px) { .kn-note-relations { gap: 0; } .kn-note-relations button { padding: 5px; font-size: 11px; } }
