@@ -84,6 +84,7 @@ const DICT_ZH: Record<string, string> = {
   tableColRight: "本列右移",
   tableDeleteRow: "删除本行",
   tableDeleteCol: "删除本列",
+  tableDeleteTable: "删除整张表格",
   /* 动不了时说明为什么 ✓；只读 / 保存中：入口还在但禁用 ✓ */
   tableMoveEdge: "已经在边界上，这个方向移不动",
   tableMoveHeader: "表头行不参与移动",
@@ -199,6 +200,7 @@ const DICT_EN: Record<string, string> = {
   tableColLeft: "Move this column left",
   tableColRight: "Move this column right",
   tableDeleteRow: "Delete this row",
+  tableDeleteTable: "Delete table",
   tableDeleteCol: "Delete this column",
   /* Why a move is unavailable; and the disabled entry state ✓ */
   tableMoveEdge: "Already at the edge — cannot move further that way",

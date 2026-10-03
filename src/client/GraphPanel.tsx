@@ -1151,6 +1151,8 @@ function GraphPanelInner(props: {
                 key={`${libraryKey}::${editingNodeId}`}
                 nodeId={editingNodeId}
                 libraryKey={libraryKey}
+                graph={graph ?? undefined}
+                onRelationsChanged={() => { void load({ refresh: true }); }}
                 target={editingTarget}
                 t={props.t}
                 saveNonce={editorSaveNonce}

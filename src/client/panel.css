@@ -1618,3 +1618,14 @@
   background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
   color: var(--dsw-alias-label-primary);
 }
+.kn-note-relations { display: flex; align-items: center; gap: 6px; position: relative; margin-left: auto; }
+.kn-note-relations button { border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; }
+.kn-note-relations button:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent); }
+.kn-note-relations button:disabled { opacity: .5; cursor: default; }
+.kn-note-relations-popover { position: absolute; top: 36px; right: 0; width: min(300px, 65cqw); max-height: 45vh; overflow: auto; z-index: 30; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.kn-note-relations-popover > button { display: block; text-align: left; width: 100%; }
+.kn-note-relations-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.kn-note-relations-popover input { box-sizing: border-box; width: 100%; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 8px; background: transparent; color: inherit; margin-bottom: 8px; }
+.kn-note-relation-item { padding: 7px 0; }
+.kn-note-relations .kn-note-selection { position: fixed; z-index: 40; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
+@container (max-width: 480px) { .kn-note-relations { gap: 0; } .kn-note-relations button { padding: 5px; font-size: 11px; } }

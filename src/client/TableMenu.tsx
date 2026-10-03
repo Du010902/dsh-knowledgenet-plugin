@@ -40,6 +40,7 @@ const ENTRY_ICON = (
 
 /** 动作 → 图标（行/列的形状 + 箭头 / 减号 ✓，语义由文字标签写清 ✓） */
 const ICONS: Record<TableMenuAction, ReactNode> = {
+  "table-delete": <Icon><path d="M3 4h10M6 4V2h4v2M4 4l1 10h6l1-10M7 7v4M9 7v4" /></Icon>,
   "row-before": (
     <Icon>
       <rect x="2" y="7.5" width="12" height="6" rx="1.2" />

@@ -1,3 +1,5 @@
+import { NoteRelations } from "./NoteRelations.tsx";
+import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 /**
  * **节点笔记编辑器**（`design/node-note-editor.html` 的界面语言 + `node-note-editor-plan.md` 的行为
  * + `design/node-document-editor-review.md` 的草稿保护修正）。
@@ -62,6 +64,8 @@ import {
  * @returns 编辑器界面。
  */
 export function NodeDocumentEditor(props: {
+  graph?: GraphSnapshot;
+  onRelationsChanged?: () => void;
   nodeId: string;
   libraryKey?: string | undefined;
   target?: DocumentTarget | undefined;
@@ -88,6 +92,7 @@ export function NodeDocumentEditor(props: {
   const [tab, setTab] = useState<"rich" | "source">("rich");
   const [confirmAdopt, setConfirmAdopt] = useState(false);
   /** 复制草稿的反馈（null = 还没复制过 ✓） */
+  const [noteSelection, setNoteSelection] = useState<{ text: string; top: number; left: number } | null>(null);
   const [copyState, setCopyState] = useState<"done" | "failed" | null>(null);
   /**
    * **当下这份状态**（每次渲染都刷新 ✓）。
@@ -767,6 +772,7 @@ export function NodeDocumentEditor(props: {
             </sup>
           ) : null}
         </h2>
+        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>
@@ -952,6 +958,7 @@ export function NodeDocumentEditor(props: {
                  * 万一它被 Markdown 拆成段落 + `Text` 块（截图那样 ✓），
                  * 下面那条提示里就给一个"作为代码块插入"的一键补救 ✓（可撤销 ✓）。
                  */
+                onSelectionText={setNoteSelection}
                 onPasteText={(text) => { setLastPaste(text); }}
                 t={props.t}
                 /*

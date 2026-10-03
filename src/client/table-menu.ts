@@ -30,7 +30,8 @@ export type TableMenuAction =
   | "col-left"
   | "col-right"
   | "row-delete"
-  | "col-delete";
+  | "col-delete"
+  | "table-delete";
 
 /** 列对齐（表格 schema 的 alignment 属性；缺省按左对齐 ✓） */
 export type TableAlignment = "left" | "center" | "right";
@@ -65,6 +66,7 @@ export const TABLE_LITERAL: Record<string, string> = {
   tableColLeft: "本列左移",
   tableColRight: "本列右移",
   tableDeleteRow: "删除本行",
+  tableDeleteTable: "删除整张表格",
   tableDeleteCol: "删除本列",
   /* 动不了时给出**为什么** ✓（复查要求"边界时禁用对应方向"✓） */
   tableMoveEdge: "已经在边界上，这个方向移不动",
@@ -92,6 +94,7 @@ export const TABLE_MENU_ITEMS: readonly TableMenuItem[] = [
   { id: "col-left", labelKey: "tableColLeft", group: 3, move: true },
   { id: "col-right", labelKey: "tableColRight", group: 3, move: true },
   { id: "row-delete", labelKey: "tableDeleteRow", group: 4, danger: true },
+  { id: "table-delete", labelKey: "tableDeleteTable", group: 4, danger: true },
   { id: "col-delete", labelKey: "tableDeleteCol", group: 4, danger: true },
 ];
 

@@ -30,7 +30,7 @@ import {
   moveRowCommand,
   setAlignCommand,
 } from "@milkdown/kit/preset/gfm";
-import { deleteColumn, deleteRow } from "@milkdown/kit/prose/tables";
+import { deleteColumn, deleteRow, deleteTable } from "@milkdown/kit/prose/tables";
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import { replaceAll } from "@milkdown/kit/utils";
@@ -369,6 +369,7 @@ export function MarkdownRichEditor(props: {
    * 没命中本插件载荷、也没被拦下的粘贴（就是普通 Markdown 粘贴 ✓）把原文交给父组件 ✓，
    * 万一被拆成段落 + `Text` 块（截图那样 ✓），提示条上还能一键"作为代码块插入"✓。
    */
+  onSelectionText?: (selection: { text: string; top: number; left: number } | null) => void;
   onPasteText?: ((text: string) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
   t?: unknown;
@@ -382,6 +383,7 @@ export function MarkdownRichEditor(props: {
    * 表格入口当前该在哪（`null` = 不显示 ✓）。
    * 只由**编辑器 selection** 决定 ✓（不靠鼠标悬停推断 ✗）。
    */
+  const contextPointRef = useRef<{ top: number; right: number } | null>(null);
   const [menu, setMenu] = useState<TableMenuAnchor | null>(null);
   /** 完整动作菜单是否展开（**点开才出现** ✓；复查要求"一个轻量入口，按需展开" ✓） */
   const [menuOpen, setMenuOpen] = useState(false);
@@ -566,7 +568,7 @@ export function MarkdownRichEditor(props: {
     }
     entryHiddenReportedRef.current = false;
     hideReasonRef.current = null;
-    const popover = tablePopoverPosition(entry, containerRect, container.scrollTop);
+    const popover = contextPointRef.current ?? tablePopoverPosition(entry, containerRect, container.scrollTop);
     /*
      * 对齐高亮与"行列移动能不能用"都**只看目标表格里的选区** ✓：
      * 悬停的是 B、光标还在 A 时，先不要拿 A 的状态去点亮 B 的菜单 ✗
@@ -764,6 +766,7 @@ export function MarkdownRichEditor(props: {
             if (move !== null) commands.call(moveColCommand.key, { from: move.from, to: move.to });
             break;
           }
+          case "table-delete": { deleteTable(view.state, view.dispatch); break; }
           case "row-delete": {
             const view = ctx.get(editorViewCtx) as ProseMirrorView;
             deleteRow(view.state, view.dispatch);
@@ -1050,6 +1053,45 @@ export function MarkdownRichEditor(props: {
       reportRef.current?.("code-block-paste", { language: payload.language, chars: payload.code.length, viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === "" });
     };
     root.addEventListener("paste", onPastePayload, true);
+    const onTableContext = (event: Event): void => {
+      const mouse = event as MouseEvent;
+      const element = event.target as Element | null;
+      const cell = element?.closest("td, th");
+      const view = viewRef.current;
+      if (!cell || !view || readOnlyRef.current) return;
+      event.preventDefault(); event.stopPropagation();
+      menuBlockRef.current = cell.closest<HTMLElement>(".milkdown-table-block");
+      const pos = view.posAtDOM(cell, 0);
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))));
+      const body = root.closest<HTMLElement>(".kn-editor-body");
+      if (!body) return;
+      const rect = body.getBoundingClientRect();
+      contextPointRef.current = { top: Math.max(0, Math.min(mouse.clientY - rect.top, rect.height - 180)) + body.scrollTop, right: Math.max(8, rect.right - Math.min(mouse.clientX + 220, rect.right - 8)) };
+      syncMenuRef.current(); setMenuOpen(true);
+    };
+    const readTextSelection = (): void => {
+      const tree = root.getRootNode() as Document | (ShadowRoot & { getSelection?: () => Selection | null });
+      const native = ("getSelection" in tree ? tree.getSelection?.() : null) ?? window.getSelection();
+      if (native && !native.isCollapsed && native.rangeCount > 0) {
+        const range = native.getRangeAt(0);
+        const text = native.toString().trim();
+        if (text && root.contains(range.commonAncestorContainer)) {
+          const rect = range.getBoundingClientRect();
+          props.onSelectionText?.({ text, top: Math.max(8, rect.top - 38), left: Math.max(8, Math.min(rect.left, window.innerWidth - 200)) });
+          return;
+        }
+      }
+      const view = viewRef.current;
+      if (!view || view.state.selection.empty) { props.onSelectionText?.(null); return; }
+      const { from, to } = view.state.selection;
+      const text = view.state.doc.textBetween(from, to, " ").trim();
+      const rect = view.coordsAtPos(from);
+      props.onSelectionText?.(text ? { text, top: Math.max(8, rect.top - 38), left: Math.max(8, Math.min(rect.left, window.innerWidth - 200)) } : null);
+    };
+    const onTextSelection = (): void => { requestAnimationFrame(readTextSelection); };
+    root.addEventListener("contextmenu", onTableContext, true);
+    root.addEventListener("pointerup", onTextSelection);
+    root.addEventListener("keyup", onTextSelection);
 
     /*
      * 复查要求的两条"容器变化"通知 ✓：
@@ -1193,6 +1235,9 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("mouseup", onMouseUpFallback, true);
       root.removeEventListener("click", onCopyClick, true);
       root.removeEventListener("paste", onPastePayload, true);
+      root.removeEventListener("contextmenu", onTableContext, true);
+      root.removeEventListener("pointerup", onTextSelection);
+      root.removeEventListener("keyup", onTextSelection);
       document.removeEventListener("selectionchange", onSelectionChanged);
       shadowRoot?.removeEventListener("selectionchange", onSelectionChanged);
       window.removeEventListener("resize", onSelectionChanged);
@@ -1310,20 +1355,6 @@ export function MarkdownRichEditor(props: {
   return (
     <>
       <div className="kn-editor-rich" ref={hostRef} data-testid="kn-markdown-rich" />
-      {menu === null ? null : (
-        <TableEntry
-          top={menu.entry.top}
-          right={menu.entry.right}
-          inside={menu.entry.inside}
-          open={menuOpen}
-          compact={menu.entry.compact}
-          disabled={menu.busy}
-          hint={menu.busy ? t("tableEntryDisabled") : t("tableMenuLabel")}
-          t={t}
-          nodeRef={entryNodeRef}
-          onToggle={() => { if (menuOpen) dismissMenu(); else openMenu(); }}
-        />
-      )}
       {menu === null || !menuOpen ? null : (
         <TableMenu
           top={menu.popover.top}

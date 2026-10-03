@@ -258,7 +258,7 @@ describe("Shadow DOM：点击菜单内部不许被当成「点外面」（复查
     assert.ok(!handler.includes("closest("), "不许再用被重定向的 target.closest ✗");
     assert.ok(richSource.includes("const entryNodeRef = useRef<HTMLButtonElement | null>(null);"), "入口节点要有 ref ✓");
     assert.ok(richSource.includes("const menuNodeRef = useRef<HTMLDivElement | null>(null);"), "菜单节点要有 ref ✓");
-    assert.ok(richSource.includes("nodeRef={entryNodeRef}"), "ref 要传进入口 ✓");
+    assert.ok(!/<TableEntry\s/.test(richSource), "普通点击不渲染表格入口");
     assert.ok(richSource.includes("nodeRef={menuNodeRef}"), "ref 要传进菜单 ✓");
   });
 
@@ -640,7 +640,7 @@ describe("正文表格 vs 隐藏预览表（复查实测的入口消失 ✗）",
   });
 
   it("**实在没地方才收成小图标** ✓：文字收起来、`title` / `aria-label` 还在 ✓", () => {
-    assert.ok(richSource.includes("compact={menu.entry.compact}"), "位置算出的 compact 要传给入口 ✓");
+    assert.ok(richSource.includes('root.addEventListener("contextmenu", onTableContext, true)'), "表格操作由右键打开");
     assert.ok(menuSource.includes("props.compact ? null :"), "小图标模式收起文字标签 ✓");
     assert.ok(menuSource.includes("aria-label={props.t(\"tableMenuLabel\")}"), "收起文字也要有可访问名字 ✓");
     assert.ok(panel.includes(".kn-table-entry.is-compact"), "要有一条小图标样式 ✓");
@@ -724,7 +724,7 @@ describe("动作清单：够用、分组、危险操作写明对象", () => {
       "col-before", "col-after",
       "align-left", "align-center", "align-right",
       "row-up", "row-down", "col-left", "col-right",
-      "row-delete", "col-delete",
+      "row-delete", "table-delete", "col-delete",
     ]);
     assert.equal(new Set(TABLE_MENU_ITEMS.map((item) => item.id)).size, TABLE_MENU_ITEMS.length, "不许重复 ✗");
     /* 复查补的功能：四项移动必须真的在菜单里 ✓ */
@@ -748,7 +748,7 @@ describe("动作清单：够用、分组、危险操作写明对象", () => {
     const groups = TABLE_MENU_ITEMS.map((item) => item.group);
     for (let i = 1; i < groups.length; i += 1) assert.ok(groups[i] >= groups[i - 1], "分组不许回退 ✗");
     const danger = TABLE_MENU_ITEMS.filter((item) => item.danger === true).map((item) => item.id);
-    assert.deepEqual(danger, ["row-delete", "col-delete"], "只有删除是危险操作 ✓");
+    assert.deepEqual(danger, ["row-delete", "table-delete", "col-delete"], "只有删除是危险操作 ✓");
     assert.equal(TABLE_LITERAL.tableDeleteRow, "删除本行");
     assert.equal(TABLE_LITERAL.tableDeleteCol, "删除本列");
   });
@@ -762,7 +762,7 @@ describe("动作清单：够用、分组、危险操作写明对象", () => {
 
 describe("交互契约：一个入口、点开才展开、Esc 回正文", () => {
   it("默认**只渲染入口**，动作菜单在 `menuOpen` 时才渲染 ✓", () => {
-    assert.ok(richSource.includes("<TableEntry"), "要渲染入口 ✓");
+    assert.ok(richSource.includes("onTableContext"), "要支持右键入口");
     assert.ok(
       /menu === null \|\| !menuOpen \? null : \(\s*<TableMenu/.test(richSource),
       "菜单必须由展开状态控制 ✗（复查：九个按钮常驻是这次要修的问题 ✓）",
