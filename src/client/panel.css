@@ -1533,6 +1533,26 @@
 .kn-root-fill .kn-modes { flex: 0 0 auto; margin-left: auto; gap: 4px; }
 .kn-root-fill .kn-btn { height: 24px; padding: 0 9px; font-size: 12px; line-height: 22px; }
 
+/* ---------------- 搜索候选浮层要压过下方的节点笔记编辑卡片 ----------------
+   用户反馈 2026-10-03：编辑文档时，头行搜索框的候选列表被节点笔记卡片挡住了一半。
+
+   原因（不是选错了选择器，而是从来没给头行定过层级）：
+   `.kn-head-panel` 与 `.kn-graph` 是同一个 flex 列里的兄弟 ✓，两者都没有 `position`
+   ⇒ 都按"块级内容"绘制，**后出现的 `.kn-graph` 整体压在头行上面** ✓。
+   于是 `.kn-graph` 内部的编辑浮层（`z-index: 12` ✓，见上文 `.kn-editor`）连带着
+   把候选列表（`.kn-search-list`，在头行内部 `z-index: 5` ✓）一起盖住了 ✗。
+
+   修法：只给头行自己一个层级 ✓ —— 头行仍排在 `.kn-graph` 之前 ✓，但作为定位元素
+   参与绘制时后画 ⇒ 候选列表压在编辑卡片之上 ✓；而它自己的底色/分隔线仍是原来的样子 ✓。
+   取值 20 的含义：高于 `.kn-graph` 里的编辑遮罩（11）与编辑卡片（12）✓，
+   又低于 `panel.css` 里那几个真正的全屏弹层（`z-index: 10001+` ✓）。
+   注意 `.kn-root` 是 `overflow: hidden` ⇒ 浮层只会在面板内溢出，不会跑到宿主页面上 ✗✓。 */
+.kn-root-fill .kn-head,
+.kn-root-fill .kn-head-panel {
+  position: relative;
+  z-index: 20;
+}
+
 /* 非激活按钮不再用 muted 配色（那看起来像 disabled）；对齐宿主图标按钮的边框/文字色 */
 .kn-root-fill .kn-btn {
   border-color: var(--dsw-alias-border-l2);

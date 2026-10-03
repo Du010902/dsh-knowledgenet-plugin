@@ -287,4 +287,40 @@ describe("面板接线：搜索框 → 模糊匹配 → 聚焦（静态守门）
     assert.ok(submit.includes("if (searchMatches.length === 0)"), "没命中要提前返回");
     assert.ok(submit.includes("search-miss"), "没命中要有诊断上报（便于排查为什么没焦点） ");
   });
+
+  it("候选浮层要压过下方的节点笔记编辑卡片（头行自成一个层级）", () => {
+    /*
+     * 用户实测（2026-10-03，编辑文档时）：头行搜索框的候选列表被**节点笔记卡片**挡住了一半 ✗。
+     *
+     * 根因不在候选列表的选择器，而是**头行从来没有层级** ✓：
+     * `.kn-head-panel` 与 `.kn-graph` 是同一个 flex 列里的兄弟，都没有 `position`
+     * ⇒ 后出现的 `.kn-graph` 整体压在头行上；而编辑浮层（`.kn-editor`，`z-index: 12`）
+     * 长在 `.kn-graph` 里面 ⇒ 连候选列表一起盖住 ✗。
+     *
+     * 所以钉住"头行要有定位 + 层级"，并顺带校验几个数值仍保持"编辑卡片 < 头行 < 全屏弹层" ✓。
+     */
+    const headLayer = css.match(
+      /\.kn-root-fill \.kn-head,\s*\.kn-root-fill \.kn-head-panel \{[^}]*position:\s*relative[^}]*z-index:\s*(\d+)/,
+    );
+    assert.ok(headLayer !== null, "要有一条把 .kn-head / .kn-head-panel 设为定位元素并给层级的规则");
+    const headZ = Number(headLayer[1]);
+    assert.ok(Number.isFinite(headZ), "头行要有明确的 z-index");
+
+    /* 头行在 DOM 里排在图层之前（`.kn-graph` 是它的下一个兄弟）✓ */
+    const headAt = panel.indexOf('"kn-head kn-head-panel"');
+    const graphAt = panel.indexOf('className="kn-graph"');
+    assert.ok(headAt > 0 && graphAt > headAt, "头行必须排在图层之前（沙箱 / 三维视图都挂在图层里）");
+
+    const editorZ = Number((css.match(/\.kn-editor \{[\s\S]{0,200}?z-index:\s*(\d+)/) ?? [])[1]);
+    assert.ok(Number.isFinite(editorZ), "编辑卡片要有明确的 z-index");
+    assert.ok(headZ > editorZ, `头行层级要高于编辑卡片（${headZ} > ${editorZ}）`);
+
+    const searchZ = Number((css.match(/\.kn-search-list \{[\s\S]{0,200}?z-index:\s*(\d+)/) ?? [])[1]);
+    assert.ok(Number.isFinite(searchZ), "候选列表要有明确的 z-index");
+    assert.ok(searchZ > 0, "候选列表要浮在输入框之上");
+
+    /* 全屏的建前置弹窗 / 右键菜单仍在头行之上：头行的层级只解决"与编辑卡片"这一层 ✓ */
+    const modalZ = Number((css.match(/\.kn-modal-backdrop \{[\s\S]{0,120}?z-index:\s*(\d+)/) ?? [])[1]);
+    if (Number.isFinite(modalZ)) assert.ok(modalZ > headZ, `全屏弹层要高于头行（${modalZ} > ${headZ}）`);
+  });
 });
