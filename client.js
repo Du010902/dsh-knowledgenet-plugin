@@ -11,7 +11,14 @@ window.__ModuleLoader__.load({
 		var __getOwnPropNames = Object.getOwnPropertyNames;
 		var __getProtoOf = Object.getPrototypeOf;
 		var __hasOwnProp$10 = Object.prototype.hasOwnProperty;
-		var __esmMin = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+		var __esmMin = (fn, res, err) => () => {
+			if (err) throw err[0];
+			try {
+				return fn && (res = fn(fn = 0)), res;
+			} catch (e) {
+				throw err = [e], e;
+			}
+		};
 		var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 		var __exportAll = (all, no_symbols) => {
 			let target = {};
@@ -32,7 +39,7 @@ window.__ModuleLoader__.load({
 			}
 			return to;
 		};
-		var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp$10(target, "default", {
+		var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule || !__hasOwnProp$10.call(mod, "default") ? __defProp$10(target, "default", {
 			value: mod,
 			enumerable: true
 		}) : target, mod));
@@ -2285,12 +2292,13 @@ window.__ModuleLoader__.load({
 					shadow.textContent = "";
 				};
 			}, [auto, fill]);
+			const style = auto ? void 0 : fill ? {
+				height: "100%",
+				minHeight: "320px"
+			} : { height: `${height}px` };
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				ref: hostRef,
-				style: auto ? void 0 : fill ? {
-					height: "100%",
-					minHeight: "320px"
-				} : { height: `${height}px` },
+				style,
 				children: mount === null ? null : (0, react_dom.createPortal)(children, mount)
 			});
 		}
@@ -3450,7 +3458,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0kn-layout-worker
-		const KN_LAYOUT_WORKER_SOURCE = "(function() {\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/add.js\n	function add_default$2(d) {\n		const x = +this._x.call(null, d);\n		return add$2(this.cover(x), x, d);\n	}\n	function add$2(tree, x, d) {\n		if (isNaN(x)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, x1 = tree._x1, xm, xp, right, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (parent = node, !(node = node[i = +right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		if (x === xp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(2) : tree._root = new Array(2);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n		} while ((i = +right) === (j = +(xp >= xm)));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll$2(data) {\n		if (!Array.isArray(data)) data = Array.from(data);\n		const n = data.length;\n		const xz = new Float64Array(n);\n		let x0 = Infinity, x1 = -Infinity;\n		for (let i = 0, x; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, data[i]))) continue;\n			xz[i] = x;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n		}\n		if (x0 > x1) return this;\n		this.cover(x0).cover(x1);\n		for (let i = 0; i < n; ++i) add$2(this, xz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/cover.js\n	function cover_default$2(x) {\n		if (isNaN(x = +x)) return this;\n		var x0 = this._x0, x1 = this._x1;\n		if (isNaN(x0)) x1 = (x0 = Math.floor(x)) + 1;\n		else {\n			var z = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1) {\n				i = +(x < x0);\n				parent = new Array(2), parent[i] = node, node = parent, z *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + z;\n						break;\n					case 1:\n						x0 = x1 - z;\n						break;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._x1 = x1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/data.js\n	function data_default$2() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/extent.js\n	function extent_default$2(_) {\n		return arguments.length ? this.cover(+_[0][0]).cover(+_[1][0]) : isNaN(this._x0) ? void 0 : [[this._x0], [this._x1]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/half.js\n	function half_default(node, x0, x1) {\n		this.node = node;\n		this.x0 = x0;\n		this.x1 = x1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/find.js\n	function find_default$2(x, radius) {\n		var data, x0 = this._x0, x1, x2, x3 = this._x1, halves = [], node = this._root, q, i;\n		if (node) halves.push(new half_default(node, x0, x3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius;\n			x3 = x + radius;\n		}\n		while (q = halves.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (x2 = q.x1) < x0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2;\n				halves.push(new half_default(node[1], xm, x2), new half_default(node[0], x1, xm));\n				if (i = +(x >= xm)) {\n					q = halves[halves.length - 1];\n					halves[halves.length - 1] = halves[halves.length - 1 - i];\n					halves[halves.length - 1 - i] = q;\n				}\n			} else {\n				var d = Math.abs(x - +this._x.call(null, node.data));\n				if (d < radius) {\n					radius = d;\n					x0 = x - d;\n					x3 = x + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/remove.js\n	function remove_default$2(d) {\n		if (isNaN(x = +this._x.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, x1 = this._x1, x, xm, right, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (!(parent = node, node = node[i = +right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 1]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1]) && node === (parent[1] || parent[0]) && !node.length) if (retainer) retainer[j] = node;\n		else this._root = node;\n		return this;\n	}\n	function removeAll$2(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/root.js\n	function root_default$2() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/size.js\n	function size_default$2() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/visit.js\n	function visit_default$2(callback) {\n		var halves = [], q, node = this._root, child, x0, x1;\n		if (node) halves.push(new half_default(node, this._x0, this._x1));\n		while (q = halves.pop()) if (!callback(node = q.node, x0 = q.x0, x1 = q.x1) && node.length) {\n			var xm = (x0 + x1) / 2;\n			if (child = node[1]) halves.push(new half_default(child, xm, x1));\n			if (child = node[0]) halves.push(new half_default(child, x0, xm));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/visitAfter.js\n	function visitAfter_default$2(callback) {\n		var halves = [], next = [], q;\n		if (this._root) halves.push(new half_default(this._root, this._x0, this._x1));\n		while (q = halves.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, x1 = q.x1, xm = (x0 + x1) / 2;\n				if (child = node[0]) halves.push(new half_default(child, x0, xm));\n				if (child = node[1]) halves.push(new half_default(child, xm, x1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.x1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/x.js\n	function defaultX$2(d) {\n		return d[0];\n	}\n	function x_default$2(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/binarytree.js\n	function binarytree(nodes, x) {\n		var tree = new Binarytree(x == null ? defaultX$2 : x, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Binarytree(x, x0, x1) {\n		this._x = x;\n		this._x0 = x0;\n		this._x1 = x1;\n		this._root = void 0;\n	}\n	function leaf_copy$2(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto$2 = binarytree.prototype = Binarytree.prototype;\n	treeProto$2.copy = function() {\n		var copy = new Binarytree(this._x, this._x0, this._x1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy$2(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(2)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 2; ++i) if (child = node.source[i]) if (child.length) nodes.push({\n			source: child,\n			target: node.target[i] = new Array(2)\n		});\n		else node.target[i] = leaf_copy$2(child);\n		return copy;\n	};\n	treeProto$2.add = add_default$2;\n	treeProto$2.addAll = addAll$2;\n	treeProto$2.cover = cover_default$2;\n	treeProto$2.data = data_default$2;\n	treeProto$2.extent = extent_default$2;\n	treeProto$2.find = find_default$2;\n	treeProto$2.remove = remove_default$2;\n	treeProto$2.removeAll = removeAll$2;\n	treeProto$2.root = root_default$2;\n	treeProto$2.size = size_default$2;\n	treeProto$2.visit = visit_default$2;\n	treeProto$2.visitAfter = visitAfter_default$2;\n	treeProto$2.x = x_default$2;\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/add.js\n	function add_default$1(d) {\n		const x = +this._x.call(null, d), y = +this._y.call(null, d);\n		return add$1(this.cover(x, y), x, y, d);\n	}\n	function add$1(tree, x, y, d) {\n		if (isNaN(x) || isNaN(y)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, y0 = tree._y0, x1 = tree._x1, y1 = tree._y1, xm, ym, xp, yp, right, bottom, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (parent = node, !(node = node[i = bottom << 1 | right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		yp = +tree._y.call(null, node.data);\n		if (x === xp && y === yp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(4) : tree._root = new Array(4);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n		} while ((i = bottom << 1 | right) === (j = (yp >= ym) << 1 | xp >= xm));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll$1(data) {\n		var d, i, n = data.length, x, y, xz = new Array(n), yz = new Array(n), x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;\n		for (i = 0; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, d = data[i])) || isNaN(y = +this._y.call(null, d))) continue;\n			xz[i] = x;\n			yz[i] = y;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n			if (y < y0) y0 = y;\n			if (y > y1) y1 = y;\n		}\n		if (x0 > x1 || y0 > y1) return this;\n		this.cover(x0, y0).cover(x1, y1);\n		for (i = 0; i < n; ++i) add$1(this, xz[i], yz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/cover.js\n	function cover_default$1(x, y) {\n		if (isNaN(x = +x) || isNaN(y = +y)) return this;\n		var x0 = this._x0, y0 = this._y0, x1 = this._x1, y1 = this._y1;\n		if (isNaN(x0)) {\n			x1 = (x0 = Math.floor(x)) + 1;\n			y1 = (y0 = Math.floor(y)) + 1;\n		} else {\n			var z = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1 || y0 > y || y >= y1) {\n				i = (y < y0) << 1 | x < x0;\n				parent = new Array(4), parent[i] = node, node = parent, z *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + z, y1 = y0 + z;\n						break;\n					case 1:\n						x0 = x1 - z, y1 = y0 + z;\n						break;\n					case 2:\n						x1 = x0 + z, y0 = y1 - z;\n						break;\n					case 3:\n						x0 = x1 - z, y0 = y1 - z;\n						break;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._y0 = y0;\n		this._x1 = x1;\n		this._y1 = y1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/data.js\n	function data_default$1() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/extent.js\n	function extent_default$1(_) {\n		return arguments.length ? this.cover(+_[0][0], +_[0][1]).cover(+_[1][0], +_[1][1]) : isNaN(this._x0) ? void 0 : [[this._x0, this._y0], [this._x1, this._y1]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/quad.js\n	function quad_default(node, x0, y0, x1, y1) {\n		this.node = node;\n		this.x0 = x0;\n		this.y0 = y0;\n		this.x1 = x1;\n		this.y1 = y1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/find.js\n	function find_default$1(x, y, radius) {\n		var data, x0 = this._x0, y0 = this._y0, x1, y1, x2, y2, x3 = this._x1, y3 = this._y1, quads = [], node = this._root, q, i;\n		if (node) quads.push(new quad_default(node, x0, y0, x3, y3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius, y0 = y - radius;\n			x3 = x + radius, y3 = y + radius;\n			radius *= radius;\n		}\n		while (q = quads.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (y1 = q.y0) > y3 || (x2 = q.x1) < x0 || (y2 = q.y1) < y0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2, ym = (y1 + y2) / 2;\n				quads.push(new quad_default(node[3], xm, ym, x2, y2), new quad_default(node[2], x1, ym, xm, y2), new quad_default(node[1], xm, y1, x2, ym), new quad_default(node[0], x1, y1, xm, ym));\n				if (i = (y >= ym) << 1 | x >= xm) {\n					q = quads[quads.length - 1];\n					quads[quads.length - 1] = quads[quads.length - 1 - i];\n					quads[quads.length - 1 - i] = q;\n				}\n			} else {\n				var dx = x - +this._x.call(null, node.data), dy = y - +this._y.call(null, node.data), d2 = dx * dx + dy * dy;\n				if (d2 < radius) {\n					var d = Math.sqrt(radius = d2);\n					x0 = x - d, y0 = y - d;\n					x3 = x + d, y3 = y + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/remove.js\n	function remove_default$1(d) {\n		if (isNaN(x = +this._x.call(null, d)) || isNaN(y = +this._y.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, y0 = this._y0, x1 = this._x1, y1 = this._y1, x, y, xm, ym, right, bottom, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (!(parent = node, node = node[i = bottom << 1 | right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 3] || parent[i + 2 & 3] || parent[i + 3 & 3]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1] || parent[2] || parent[3]) && node === (parent[3] || parent[2] || parent[1] || parent[0]) && !node.length) if (retainer) retainer[j] = node;\n		else this._root = node;\n		return this;\n	}\n	function removeAll$1(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/root.js\n	function root_default$1() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/size.js\n	function size_default$1() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/visit.js\n	function visit_default$1(callback) {\n		var quads = [], q, node = this._root, child, x0, y0, x1, y1;\n		if (node) quads.push(new quad_default(node, this._x0, this._y0, this._x1, this._y1));\n		while (q = quads.pop()) if (!callback(node = q.node, x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1) && node.length) {\n			var xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;\n			if (child = node[3]) quads.push(new quad_default(child, xm, ym, x1, y1));\n			if (child = node[2]) quads.push(new quad_default(child, x0, ym, xm, y1));\n			if (child = node[1]) quads.push(new quad_default(child, xm, y0, x1, ym));\n			if (child = node[0]) quads.push(new quad_default(child, x0, y0, xm, ym));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/visitAfter.js\n	function visitAfter_default$1(callback) {\n		var quads = [], next = [], q;\n		if (this._root) quads.push(new quad_default(this._root, this._x0, this._y0, this._x1, this._y1));\n		while (q = quads.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;\n				if (child = node[0]) quads.push(new quad_default(child, x0, y0, xm, ym));\n				if (child = node[1]) quads.push(new quad_default(child, xm, y0, x1, ym));\n				if (child = node[2]) quads.push(new quad_default(child, x0, ym, xm, y1));\n				if (child = node[3]) quads.push(new quad_default(child, xm, ym, x1, y1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.y0, q.x1, q.y1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/x.js\n	function defaultX$1(d) {\n		return d[0];\n	}\n	function x_default$1(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/y.js\n	function defaultY$1(d) {\n		return d[1];\n	}\n	function y_default$1(_) {\n		return arguments.length ? (this._y = _, this) : this._y;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/quadtree.js\n	function quadtree(nodes, x, y) {\n		var tree = new Quadtree(x == null ? defaultX$1 : x, y == null ? defaultY$1 : y, NaN, NaN, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Quadtree(x, y, x0, y0, x1, y1) {\n		this._x = x;\n		this._y = y;\n		this._x0 = x0;\n		this._y0 = y0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._root = void 0;\n	}\n	function leaf_copy$1(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto$1 = quadtree.prototype = Quadtree.prototype;\n	treeProto$1.copy = function() {\n		var copy = new Quadtree(this._x, this._y, this._x0, this._y0, this._x1, this._y1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy$1(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(4)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 4; ++i) if (child = node.source[i]) if (child.length) nodes.push({\n			source: child,\n			target: node.target[i] = new Array(4)\n		});\n		else node.target[i] = leaf_copy$1(child);\n		return copy;\n	};\n	treeProto$1.add = add_default$1;\n	treeProto$1.addAll = addAll$1;\n	treeProto$1.cover = cover_default$1;\n	treeProto$1.data = data_default$1;\n	treeProto$1.extent = extent_default$1;\n	treeProto$1.find = find_default$1;\n	treeProto$1.remove = remove_default$1;\n	treeProto$1.removeAll = removeAll$1;\n	treeProto$1.root = root_default$1;\n	treeProto$1.size = size_default$1;\n	treeProto$1.visit = visit_default$1;\n	treeProto$1.visitAfter = visitAfter_default$1;\n	treeProto$1.x = x_default$1;\n	treeProto$1.y = y_default$1;\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/add.js\n	function add_default(d) {\n		const x = +this._x.call(null, d), y = +this._y.call(null, d), z = +this._z.call(null, d);\n		return add(this.cover(x, y, z), x, y, z, d);\n	}\n	function add(tree, x, y, z, d) {\n		if (isNaN(x) || isNaN(y) || isNaN(z)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, y0 = tree._y0, z0 = tree._z0, x1 = tree._x1, y1 = tree._y1, z1 = tree._z1, xm, ym, zm, xp, yp, zp, right, bottom, deep, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n			if (parent = node, !(node = node[i = deep << 2 | bottom << 1 | right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		yp = +tree._y.call(null, node.data);\n		zp = +tree._z.call(null, node.data);\n		if (x === xp && y === yp && z === zp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(8) : tree._root = new Array(8);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n		} while ((i = deep << 2 | bottom << 1 | right) === (j = (zp >= zm) << 2 | (yp >= ym) << 1 | xp >= xm));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll(data) {\n		if (!Array.isArray(data)) data = Array.from(data);\n		const n = data.length;\n		const xz = new Float64Array(n);\n		const yz = new Float64Array(n);\n		const zz = new Float64Array(n);\n		let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;\n		for (let i = 0, d, x, y, z; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, d = data[i])) || isNaN(y = +this._y.call(null, d)) || isNaN(z = +this._z.call(null, d))) continue;\n			xz[i] = x;\n			yz[i] = y;\n			zz[i] = z;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n			if (y < y0) y0 = y;\n			if (y > y1) y1 = y;\n			if (z < z0) z0 = z;\n			if (z > z1) z1 = z;\n		}\n		if (x0 > x1 || y0 > y1 || z0 > z1) return this;\n		this.cover(x0, y0, z0).cover(x1, y1, z1);\n		for (let i = 0; i < n; ++i) add(this, xz[i], yz[i], zz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/cover.js\n	function cover_default(x, y, z) {\n		if (isNaN(x = +x) || isNaN(y = +y) || isNaN(z = +z)) return this;\n		var x0 = this._x0, y0 = this._y0, z0 = this._z0, x1 = this._x1, y1 = this._y1, z1 = this._z1;\n		if (isNaN(x0)) {\n			x1 = (x0 = Math.floor(x)) + 1;\n			y1 = (y0 = Math.floor(y)) + 1;\n			z1 = (z0 = Math.floor(z)) + 1;\n		} else {\n			var t = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1 || y0 > y || y >= y1 || z0 > z || z >= z1) {\n				i = (z < z0) << 2 | (y < y0) << 1 | x < x0;\n				parent = new Array(8), parent[i] = node, node = parent, t *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + t, y1 = y0 + t, z1 = z0 + t;\n						break;\n					case 1:\n						x0 = x1 - t, y1 = y0 + t, z1 = z0 + t;\n						break;\n					case 2:\n						x1 = x0 + t, y0 = y1 - t, z1 = z0 + t;\n						break;\n					case 3:\n						x0 = x1 - t, y0 = y1 - t, z1 = z0 + t;\n						break;\n					case 4:\n						x1 = x0 + t, y1 = y0 + t, z0 = z1 - t;\n						break;\n					case 5:\n						x0 = x1 - t, y1 = y0 + t, z0 = z1 - t;\n						break;\n					case 6:\n						x1 = x0 + t, y0 = y1 - t, z0 = z1 - t;\n						break;\n					case 7:\n						x0 = x1 - t, y0 = y1 - t, z0 = z1 - t;\n						break;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._y0 = y0;\n		this._z0 = z0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._z1 = z1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/data.js\n	function data_default() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/extent.js\n	function extent_default(_) {\n		return arguments.length ? this.cover(+_[0][0], +_[0][1], +_[0][2]).cover(+_[1][0], +_[1][1], +_[1][2]) : isNaN(this._x0) ? void 0 : [[\n			this._x0,\n			this._y0,\n			this._z0\n		], [\n			this._x1,\n			this._y1,\n			this._z1\n		]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/octant.js\n	function octant_default(node, x0, y0, z0, x1, y1, z1) {\n		this.node = node;\n		this.x0 = x0;\n		this.y0 = y0;\n		this.z0 = z0;\n		this.x1 = x1;\n		this.y1 = y1;\n		this.z1 = z1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/find.js\n	function find_default(x, y, z, radius) {\n		var data, x0 = this._x0, y0 = this._y0, z0 = this._z0, x1, y1, z1, x2, y2, z2, x3 = this._x1, y3 = this._y1, z3 = this._z1, octs = [], node = this._root, q, i;\n		if (node) octs.push(new octant_default(node, x0, y0, z0, x3, y3, z3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius, y0 = y - radius, z0 = z - radius;\n			x3 = x + radius, y3 = y + radius, z3 = z + radius;\n			radius *= radius;\n		}\n		while (q = octs.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (y1 = q.y0) > y3 || (z1 = q.z0) > z3 || (x2 = q.x1) < x0 || (y2 = q.y1) < y0 || (z2 = q.z1) < z0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2, ym = (y1 + y2) / 2, zm = (z1 + z2) / 2;\n				octs.push(new octant_default(node[7], xm, ym, zm, x2, y2, z2), new octant_default(node[6], x1, ym, zm, xm, y2, z2), new octant_default(node[5], xm, y1, zm, x2, ym, z2), new octant_default(node[4], x1, y1, zm, xm, ym, z2), new octant_default(node[3], xm, ym, z1, x2, y2, zm), new octant_default(node[2], x1, ym, z1, xm, y2, zm), new octant_default(node[1], xm, y1, z1, x2, ym, zm), new octant_default(node[0], x1, y1, z1, xm, ym, zm));\n				if (i = (z >= zm) << 2 | (y >= ym) << 1 | x >= xm) {\n					q = octs[octs.length - 1];\n					octs[octs.length - 1] = octs[octs.length - 1 - i];\n					octs[octs.length - 1 - i] = q;\n				}\n			} else {\n				var dx = x - +this._x.call(null, node.data), dy = y - +this._y.call(null, node.data), dz = z - +this._z.call(null, node.data), d2 = dx * dx + dy * dy + dz * dz;\n				if (d2 < radius) {\n					var d = Math.sqrt(radius = d2);\n					x0 = x - d, y0 = y - d, z0 = z - d;\n					x3 = x + d, y3 = y + d, z3 = z + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/findAll.js\n	const distance = (x1, y1, z1, x2, y2, z2) => Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);\n	function findAllWithinRadius(x, y, z, radius) {\n		const result = [];\n		const xMin = x - radius;\n		const yMin = y - radius;\n		const zMin = z - radius;\n		const xMax = x + radius;\n		const yMax = y + radius;\n		const zMax = z + radius;\n		this.visit((node, x1, y1, z1, x2, y2, z2) => {\n			if (!node.length) do {\n				const d = node.data;\n				if (distance(x, y, z, this._x(d), this._y(d), this._z(d)) <= radius) result.push(d);\n			} while (node = node.next);\n			return x1 > xMax || y1 > yMax || z1 > zMax || x2 < xMin || y2 < yMin || z2 < zMin;\n		});\n		return result;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/remove.js\n	function remove_default(d) {\n		if (isNaN(x = +this._x.call(null, d)) || isNaN(y = +this._y.call(null, d)) || isNaN(z = +this._z.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, y0 = this._y0, z0 = this._z0, x1 = this._x1, y1 = this._y1, z1 = this._z1, x, y, z, xm, ym, zm, right, bottom, deep, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n			if (!(parent = node, node = node[i = deep << 2 | bottom << 1 | right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 7] || parent[i + 2 & 7] || parent[i + 3 & 7] || parent[i + 4 & 7] || parent[i + 5 & 7] || parent[i + 6 & 7] || parent[i + 7 & 7]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1] || parent[2] || parent[3] || parent[4] || parent[5] || parent[6] || parent[7]) && node === (parent[7] || parent[6] || parent[5] || parent[4] || parent[3] || parent[2] || parent[1] || parent[0]) && !node.length) if (retainer) retainer[j] = node;\n		else this._root = node;\n		return this;\n	}\n	function removeAll(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/root.js\n	function root_default() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/size.js\n	function size_default() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/visit.js\n	function visit_default(callback) {\n		var octs = [], q, node = this._root, child, x0, y0, z0, x1, y1, z1;\n		if (node) octs.push(new octant_default(node, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1));\n		while (q = octs.pop()) if (!callback(node = q.node, x0 = q.x0, y0 = q.y0, z0 = q.z0, x1 = q.x1, y1 = q.y1, z1 = q.z1) && node.length) {\n			var xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, zm = (z0 + z1) / 2;\n			if (child = node[7]) octs.push(new octant_default(child, xm, ym, zm, x1, y1, z1));\n			if (child = node[6]) octs.push(new octant_default(child, x0, ym, zm, xm, y1, z1));\n			if (child = node[5]) octs.push(new octant_default(child, xm, y0, zm, x1, ym, z1));\n			if (child = node[4]) octs.push(new octant_default(child, x0, y0, zm, xm, ym, z1));\n			if (child = node[3]) octs.push(new octant_default(child, xm, ym, z0, x1, y1, zm));\n			if (child = node[2]) octs.push(new octant_default(child, x0, ym, z0, xm, y1, zm));\n			if (child = node[1]) octs.push(new octant_default(child, xm, y0, z0, x1, ym, zm));\n			if (child = node[0]) octs.push(new octant_default(child, x0, y0, z0, xm, ym, zm));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/visitAfter.js\n	function visitAfter_default(callback) {\n		var octs = [], next = [], q;\n		if (this._root) octs.push(new octant_default(this._root, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1));\n		while (q = octs.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, y0 = q.y0, z0 = q.z0, x1 = q.x1, y1 = q.y1, z1 = q.z1, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, zm = (z0 + z1) / 2;\n				if (child = node[0]) octs.push(new octant_default(child, x0, y0, z0, xm, ym, zm));\n				if (child = node[1]) octs.push(new octant_default(child, xm, y0, z0, x1, ym, zm));\n				if (child = node[2]) octs.push(new octant_default(child, x0, ym, z0, xm, y1, zm));\n				if (child = node[3]) octs.push(new octant_default(child, xm, ym, z0, x1, y1, zm));\n				if (child = node[4]) octs.push(new octant_default(child, x0, y0, zm, xm, ym, z1));\n				if (child = node[5]) octs.push(new octant_default(child, xm, y0, zm, x1, ym, z1));\n				if (child = node[6]) octs.push(new octant_default(child, x0, ym, zm, xm, y1, z1));\n				if (child = node[7]) octs.push(new octant_default(child, xm, ym, zm, x1, y1, z1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.y0, q.z0, q.x1, q.y1, q.z1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/x.js\n	function defaultX(d) {\n		return d[0];\n	}\n	function x_default(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/y.js\n	function defaultY(d) {\n		return d[1];\n	}\n	function y_default(_) {\n		return arguments.length ? (this._y = _, this) : this._y;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/z.js\n	function defaultZ(d) {\n		return d[2];\n	}\n	function z_default(_) {\n		return arguments.length ? (this._z = _, this) : this._z;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/octree.js\n	function octree(nodes, x, y, z) {\n		var tree = new Octree(x == null ? defaultX : x, y == null ? defaultY : y, z == null ? defaultZ : z, NaN, NaN, NaN, NaN, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Octree(x, y, z, x0, y0, z0, x1, y1, z1) {\n		this._x = x;\n		this._y = y;\n		this._z = z;\n		this._x0 = x0;\n		this._y0 = y0;\n		this._z0 = z0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._z1 = z1;\n		this._root = void 0;\n	}\n	function leaf_copy(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto = octree.prototype = Octree.prototype;\n	treeProto.copy = function() {\n		var copy = new Octree(this._x, this._y, this._z, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(8)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 8; ++i) if (child = node.source[i]) if (child.length) nodes.push({\n			source: child,\n			target: node.target[i] = new Array(8)\n		});\n		else node.target[i] = leaf_copy(child);\n		return copy;\n	};\n	treeProto.add = add_default;\n	treeProto.addAll = addAll;\n	treeProto.cover = cover_default;\n	treeProto.data = data_default;\n	treeProto.extent = extent_default;\n	treeProto.find = find_default;\n	treeProto.findAllWithinRadius = findAllWithinRadius;\n	treeProto.remove = remove_default;\n	treeProto.removeAll = removeAll;\n	treeProto.root = root_default;\n	treeProto.size = size_default;\n	treeProto.visit = visit_default;\n	treeProto.visitAfter = visitAfter_default;\n	treeProto.x = x_default;\n	treeProto.y = y_default;\n	treeProto.z = z_default;\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/constant.js\n	function constant_default(x) {\n		return function() {\n			return x;\n		};\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/jiggle.js\n	function jiggle_default(random) {\n		return (random() - .5) * 1e-6;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/collide.js\n	function x$1(d) {\n		return d.x + d.vx;\n	}\n	function y$1(d) {\n		return d.y + d.vy;\n	}\n	function z$1(d) {\n		return d.z + d.vz;\n	}\n	function collide_default(radius) {\n		var nodes, nDim, radii, random, strength = 1, iterations = 1;\n		if (typeof radius !== \"function\") radius = constant_default(radius == null ? 1 : +radius);\n		function force() {\n			var i, n = nodes.length, tree, node, xi, yi, zi, ri, ri2;\n			for (var k = 0; k < iterations; ++k) {\n				tree = (nDim === 1 ? binarytree(nodes, x$1) : nDim === 2 ? quadtree(nodes, x$1, y$1) : nDim === 3 ? octree(nodes, x$1, y$1, z$1) : null).visitAfter(prepare);\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					ri = radii[node.index], ri2 = ri * ri;\n					xi = node.x + node.vx;\n					if (nDim > 1) yi = node.y + node.vy;\n					if (nDim > 2) zi = node.z + node.vz;\n					tree.visit(apply);\n				}\n			}\n			function apply(treeNode, arg1, arg2, arg3, arg4, arg5, arg6) {\n				var args = [\n					arg1,\n					arg2,\n					arg3,\n					arg4,\n					arg5,\n					arg6\n				];\n				var x0 = args[0], y0 = args[1], z0 = args[2], x1 = args[nDim], y1 = args[nDim + 1], z1 = args[nDim + 2];\n				var data = treeNode.data, rj = treeNode.r, r = ri + rj;\n				if (data) {\n					if (data.index > node.index) {\n						var x = xi - data.x - data.vx, y = nDim > 1 ? yi - data.y - data.vy : 0, z = nDim > 2 ? zi - data.z - data.vz : 0, l = x * x + y * y + z * z;\n						if (l < r * r) {\n							if (x === 0) x = jiggle_default(random), l += x * x;\n							if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n							if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n							l = (r - (l = Math.sqrt(l))) / l * strength;\n							node.vx += (x *= l) * (r = (rj *= rj) / (ri2 + rj));\n							if (nDim > 1) node.vy += (y *= l) * r;\n							if (nDim > 2) node.vz += (z *= l) * r;\n							data.vx -= x * (r = 1 - r);\n							if (nDim > 1) data.vy -= y * r;\n							if (nDim > 2) data.vz -= z * r;\n						}\n					}\n					return;\n				}\n				return x0 > xi + r || x1 < xi - r || nDim > 1 && (y0 > yi + r || y1 < yi - r) || nDim > 2 && (z0 > zi + r || z1 < zi - r);\n			}\n		}\n		function prepare(treeNode) {\n			if (treeNode.data) return treeNode.r = radii[treeNode.data.index];\n			for (var i = treeNode.r = 0; i < Math.pow(2, nDim); ++i) if (treeNode[i] && treeNode[i].r > treeNode.r) treeNode.r = treeNode[i].r;\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, node;\n			radii = new Array(n);\n			for (i = 0; i < n; ++i) node = nodes[i], radii[node.index] = +radius(node, i, nodes);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.iterations = function(_) {\n			return arguments.length ? (iterations = +_, force) : iterations;\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = +_, force) : strength;\n		};\n		force.radius = function(_) {\n			return arguments.length ? (radius = typeof _ === \"function\" ? _ : constant_default(+_), initialize(), force) : radius;\n		};\n		return force;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/link.js\n	function index(d) {\n		return d.index;\n	}\n	function find(nodeById, nodeId) {\n		var node = nodeById.get(nodeId);\n		if (!node) throw new Error(\"node not found: \" + nodeId);\n		return node;\n	}\n	function link_default(links) {\n		var id = index, strength = defaultStrength, strengths, distance = constant_default(30), distances, nodes, nDim, count, bias, random, iterations = 1;\n		if (links == null) links = [];\n		function defaultStrength(link) {\n			return 1 / Math.min(count[link.source.index], count[link.target.index]);\n		}\n		function force(alpha) {\n			for (var k = 0, n = links.length; k < iterations; ++k) for (var i = 0, link, source, target, x = 0, y = 0, z = 0, l, b; i < n; ++i) {\n				link = links[i], source = link.source, target = link.target;\n				x = target.x + target.vx - source.x - source.vx || jiggle_default(random);\n				if (nDim > 1) y = target.y + target.vy - source.y - source.vy || jiggle_default(random);\n				if (nDim > 2) z = target.z + target.vz - source.z - source.vz || jiggle_default(random);\n				l = Math.sqrt(x * x + y * y + z * z);\n				l = (l - distances[i]) / l * alpha * strengths[i];\n				x *= l, y *= l, z *= l;\n				target.vx -= x * (b = bias[i]);\n				if (nDim > 1) target.vy -= y * b;\n				if (nDim > 2) target.vz -= z * b;\n				source.vx += x * (b = 1 - b);\n				if (nDim > 1) source.vy += y * b;\n				if (nDim > 2) source.vz += z * b;\n			}\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, m = links.length, nodeById = new Map(nodes.map((d, i) => [id(d, i, nodes), d])), link;\n			for (i = 0, count = new Array(n); i < m; ++i) {\n				link = links[i], link.index = i;\n				if (typeof link.source !== \"object\") link.source = find(nodeById, link.source);\n				if (typeof link.target !== \"object\") link.target = find(nodeById, link.target);\n				count[link.source.index] = (count[link.source.index] || 0) + 1;\n				count[link.target.index] = (count[link.target.index] || 0) + 1;\n			}\n			for (i = 0, bias = new Array(m); i < m; ++i) link = links[i], bias[i] = count[link.source.index] / (count[link.source.index] + count[link.target.index]);\n			strengths = new Array(m), initializeStrength();\n			distances = new Array(m), initializeDistance();\n		}\n		function initializeStrength() {\n			if (!nodes) return;\n			for (var i = 0, n = links.length; i < n; ++i) strengths[i] = +strength(links[i], i, links);\n		}\n		function initializeDistance() {\n			if (!nodes) return;\n			for (var i = 0, n = links.length; i < n; ++i) distances[i] = +distance(links[i], i, links);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.links = function(_) {\n			return arguments.length ? (links = _, initialize(), force) : links;\n		};\n		force.id = function(_) {\n			return arguments.length ? (id = _, force) : id;\n		};\n		force.iterations = function(_) {\n			return arguments.length ? (iterations = +_, force) : iterations;\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = typeof _ === \"function\" ? _ : constant_default(+_), initializeStrength(), force) : strength;\n		};\n		force.distance = function(_) {\n			return arguments.length ? (distance = typeof _ === \"function\" ? _ : constant_default(+_), initializeDistance(), force) : distance;\n		};\n		return force;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-dispatch@3.0.1/node_modules/d3-dispatch/src/dispatch.js\n	var noop = { value: () => {} };\n	function dispatch() {\n		for (var i = 0, n = arguments.length, _ = {}, t; i < n; ++i) {\n			if (!(t = arguments[i] + \"\") || t in _ || /[\\s.]/.test(t)) throw new Error(\"illegal type: \" + t);\n			_[t] = [];\n		}\n		return new Dispatch(_);\n	}\n	function Dispatch(_) {\n		this._ = _;\n	}\n	function parseTypenames(typenames, types) {\n		return typenames.trim().split(/^|\\s+/).map(function(t) {\n			var name = \"\", i = t.indexOf(\".\");\n			if (i >= 0) name = t.slice(i + 1), t = t.slice(0, i);\n			if (t && !types.hasOwnProperty(t)) throw new Error(\"unknown type: \" + t);\n			return {\n				type: t,\n				name\n			};\n		});\n	}\n	Dispatch.prototype = dispatch.prototype = {\n		constructor: Dispatch,\n		on: function(typename, callback) {\n			var _ = this._, T = parseTypenames(typename + \"\", _), t, i = -1, n = T.length;\n			if (arguments.length < 2) {\n				while (++i < n) if ((t = (typename = T[i]).type) && (t = get(_[t], typename.name))) return t;\n				return;\n			}\n			if (callback != null && typeof callback !== \"function\") throw new Error(\"invalid callback: \" + callback);\n			while (++i < n) if (t = (typename = T[i]).type) _[t] = set(_[t], typename.name, callback);\n			else if (callback == null) for (t in _) _[t] = set(_[t], typename.name, null);\n			return this;\n		},\n		copy: function() {\n			var copy = {}, _ = this._;\n			for (var t in _) copy[t] = _[t].slice();\n			return new Dispatch(copy);\n		},\n		call: function(type, that) {\n			if ((n = arguments.length - 2) > 0) for (var args = new Array(n), i = 0, n, t; i < n; ++i) args[i] = arguments[i + 2];\n			if (!this._.hasOwnProperty(type)) throw new Error(\"unknown type: \" + type);\n			for (t = this._[type], i = 0, n = t.length; i < n; ++i) t[i].value.apply(that, args);\n		},\n		apply: function(type, that, args) {\n			if (!this._.hasOwnProperty(type)) throw new Error(\"unknown type: \" + type);\n			for (var t = this._[type], i = 0, n = t.length; i < n; ++i) t[i].value.apply(that, args);\n		}\n	};\n	function get(type, name) {\n		for (var i = 0, n = type.length, c; i < n; ++i) if ((c = type[i]).name === name) return c.value;\n	}\n	function set(type, name, callback) {\n		for (var i = 0, n = type.length; i < n; ++i) if (type[i].name === name) {\n			type[i] = noop, type = type.slice(0, i).concat(type.slice(i + 1));\n			break;\n		}\n		if (callback != null) type.push({\n			name,\n			value: callback\n		});\n		return type;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-timer@3.0.1/node_modules/d3-timer/src/timer.js\n	var frame = 0, timeout = 0, interval = 0, pokeDelay = 1e3, taskHead, taskTail, clockLast = 0, clockNow = 0, clockSkew = 0, clock = typeof performance === \"object\" && performance.now ? performance : Date, setFrame = typeof window === \"object\" && window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(f) {\n		setTimeout(f, 17);\n	};\n	function now$1() {\n		return clockNow || (setFrame(clearNow), clockNow = clock.now() + clockSkew);\n	}\n	function clearNow() {\n		clockNow = 0;\n	}\n	function Timer() {\n		this._call = this._time = this._next = null;\n	}\n	Timer.prototype = timer.prototype = {\n		constructor: Timer,\n		restart: function(callback, delay, time) {\n			if (typeof callback !== \"function\") throw new TypeError(\"callback is not a function\");\n			time = (time == null ? now$1() : +time) + (delay == null ? 0 : +delay);\n			if (!this._next && taskTail !== this) {\n				if (taskTail) taskTail._next = this;\n				else taskHead = this;\n				taskTail = this;\n			}\n			this._call = callback;\n			this._time = time;\n			sleep();\n		},\n		stop: function() {\n			if (this._call) {\n				this._call = null;\n				this._time = Infinity;\n				sleep();\n			}\n		}\n	};\n	function timer(callback, delay, time) {\n		var t = new Timer();\n		t.restart(callback, delay, time);\n		return t;\n	}\n	function timerFlush() {\n		now$1();\n		++frame;\n		var t = taskHead, e;\n		while (t) {\n			if ((e = clockNow - t._time) >= 0) t._call.call(void 0, e);\n			t = t._next;\n		}\n		--frame;\n	}\n	function wake() {\n		clockNow = (clockLast = clock.now()) + clockSkew;\n		frame = timeout = 0;\n		try {\n			timerFlush();\n		} finally {\n			frame = 0;\n			nap();\n			clockNow = 0;\n		}\n	}\n	function poke() {\n		var now = clock.now(), delay = now - clockLast;\n		if (delay > pokeDelay) clockSkew -= delay, clockLast = now;\n	}\n	function nap() {\n		var t0, t1 = taskHead, t2, time = Infinity;\n		while (t1) if (t1._call) {\n			if (time > t1._time) time = t1._time;\n			t0 = t1, t1 = t1._next;\n		} else {\n			t2 = t1._next, t1._next = null;\n			t1 = t0 ? t0._next = t2 : taskHead = t2;\n		}\n		taskTail = t0;\n		sleep(time);\n	}\n	function sleep(time) {\n		if (frame) return;\n		if (timeout) timeout = clearTimeout(timeout);\n		if (time - clockNow > 24) {\n			if (time < Infinity) timeout = setTimeout(wake, time - clock.now() - clockSkew);\n			if (interval) interval = clearInterval(interval);\n		} else {\n			if (!interval) clockLast = clock.now(), interval = setInterval(poke, pokeDelay);\n			frame = 1, setFrame(wake);\n		}\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/lcg.js\n	const a = 1664525;\n	const c = 1013904223;\n	const m = 4294967296;\n	function lcg_default() {\n		let s = 1;\n		return () => (s = (a * s + c) % m) / m;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/simulation.js\n	var MAX_DIMENSIONS = 3;\n	function x(d) {\n		return d.x;\n	}\n	function y(d) {\n		return d.y;\n	}\n	function z(d) {\n		return d.z;\n	}\n	var initialRadius = 10, initialAngleRoll = Math.PI * (3 - Math.sqrt(5)), initialAngleYaw = Math.PI * 20 / (9 + Math.sqrt(221));\n	function simulation_default(nodes, numDimensions) {\n		numDimensions = numDimensions || 2;\n		var nDim = Math.min(MAX_DIMENSIONS, Math.max(1, Math.round(numDimensions))), simulation, alpha = 1, alphaMin = .001, alphaDecay = 1 - Math.pow(alphaMin, 1 / 300), alphaTarget = 0, velocityDecay = .6, forces = /* @__PURE__ */ new Map(), stepper = timer(step), event = dispatch(\"tick\", \"end\"), random = lcg_default();\n		if (nodes == null) nodes = [];\n		function step() {\n			tick();\n			event.call(\"tick\", simulation);\n			if (alpha < alphaMin) {\n				stepper.stop();\n				event.call(\"end\", simulation);\n			}\n		}\n		function tick(iterations) {\n			var i, n = nodes.length, node;\n			if (iterations === void 0) iterations = 1;\n			for (var k = 0; k < iterations; ++k) {\n				alpha += (alphaTarget - alpha) * alphaDecay;\n				forces.forEach(function(force) {\n					force(alpha);\n				});\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					if (node.fx == null) node.x += node.vx *= velocityDecay;\n					else node.x = node.fx, node.vx = 0;\n					if (nDim > 1) if (node.fy == null) node.y += node.vy *= velocityDecay;\n					else node.y = node.fy, node.vy = 0;\n					if (nDim > 2) if (node.fz == null) node.z += node.vz *= velocityDecay;\n					else node.z = node.fz, node.vz = 0;\n				}\n			}\n			return simulation;\n		}\n		function initializeNodes() {\n			for (var i = 0, n = nodes.length, node; i < n; ++i) {\n				node = nodes[i], node.index = i;\n				if (node.fx != null) node.x = node.fx;\n				if (node.fy != null) node.y = node.fy;\n				if (node.fz != null) node.z = node.fz;\n				if (isNaN(node.x) || nDim > 1 && isNaN(node.y) || nDim > 2 && isNaN(node.z)) {\n					var radius = initialRadius * (nDim > 2 ? Math.cbrt(.5 + i) : nDim > 1 ? Math.sqrt(.5 + i) : i), rollAngle = i * initialAngleRoll, yawAngle = i * initialAngleYaw;\n					if (nDim === 1) node.x = radius;\n					else if (nDim === 2) {\n						node.x = radius * Math.cos(rollAngle);\n						node.y = radius * Math.sin(rollAngle);\n					} else {\n						node.x = radius * Math.sin(rollAngle) * Math.cos(yawAngle);\n						node.y = radius * Math.cos(rollAngle);\n						node.z = radius * Math.sin(rollAngle) * Math.sin(yawAngle);\n					}\n				}\n				if (isNaN(node.vx) || nDim > 1 && isNaN(node.vy) || nDim > 2 && isNaN(node.vz)) {\n					node.vx = 0;\n					if (nDim > 1) node.vy = 0;\n					if (nDim > 2) node.vz = 0;\n				}\n			}\n		}\n		function initializeForce(force) {\n			if (force.initialize) force.initialize(nodes, random, nDim);\n			return force;\n		}\n		initializeNodes();\n		return simulation = {\n			tick,\n			restart: function() {\n				return stepper.restart(step), simulation;\n			},\n			stop: function() {\n				return stepper.stop(), simulation;\n			},\n			numDimensions: function(_) {\n				return arguments.length ? (nDim = Math.min(MAX_DIMENSIONS, Math.max(1, Math.round(_))), forces.forEach(initializeForce), simulation) : nDim;\n			},\n			nodes: function(_) {\n				return arguments.length ? (nodes = _, initializeNodes(), forces.forEach(initializeForce), simulation) : nodes;\n			},\n			alpha: function(_) {\n				return arguments.length ? (alpha = +_, simulation) : alpha;\n			},\n			alphaMin: function(_) {\n				return arguments.length ? (alphaMin = +_, simulation) : alphaMin;\n			},\n			alphaDecay: function(_) {\n				return arguments.length ? (alphaDecay = +_, simulation) : +alphaDecay;\n			},\n			alphaTarget: function(_) {\n				return arguments.length ? (alphaTarget = +_, simulation) : alphaTarget;\n			},\n			velocityDecay: function(_) {\n				return arguments.length ? (velocityDecay = 1 - _, simulation) : 1 - velocityDecay;\n			},\n			randomSource: function(_) {\n				return arguments.length ? (random = _, forces.forEach(initializeForce), simulation) : random;\n			},\n			force: function(name, _) {\n				return arguments.length > 1 ? (_ == null ? forces.delete(name) : forces.set(name, initializeForce(_)), simulation) : forces.get(name);\n			},\n			find: function() {\n				var args = Array.prototype.slice.call(arguments);\n				var x = args.shift() || 0, y = (nDim > 1 ? args.shift() : null) || 0, z = (nDim > 2 ? args.shift() : null) || 0, radius = args.shift() || Infinity;\n				var i = 0, n = nodes.length, dx, dy, dz, d2, node, closest;\n				radius *= radius;\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					dx = x - node.x;\n					dy = y - (node.y || 0);\n					dz = z - (node.z || 0);\n					d2 = dx * dx + dy * dy + dz * dz;\n					if (d2 < radius) closest = node, radius = d2;\n				}\n				return closest;\n			},\n			on: function(name, _) {\n				return arguments.length > 1 ? (event.on(name, _), simulation) : event.on(name);\n			}\n		};\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/manyBody.js\n	function manyBody_default() {\n		var nodes, nDim, node, random, alpha, strength = constant_default(-30), strengths, distanceMin2 = 1, distanceMax2 = Infinity, theta2 = .81;\n		function force(_) {\n			var i, n = nodes.length, tree = (nDim === 1 ? binarytree(nodes, x) : nDim === 2 ? quadtree(nodes, x, y) : nDim === 3 ? octree(nodes, x, y, z) : null).visitAfter(accumulate);\n			for (alpha = _, i = 0; i < n; ++i) node = nodes[i], tree.visit(apply);\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, node;\n			strengths = new Array(n);\n			for (i = 0; i < n; ++i) node = nodes[i], strengths[node.index] = +strength(node, i, nodes);\n		}\n		function accumulate(treeNode) {\n			var strength = 0, q, c, weight = 0, x, y, z, i;\n			var numChildren = treeNode.length;\n			if (numChildren) {\n				for (x = y = z = i = 0; i < numChildren; ++i) if ((q = treeNode[i]) && (c = Math.abs(q.value))) strength += q.value, weight += c, x += c * (q.x || 0), y += c * (q.y || 0), z += c * (q.z || 0);\n				strength *= Math.sqrt(4 / numChildren);\n				treeNode.x = x / weight;\n				if (nDim > 1) treeNode.y = y / weight;\n				if (nDim > 2) treeNode.z = z / weight;\n			} else {\n				q = treeNode;\n				q.x = q.data.x;\n				if (nDim > 1) q.y = q.data.y;\n				if (nDim > 2) q.z = q.data.z;\n				do\n					strength += strengths[q.data.index];\n				while (q = q.next);\n			}\n			treeNode.value = strength;\n		}\n		function apply(treeNode, x1, arg1, arg2, arg3) {\n			if (!treeNode.value) return true;\n			var x2 = [\n				arg1,\n				arg2,\n				arg3\n			][nDim - 1];\n			var x = treeNode.x - node.x, y = nDim > 1 ? treeNode.y - node.y : 0, z = nDim > 2 ? treeNode.z - node.z : 0, w = x2 - x1, l = x * x + y * y + z * z;\n			if (w * w / theta2 < l) {\n				if (l < distanceMax2) {\n					if (x === 0) x = jiggle_default(random), l += x * x;\n					if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n					if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n					if (l < distanceMin2) l = Math.sqrt(distanceMin2 * l);\n					node.vx += x * treeNode.value * alpha / l;\n					if (nDim > 1) node.vy += y * treeNode.value * alpha / l;\n					if (nDim > 2) node.vz += z * treeNode.value * alpha / l;\n				}\n				return true;\n			} else if (treeNode.length || l >= distanceMax2) return;\n			if (treeNode.data !== node || treeNode.next) {\n				if (x === 0) x = jiggle_default(random), l += x * x;\n				if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n				if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n				if (l < distanceMin2) l = Math.sqrt(distanceMin2 * l);\n			}\n			do\n				if (treeNode.data !== node) {\n					w = strengths[treeNode.data.index] * alpha / l;\n					node.vx += x * w;\n					if (nDim > 1) node.vy += y * w;\n					if (nDim > 2) node.vz += z * w;\n				}\n			while (treeNode = treeNode.next);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = typeof _ === \"function\" ? _ : constant_default(+_), initialize(), force) : strength;\n		};\n		force.distanceMin = function(_) {\n			return arguments.length ? (distanceMin2 = _ * _, force) : Math.sqrt(distanceMin2);\n		};\n		force.distanceMax = function(_) {\n			return arguments.length ? (distanceMax2 = _ * _, force) : Math.sqrt(distanceMax2);\n		};\n		force.theta = function(_) {\n			return arguments.length ? (theta2 = _ * _, force) : Math.sqrt(theta2);\n		};\n		return force;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/topology.ts\n	/** 稳定 ID 顺序：相同输入必须得到相同顺序，否则「同一份图」每次布局都会变形 */\n	function stableIds(ids) {\n		return [...ids].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);\n	}\n	/** 无向去重：布局忽略箭头，但显示层仍然保留有向边 */\n	function undirectedPairs(edges) {\n		const seen = /* @__PURE__ */ new Set();\n		const out = [];\n		for (const [a, b] of edges) {\n			if (a === b) continue;\n			const i = Math.min(a, b);\n			const j = Math.max(a, b);\n			const key = i * 1048576 + j;\n			if (seen.has(key)) continue;\n			seen.add(key);\n			out.push([i, j]);\n		}\n		out.sort((x, y) => x[0] - y[0] || x[1] - y[1]);\n		return out;\n	}\n	/**\n	* 结构签名。\n	*\n	* 只包含节点 ID 与边端点：标题、笔记、状态、主题、选中、相机变化都不改变它，\n	* 因此这些变化不会触发重算——否则点一下节点整张图就会重新抖一次。\n	*/\n	function topologySignature(ids, pairs) {\n		let hash = 2166136261;\n		const mix = (value) => {\n			hash ^= value & 255;\n			hash = Math.imul(hash, 16777619);\n			hash ^= value >>> 8 & 255;\n			hash = Math.imul(hash, 16777619);\n		};\n		for (const id of ids) {\n			for (let i = 0; i < id.length; i += 1) mix(id.charCodeAt(i));\n			mix(31);\n		}\n		mix(ids.length);\n		for (const [a, b] of pairs) {\n			mix(a);\n			mix(b);\n		}\n		return `t1:${ids.length}:${pairs.length}:${(hash >>> 0).toString(36)}`;\n	}\n	/** 建拓扑。`distances` 打开时会做全源 BFS（O(N·(N+M))，只在结构变化时算一次） */\n	function buildTopology(rawIds, edges, options = {}) {\n		const ids = stableIds(rawIds);\n		const indexById = /* @__PURE__ */ new Map();\n		ids.forEach((id, i) => indexById.set(id, i));\n		const pairs = undirectedPairs(edges);\n		const adjacency = ids.map(() => []);\n		for (const [a, b] of pairs) {\n			adjacency[a].push(b);\n			adjacency[b].push(a);\n		}\n		for (const list of adjacency) list.sort((a, b) => a - b);\n		const componentOf = new Int32Array(ids.length).fill(-1);\n		const components = [];\n		for (let start = 0; start < ids.length; start += 1) {\n			if (componentOf[start] !== -1) continue;\n			const component = [];\n			const queue = [start];\n			componentOf[start] = components.length;\n			for (let head = 0; head < queue.length; head += 1) {\n				const cur = queue[head];\n				component.push(cur);\n				for (const next of adjacency[cur]) {\n					if (componentOf[next] !== -1) continue;\n					componentOf[next] = components.length;\n					queue.push(next);\n				}\n			}\n			component.sort((a, b) => a - b);\n			components.push(component);\n		}\n		components.sort((a, b) => a[0] - b[0]);\n		return {\n			ids,\n			indexById,\n			adjacency,\n			components,\n			distances: options.distances ? allPairsDistances(adjacency) : null,\n			pairs,\n			signature: topologySignature(ids, pairs),\n			componentOf\n		};\n	}\n	/** 从每个节点出发做一次 BFS；环、未连通、孤立点都在这里自然收敛 */\n	function allPairsDistances(adjacency) {\n		const n = adjacency.length;\n		const table = new Array(n);\n		const queue = new Int32Array(n);\n		for (let root = 0; root < n; root += 1) {\n			const dist = new Int16Array(n).fill(-1);\n			dist[root] = 0;\n			let head = 0;\n			let tail = 0;\n			queue[tail] = root;\n			tail += 1;\n			while (head < tail) {\n				const cur = queue[head];\n				head += 1;\n				const next = dist[cur] + 1;\n				for (const nb of adjacency[cur]) {\n					if (dist[nb] !== -1) continue;\n					dist[nb] = next;\n					queue[tail] = nb;\n					tail += 1;\n				}\n			}\n			table[root] = dist;\n		}\n		return table;\n	}\n	/**\n	* 拓扑目标距离：L(d) = Ledge × (1 + β × ln d)，d ≥ 1。\n	*\n	* L(1) 恰好等于直接边长度：直接相连的节点不再叠加拓扑分离，\n	* 它们的关系由弹簧、斥力和碰撞表达。\n	*/\n	function targetDistance(d, params) {\n		if (d <= 1) return params.edgeLength;\n		return params.edgeLength * (1 + params.topoBeta * Math.log(d));\n	}\n	/**\n	* 挑出参与拓扑分离的节点对。\n	*\n	* 小图（节点对总数在预算内）取全部 d ≥ 2 的对；大图先取关键近邻对\n	* （每个节点按跳数从小到大取若干），再用固定种子在分量内抽样补足预算——\n	* 远分支因此仍被考虑，而不是每帧随机换一批约束引起抖动。\n	*/\n	function selectTopologyPairs(topo, params) {\n		const n = topo.ids.length;\n		const counts = new Int32Array(n);\n		if (n < 2) return {\n			pairs: [],\n			targets: new Float64Array(0),\n			counts\n		};\n		const distances = topo.distances;\n		const budget = Math.max(1, Math.floor(params.topoPairBudget));\n		const chosen = /* @__PURE__ */ new Set();\n		const pairs = [];\n		const key = (i, j) => i * 1048576 + j;\n		const push = (i, j) => {\n			const a = Math.min(i, j);\n			const b = Math.max(i, j);\n			const k = key(a, b);\n			if (chosen.has(k)) return false;\n			chosen.add(k);\n			pairs.push([a, b]);\n			counts[a] += 1;\n			counts[b] += 1;\n			return true;\n		};\n		const nearPerNode = n <= 120 ? 64 : 12;\n		if (distances) for (let i = 0; i < n; i += 1) {\n			const row = distances[i];\n			const candidates = [];\n			for (let j = i + 1; j < n; j += 1) {\n				const d = row[j];\n				if (d >= 2) candidates.push({\n					j,\n					d\n				});\n			}\n			candidates.sort((a, b) => a.d - b.d || a.j - b.j);\n			for (let k = 0; k < Math.min(nearPerNode, candidates.length); k += 1) {\n				if (pairs.length >= budget) break;\n				push(i, candidates[k].j);\n			}\n		}\n		else for (const component of topo.components) for (const i of component) {\n			const seen = /* @__PURE__ */ new Set();\n			for (const nb of topo.adjacency[i]) for (const nb2 of topo.adjacency[nb]) seen.add(nb2);\n			const list = [...seen].filter((j) => j > i).sort((a, b) => a - b);\n			for (let k = 0; k < Math.min(nearPerNode, list.length); k += 1) {\n				if (pairs.length >= budget) break;\n				push(i, list[k]);\n			}\n		}\n		if (pairs.length < budget) {\n			const rng = lcg(params.seed ^ 1542469173);\n			const maxAttempts = budget * 12;\n			let attempts = 0;\n			while (pairs.length < budget && attempts < maxAttempts) {\n				attempts += 1;\n				const i = Math.floor(rng() * n);\n				const component = topo.components[topo.componentOf[i]];\n				if (component.length < 2) continue;\n				const j = component[Math.floor(rng() * component.length)];\n				if (i === j) continue;\n				if (distances && distances[i][j] < 2) continue;\n				push(i, j);\n			}\n		}\n		const targets = new Float64Array(pairs.length);\n		for (let k = 0; k < pairs.length; k += 1) {\n			const [i, j] = pairs[k];\n			const d = distances ? distances[i][j] : 3;\n			targets[k] = targetDistance(d >= 2 ? d : 3, params);\n		}\n		return {\n			pairs,\n			targets,\n			counts\n		};\n	}\n	/** 线性同余发生器：固定种子 → 可复现的初始化与抽样 */\n	function lcg(seed) {\n		let state = seed >>> 0;\n		return () => {\n			state = Math.imul(state, 1664525) + 1013904223 >>> 0;\n			return state / 4294967296;\n		};\n	}\n	/**\n	* 「紧凑云团」的估算半径：按节点数与直接边长度估一个体积，\n	* 只用来定柔性边界与初始分布，不当作必须达到的形状。\n	*\n	* 长链细长、星形有外壳、多子团并存都是合法结果——不为了球形扭曲关系。\n	*/\n	function expectedCloudRadius(edgeLength, nodeCount) {\n		if (nodeCount <= 1) return edgeLength;\n		return 1.4 * edgeLength * Math.cbrt(nodeCount);\n	}\n	/** 每个分量的锚点：分量之间留出稳定间隔，锚点不赋予「知识更远」的业务含义 */\n	function componentAnchors(topo, params) {\n		const anchors = new Float64Array(topo.ids.length * 3);\n		const components = [...topo.components].sort((a, b) => b.length - a.length || a[0] - b[0]);\n		if (components.length <= 1) return anchors;\n		const unit = (k) => {\n			const y = 1 - 2 * (k + .5) / components.length;\n			const r = Math.sqrt(Math.max(0, 1 - y * y));\n			const theta = k * Math.PI * (3 - Math.sqrt(5));\n			return [\n				Math.cos(theta) * r,\n				y,\n				Math.sin(theta) * r\n			];\n		};\n		let cursor = 0;\n		components.forEach((component, k) => {\n			const singleton = component.length === 1;\n			const radius = singleton ? params.collideRadius * 1.2 : expectedCloudRadius(params.edgeLength, component.length) * .85;\n			const gap = singleton ? params.collideRadius * 2 : params.edgeLength * .45;\n			const [ux, uy, uz] = unit(k);\n			const shell = params.collideRadius * 1.2 + params.edgeLength * 2.2;\n			const reach = singleton ? Math.min(cursor + radius, shell) : cursor + radius;\n			const center = [\n				ux * reach,\n				uy * reach,\n				uz * reach\n			];\n			for (const i of component) {\n				anchors[i * 3] = center[0];\n				anchors[i * 3 + 1] = center[1];\n				anchors[i * 3 + 2] = center[2];\n			}\n			cursor += radius * 2 + gap;\n		});\n		return anchors;\n	}\n	/**\n	* 确定性初始分布：同一批 ID 与参数必然得到同一批坐标（不含随机数）。\n	*\n	* 每个分量围绕自己的锚点铺开，半径按体积均匀（cbrt）分布，\n	* 方向用黄金角螺旋——比「全在原点附近再让斥力炸开」稳定得多。\n	*/\n	function initialPositions(topo, params) {\n		const n = topo.ids.length;\n		const out = new Float32Array(n * 3);\n		const anchors = componentAnchors(topo, params);\n		for (const component of topo.components) {\n			const radius = expectedCloudRadius(params.edgeLength, component.length) * .6;\n			component.forEach((index, k) => {\n				const fraction = (k + .5) / component.length;\n				const local = radius * Math.cbrt(fraction);\n				const y = 1 - 2 * fraction;\n				const r = Math.sqrt(Math.max(0, 1 - y * y));\n				const theta = k * Math.PI * (3 - Math.sqrt(5));\n				out[index * 3] = anchors[index * 3] + Math.cos(theta) * r * local;\n				out[index * 3 + 1] = anchors[index * 3 + 1] + y * local;\n				out[index * 3 + 2] = anchors[index * 3 + 2] + Math.sin(theta) * r * local;\n			});\n		}\n		return out;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/forces.ts\n	/**\n	* 受控拓扑分离。\n	*\n	* ```\n	* r = ||xi - xj||, u = (xi - xj) / max(r, ε)\n	* a = alpha × kTopo × max(0, L(d) - r) / max(1, qi, qj)\n	* Δvi += clamp(a, 0, aMax) × u,  Δvj -= clamp(a, 0, aMax) × u\n	* ```\n	*\n	* 只处理过近的一侧：过远由弹簧与普通斥力表达，这里不做「拉近」，\n	* 免得把两种力叠成一双更强的斥力。\n	*/\n	function applyTopologyForce(nodes, state, params, alpha) {\n		const epsilon = 1e-4;\n		for (let k = 0; k < state.pairs.length; k += 1) {\n			const [i, j] = state.pairs[k];\n			const a = nodes[i];\n			const b = nodes[j];\n			let dx = a.x - b.x;\n			let dy = a.y - b.y;\n			let dz = a.z - b.z;\n			let r = Math.sqrt(dx * dx + dy * dy + dz * dz);\n			if (r < epsilon) {\n				const [ux, uy, uz] = tieBreakDirection(a.id, b.id);\n				dx = ux;\n				dy = uy;\n				dz = uz;\n				r = 1;\n			}\n			const gap = state.targets[k] - r;\n			if (gap <= 0) continue;\n			const norm = Math.max(1, Math.max(state.counts[i], state.counts[j]));\n			const magnitude = Math.min(params.topoMaxStep, alpha * params.topoStrength * gap / norm);\n			if (magnitude <= 0) continue;\n			const fx = dx / r * magnitude;\n			const fy = dy / r * magnitude;\n			const fz = dz / r * magnitude;\n			a.vx += fx;\n			a.vy += fy;\n			a.vz += fz;\n			b.vx -= fx;\n			b.vy -= fy;\n			b.vz -= fz;\n		}\n	}\n	/** 两个稳定 ID 派生的单位向量：同样的重合对永远朝同一个方向分开 */\n	function tieBreakDirection(idA, idB) {\n		let hash = 2654435769;\n		const key = idA < idB ? `${idA}\\u0000${idB}` : `${idB}\\u0000${idA}`;\n		for (let i = 0; i < key.length; i += 1) {\n			hash ^= key.charCodeAt(i);\n			hash = Math.imul(hash, 16777619) >>> 0;\n		}\n		const x = (hash & 255) / 255 * 2 - 1;\n		const y = (hash >>> 8 & 255) / 255 * 2 - 1;\n		const z = (hash >>> 16 & 255) / 255 * 2 - 1;\n		const length = Math.hypot(x, y, z) || 1;\n		return [\n			x / length,\n			y / length,\n			z / length\n		];\n	}\n	function componentGeometry(topo, params, anchors) {\n		const boundaryRadius = new Float64Array(topo.ids.length);\n		for (const component of topo.components) {\n			const radius = expectedCloudRadius(params.edgeLength, component.length) * params.boundarySlack;\n			for (const index of component) boundaryRadius[index] = radius;\n		}\n		return {\n			anchors,\n			boundaryRadius\n		};\n	}\n	/** 弱收拢：把分量往自己的锚点带，控制松散程度（不改变相对距离的语义） */\n	function applyCenteringForce(nodes, geometry, params, alpha) {\n		const strength = params.centering * alpha;\n		if (strength <= 0) return;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			node.vx += (geometry.anchors[i] - node.x) * strength;\n			node.vy += (geometry.anchors[i + 1] - node.y) * strength;\n			node.vz += (geometry.anchors[i + 2] - node.z) * strength;\n		}\n	}\n	/**\n	* 柔性边界：只对超出目标范围的节点回拉。\n	*\n	* 不用正半径 forceRadial（那是往球壳上贴），也不做硬裁剪：\n	* 长链、星形外壳与多子团都允许存在。\n	*/\n	function applyBoundaryForce(nodes, geometry, params, alpha) {\n		const strength = params.boundaryStrength * alpha;\n		if (strength <= 0) return;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			const dx = node.x - geometry.anchors[i];\n			const dy = node.y - geometry.anchors[i + 1];\n			const dz = node.z - geometry.anchors[i + 2];\n			const r = Math.hypot(dx, dy, dz);\n			const limit = geometry.boundaryRadius[node.index];\n			if (r <= limit || r <= 0) continue;\n			const back = (r - limit) / r * strength;\n			node.vx -= dx * back;\n			node.vy -= dy * back;\n			node.vz -= dz * back;\n		}\n	}\n	/**\n	* 旧坐标软锚定强度。\n	*\n	* 1 表示「沿用旧坐标、正常拉住」；0.25 表示「刚新增或就在新增点一两跳内」——\n	* 允许这段结构重新舒展，外围节点则基本不动，切视图回来还能认出原来的位置。\n	*/\n	function softAnchorWeights(topo, hasPrevious, nearChangeFactor = .25, neighborhoodHops = 2) {\n		const weights = new Float32Array(topo.ids.length);\n		const newNodes = [];\n		for (let i = 0; i < topo.ids.length; i += 1) if (hasPrevious[i]) weights[i] = 1;\n		else newNodes.push(i);\n		if (newNodes.length === 0) return weights;\n		const queue = [...newNodes];\n		const depth = new Int32Array(topo.ids.length).fill(-1);\n		for (const i of newNodes) depth[i] = 0;\n		let head = 0;\n		while (head < queue.length) {\n			const cur = queue[head];\n			head += 1;\n			if (depth[cur] >= neighborhoodHops) continue;\n			for (const next of topo.adjacency[cur]) {\n				if (depth[next] !== -1) continue;\n				depth[next] = depth[cur] + 1;\n				if (weights[next] > 0) weights[next] = nearChangeFactor;\n				queue.push(next);\n			}\n		}\n		return weights;\n	}\n	function applyAnchorForce(nodes, previous, weights, params, alpha) {\n		if (params.anchorStrength <= 0) return;\n		for (const node of nodes) {\n			const weight = weights[node.index];\n			if (weight <= 0) continue;\n			const i = node.index * 3;\n			const strength = params.anchorStrength * weight * alpha;\n			if (strength <= 0) continue;\n			node.vx += (previous[i] - node.x) * strength;\n			node.vy += (previous[i + 1] - node.y) * strength;\n			node.vz += (previous[i + 2] - node.z) * strength;\n		}\n	}\n	/** 位移均方根：归一化到 Ledge 之后才与图的尺度无关 */\n	function rmsDisplacement(nodes, before, edgeLength) {\n		if (nodes.length === 0) return 0;\n		let sum = 0;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			const dx = node.x - before[i];\n			const dy = node.y - before[i + 1];\n			const dz = node.z - before[i + 2];\n			sum += dx * dx + dy * dy + dz * dz;\n		}\n		return Math.sqrt(sum / nodes.length) / edgeLength;\n	}\n	/**\n	* 碰撞残差：最大穿透深度（世界单位）。\n	*\n	* 用空间哈希网格，邻居只在自己与相邻格子中找，因此是 O(N + 重叠对数)，\n	* 不会因为「检查碰撞」把大图拖慢。返回 0 表示没有重叠。\n	*/\n	function collisionResidual(nodes, collideRadius) {\n		if (nodes.length < 2) return 0;\n		const cell = collideRadius * 2;\n		const buckets = /* @__PURE__ */ new Map();\n		const cellOf = (value) => {\n			const index = Math.floor(value / cell);\n			return index < -512 ? -512 : index > 512 ? 512 : index;\n		};\n		const key = (x, y, z) => ((x + 512) * 1025 + (y + 512)) * 1025 + (z + 512);\n		for (const node of nodes) {\n			const k = key(cellOf(node.x), cellOf(node.y), cellOf(node.z));\n			const bucket = buckets.get(k);\n			if (bucket) bucket.push(node.index);\n			else buckets.set(k, [node.index]);\n		}\n		let worst = 0;\n		for (const node of nodes) {\n			const cx = cellOf(node.x);\n			const cy = cellOf(node.y);\n			const cz = cellOf(node.z);\n			for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {\n				const bucket = buckets.get(key(cx + dx, cy + dy, cz + dz));\n				if (!bucket) continue;\n				for (const other of bucket) {\n					if (other <= node.index) continue;\n					const b = nodes[other];\n					const distance = Math.hypot(node.x - b.x, node.y - b.y, node.z - b.z);\n					const penetration = collideRadius * 2 - distance;\n					if (penetration > worst) worst = penetration;\n				}\n			}\n		}\n		return worst;\n	}\n	/** 所有坐标都有限？（出现 NaN/Infinity 时回退上一份有效快照） */\n	function hasFiniteCoordinates(nodes) {\n		for (const node of nodes) if (!Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) return false;\n		return true;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/layoutCore.ts\n	/**\n	* 布局内核：d3-force-3d 基线 + 本项目的受控扩展\n	*\n	* 基线 A：直接边弹簧 + 普通斥力 + 节点碰撞 + 弱收拢 + 柔性边界。\n	* 扩展 B：受预算限制的弱拓扑分离（`forces.ts`），两者用同一批图对照。\n	*\n	* 手动 tick，不用 d3 的自动计时器：渲染帧率与 Worker 分片都不应该改变物理结果，\n	* 而且「一批算多少步」必须由我们按时间片决定（见《空间图谱技术方案》8.4）。\n	* 这里的代码完全无 DOM、无 window，Worker 与单元测试共用。\n	*/\n	/**\n	* 温启动的初始 alpha。\n	*\n	* 取值是试调起点：太小则新增节点的结构舒展不出来，太大则整张图被重新推开。\n	*/\n	const WARM_ALPHA = .45;\n	function createNodes(input, topo) {\n		const initial = initialPositions(topo, input.params);\n		const previous = input.previous;\n		const nodes = new Array(topo.ids.length);\n		const hasPrevious = new Array(topo.ids.length).fill(false);\n		for (let i = 0; i < topo.ids.length; i += 1) {\n			const known = previous !== null && previous.length >= (i + 1) * 3 && Number.isFinite(previous[i * 3]) && Number.isFinite(previous[i * 3 + 1]) && Number.isFinite(previous[i * 3 + 2]);\n			hasPrevious[i] = known;\n			nodes[i] = {\n				index: i,\n				id: topo.ids[i],\n				x: known ? previous[i * 3] : initial[i * 3],\n				y: known ? previous[i * 3 + 1] : initial[i * 3 + 1],\n				z: known ? previous[i * 3 + 2] : initial[i * 3 + 2],\n				vx: 0,\n				vy: 0,\n				vz: 0\n			};\n		}\n		return {\n			nodes,\n			hasPrevious\n		};\n	}\n	/** 稳定 ID 顺序的入口检查：坐标数组的解释顺序必须与拓扑一致 */\n	function assertStableOrder(ids) {\n		for (let i = 1; i < ids.length; i += 1) if (ids[i - 1] > ids[i]) throw new Error(`布局输入必须按稳定 ID 升序：第 ${i - 1} 项「${ids[i - 1]}」大于第 ${i} 项「${ids[i]}」`);\n	}\n	function createLayout(input) {\n		const params = input.params;\n		assertStableOrder(input.ids);\n		const topo = buildTopology(input.ids, input.edges, { distances: true });\n		const { nodes, hasPrevious } = createNodes(input, topo);\n		const pairs = selectTopologyPairs(topo, params);\n		const topologyForce = {\n			pairs: pairs.pairs,\n			targets: pairs.targets,\n			counts: pairs.counts\n		};\n		const geometry = componentGeometry(topo, params, componentAnchors(topo, params));\n		const anchorWeights = softAnchorWeights(topo, hasPrevious);\n		const previous = input.previous;\n		const links = topo.pairs.map(([a, b]) => ({\n			source: nodes[a],\n			target: nodes[b]\n		}));\n		const simulation = simulation_default(nodes, 3).stop().velocityDecay(params.velocityDecay).alpha(input.warmStart ? WARM_ALPHA : 1).force(\"link\", link_default(links).distance(params.edgeLength).iterations(1)).force(\"charge\", manyBody_default().strength(-params.chargeStrength).distanceMin(params.collideRadius * 1.2).theta(.9)).force(\"collide\", collide_default(params.collideRadius).strength(.9).iterations(2)).force(\"topology\", (alpha) => {\n			applyTopologyForce(nodes, topologyForce, params, alpha);\n		}).force(\"converge\", (alpha) => {\n			applyCenteringForce(nodes, geometry, params, alpha);\n			applyBoundaryForce(nodes, geometry, params, alpha);\n		}).force(\"anchor\", (alpha) => {\n			if (previous && params.anchorStrength > 0) applyAnchorForce(nodes, previous, anchorWeights, params, alpha);\n		});\n		return {\n			topo,\n			params,\n			nodes,\n			geometry,\n			topologyPairs: pairs.pairs.length,\n			valid: readPositions(nodes),\n			iterations: 0,\n			rms: Number.POSITIVE_INFINITY,\n			stableBatches: 0,\n			collisionResidual: 0,\n			finite: true,\n			simulation,\n			scratch: new Float64Array(nodes.length * 3)\n		};\n	}\n	/** 推进若干步，并更新位移与碰撞度量（渲染帧率不参与物理计算） */\n	function stepLayout(runtime, batch = 1) {\n		const { nodes, scratch } = runtime;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			scratch[i] = node.x;\n			scratch[i + 1] = node.y;\n			scratch[i + 2] = node.z;\n		}\n		runtime.simulation.tick(batch);\n		runtime.iterations += batch;\n		runtime.rms = rmsDisplacement(nodes, scratch, runtime.params.edgeLength);\n		runtime.collisionResidual = collisionResidual(nodes, runtime.params.collideRadius);\n		runtime.finite = hasFiniteCoordinates(nodes);\n		if (runtime.finite) {\n			runtime.valid = readPositions(runtime.nodes, runtime.valid);\n			if (runtime.rms < runtime.params.stableRms && runtime.collisionResidual <= runtime.params.stableCollisionResidual) runtime.stableBatches += 1;\n			else runtime.stableBatches = 0;\n		} else runtime.stableBatches = 0;\n	}\n	/** 把坐标导出到独立数组（写进 out 时复用同一块内存，避免每帧新建） */\n	function readPositions(nodes, out) {\n		const target = out && out.length === nodes.length * 3 ? out : new Float32Array(nodes.length * 3);\n		for (const node of nodes) {\n			const i = node.index * 3;\n			target[i] = node.x;\n			target[i + 1] = node.y;\n			target[i + 2] = node.z;\n		}\n		return target;\n	}\n	/** 结束判据：位移与碰撞同时达标，并且连续若干批都达标（不看 alpha 是否耗尽） */\n	function isSettled(runtime, requiredBatches = 4) {\n		return runtime.finite && runtime.stableBatches >= requiredBatches;\n	}\n	function layoutMetrics(runtime, elapsedMs) {\n		return {\n			iterations: runtime.iterations,\n			rms: runtime.rms,\n			collisionResidual: runtime.collisionResidual,\n			topologyPairs: runtime.topologyPairs,\n			components: runtime.topo.components.length,\n			elapsedMs\n		};\n	}\n	/** 结束原因：达标 / 用完预算 / 坐标异常 */\n	function stopReason(runtime, requiredBatches = 4) {\n		if (!runtime.finite) return \"error\";\n		if (isSettled(runtime, requiredBatches)) return \"stable\";\n		return \"budget\";\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/layout.worker.ts\n	/**\n	* 三维布局 Worker\n	*\n	* 协议见 `types.ts` 与《空间图谱技术方案》8.4：\n	* - 同一轮之后到达的旧命令（runId 不增）直接丢弃；快照/结束消息带上版本标识，\n	*   由主线程按 epoch + 拓扑版本 + runId 过滤；\n	* - 分时间片推进：每片结束让出事件循环，UPDATE / CANCEL / STOP 才收得到；\n	* - 只用副本做快照并转移所有权，绝不转移内部仍在写的缓冲区；\n	* - 结束后不留在内存里等下一次：主线程收到 FINISHED 即可 terminate 本 Worker。\n	*\n	* 这个文件刻意不碰 window / document：`tsconfig.worker.json` 用 WebWorker 类型\n	* 单独检查它，避免把 DOM 类型混进 Worker。\n	*/\n	const scope = globalThis;\n	/** 每片推进的步数：太大则取消消息迟到，太小则总时间被调度开销吃掉 */\n	const TICKS_PER_SLICE = 4;\n	/** 快照发送间隔（毫秒）：主线程按 10–20Hz 接收，渲染帧率与它无关 */\n	const SNAPSHOT_INTERVAL_MS = 55;\n	/** 位移与碰撞连续达标的批次数，达到即视为收敛 */\n	const SETTLED_BATCHES = 4;\n	let run = null;\n	function post(message, transfer) {\n		if (transfer && transfer.length > 0) scope.postMessage(message, transfer);\n		else scope.postMessage(message);\n	}\n	function now() {\n		return typeof performance !== \"undefined\" ? performance.now() : Date.now();\n	}\n	function finish(current, reason, source) {\n		if (current.timer !== null) clearTimeout(current.timer);\n		current.timer = null;\n		const elapsedMs = now() - current.startedAt;\n		const positions = new Float32Array(source ?? readPositions(current.runtime.nodes));\n		post({\n			type: \"FINISHED\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			reason,\n			metrics: layoutMetrics(current.runtime, elapsedMs),\n			positions\n		}, [positions.buffer]);\n		current.runtime.simulation.stop();\n		if (run === current) run = null;\n	}\n	function sendSnapshot(current) {\n		const positions = readPositions(current.runtime.nodes);\n		current.sequence += 1;\n		current.lastSnapshotAt = now();\n		post({\n			type: \"SNAPSHOT\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			sequence: current.sequence,\n			positions,\n			iterations: current.runtime.iterations,\n			rms: current.runtime.rms\n		}, [positions.buffer]);\n	}\n	function fail(current, error) {\n		if (current.timer !== null) clearTimeout(current.timer);\n		current.timer = null;\n		post({\n			type: \"ERROR\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			message: error instanceof Error ? error.message : String(error)\n		});\n		if (run === current) run = null;\n	}\n	/**\n	* 一片计算。\n	*\n	* 每片结束都把控制权交回事件循环（setTimeout 0），否则一个长同步循环会让\n	* CANCEL / UPDATE 永远排不上队——「往忙碌 Worker 发取消消息」从来不会打断它。\n	*/\n	function slice() {\n		const current = run;\n		if (!current || current.cancelled) return;\n		current.timer = null;\n		try {\n			stepLayout(current.runtime, TICKS_PER_SLICE);\n		} catch (error) {\n			fail(current, error);\n			return;\n		}\n		const elapsed = now() - current.startedAt;\n		const settled = current.runtime.finite && current.runtime.stableBatches >= SETTLED_BATCHES;\n		const overIterations = current.runtime.iterations >= current.runtime.params.maxIterations;\n		const overtime = elapsed >= current.runtime.params.maxDurationMs;\n		const broken = !current.runtime.finite;\n		if (settled || overIterations || overtime || broken) {\n			if (broken) {\n				finish(current, \"error\", current.runtime.valid);\n				return;\n			}\n			sendSnapshot(current);\n			finish(current, stopReason(current.runtime, SETTLED_BATCHES));\n			return;\n		}\n		if (now() - current.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) sendSnapshot(current);\n		current.timer = setTimeout(slice, 0);\n	}\n	function start(message) {\n		if (run) {\n			if (run.timer !== null) clearTimeout(run.timer);\n			run.runtime.simulation.stop();\n			run = null;\n		}\n		const fresh = {\n			runId: message.runId,\n			epoch: message.epoch,\n			topologyRevision: message.topologyRevision,\n			runtime: null,\n			startedAt: now(),\n			lastSnapshotAt: 0,\n			sequence: 0,\n			cancelled: false,\n			timer: null\n		};\n		try {\n			fresh.runtime = createLayout({\n				ids: message.stableNodeIds,\n				edges: message.edges,\n				previous: message.previousPositions,\n				warmStart: message.type === \"UPDATE\",\n				params: message.parameters\n			});\n		} catch (error) {\n			fail(fresh, error);\n			return;\n		}\n		run = fresh;\n		sendSnapshot(fresh);\n		fresh.timer = setTimeout(slice, 0);\n	}\n	scope.addEventListener(\"message\", (event) => {\n		const message = event.data;\n		if (!message || typeof message !== \"object\") return;\n		if (message.type === \"INIT\" || message.type === \"UPDATE\") {\n			if (run && message.runId <= run.runId) return;\n			start(message);\n			return;\n		}\n		if (message.type === \"CANCEL\" || message.type === \"STOP\") {\n			if (!run || run.runId !== message.runId) return;\n			if (message.type === \"STOP\") {\n				run.cancelled = true;\n				if (run.timer !== null) clearTimeout(run.timer);\n				run.timer = null;\n				run.runtime.simulation.stop();\n				run = null;\n				return;\n			}\n			run.cancelled = true;\n			if (run.timer !== null) clearTimeout(run.timer);\n			run.timer = null;\n			finish(run, \"cancelled\");\n		}\n	});\n	//#endregion\n})();\n";
+		const KN_LAYOUT_WORKER_SOURCE = "(function() {\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/add.js\n	function add_default$2(d) {\n		const x = +this._x.call(null, d);\n		return add$2(this.cover(x), x, d);\n	}\n	function add$2(tree, x, d) {\n		if (isNaN(x)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, x1 = tree._x1, xm, xp, right, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (parent = node, !(node = node[i = +right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		if (x === xp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(2) : tree._root = new Array(2);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n		} while ((i = +right) === (j = +(xp >= xm)));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll$2(data) {\n		if (!Array.isArray(data)) data = Array.from(data);\n		const n = data.length;\n		const xz = new Float64Array(n);\n		let x0 = Infinity, x1 = -Infinity;\n		for (let i = 0, x; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, data[i]))) continue;\n			xz[i] = x;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n		}\n		if (x0 > x1) return this;\n		this.cover(x0).cover(x1);\n		for (let i = 0; i < n; ++i) add$2(this, xz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/cover.js\n	function cover_default$2(x) {\n		if (isNaN(x = +x)) return this;\n		var x0 = this._x0, x1 = this._x1;\n		if (isNaN(x0)) x1 = (x0 = Math.floor(x)) + 1;\n		else {\n			var z = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1) {\n				i = +(x < x0);\n				parent = new Array(2), parent[i] = node, node = parent, z *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + z;\n						break;\n					case 1: x0 = x1 - z;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._x1 = x1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/data.js\n	function data_default$2() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/extent.js\n	function extent_default$2(_) {\n		return arguments.length ? this.cover(+_[0][0]).cover(+_[1][0]) : isNaN(this._x0) ? void 0 : [[this._x0], [this._x1]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/half.js\n	function half_default(node, x0, x1) {\n		this.node = node;\n		this.x0 = x0;\n		this.x1 = x1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/find.js\n	function find_default$2(x, radius) {\n		var data, x0 = this._x0, x1, x2, x3 = this._x1, halves = [], node = this._root, q, i;\n		if (node) halves.push(new half_default(node, x0, x3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius;\n			x3 = x + radius;\n		}\n		while (q = halves.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (x2 = q.x1) < x0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2;\n				halves.push(new half_default(node[1], xm, x2), new half_default(node[0], x1, xm));\n				if (i = +(x >= xm)) {\n					q = halves[halves.length - 1];\n					halves[halves.length - 1] = halves[halves.length - 1 - i];\n					halves[halves.length - 1 - i] = q;\n				}\n			} else {\n				var d = Math.abs(x - +this._x.call(null, node.data));\n				if (d < radius) {\n					radius = d;\n					x0 = x - d;\n					x3 = x + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/remove.js\n	function remove_default$2(d) {\n		if (isNaN(x = +this._x.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, x1 = this._x1, x, xm, right, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (!(parent = node, node = node[i = +right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 1]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1]) && node === (parent[1] || parent[0]) && !node.length) {\n			if (retainer) retainer[j] = node;\n			else this._root = node;\n		}\n		return this;\n	}\n	function removeAll$2(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/root.js\n	function root_default$2() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/size.js\n	function size_default$2() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/visit.js\n	function visit_default$2(callback) {\n		var halves = [], q, node = this._root, child, x0, x1;\n		if (node) halves.push(new half_default(node, this._x0, this._x1));\n		while (q = halves.pop()) if (!callback(node = q.node, x0 = q.x0, x1 = q.x1) && node.length) {\n			var xm = (x0 + x1) / 2;\n			if (child = node[1]) halves.push(new half_default(child, xm, x1));\n			if (child = node[0]) halves.push(new half_default(child, x0, xm));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/visitAfter.js\n	function visitAfter_default$2(callback) {\n		var halves = [], next = [], q;\n		if (this._root) halves.push(new half_default(this._root, this._x0, this._x1));\n		while (q = halves.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, x1 = q.x1, xm = (x0 + x1) / 2;\n				if (child = node[0]) halves.push(new half_default(child, x0, xm));\n				if (child = node[1]) halves.push(new half_default(child, xm, x1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.x1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/x.js\n	function defaultX$2(d) {\n		return d[0];\n	}\n	function x_default$2(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-binarytree@1.0.2/node_modules/d3-binarytree/src/binarytree.js\n	function binarytree(nodes, x) {\n		var tree = new Binarytree(x == null ? defaultX$2 : x, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Binarytree(x, x0, x1) {\n		this._x = x;\n		this._x0 = x0;\n		this._x1 = x1;\n		this._root = void 0;\n	}\n	function leaf_copy$2(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto$2 = binarytree.prototype = Binarytree.prototype;\n	treeProto$2.copy = function() {\n		var copy = new Binarytree(this._x, this._x0, this._x1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy$2(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(2)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 2; ++i) if (child = node.source[i]) {\n			if (child.length) nodes.push({\n				source: child,\n				target: node.target[i] = new Array(2)\n			});\n			else node.target[i] = leaf_copy$2(child);\n		}\n		return copy;\n	};\n	treeProto$2.add = add_default$2;\n	treeProto$2.addAll = addAll$2;\n	treeProto$2.cover = cover_default$2;\n	treeProto$2.data = data_default$2;\n	treeProto$2.extent = extent_default$2;\n	treeProto$2.find = find_default$2;\n	treeProto$2.remove = remove_default$2;\n	treeProto$2.removeAll = removeAll$2;\n	treeProto$2.root = root_default$2;\n	treeProto$2.size = size_default$2;\n	treeProto$2.visit = visit_default$2;\n	treeProto$2.visitAfter = visitAfter_default$2;\n	treeProto$2.x = x_default$2;\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/add.js\n	function add_default$1(d) {\n		const x = +this._x.call(null, d), y = +this._y.call(null, d);\n		return add$1(this.cover(x, y), x, y, d);\n	}\n	function add$1(tree, x, y, d) {\n		if (isNaN(x) || isNaN(y)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, y0 = tree._y0, x1 = tree._x1, y1 = tree._y1, xm, ym, xp, yp, right, bottom, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (parent = node, !(node = node[i = bottom << 1 | right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		yp = +tree._y.call(null, node.data);\n		if (x === xp && y === yp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(4) : tree._root = new Array(4);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n		} while ((i = bottom << 1 | right) === (j = (yp >= ym) << 1 | xp >= xm));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll$1(data) {\n		var d, i, n = data.length, x, y, xz = new Array(n), yz = new Array(n), x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;\n		for (i = 0; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, d = data[i])) || isNaN(y = +this._y.call(null, d))) continue;\n			xz[i] = x;\n			yz[i] = y;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n			if (y < y0) y0 = y;\n			if (y > y1) y1 = y;\n		}\n		if (x0 > x1 || y0 > y1) return this;\n		this.cover(x0, y0).cover(x1, y1);\n		for (i = 0; i < n; ++i) add$1(this, xz[i], yz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/cover.js\n	function cover_default$1(x, y) {\n		if (isNaN(x = +x) || isNaN(y = +y)) return this;\n		var x0 = this._x0, y0 = this._y0, x1 = this._x1, y1 = this._y1;\n		if (isNaN(x0)) {\n			x1 = (x0 = Math.floor(x)) + 1;\n			y1 = (y0 = Math.floor(y)) + 1;\n		} else {\n			var z = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1 || y0 > y || y >= y1) {\n				i = (y < y0) << 1 | x < x0;\n				parent = new Array(4), parent[i] = node, node = parent, z *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + z, y1 = y0 + z;\n						break;\n					case 1:\n						x0 = x1 - z, y1 = y0 + z;\n						break;\n					case 2:\n						x1 = x0 + z, y0 = y1 - z;\n						break;\n					case 3: x0 = x1 - z, y0 = y1 - z;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._y0 = y0;\n		this._x1 = x1;\n		this._y1 = y1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/data.js\n	function data_default$1() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/extent.js\n	function extent_default$1(_) {\n		return arguments.length ? this.cover(+_[0][0], +_[0][1]).cover(+_[1][0], +_[1][1]) : isNaN(this._x0) ? void 0 : [[this._x0, this._y0], [this._x1, this._y1]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/quad.js\n	function quad_default(node, x0, y0, x1, y1) {\n		this.node = node;\n		this.x0 = x0;\n		this.y0 = y0;\n		this.x1 = x1;\n		this.y1 = y1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/find.js\n	function find_default$1(x, y, radius) {\n		var data, x0 = this._x0, y0 = this._y0, x1, y1, x2, y2, x3 = this._x1, y3 = this._y1, quads = [], node = this._root, q, i;\n		if (node) quads.push(new quad_default(node, x0, y0, x3, y3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius, y0 = y - radius;\n			x3 = x + radius, y3 = y + radius;\n			radius *= radius;\n		}\n		while (q = quads.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (y1 = q.y0) > y3 || (x2 = q.x1) < x0 || (y2 = q.y1) < y0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2, ym = (y1 + y2) / 2;\n				quads.push(new quad_default(node[3], xm, ym, x2, y2), new quad_default(node[2], x1, ym, xm, y2), new quad_default(node[1], xm, y1, x2, ym), new quad_default(node[0], x1, y1, xm, ym));\n				if (i = (y >= ym) << 1 | x >= xm) {\n					q = quads[quads.length - 1];\n					quads[quads.length - 1] = quads[quads.length - 1 - i];\n					quads[quads.length - 1 - i] = q;\n				}\n			} else {\n				var dx = x - +this._x.call(null, node.data), dy = y - +this._y.call(null, node.data), d2 = dx * dx + dy * dy;\n				if (d2 < radius) {\n					var d = Math.sqrt(radius = d2);\n					x0 = x - d, y0 = y - d;\n					x3 = x + d, y3 = y + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/remove.js\n	function remove_default$1(d) {\n		if (isNaN(x = +this._x.call(null, d)) || isNaN(y = +this._y.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, y0 = this._y0, x1 = this._x1, y1 = this._y1, x, y, xm, ym, right, bottom, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (!(parent = node, node = node[i = bottom << 1 | right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 3] || parent[i + 2 & 3] || parent[i + 3 & 3]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1] || parent[2] || parent[3]) && node === (parent[3] || parent[2] || parent[1] || parent[0]) && !node.length) {\n			if (retainer) retainer[j] = node;\n			else this._root = node;\n		}\n		return this;\n	}\n	function removeAll$1(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/root.js\n	function root_default$1() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/size.js\n	function size_default$1() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/visit.js\n	function visit_default$1(callback) {\n		var quads = [], q, node = this._root, child, x0, y0, x1, y1;\n		if (node) quads.push(new quad_default(node, this._x0, this._y0, this._x1, this._y1));\n		while (q = quads.pop()) if (!callback(node = q.node, x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1) && node.length) {\n			var xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;\n			if (child = node[3]) quads.push(new quad_default(child, xm, ym, x1, y1));\n			if (child = node[2]) quads.push(new quad_default(child, x0, ym, xm, y1));\n			if (child = node[1]) quads.push(new quad_default(child, xm, y0, x1, ym));\n			if (child = node[0]) quads.push(new quad_default(child, x0, y0, xm, ym));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/visitAfter.js\n	function visitAfter_default$1(callback) {\n		var quads = [], next = [], q;\n		if (this._root) quads.push(new quad_default(this._root, this._x0, this._y0, this._x1, this._y1));\n		while (q = quads.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;\n				if (child = node[0]) quads.push(new quad_default(child, x0, y0, xm, ym));\n				if (child = node[1]) quads.push(new quad_default(child, xm, y0, x1, ym));\n				if (child = node[2]) quads.push(new quad_default(child, x0, ym, xm, y1));\n				if (child = node[3]) quads.push(new quad_default(child, xm, ym, x1, y1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.y0, q.x1, q.y1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/x.js\n	function defaultX$1(d) {\n		return d[0];\n	}\n	function x_default$1(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/y.js\n	function defaultY$1(d) {\n		return d[1];\n	}\n	function y_default$1(_) {\n		return arguments.length ? (this._y = _, this) : this._y;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-quadtree@3.0.1/node_modules/d3-quadtree/src/quadtree.js\n	function quadtree(nodes, x, y) {\n		var tree = new Quadtree(x == null ? defaultX$1 : x, y == null ? defaultY$1 : y, NaN, NaN, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Quadtree(x, y, x0, y0, x1, y1) {\n		this._x = x;\n		this._y = y;\n		this._x0 = x0;\n		this._y0 = y0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._root = void 0;\n	}\n	function leaf_copy$1(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto$1 = quadtree.prototype = Quadtree.prototype;\n	treeProto$1.copy = function() {\n		var copy = new Quadtree(this._x, this._y, this._x0, this._y0, this._x1, this._y1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy$1(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(4)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 4; ++i) if (child = node.source[i]) {\n			if (child.length) nodes.push({\n				source: child,\n				target: node.target[i] = new Array(4)\n			});\n			else node.target[i] = leaf_copy$1(child);\n		}\n		return copy;\n	};\n	treeProto$1.add = add_default$1;\n	treeProto$1.addAll = addAll$1;\n	treeProto$1.cover = cover_default$1;\n	treeProto$1.data = data_default$1;\n	treeProto$1.extent = extent_default$1;\n	treeProto$1.find = find_default$1;\n	treeProto$1.remove = remove_default$1;\n	treeProto$1.removeAll = removeAll$1;\n	treeProto$1.root = root_default$1;\n	treeProto$1.size = size_default$1;\n	treeProto$1.visit = visit_default$1;\n	treeProto$1.visitAfter = visitAfter_default$1;\n	treeProto$1.x = x_default$1;\n	treeProto$1.y = y_default$1;\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/add.js\n	function add_default(d) {\n		const x = +this._x.call(null, d), y = +this._y.call(null, d), z = +this._z.call(null, d);\n		return add(this.cover(x, y, z), x, y, z, d);\n	}\n	function add(tree, x, y, z, d) {\n		if (isNaN(x) || isNaN(y) || isNaN(z)) return tree;\n		var parent, node = tree._root, leaf = { data: d }, x0 = tree._x0, y0 = tree._y0, z0 = tree._z0, x1 = tree._x1, y1 = tree._y1, z1 = tree._z1, xm, ym, zm, xp, yp, zp, right, bottom, deep, i, j;\n		if (!node) return tree._root = leaf, tree;\n		while (node.length) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n			if (parent = node, !(node = node[i = deep << 2 | bottom << 1 | right])) return parent[i] = leaf, tree;\n		}\n		xp = +tree._x.call(null, node.data);\n		yp = +tree._y.call(null, node.data);\n		zp = +tree._z.call(null, node.data);\n		if (x === xp && y === yp && z === zp) return leaf.next = node, parent ? parent[i] = leaf : tree._root = leaf, tree;\n		do {\n			parent = parent ? parent[i] = new Array(8) : tree._root = new Array(8);\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n		} while ((i = deep << 2 | bottom << 1 | right) === (j = (zp >= zm) << 2 | (yp >= ym) << 1 | xp >= xm));\n		return parent[j] = node, parent[i] = leaf, tree;\n	}\n	function addAll(data) {\n		if (!Array.isArray(data)) data = Array.from(data);\n		const n = data.length;\n		const xz = new Float64Array(n);\n		const yz = new Float64Array(n);\n		const zz = new Float64Array(n);\n		let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;\n		for (let i = 0, d, x, y, z; i < n; ++i) {\n			if (isNaN(x = +this._x.call(null, d = data[i])) || isNaN(y = +this._y.call(null, d)) || isNaN(z = +this._z.call(null, d))) continue;\n			xz[i] = x;\n			yz[i] = y;\n			zz[i] = z;\n			if (x < x0) x0 = x;\n			if (x > x1) x1 = x;\n			if (y < y0) y0 = y;\n			if (y > y1) y1 = y;\n			if (z < z0) z0 = z;\n			if (z > z1) z1 = z;\n		}\n		if (x0 > x1 || y0 > y1 || z0 > z1) return this;\n		this.cover(x0, y0, z0).cover(x1, y1, z1);\n		for (let i = 0; i < n; ++i) add(this, xz[i], yz[i], zz[i], data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/cover.js\n	function cover_default(x, y, z) {\n		if (isNaN(x = +x) || isNaN(y = +y) || isNaN(z = +z)) return this;\n		var x0 = this._x0, y0 = this._y0, z0 = this._z0, x1 = this._x1, y1 = this._y1, z1 = this._z1;\n		if (isNaN(x0)) {\n			x1 = (x0 = Math.floor(x)) + 1;\n			y1 = (y0 = Math.floor(y)) + 1;\n			z1 = (z0 = Math.floor(z)) + 1;\n		} else {\n			var t = x1 - x0 || 1, node = this._root, parent, i;\n			while (x0 > x || x >= x1 || y0 > y || y >= y1 || z0 > z || z >= z1) {\n				i = (z < z0) << 2 | (y < y0) << 1 | x < x0;\n				parent = new Array(8), parent[i] = node, node = parent, t *= 2;\n				switch (i) {\n					case 0:\n						x1 = x0 + t, y1 = y0 + t, z1 = z0 + t;\n						break;\n					case 1:\n						x0 = x1 - t, y1 = y0 + t, z1 = z0 + t;\n						break;\n					case 2:\n						x1 = x0 + t, y0 = y1 - t, z1 = z0 + t;\n						break;\n					case 3:\n						x0 = x1 - t, y0 = y1 - t, z1 = z0 + t;\n						break;\n					case 4:\n						x1 = x0 + t, y1 = y0 + t, z0 = z1 - t;\n						break;\n					case 5:\n						x0 = x1 - t, y1 = y0 + t, z0 = z1 - t;\n						break;\n					case 6:\n						x1 = x0 + t, y0 = y1 - t, z0 = z1 - t;\n						break;\n					case 7: x0 = x1 - t, y0 = y1 - t, z0 = z1 - t;\n				}\n			}\n			if (this._root && this._root.length) this._root = node;\n		}\n		this._x0 = x0;\n		this._y0 = y0;\n		this._z0 = z0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._z1 = z1;\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/data.js\n	function data_default() {\n		var data = [];\n		this.visit(function(node) {\n			if (!node.length) do\n				data.push(node.data);\n			while (node = node.next);\n		});\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/extent.js\n	function extent_default(_) {\n		return arguments.length ? this.cover(+_[0][0], +_[0][1], +_[0][2]).cover(+_[1][0], +_[1][1], +_[1][2]) : isNaN(this._x0) ? void 0 : [[\n			this._x0,\n			this._y0,\n			this._z0\n		], [\n			this._x1,\n			this._y1,\n			this._z1\n		]];\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/octant.js\n	function octant_default(node, x0, y0, z0, x1, y1, z1) {\n		this.node = node;\n		this.x0 = x0;\n		this.y0 = y0;\n		this.z0 = z0;\n		this.x1 = x1;\n		this.y1 = y1;\n		this.z1 = z1;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/find.js\n	function find_default(x, y, z, radius) {\n		var data, x0 = this._x0, y0 = this._y0, z0 = this._z0, x1, y1, z1, x2, y2, z2, x3 = this._x1, y3 = this._y1, z3 = this._z1, octs = [], node = this._root, q, i;\n		if (node) octs.push(new octant_default(node, x0, y0, z0, x3, y3, z3));\n		if (radius == null) radius = Infinity;\n		else {\n			x0 = x - radius, y0 = y - radius, z0 = z - radius;\n			x3 = x + radius, y3 = y + radius, z3 = z + radius;\n			radius *= radius;\n		}\n		while (q = octs.pop()) {\n			if (!(node = q.node) || (x1 = q.x0) > x3 || (y1 = q.y0) > y3 || (z1 = q.z0) > z3 || (x2 = q.x1) < x0 || (y2 = q.y1) < y0 || (z2 = q.z1) < z0) continue;\n			if (node.length) {\n				var xm = (x1 + x2) / 2, ym = (y1 + y2) / 2, zm = (z1 + z2) / 2;\n				octs.push(new octant_default(node[7], xm, ym, zm, x2, y2, z2), new octant_default(node[6], x1, ym, zm, xm, y2, z2), new octant_default(node[5], xm, y1, zm, x2, ym, z2), new octant_default(node[4], x1, y1, zm, xm, ym, z2), new octant_default(node[3], xm, ym, z1, x2, y2, zm), new octant_default(node[2], x1, ym, z1, xm, y2, zm), new octant_default(node[1], xm, y1, z1, x2, ym, zm), new octant_default(node[0], x1, y1, z1, xm, ym, zm));\n				if (i = (z >= zm) << 2 | (y >= ym) << 1 | x >= xm) {\n					q = octs[octs.length - 1];\n					octs[octs.length - 1] = octs[octs.length - 1 - i];\n					octs[octs.length - 1 - i] = q;\n				}\n			} else {\n				var dx = x - +this._x.call(null, node.data), dy = y - +this._y.call(null, node.data), dz = z - +this._z.call(null, node.data), d2 = dx * dx + dy * dy + dz * dz;\n				if (d2 < radius) {\n					var d = Math.sqrt(radius = d2);\n					x0 = x - d, y0 = y - d, z0 = z - d;\n					x3 = x + d, y3 = y + d, z3 = z + d;\n					data = node.data;\n				}\n			}\n		}\n		return data;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/findAll.js\n	const distance = (x1, y1, z1, x2, y2, z2) => Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);\n	function findAllWithinRadius(x, y, z, radius) {\n		const result = [];\n		const xMin = x - radius;\n		const yMin = y - radius;\n		const zMin = z - radius;\n		const xMax = x + radius;\n		const yMax = y + radius;\n		const zMax = z + radius;\n		this.visit((node, x1, y1, z1, x2, y2, z2) => {\n			if (!node.length) do {\n				const d = node.data;\n				if (distance(x, y, z, this._x(d), this._y(d), this._z(d)) <= radius) result.push(d);\n			} while (node = node.next);\n			return x1 > xMax || y1 > yMax || z1 > zMax || x2 < xMin || y2 < yMin || z2 < zMin;\n		});\n		return result;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/remove.js\n	function remove_default(d) {\n		if (isNaN(x = +this._x.call(null, d)) || isNaN(y = +this._y.call(null, d)) || isNaN(z = +this._z.call(null, d))) return this;\n		var parent, node = this._root, retainer, previous, next, x0 = this._x0, y0 = this._y0, z0 = this._z0, x1 = this._x1, y1 = this._y1, z1 = this._z1, x, y, z, xm, ym, zm, right, bottom, deep, i, j;\n		if (!node) return this;\n		if (node.length) while (true) {\n			if (right = x >= (xm = (x0 + x1) / 2)) x0 = xm;\n			else x1 = xm;\n			if (bottom = y >= (ym = (y0 + y1) / 2)) y0 = ym;\n			else y1 = ym;\n			if (deep = z >= (zm = (z0 + z1) / 2)) z0 = zm;\n			else z1 = zm;\n			if (!(parent = node, node = node[i = deep << 2 | bottom << 1 | right])) return this;\n			if (!node.length) break;\n			if (parent[i + 1 & 7] || parent[i + 2 & 7] || parent[i + 3 & 7] || parent[i + 4 & 7] || parent[i + 5 & 7] || parent[i + 6 & 7] || parent[i + 7 & 7]) retainer = parent, j = i;\n		}\n		while (node.data !== d) if (!(previous = node, node = node.next)) return this;\n		if (next = node.next) delete node.next;\n		if (previous) return next ? previous.next = next : delete previous.next, this;\n		if (!parent) return this._root = next, this;\n		next ? parent[i] = next : delete parent[i];\n		if ((node = parent[0] || parent[1] || parent[2] || parent[3] || parent[4] || parent[5] || parent[6] || parent[7]) && node === (parent[7] || parent[6] || parent[5] || parent[4] || parent[3] || parent[2] || parent[1] || parent[0]) && !node.length) {\n			if (retainer) retainer[j] = node;\n			else this._root = node;\n		}\n		return this;\n	}\n	function removeAll(data) {\n		for (var i = 0, n = data.length; i < n; ++i) this.remove(data[i]);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/root.js\n	function root_default() {\n		return this._root;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/size.js\n	function size_default() {\n		var size = 0;\n		this.visit(function(node) {\n			if (!node.length) do\n				++size;\n			while (node = node.next);\n		});\n		return size;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/visit.js\n	function visit_default(callback) {\n		var octs = [], q, node = this._root, child, x0, y0, z0, x1, y1, z1;\n		if (node) octs.push(new octant_default(node, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1));\n		while (q = octs.pop()) if (!callback(node = q.node, x0 = q.x0, y0 = q.y0, z0 = q.z0, x1 = q.x1, y1 = q.y1, z1 = q.z1) && node.length) {\n			var xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, zm = (z0 + z1) / 2;\n			if (child = node[7]) octs.push(new octant_default(child, xm, ym, zm, x1, y1, z1));\n			if (child = node[6]) octs.push(new octant_default(child, x0, ym, zm, xm, y1, z1));\n			if (child = node[5]) octs.push(new octant_default(child, xm, y0, zm, x1, ym, z1));\n			if (child = node[4]) octs.push(new octant_default(child, x0, y0, zm, xm, ym, z1));\n			if (child = node[3]) octs.push(new octant_default(child, xm, ym, z0, x1, y1, zm));\n			if (child = node[2]) octs.push(new octant_default(child, x0, ym, z0, xm, y1, zm));\n			if (child = node[1]) octs.push(new octant_default(child, xm, y0, z0, x1, ym, zm));\n			if (child = node[0]) octs.push(new octant_default(child, x0, y0, z0, xm, ym, zm));\n		}\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/visitAfter.js\n	function visitAfter_default(callback) {\n		var octs = [], next = [], q;\n		if (this._root) octs.push(new octant_default(this._root, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1));\n		while (q = octs.pop()) {\n			var node = q.node;\n			if (node.length) {\n				var child, x0 = q.x0, y0 = q.y0, z0 = q.z0, x1 = q.x1, y1 = q.y1, z1 = q.z1, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, zm = (z0 + z1) / 2;\n				if (child = node[0]) octs.push(new octant_default(child, x0, y0, z0, xm, ym, zm));\n				if (child = node[1]) octs.push(new octant_default(child, xm, y0, z0, x1, ym, zm));\n				if (child = node[2]) octs.push(new octant_default(child, x0, ym, z0, xm, y1, zm));\n				if (child = node[3]) octs.push(new octant_default(child, xm, ym, z0, x1, y1, zm));\n				if (child = node[4]) octs.push(new octant_default(child, x0, y0, zm, xm, ym, z1));\n				if (child = node[5]) octs.push(new octant_default(child, xm, y0, zm, x1, ym, z1));\n				if (child = node[6]) octs.push(new octant_default(child, x0, ym, zm, xm, y1, z1));\n				if (child = node[7]) octs.push(new octant_default(child, xm, ym, zm, x1, y1, z1));\n			}\n			next.push(q);\n		}\n		while (q = next.pop()) callback(q.node, q.x0, q.y0, q.z0, q.x1, q.y1, q.z1);\n		return this;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/x.js\n	function defaultX(d) {\n		return d[0];\n	}\n	function x_default(_) {\n		return arguments.length ? (this._x = _, this) : this._x;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/y.js\n	function defaultY(d) {\n		return d[1];\n	}\n	function y_default(_) {\n		return arguments.length ? (this._y = _, this) : this._y;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/z.js\n	function defaultZ(d) {\n		return d[2];\n	}\n	function z_default(_) {\n		return arguments.length ? (this._z = _, this) : this._z;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-octree@1.1.0/node_modules/d3-octree/src/octree.js\n	function octree(nodes, x, y, z) {\n		var tree = new Octree(x == null ? defaultX : x, y == null ? defaultY : y, z == null ? defaultZ : z, NaN, NaN, NaN, NaN, NaN, NaN);\n		return nodes == null ? tree : tree.addAll(nodes);\n	}\n	function Octree(x, y, z, x0, y0, z0, x1, y1, z1) {\n		this._x = x;\n		this._y = y;\n		this._z = z;\n		this._x0 = x0;\n		this._y0 = y0;\n		this._z0 = z0;\n		this._x1 = x1;\n		this._y1 = y1;\n		this._z1 = z1;\n		this._root = void 0;\n	}\n	function leaf_copy(leaf) {\n		var copy = { data: leaf.data }, next = copy;\n		while (leaf = leaf.next) next = next.next = { data: leaf.data };\n		return copy;\n	}\n	var treeProto = octree.prototype = Octree.prototype;\n	treeProto.copy = function() {\n		var copy = new Octree(this._x, this._y, this._z, this._x0, this._y0, this._z0, this._x1, this._y1, this._z1), node = this._root, nodes, child;\n		if (!node) return copy;\n		if (!node.length) return copy._root = leaf_copy(node), copy;\n		nodes = [{\n			source: node,\n			target: copy._root = new Array(8)\n		}];\n		while (node = nodes.pop()) for (var i = 0; i < 8; ++i) if (child = node.source[i]) {\n			if (child.length) nodes.push({\n				source: child,\n				target: node.target[i] = new Array(8)\n			});\n			else node.target[i] = leaf_copy(child);\n		}\n		return copy;\n	};\n	treeProto.add = add_default;\n	treeProto.addAll = addAll;\n	treeProto.cover = cover_default;\n	treeProto.data = data_default;\n	treeProto.extent = extent_default;\n	treeProto.find = find_default;\n	treeProto.findAllWithinRadius = findAllWithinRadius;\n	treeProto.remove = remove_default;\n	treeProto.removeAll = removeAll;\n	treeProto.root = root_default;\n	treeProto.size = size_default;\n	treeProto.visit = visit_default;\n	treeProto.visitAfter = visitAfter_default;\n	treeProto.x = x_default;\n	treeProto.y = y_default;\n	treeProto.z = z_default;\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/constant.js\n	function constant_default(x) {\n		return function() {\n			return x;\n		};\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/jiggle.js\n	function jiggle_default(random) {\n		return (random() - .5) * 1e-6;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/collide.js\n	function x$1(d) {\n		return d.x + d.vx;\n	}\n	function y$1(d) {\n		return d.y + d.vy;\n	}\n	function z$1(d) {\n		return d.z + d.vz;\n	}\n	function collide_default(radius) {\n		var nodes, nDim, radii, random, strength = 1, iterations = 1;\n		if (typeof radius !== \"function\") radius = constant_default(radius == null ? 1 : +radius);\n		function force() {\n			var i, n = nodes.length, tree, node, xi, yi, zi, ri, ri2;\n			for (var k = 0; k < iterations; ++k) {\n				tree = (nDim === 1 ? binarytree(nodes, x$1) : nDim === 2 ? quadtree(nodes, x$1, y$1) : nDim === 3 ? octree(nodes, x$1, y$1, z$1) : null).visitAfter(prepare);\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					ri = radii[node.index], ri2 = ri * ri;\n					xi = node.x + node.vx;\n					if (nDim > 1) yi = node.y + node.vy;\n					if (nDim > 2) zi = node.z + node.vz;\n					tree.visit(apply);\n				}\n			}\n			function apply(treeNode, arg1, arg2, arg3, arg4, arg5, arg6) {\n				var args = [\n					arg1,\n					arg2,\n					arg3,\n					arg4,\n					arg5,\n					arg6\n				];\n				var x0 = args[0], y0 = args[1], z0 = args[2], x1 = args[nDim], y1 = args[nDim + 1], z1 = args[nDim + 2];\n				var data = treeNode.data, rj = treeNode.r, r = ri + rj;\n				if (data) {\n					if (data.index > node.index) {\n						var x = xi - data.x - data.vx, y = nDim > 1 ? yi - data.y - data.vy : 0, z = nDim > 2 ? zi - data.z - data.vz : 0, l = x * x + y * y + z * z;\n						if (l < r * r) {\n							if (x === 0) x = jiggle_default(random), l += x * x;\n							if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n							if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n							l = (r - (l = Math.sqrt(l))) / l * strength;\n							node.vx += (x *= l) * (r = (rj *= rj) / (ri2 + rj));\n							if (nDim > 1) node.vy += (y *= l) * r;\n							if (nDim > 2) node.vz += (z *= l) * r;\n							data.vx -= x * (r = 1 - r);\n							if (nDim > 1) data.vy -= y * r;\n							if (nDim > 2) data.vz -= z * r;\n						}\n					}\n					return;\n				}\n				return x0 > xi + r || x1 < xi - r || nDim > 1 && (y0 > yi + r || y1 < yi - r) || nDim > 2 && (z0 > zi + r || z1 < zi - r);\n			}\n		}\n		function prepare(treeNode) {\n			if (treeNode.data) return treeNode.r = radii[treeNode.data.index];\n			for (var i = treeNode.r = 0; i < Math.pow(2, nDim); ++i) if (treeNode[i] && treeNode[i].r > treeNode.r) treeNode.r = treeNode[i].r;\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, node;\n			radii = new Array(n);\n			for (i = 0; i < n; ++i) node = nodes[i], radii[node.index] = +radius(node, i, nodes);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.iterations = function(_) {\n			return arguments.length ? (iterations = +_, force) : iterations;\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = +_, force) : strength;\n		};\n		force.radius = function(_) {\n			return arguments.length ? (radius = typeof _ === \"function\" ? _ : constant_default(+_), initialize(), force) : radius;\n		};\n		return force;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/link.js\n	function index(d) {\n		return d.index;\n	}\n	function find(nodeById, nodeId) {\n		var node = nodeById.get(nodeId);\n		if (!node) throw new Error(\"node not found: \" + nodeId);\n		return node;\n	}\n	function link_default(links) {\n		var id = index, strength = defaultStrength, strengths, distance = constant_default(30), distances, nodes, nDim, count, bias, random, iterations = 1;\n		if (links == null) links = [];\n		function defaultStrength(link) {\n			return 1 / Math.min(count[link.source.index], count[link.target.index]);\n		}\n		function force(alpha) {\n			for (var k = 0, n = links.length; k < iterations; ++k) for (var i = 0, link, source, target, x = 0, y = 0, z = 0, l, b; i < n; ++i) {\n				link = links[i], source = link.source, target = link.target;\n				x = target.x + target.vx - source.x - source.vx || jiggle_default(random);\n				if (nDim > 1) y = target.y + target.vy - source.y - source.vy || jiggle_default(random);\n				if (nDim > 2) z = target.z + target.vz - source.z - source.vz || jiggle_default(random);\n				l = Math.sqrt(x * x + y * y + z * z);\n				l = (l - distances[i]) / l * alpha * strengths[i];\n				x *= l, y *= l, z *= l;\n				target.vx -= x * (b = bias[i]);\n				if (nDim > 1) target.vy -= y * b;\n				if (nDim > 2) target.vz -= z * b;\n				source.vx += x * (b = 1 - b);\n				if (nDim > 1) source.vy += y * b;\n				if (nDim > 2) source.vz += z * b;\n			}\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, m = links.length, nodeById = new Map(nodes.map((d, i) => [id(d, i, nodes), d])), link;\n			for (i = 0, count = new Array(n); i < m; ++i) {\n				link = links[i], link.index = i;\n				if (typeof link.source !== \"object\") link.source = find(nodeById, link.source);\n				if (typeof link.target !== \"object\") link.target = find(nodeById, link.target);\n				count[link.source.index] = (count[link.source.index] || 0) + 1;\n				count[link.target.index] = (count[link.target.index] || 0) + 1;\n			}\n			for (i = 0, bias = new Array(m); i < m; ++i) link = links[i], bias[i] = count[link.source.index] / (count[link.source.index] + count[link.target.index]);\n			strengths = new Array(m), initializeStrength();\n			distances = new Array(m), initializeDistance();\n		}\n		function initializeStrength() {\n			if (!nodes) return;\n			for (var i = 0, n = links.length; i < n; ++i) strengths[i] = +strength(links[i], i, links);\n		}\n		function initializeDistance() {\n			if (!nodes) return;\n			for (var i = 0, n = links.length; i < n; ++i) distances[i] = +distance(links[i], i, links);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.links = function(_) {\n			return arguments.length ? (links = _, initialize(), force) : links;\n		};\n		force.id = function(_) {\n			return arguments.length ? (id = _, force) : id;\n		};\n		force.iterations = function(_) {\n			return arguments.length ? (iterations = +_, force) : iterations;\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = typeof _ === \"function\" ? _ : constant_default(+_), initializeStrength(), force) : strength;\n		};\n		force.distance = function(_) {\n			return arguments.length ? (distance = typeof _ === \"function\" ? _ : constant_default(+_), initializeDistance(), force) : distance;\n		};\n		return force;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-dispatch@3.0.1/node_modules/d3-dispatch/src/dispatch.js\n	var noop = { value: () => {} };\n	function dispatch() {\n		for (var i = 0, n = arguments.length, _ = {}, t; i < n; ++i) {\n			if (!(t = arguments[i] + \"\") || t in _ || /[\\s.]/.test(t)) throw new Error(\"illegal type: \" + t);\n			_[t] = [];\n		}\n		return new Dispatch(_);\n	}\n	function Dispatch(_) {\n		this._ = _;\n	}\n	function parseTypenames(typenames, types) {\n		return typenames.trim().split(/^|\\s+/).map(function(t) {\n			var name = \"\", i = t.indexOf(\".\");\n			if (i >= 0) name = t.slice(i + 1), t = t.slice(0, i);\n			if (t && !types.hasOwnProperty(t)) throw new Error(\"unknown type: \" + t);\n			return {\n				type: t,\n				name\n			};\n		});\n	}\n	Dispatch.prototype = dispatch.prototype = {\n		constructor: Dispatch,\n		on: function(typename, callback) {\n			var _ = this._, T = parseTypenames(typename + \"\", _), t, i = -1, n = T.length;\n			if (arguments.length < 2) {\n				while (++i < n) if ((t = (typename = T[i]).type) && (t = get(_[t], typename.name))) return t;\n				return;\n			}\n			if (callback != null && typeof callback !== \"function\") throw new Error(\"invalid callback: \" + callback);\n			while (++i < n) if (t = (typename = T[i]).type) _[t] = set(_[t], typename.name, callback);\n			else if (callback == null) for (t in _) _[t] = set(_[t], typename.name, null);\n			return this;\n		},\n		copy: function() {\n			var copy = {}, _ = this._;\n			for (var t in _) copy[t] = _[t].slice();\n			return new Dispatch(copy);\n		},\n		call: function(type, that) {\n			if ((n = arguments.length - 2) > 0) for (var args = new Array(n), i = 0, n, t; i < n; ++i) args[i] = arguments[i + 2];\n			if (!this._.hasOwnProperty(type)) throw new Error(\"unknown type: \" + type);\n			for (t = this._[type], i = 0, n = t.length; i < n; ++i) t[i].value.apply(that, args);\n		},\n		apply: function(type, that, args) {\n			if (!this._.hasOwnProperty(type)) throw new Error(\"unknown type: \" + type);\n			for (var t = this._[type], i = 0, n = t.length; i < n; ++i) t[i].value.apply(that, args);\n		}\n	};\n	function get(type, name) {\n		for (var i = 0, n = type.length, c; i < n; ++i) if ((c = type[i]).name === name) return c.value;\n	}\n	function set(type, name, callback) {\n		for (var i = 0, n = type.length; i < n; ++i) if (type[i].name === name) {\n			type[i] = noop, type = type.slice(0, i).concat(type.slice(i + 1));\n			break;\n		}\n		if (callback != null) type.push({\n			name,\n			value: callback\n		});\n		return type;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-timer@3.0.1/node_modules/d3-timer/src/timer.js\n	var frame = 0;\n	var timeout = 0;\n	var interval = 0;\n	var pokeDelay = 1e3;\n	var taskHead;\n	var taskTail;\n	var clockLast = 0;\n	var clockNow = 0;\n	var clockSkew = 0;\n	var clock = typeof performance === \"object\" && performance.now ? performance : Date;\n	var setFrame = typeof window === \"object\" && window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(f) {\n		setTimeout(f, 17);\n	};\n	function now$1() {\n		return clockNow || (setFrame(clearNow), clockNow = clock.now() + clockSkew);\n	}\n	function clearNow() {\n		clockNow = 0;\n	}\n	function Timer() {\n		this._call = this._time = this._next = null;\n	}\n	Timer.prototype = timer.prototype = {\n		constructor: Timer,\n		restart: function(callback, delay, time) {\n			if (typeof callback !== \"function\") throw new TypeError(\"callback is not a function\");\n			time = (time == null ? now$1() : +time) + (delay == null ? 0 : +delay);\n			if (!this._next && taskTail !== this) {\n				if (taskTail) taskTail._next = this;\n				else taskHead = this;\n				taskTail = this;\n			}\n			this._call = callback;\n			this._time = time;\n			sleep();\n		},\n		stop: function() {\n			if (this._call) {\n				this._call = null;\n				this._time = Infinity;\n				sleep();\n			}\n		}\n	};\n	function timer(callback, delay, time) {\n		var t = new Timer();\n		t.restart(callback, delay, time);\n		return t;\n	}\n	function timerFlush() {\n		now$1();\n		++frame;\n		var t = taskHead, e;\n		while (t) {\n			if ((e = clockNow - t._time) >= 0) t._call.call(void 0, e);\n			t = t._next;\n		}\n		--frame;\n	}\n	function wake() {\n		clockNow = (clockLast = clock.now()) + clockSkew;\n		frame = timeout = 0;\n		try {\n			timerFlush();\n		} finally {\n			frame = 0;\n			nap();\n			clockNow = 0;\n		}\n	}\n	function poke() {\n		var now = clock.now(), delay = now - clockLast;\n		if (delay > pokeDelay) clockSkew -= delay, clockLast = now;\n	}\n	function nap() {\n		var t0, t1 = taskHead, t2, time = Infinity;\n		while (t1) if (t1._call) {\n			if (time > t1._time) time = t1._time;\n			t0 = t1, t1 = t1._next;\n		} else {\n			t2 = t1._next, t1._next = null;\n			t1 = t0 ? t0._next = t2 : taskHead = t2;\n		}\n		taskTail = t0;\n		sleep(time);\n	}\n	function sleep(time) {\n		if (frame) return;\n		if (timeout) timeout = clearTimeout(timeout);\n		if (time - clockNow > 24) {\n			if (time < Infinity) timeout = setTimeout(wake, time - clock.now() - clockSkew);\n			if (interval) interval = clearInterval(interval);\n		} else {\n			if (!interval) clockLast = clock.now(), interval = setInterval(poke, pokeDelay);\n			frame = 1, setFrame(wake);\n		}\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/lcg.js\n	const a = 1664525;\n	const c = 1013904223;\n	const m = 4294967296;\n	function lcg_default() {\n		let s = 1;\n		return () => (s = (a * s + c) % m) / m;\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/simulation.js\n	var MAX_DIMENSIONS = 3;\n	function x(d) {\n		return d.x;\n	}\n	function y(d) {\n		return d.y;\n	}\n	function z(d) {\n		return d.z;\n	}\n	var initialRadius = 10;\n	var initialAngleRoll = Math.PI * (3 - Math.sqrt(5));\n	var initialAngleYaw = Math.PI * 20 / (9 + Math.sqrt(221));\n	function simulation_default(nodes, numDimensions) {\n		numDimensions = numDimensions || 2;\n		var nDim = Math.min(MAX_DIMENSIONS, Math.max(1, Math.round(numDimensions))), simulation, alpha = 1, alphaMin = .001, alphaDecay = 1 - Math.pow(alphaMin, 1 / 300), alphaTarget = 0, velocityDecay = .6, forces = /* @__PURE__ */ new Map(), stepper = timer(step), event = dispatch(\"tick\", \"end\"), random = lcg_default();\n		if (nodes == null) nodes = [];\n		function step() {\n			tick();\n			event.call(\"tick\", simulation);\n			if (alpha < alphaMin) {\n				stepper.stop();\n				event.call(\"end\", simulation);\n			}\n		}\n		function tick(iterations) {\n			var i, n = nodes.length, node;\n			if (iterations === void 0) iterations = 1;\n			for (var k = 0; k < iterations; ++k) {\n				alpha += (alphaTarget - alpha) * alphaDecay;\n				forces.forEach(function(force) {\n					force(alpha);\n				});\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					if (node.fx == null) node.x += node.vx *= velocityDecay;\n					else node.x = node.fx, node.vx = 0;\n					if (nDim > 1) {\n						if (node.fy == null) node.y += node.vy *= velocityDecay;\n						else node.y = node.fy, node.vy = 0;\n					}\n					if (nDim > 2) {\n						if (node.fz == null) node.z += node.vz *= velocityDecay;\n						else node.z = node.fz, node.vz = 0;\n					}\n				}\n			}\n			return simulation;\n		}\n		function initializeNodes() {\n			for (var i = 0, n = nodes.length, node; i < n; ++i) {\n				node = nodes[i], node.index = i;\n				if (node.fx != null) node.x = node.fx;\n				if (node.fy != null) node.y = node.fy;\n				if (node.fz != null) node.z = node.fz;\n				if (isNaN(node.x) || nDim > 1 && isNaN(node.y) || nDim > 2 && isNaN(node.z)) {\n					var radius = initialRadius * (nDim > 2 ? Math.cbrt(.5 + i) : nDim > 1 ? Math.sqrt(.5 + i) : i), rollAngle = i * initialAngleRoll, yawAngle = i * initialAngleYaw;\n					if (nDim === 1) node.x = radius;\n					else if (nDim === 2) {\n						node.x = radius * Math.cos(rollAngle);\n						node.y = radius * Math.sin(rollAngle);\n					} else {\n						node.x = radius * Math.sin(rollAngle) * Math.cos(yawAngle);\n						node.y = radius * Math.cos(rollAngle);\n						node.z = radius * Math.sin(rollAngle) * Math.sin(yawAngle);\n					}\n				}\n				if (isNaN(node.vx) || nDim > 1 && isNaN(node.vy) || nDim > 2 && isNaN(node.vz)) {\n					node.vx = 0;\n					if (nDim > 1) node.vy = 0;\n					if (nDim > 2) node.vz = 0;\n				}\n			}\n		}\n		function initializeForce(force) {\n			if (force.initialize) force.initialize(nodes, random, nDim);\n			return force;\n		}\n		initializeNodes();\n		return simulation = {\n			tick,\n			restart: function() {\n				return stepper.restart(step), simulation;\n			},\n			stop: function() {\n				return stepper.stop(), simulation;\n			},\n			numDimensions: function(_) {\n				return arguments.length ? (nDim = Math.min(MAX_DIMENSIONS, Math.max(1, Math.round(_))), forces.forEach(initializeForce), simulation) : nDim;\n			},\n			nodes: function(_) {\n				return arguments.length ? (nodes = _, initializeNodes(), forces.forEach(initializeForce), simulation) : nodes;\n			},\n			alpha: function(_) {\n				return arguments.length ? (alpha = +_, simulation) : alpha;\n			},\n			alphaMin: function(_) {\n				return arguments.length ? (alphaMin = +_, simulation) : alphaMin;\n			},\n			alphaDecay: function(_) {\n				return arguments.length ? (alphaDecay = +_, simulation) : +alphaDecay;\n			},\n			alphaTarget: function(_) {\n				return arguments.length ? (alphaTarget = +_, simulation) : alphaTarget;\n			},\n			velocityDecay: function(_) {\n				return arguments.length ? (velocityDecay = 1 - _, simulation) : 1 - velocityDecay;\n			},\n			randomSource: function(_) {\n				return arguments.length ? (random = _, forces.forEach(initializeForce), simulation) : random;\n			},\n			force: function(name, _) {\n				return arguments.length > 1 ? (_ == null ? forces.delete(name) : forces.set(name, initializeForce(_)), simulation) : forces.get(name);\n			},\n			find: function() {\n				var args = Array.prototype.slice.call(arguments);\n				var x = args.shift() || 0, y = (nDim > 1 ? args.shift() : null) || 0, z = (nDim > 2 ? args.shift() : null) || 0, radius = args.shift() || Infinity;\n				var i = 0, n = nodes.length, dx, dy, dz, d2, node, closest;\n				radius *= radius;\n				for (i = 0; i < n; ++i) {\n					node = nodes[i];\n					dx = x - node.x;\n					dy = y - (node.y || 0);\n					dz = z - (node.z || 0);\n					d2 = dx * dx + dy * dy + dz * dz;\n					if (d2 < radius) closest = node, radius = d2;\n				}\n				return closest;\n			},\n			on: function(name, _) {\n				return arguments.length > 1 ? (event.on(name, _), simulation) : event.on(name);\n			}\n		};\n	}\n	//#endregion\n	//#region node_modules/.pnpm/d3-force-3d@3.0.6/node_modules/d3-force-3d/src/manyBody.js\n	function manyBody_default() {\n		var nodes, nDim, node, random, alpha, strength = constant_default(-30), strengths, distanceMin2 = 1, distanceMax2 = Infinity, theta2 = .81;\n		function force(_) {\n			var i, n = nodes.length, tree = (nDim === 1 ? binarytree(nodes, x) : nDim === 2 ? quadtree(nodes, x, y) : nDim === 3 ? octree(nodes, x, y, z) : null).visitAfter(accumulate);\n			for (alpha = _, i = 0; i < n; ++i) node = nodes[i], tree.visit(apply);\n		}\n		function initialize() {\n			if (!nodes) return;\n			var i, n = nodes.length, node;\n			strengths = new Array(n);\n			for (i = 0; i < n; ++i) node = nodes[i], strengths[node.index] = +strength(node, i, nodes);\n		}\n		function accumulate(treeNode) {\n			var strength = 0, q, c, weight = 0, x, y, z, i;\n			var numChildren = treeNode.length;\n			if (numChildren) {\n				for (x = y = z = i = 0; i < numChildren; ++i) if ((q = treeNode[i]) && (c = Math.abs(q.value))) strength += q.value, weight += c, x += c * (q.x || 0), y += c * (q.y || 0), z += c * (q.z || 0);\n				strength *= Math.sqrt(4 / numChildren);\n				treeNode.x = x / weight;\n				if (nDim > 1) treeNode.y = y / weight;\n				if (nDim > 2) treeNode.z = z / weight;\n			} else {\n				q = treeNode;\n				q.x = q.data.x;\n				if (nDim > 1) q.y = q.data.y;\n				if (nDim > 2) q.z = q.data.z;\n				do\n					strength += strengths[q.data.index];\n				while (q = q.next);\n			}\n			treeNode.value = strength;\n		}\n		function apply(treeNode, x1, arg1, arg2, arg3) {\n			if (!treeNode.value) return true;\n			var x2 = [\n				arg1,\n				arg2,\n				arg3\n			][nDim - 1];\n			var x = treeNode.x - node.x, y = nDim > 1 ? treeNode.y - node.y : 0, z = nDim > 2 ? treeNode.z - node.z : 0, w = x2 - x1, l = x * x + y * y + z * z;\n			if (w * w / theta2 < l) {\n				if (l < distanceMax2) {\n					if (x === 0) x = jiggle_default(random), l += x * x;\n					if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n					if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n					if (l < distanceMin2) l = Math.sqrt(distanceMin2 * l);\n					node.vx += x * treeNode.value * alpha / l;\n					if (nDim > 1) node.vy += y * treeNode.value * alpha / l;\n					if (nDim > 2) node.vz += z * treeNode.value * alpha / l;\n				}\n				return true;\n			} else if (treeNode.length || l >= distanceMax2) return;\n			if (treeNode.data !== node || treeNode.next) {\n				if (x === 0) x = jiggle_default(random), l += x * x;\n				if (nDim > 1 && y === 0) y = jiggle_default(random), l += y * y;\n				if (nDim > 2 && z === 0) z = jiggle_default(random), l += z * z;\n				if (l < distanceMin2) l = Math.sqrt(distanceMin2 * l);\n			}\n			do\n				if (treeNode.data !== node) {\n					w = strengths[treeNode.data.index] * alpha / l;\n					node.vx += x * w;\n					if (nDim > 1) node.vy += y * w;\n					if (nDim > 2) node.vz += z * w;\n				}\n			while (treeNode = treeNode.next);\n		}\n		force.initialize = function(_nodes, ...args) {\n			nodes = _nodes;\n			random = args.find((arg) => typeof arg === \"function\") || Math.random;\n			nDim = args.find((arg) => [\n				1,\n				2,\n				3\n			].includes(arg)) || 2;\n			initialize();\n		};\n		force.strength = function(_) {\n			return arguments.length ? (strength = typeof _ === \"function\" ? _ : constant_default(+_), initialize(), force) : strength;\n		};\n		force.distanceMin = function(_) {\n			return arguments.length ? (distanceMin2 = _ * _, force) : Math.sqrt(distanceMin2);\n		};\n		force.distanceMax = function(_) {\n			return arguments.length ? (distanceMax2 = _ * _, force) : Math.sqrt(distanceMax2);\n		};\n		force.theta = function(_) {\n			return arguments.length ? (theta2 = _ * _, force) : Math.sqrt(theta2);\n		};\n		return force;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/topology.ts\n	/** 稳定 ID 顺序：相同输入必须得到相同顺序，否则「同一份图」每次布局都会变形 */\n	function stableIds(ids) {\n		return [...ids].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);\n	}\n	/** 无向去重：布局忽略箭头，但显示层仍然保留有向边 */\n	function undirectedPairs(edges) {\n		const seen = /* @__PURE__ */ new Set();\n		const out = [];\n		for (const [a, b] of edges) {\n			if (a === b) continue;\n			const i = Math.min(a, b);\n			const j = Math.max(a, b);\n			const key = i * 1048576 + j;\n			if (seen.has(key)) continue;\n			seen.add(key);\n			out.push([i, j]);\n		}\n		out.sort((x, y) => x[0] - y[0] || x[1] - y[1]);\n		return out;\n	}\n	/**\n	* 结构签名。\n	*\n	* 只包含节点 ID 与边端点：标题、笔记、状态、主题、选中、相机变化都不改变它，\n	* 因此这些变化不会触发重算——否则点一下节点整张图就会重新抖一次。\n	*/\n	function topologySignature(ids, pairs) {\n		let hash = 2166136261;\n		const mix = (value) => {\n			hash ^= value & 255;\n			hash = Math.imul(hash, 16777619);\n			hash ^= value >>> 8 & 255;\n			hash = Math.imul(hash, 16777619);\n		};\n		for (const id of ids) {\n			for (let i = 0; i < id.length; i += 1) mix(id.charCodeAt(i));\n			mix(31);\n		}\n		mix(ids.length);\n		for (const [a, b] of pairs) {\n			mix(a);\n			mix(b);\n		}\n		return `t1:${ids.length}:${pairs.length}:${(hash >>> 0).toString(36)}`;\n	}\n	/** 建拓扑。`distances` 打开时会做全源 BFS（O(N·(N+M))，只在结构变化时算一次） */\n	function buildTopology(rawIds, edges, options = {}) {\n		const ids = stableIds(rawIds);\n		const indexById = /* @__PURE__ */ new Map();\n		ids.forEach((id, i) => indexById.set(id, i));\n		const pairs = undirectedPairs(edges);\n		const adjacency = ids.map(() => []);\n		for (const [a, b] of pairs) {\n			adjacency[a].push(b);\n			adjacency[b].push(a);\n		}\n		for (const list of adjacency) list.sort((a, b) => a - b);\n		const componentOf = new Int32Array(ids.length).fill(-1);\n		const components = [];\n		for (let start = 0; start < ids.length; start += 1) {\n			if (componentOf[start] !== -1) continue;\n			const component = [];\n			const queue = [start];\n			componentOf[start] = components.length;\n			for (let head = 0; head < queue.length; head += 1) {\n				const cur = queue[head];\n				component.push(cur);\n				for (const next of adjacency[cur]) {\n					if (componentOf[next] !== -1) continue;\n					componentOf[next] = components.length;\n					queue.push(next);\n				}\n			}\n			component.sort((a, b) => a - b);\n			components.push(component);\n		}\n		components.sort((a, b) => a[0] - b[0]);\n		return {\n			ids,\n			indexById,\n			adjacency,\n			components,\n			distances: options.distances ? allPairsDistances(adjacency) : null,\n			pairs,\n			signature: topologySignature(ids, pairs),\n			componentOf\n		};\n	}\n	/** 从每个节点出发做一次 BFS；环、未连通、孤立点都在这里自然收敛 */\n	function allPairsDistances(adjacency) {\n		const n = adjacency.length;\n		const table = new Array(n);\n		const queue = new Int32Array(n);\n		for (let root = 0; root < n; root += 1) {\n			const dist = new Int16Array(n).fill(-1);\n			dist[root] = 0;\n			let head = 0;\n			let tail = 0;\n			queue[tail] = root;\n			tail += 1;\n			while (head < tail) {\n				const cur = queue[head];\n				head += 1;\n				const next = dist[cur] + 1;\n				for (const nb of adjacency[cur]) {\n					if (dist[nb] !== -1) continue;\n					dist[nb] = next;\n					queue[tail] = nb;\n					tail += 1;\n				}\n			}\n			table[root] = dist;\n		}\n		return table;\n	}\n	/**\n	* 拓扑目标距离：L(d) = Ledge × (1 + β × ln d)，d ≥ 1。\n	*\n	* L(1) 恰好等于直接边长度：直接相连的节点不再叠加拓扑分离，\n	* 它们的关系由弹簧、斥力和碰撞表达。\n	*/\n	function targetDistance(d, params) {\n		if (d <= 1) return params.edgeLength;\n		return params.edgeLength * (1 + params.topoBeta * Math.log(d));\n	}\n	/**\n	* 挑出参与拓扑分离的节点对。\n	*\n	* 小图（节点对总数在预算内）取全部 d ≥ 2 的对；大图先取关键近邻对\n	* （每个节点按跳数从小到大取若干），再用固定种子在分量内抽样补足预算——\n	* 远分支因此仍被考虑，而不是每帧随机换一批约束引起抖动。\n	*/\n	function selectTopologyPairs(topo, params) {\n		const n = topo.ids.length;\n		const counts = new Int32Array(n);\n		if (n < 2) return {\n			pairs: [],\n			targets: /* @__PURE__ */ new Float64Array(0),\n			counts\n		};\n		const distances = topo.distances;\n		const budget = Math.max(1, Math.floor(params.topoPairBudget));\n		const chosen = /* @__PURE__ */ new Set();\n		const pairs = [];\n		const key = (i, j) => i * 1048576 + j;\n		const push = (i, j) => {\n			const a = Math.min(i, j);\n			const b = Math.max(i, j);\n			const k = key(a, b);\n			if (chosen.has(k)) return false;\n			chosen.add(k);\n			pairs.push([a, b]);\n			counts[a] += 1;\n			counts[b] += 1;\n			return true;\n		};\n		const nearPerNode = n <= 120 ? 64 : 12;\n		if (distances) for (let i = 0; i < n; i += 1) {\n			const row = distances[i];\n			const candidates = [];\n			for (let j = i + 1; j < n; j += 1) {\n				const d = row[j];\n				if (d >= 2) candidates.push({\n					j,\n					d\n				});\n			}\n			candidates.sort((a, b) => a.d - b.d || a.j - b.j);\n			for (let k = 0; k < Math.min(nearPerNode, candidates.length); k += 1) {\n				if (pairs.length >= budget) break;\n				push(i, candidates[k].j);\n			}\n		}\n		else for (const component of topo.components) for (const i of component) {\n			const seen = /* @__PURE__ */ new Set();\n			for (const nb of topo.adjacency[i]) for (const nb2 of topo.adjacency[nb]) seen.add(nb2);\n			const list = [...seen].filter((j) => j > i).sort((a, b) => a - b);\n			for (let k = 0; k < Math.min(nearPerNode, list.length); k += 1) {\n				if (pairs.length >= budget) break;\n				push(i, list[k]);\n			}\n		}\n		if (pairs.length < budget) {\n			const rng = lcg(params.seed ^ 1542469173);\n			const maxAttempts = budget * 12;\n			let attempts = 0;\n			while (pairs.length < budget && attempts < maxAttempts) {\n				attempts += 1;\n				const i = Math.floor(rng() * n);\n				const component = topo.components[topo.componentOf[i]];\n				if (component.length < 2) continue;\n				const j = component[Math.floor(rng() * component.length)];\n				if (i === j) continue;\n				if (distances && distances[i][j] < 2) continue;\n				push(i, j);\n			}\n		}\n		const targets = new Float64Array(pairs.length);\n		for (let k = 0; k < pairs.length; k += 1) {\n			const [i, j] = pairs[k];\n			const d = distances ? distances[i][j] : 3;\n			targets[k] = targetDistance(d >= 2 ? d : 3, params);\n		}\n		return {\n			pairs,\n			targets,\n			counts\n		};\n	}\n	/** 线性同余发生器：固定种子 → 可复现的初始化与抽样 */\n	function lcg(seed) {\n		let state = seed >>> 0;\n		return () => {\n			state = Math.imul(state, 1664525) + 1013904223 >>> 0;\n			return state / 4294967296;\n		};\n	}\n	/**\n	* 「紧凑云团」的估算半径：按节点数与直接边长度估一个体积，\n	* 只用来定柔性边界与初始分布，不当作必须达到的形状。\n	*\n	* 长链细长、星形有外壳、多子团并存都是合法结果——不为了球形扭曲关系。\n	*/\n	function expectedCloudRadius(edgeLength, nodeCount) {\n		if (nodeCount <= 1) return edgeLength;\n		return 1.4 * edgeLength * Math.cbrt(nodeCount);\n	}\n	/** 每个分量的锚点：分量之间留出稳定间隔，锚点不赋予「知识更远」的业务含义 */\n	function componentAnchors(topo, params) {\n		const anchors = new Float64Array(topo.ids.length * 3);\n		const components = [...topo.components].sort((a, b) => b.length - a.length || a[0] - b[0]);\n		if (components.length <= 1) return anchors;\n		const unit = (k) => {\n			const y = 1 - 2 * (k + .5) / components.length;\n			const r = Math.sqrt(Math.max(0, 1 - y * y));\n			const theta = k * Math.PI * (3 - Math.sqrt(5));\n			return [\n				Math.cos(theta) * r,\n				y,\n				Math.sin(theta) * r\n			];\n		};\n		let cursor = 0;\n		components.forEach((component, k) => {\n			const singleton = component.length === 1;\n			const radius = singleton ? params.collideRadius * 1.2 : expectedCloudRadius(params.edgeLength, component.length) * .85;\n			const gap = singleton ? params.collideRadius * 2 : params.edgeLength * .45;\n			const [ux, uy, uz] = unit(k);\n			const shell = params.collideRadius * 1.2 + params.edgeLength * 2.2;\n			const reach = singleton ? Math.min(cursor + radius, shell) : cursor + radius;\n			const center = [\n				ux * reach,\n				uy * reach,\n				uz * reach\n			];\n			for (const i of component) {\n				anchors[i * 3] = center[0];\n				anchors[i * 3 + 1] = center[1];\n				anchors[i * 3 + 2] = center[2];\n			}\n			cursor += radius * 2 + gap;\n		});\n		return anchors;\n	}\n	/**\n	* 确定性初始分布：同一批 ID 与参数必然得到同一批坐标（不含随机数）。\n	*\n	* 每个分量围绕自己的锚点铺开，半径按体积均匀（cbrt）分布，\n	* 方向用黄金角螺旋——比「全在原点附近再让斥力炸开」稳定得多。\n	*/\n	function initialPositions(topo, params) {\n		const n = topo.ids.length;\n		const out = new Float32Array(n * 3);\n		const anchors = componentAnchors(topo, params);\n		for (const component of topo.components) {\n			const radius = expectedCloudRadius(params.edgeLength, component.length) * .6;\n			component.forEach((index, k) => {\n				const fraction = (k + .5) / component.length;\n				const local = radius * Math.cbrt(fraction);\n				const y = 1 - 2 * fraction;\n				const r = Math.sqrt(Math.max(0, 1 - y * y));\n				const theta = k * Math.PI * (3 - Math.sqrt(5));\n				out[index * 3] = anchors[index * 3] + Math.cos(theta) * r * local;\n				out[index * 3 + 1] = anchors[index * 3 + 1] + y * local;\n				out[index * 3 + 2] = anchors[index * 3 + 2] + Math.sin(theta) * r * local;\n			});\n		}\n		return out;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/forces.ts\n	/**\n	* 受控拓扑分离。\n	*\n	* ```\n	* r = ||xi - xj||, u = (xi - xj) / max(r, ε)\n	* a = alpha × kTopo × max(0, L(d) - r) / max(1, qi, qj)\n	* Δvi += clamp(a, 0, aMax) × u,  Δvj -= clamp(a, 0, aMax) × u\n	* ```\n	*\n	* 只处理过近的一侧：过远由弹簧与普通斥力表达，这里不做「拉近」，\n	* 免得把两种力叠成一双更强的斥力。\n	*/\n	function applyTopologyForce(nodes, state, params, alpha) {\n		const epsilon = 1e-4;\n		for (let k = 0; k < state.pairs.length; k += 1) {\n			const [i, j] = state.pairs[k];\n			const a = nodes[i];\n			const b = nodes[j];\n			let dx = a.x - b.x;\n			let dy = a.y - b.y;\n			let dz = a.z - b.z;\n			let r = Math.sqrt(dx * dx + dy * dy + dz * dz);\n			if (r < epsilon) {\n				const [ux, uy, uz] = tieBreakDirection(a.id, b.id);\n				dx = ux;\n				dy = uy;\n				dz = uz;\n				r = 1;\n			}\n			const gap = state.targets[k] - r;\n			if (gap <= 0) continue;\n			const norm = Math.max(1, Math.max(state.counts[i], state.counts[j]));\n			const magnitude = Math.min(params.topoMaxStep, alpha * params.topoStrength * gap / norm);\n			if (magnitude <= 0) continue;\n			const fx = dx / r * magnitude;\n			const fy = dy / r * magnitude;\n			const fz = dz / r * magnitude;\n			a.vx += fx;\n			a.vy += fy;\n			a.vz += fz;\n			b.vx -= fx;\n			b.vy -= fy;\n			b.vz -= fz;\n		}\n	}\n	/** 两个稳定 ID 派生的单位向量：同样的重合对永远朝同一个方向分开 */\n	function tieBreakDirection(idA, idB) {\n		let hash = 2654435769;\n		const key = idA < idB ? `${idA}\\u0000${idB}` : `${idB}\\u0000${idA}`;\n		for (let i = 0; i < key.length; i += 1) {\n			hash ^= key.charCodeAt(i);\n			hash = Math.imul(hash, 16777619) >>> 0;\n		}\n		const x = (hash & 255) / 255 * 2 - 1;\n		const y = (hash >>> 8 & 255) / 255 * 2 - 1;\n		const z = (hash >>> 16 & 255) / 255 * 2 - 1;\n		const length = Math.hypot(x, y, z) || 1;\n		return [\n			x / length,\n			y / length,\n			z / length\n		];\n	}\n	function componentGeometry(topo, params, anchors) {\n		const boundaryRadius = new Float64Array(topo.ids.length);\n		for (const component of topo.components) {\n			const radius = expectedCloudRadius(params.edgeLength, component.length) * params.boundarySlack;\n			for (const index of component) boundaryRadius[index] = radius;\n		}\n		return {\n			anchors,\n			boundaryRadius\n		};\n	}\n	/** 弱收拢：把分量往自己的锚点带，控制松散程度（不改变相对距离的语义） */\n	function applyCenteringForce(nodes, geometry, params, alpha) {\n		const strength = params.centering * alpha;\n		if (strength <= 0) return;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			node.vx += (geometry.anchors[i] - node.x) * strength;\n			node.vy += (geometry.anchors[i + 1] - node.y) * strength;\n			node.vz += (geometry.anchors[i + 2] - node.z) * strength;\n		}\n	}\n	/**\n	* 柔性边界：只对超出目标范围的节点回拉。\n	*\n	* 不用正半径 forceRadial（那是往球壳上贴），也不做硬裁剪：\n	* 长链、星形外壳与多子团都允许存在。\n	*/\n	function applyBoundaryForce(nodes, geometry, params, alpha) {\n		const strength = params.boundaryStrength * alpha;\n		if (strength <= 0) return;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			const dx = node.x - geometry.anchors[i];\n			const dy = node.y - geometry.anchors[i + 1];\n			const dz = node.z - geometry.anchors[i + 2];\n			const r = Math.hypot(dx, dy, dz);\n			const limit = geometry.boundaryRadius[node.index];\n			if (r <= limit || r <= 0) continue;\n			const back = (r - limit) / r * strength;\n			node.vx -= dx * back;\n			node.vy -= dy * back;\n			node.vz -= dz * back;\n		}\n	}\n	/**\n	* 旧坐标软锚定强度。\n	*\n	* 1 表示「沿用旧坐标、正常拉住」；0.25 表示「刚新增或就在新增点一两跳内」——\n	* 允许这段结构重新舒展，外围节点则基本不动，切视图回来还能认出原来的位置。\n	*/\n	function softAnchorWeights(topo, hasPrevious, nearChangeFactor = .25, neighborhoodHops = 2) {\n		const weights = new Float32Array(topo.ids.length);\n		const newNodes = [];\n		for (let i = 0; i < topo.ids.length; i += 1) if (hasPrevious[i]) weights[i] = 1;\n		else newNodes.push(i);\n		if (newNodes.length === 0) return weights;\n		const queue = [...newNodes];\n		const depth = new Int32Array(topo.ids.length).fill(-1);\n		for (const i of newNodes) depth[i] = 0;\n		let head = 0;\n		while (head < queue.length) {\n			const cur = queue[head];\n			head += 1;\n			if (depth[cur] >= neighborhoodHops) continue;\n			for (const next of topo.adjacency[cur]) {\n				if (depth[next] !== -1) continue;\n				depth[next] = depth[cur] + 1;\n				if (weights[next] > 0) weights[next] = nearChangeFactor;\n				queue.push(next);\n			}\n		}\n		return weights;\n	}\n	function applyAnchorForce(nodes, previous, weights, params, alpha) {\n		if (params.anchorStrength <= 0) return;\n		for (const node of nodes) {\n			const weight = weights[node.index];\n			if (weight <= 0) continue;\n			const i = node.index * 3;\n			const strength = params.anchorStrength * weight * alpha;\n			if (strength <= 0) continue;\n			node.vx += (previous[i] - node.x) * strength;\n			node.vy += (previous[i + 1] - node.y) * strength;\n			node.vz += (previous[i + 2] - node.z) * strength;\n		}\n	}\n	/** 位移均方根：归一化到 Ledge 之后才与图的尺度无关 */\n	function rmsDisplacement(nodes, before, edgeLength) {\n		if (nodes.length === 0) return 0;\n		let sum = 0;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			const dx = node.x - before[i];\n			const dy = node.y - before[i + 1];\n			const dz = node.z - before[i + 2];\n			sum += dx * dx + dy * dy + dz * dz;\n		}\n		return Math.sqrt(sum / nodes.length) / edgeLength;\n	}\n	/**\n	* 碰撞残差：最大穿透深度（世界单位）。\n	*\n	* 用空间哈希网格，邻居只在自己与相邻格子中找，因此是 O(N + 重叠对数)，\n	* 不会因为「检查碰撞」把大图拖慢。返回 0 表示没有重叠。\n	*/\n	function collisionResidual(nodes, collideRadius) {\n		if (nodes.length < 2) return 0;\n		const cell = collideRadius * 2;\n		const buckets = /* @__PURE__ */ new Map();\n		const cellOf = (value) => {\n			const index = Math.floor(value / cell);\n			return index < -512 ? -512 : index > 512 ? 512 : index;\n		};\n		const key = (x, y, z) => ((x + 512) * 1025 + (y + 512)) * 1025 + (z + 512);\n		for (const node of nodes) {\n			const k = key(cellOf(node.x), cellOf(node.y), cellOf(node.z));\n			const bucket = buckets.get(k);\n			if (bucket) bucket.push(node.index);\n			else buckets.set(k, [node.index]);\n		}\n		let worst = 0;\n		for (const node of nodes) {\n			const cx = cellOf(node.x);\n			const cy = cellOf(node.y);\n			const cz = cellOf(node.z);\n			for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {\n				const bucket = buckets.get(key(cx + dx, cy + dy, cz + dz));\n				if (!bucket) continue;\n				for (const other of bucket) {\n					if (other <= node.index) continue;\n					const b = nodes[other];\n					const distance = Math.hypot(node.x - b.x, node.y - b.y, node.z - b.z);\n					const penetration = collideRadius * 2 - distance;\n					if (penetration > worst) worst = penetration;\n				}\n			}\n		}\n		return worst;\n	}\n	/** 所有坐标都有限？（出现 NaN/Infinity 时回退上一份有效快照） */\n	function hasFiniteCoordinates(nodes) {\n		for (const node of nodes) if (!Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) return false;\n		return true;\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/layoutCore.ts\n	/**\n	* 布局内核：d3-force-3d 基线 + 本项目的受控扩展\n	*\n	* 基线 A：直接边弹簧 + 普通斥力 + 节点碰撞 + 弱收拢 + 柔性边界。\n	* 扩展 B：受预算限制的弱拓扑分离（`forces.ts`），两者用同一批图对照。\n	*\n	* 手动 tick，不用 d3 的自动计时器：渲染帧率与 Worker 分片都不应该改变物理结果，\n	* 而且「一批算多少步」必须由我们按时间片决定（见《空间图谱技术方案》8.4）。\n	* 这里的代码完全无 DOM、无 window，Worker 与单元测试共用。\n	*/\n	/**\n	* 温启动的初始 alpha。\n	*\n	* 取值是试调起点：太小则新增节点的结构舒展不出来，太大则整张图被重新推开。\n	*/\n	const WARM_ALPHA = .45;\n	function createNodes(input, topo) {\n		const initial = initialPositions(topo, input.params);\n		const previous = input.previous;\n		const nodes = new Array(topo.ids.length);\n		const hasPrevious = new Array(topo.ids.length).fill(false);\n		for (let i = 0; i < topo.ids.length; i += 1) {\n			const known = previous !== null && previous.length >= (i + 1) * 3 && Number.isFinite(previous[i * 3]) && Number.isFinite(previous[i * 3 + 1]) && Number.isFinite(previous[i * 3 + 2]);\n			hasPrevious[i] = known;\n			nodes[i] = {\n				index: i,\n				id: topo.ids[i],\n				x: known ? previous[i * 3] : initial[i * 3],\n				y: known ? previous[i * 3 + 1] : initial[i * 3 + 1],\n				z: known ? previous[i * 3 + 2] : initial[i * 3 + 2],\n				vx: 0,\n				vy: 0,\n				vz: 0\n			};\n		}\n		return {\n			nodes,\n			hasPrevious\n		};\n	}\n	/** 稳定 ID 顺序的入口检查：坐标数组的解释顺序必须与拓扑一致 */\n	function assertStableOrder(ids) {\n		for (let i = 1; i < ids.length; i += 1) if (ids[i - 1] > ids[i]) throw new Error(`布局输入必须按稳定 ID 升序：第 ${i - 1} 项「${ids[i - 1]}」大于第 ${i} 项「${ids[i]}」`);\n	}\n	function createLayout(input) {\n		const params = input.params;\n		assertStableOrder(input.ids);\n		const topo = buildTopology(input.ids, input.edges, { distances: true });\n		const { nodes, hasPrevious } = createNodes(input, topo);\n		const pairs = selectTopologyPairs(topo, params);\n		const topologyForce = {\n			pairs: pairs.pairs,\n			targets: pairs.targets,\n			counts: pairs.counts\n		};\n		const geometry = componentGeometry(topo, params, componentAnchors(topo, params));\n		const anchorWeights = softAnchorWeights(topo, hasPrevious);\n		const previous = input.previous;\n		const links = topo.pairs.map(([a, b]) => ({\n			source: nodes[a],\n			target: nodes[b]\n		}));\n		const simulation = simulation_default(nodes, 3).stop().velocityDecay(params.velocityDecay).alpha(input.warmStart ? WARM_ALPHA : 1).force(\"link\", link_default(links).distance(params.edgeLength).iterations(1)).force(\"charge\", manyBody_default().strength(-params.chargeStrength).distanceMin(params.collideRadius * 1.2).theta(.9)).force(\"collide\", collide_default(params.collideRadius).strength(.9).iterations(2)).force(\"topology\", (alpha) => {\n			applyTopologyForce(nodes, topologyForce, params, alpha);\n		}).force(\"converge\", (alpha) => {\n			applyCenteringForce(nodes, geometry, params, alpha);\n			applyBoundaryForce(nodes, geometry, params, alpha);\n		}).force(\"anchor\", (alpha) => {\n			if (previous && params.anchorStrength > 0) applyAnchorForce(nodes, previous, anchorWeights, params, alpha);\n		});\n		return {\n			topo,\n			params,\n			nodes,\n			geometry,\n			topologyPairs: pairs.pairs.length,\n			valid: readPositions(nodes),\n			iterations: 0,\n			rms: Number.POSITIVE_INFINITY,\n			stableBatches: 0,\n			collisionResidual: 0,\n			finite: true,\n			simulation,\n			scratch: new Float64Array(nodes.length * 3)\n		};\n	}\n	/** 推进若干步，并更新位移与碰撞度量（渲染帧率不参与物理计算） */\n	function stepLayout(runtime, batch = 1) {\n		const { nodes, scratch } = runtime;\n		for (const node of nodes) {\n			const i = node.index * 3;\n			scratch[i] = node.x;\n			scratch[i + 1] = node.y;\n			scratch[i + 2] = node.z;\n		}\n		runtime.simulation.tick(batch);\n		runtime.iterations += batch;\n		runtime.rms = rmsDisplacement(nodes, scratch, runtime.params.edgeLength);\n		runtime.collisionResidual = collisionResidual(nodes, runtime.params.collideRadius);\n		runtime.finite = hasFiniteCoordinates(nodes);\n		if (runtime.finite) {\n			runtime.valid = readPositions(runtime.nodes, runtime.valid);\n			if (runtime.rms < runtime.params.stableRms && runtime.collisionResidual <= runtime.params.stableCollisionResidual) runtime.stableBatches += 1;\n			else runtime.stableBatches = 0;\n		} else runtime.stableBatches = 0;\n	}\n	/** 把坐标导出到独立数组（写进 out 时复用同一块内存，避免每帧新建） */\n	function readPositions(nodes, out) {\n		const target = out && out.length === nodes.length * 3 ? out : new Float32Array(nodes.length * 3);\n		for (const node of nodes) {\n			const i = node.index * 3;\n			target[i] = node.x;\n			target[i + 1] = node.y;\n			target[i + 2] = node.z;\n		}\n		return target;\n	}\n	/** 结束判据：位移与碰撞同时达标，并且连续若干批都达标（不看 alpha 是否耗尽） */\n	function isSettled(runtime, requiredBatches = 4) {\n		return runtime.finite && runtime.stableBatches >= requiredBatches;\n	}\n	function layoutMetrics(runtime, elapsedMs) {\n		return {\n			iterations: runtime.iterations,\n			rms: runtime.rms,\n			collisionResidual: runtime.collisionResidual,\n			topologyPairs: runtime.topologyPairs,\n			components: runtime.topo.components.length,\n			elapsedMs\n		};\n	}\n	/** 结束原因：达标 / 用完预算 / 坐标异常 */\n	function stopReason(runtime, requiredBatches = 4) {\n		if (!runtime.finite) return \"error\";\n		if (isSettled(runtime, requiredBatches)) return \"stable\";\n		return \"budget\";\n	}\n	//#endregion\n	//#region src/vendor/upstream/graph3d/layout.worker.ts\n	/**\n	* 三维布局 Worker\n	*\n	* 协议见 `types.ts` 与《空间图谱技术方案》8.4：\n	* - 同一轮之后到达的旧命令（runId 不增）直接丢弃；快照/结束消息带上版本标识，\n	*   由主线程按 epoch + 拓扑版本 + runId 过滤；\n	* - 分时间片推进：每片结束让出事件循环，UPDATE / CANCEL / STOP 才收得到；\n	* - 只用副本做快照并转移所有权，绝不转移内部仍在写的缓冲区；\n	* - 结束后不留在内存里等下一次：主线程收到 FINISHED 即可 terminate 本 Worker。\n	*\n	* 这个文件刻意不碰 window / document：`tsconfig.worker.json` 用 WebWorker 类型\n	* 单独检查它，避免把 DOM 类型混进 Worker。\n	*/\n	const scope = globalThis;\n	/** 每片推进的步数：太大则取消消息迟到，太小则总时间被调度开销吃掉 */\n	const TICKS_PER_SLICE = 4;\n	/** 快照发送间隔（毫秒）：主线程按 10–20Hz 接收，渲染帧率与它无关 */\n	const SNAPSHOT_INTERVAL_MS = 55;\n	/** 位移与碰撞连续达标的批次数，达到即视为收敛 */\n	const SETTLED_BATCHES = 4;\n	let run = null;\n	function post(message, transfer) {\n		if (transfer && transfer.length > 0) scope.postMessage(message, transfer);\n		else scope.postMessage(message);\n	}\n	function now() {\n		return typeof performance !== \"undefined\" ? performance.now() : Date.now();\n	}\n	function finish(current, reason, source) {\n		if (current.timer !== null) clearTimeout(current.timer);\n		current.timer = null;\n		const elapsedMs = now() - current.startedAt;\n		const positions = new Float32Array(source ?? readPositions(current.runtime.nodes));\n		post({\n			type: \"FINISHED\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			reason,\n			metrics: layoutMetrics(current.runtime, elapsedMs),\n			positions\n		}, [positions.buffer]);\n		current.runtime.simulation.stop();\n		if (run === current) run = null;\n	}\n	function sendSnapshot(current) {\n		const positions = readPositions(current.runtime.nodes);\n		current.sequence += 1;\n		current.lastSnapshotAt = now();\n		post({\n			type: \"SNAPSHOT\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			sequence: current.sequence,\n			positions,\n			iterations: current.runtime.iterations,\n			rms: current.runtime.rms\n		}, [positions.buffer]);\n	}\n	function fail(current, error) {\n		if (current.timer !== null) clearTimeout(current.timer);\n		current.timer = null;\n		post({\n			type: \"ERROR\",\n			epoch: current.epoch,\n			topologyRevision: current.topologyRevision,\n			runId: current.runId,\n			message: error instanceof Error ? error.message : String(error)\n		});\n		if (run === current) run = null;\n	}\n	/**\n	* 一片计算。\n	*\n	* 每片结束都把控制权交回事件循环（setTimeout 0），否则一个长同步循环会让\n	* CANCEL / UPDATE 永远排不上队——「往忙碌 Worker 发取消消息」从来不会打断它。\n	*/\n	function slice() {\n		const current = run;\n		if (!current || current.cancelled) return;\n		current.timer = null;\n		try {\n			stepLayout(current.runtime, TICKS_PER_SLICE);\n		} catch (error) {\n			fail(current, error);\n			return;\n		}\n		const elapsed = now() - current.startedAt;\n		const settled = current.runtime.finite && current.runtime.stableBatches >= SETTLED_BATCHES;\n		const overIterations = current.runtime.iterations >= current.runtime.params.maxIterations;\n		const overtime = elapsed >= current.runtime.params.maxDurationMs;\n		const broken = !current.runtime.finite;\n		if (settled || overIterations || overtime || broken) {\n			if (broken) {\n				finish(current, \"error\", current.runtime.valid);\n				return;\n			}\n			sendSnapshot(current);\n			finish(current, stopReason(current.runtime, SETTLED_BATCHES));\n			return;\n		}\n		if (now() - current.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) sendSnapshot(current);\n		current.timer = setTimeout(slice, 0);\n	}\n	function start(message) {\n		if (run) {\n			if (run.timer !== null) clearTimeout(run.timer);\n			run.runtime.simulation.stop();\n			run = null;\n		}\n		const fresh = {\n			runId: message.runId,\n			epoch: message.epoch,\n			topologyRevision: message.topologyRevision,\n			runtime: null,\n			startedAt: now(),\n			lastSnapshotAt: 0,\n			sequence: 0,\n			cancelled: false,\n			timer: null\n		};\n		try {\n			fresh.runtime = createLayout({\n				ids: message.stableNodeIds,\n				edges: message.edges,\n				previous: message.previousPositions,\n				warmStart: message.type === \"UPDATE\",\n				params: message.parameters\n			});\n		} catch (error) {\n			fail(fresh, error);\n			return;\n		}\n		run = fresh;\n		sendSnapshot(fresh);\n		fresh.timer = setTimeout(slice, 0);\n	}\n	scope.addEventListener(\"message\", (event) => {\n		const message = event.data;\n		if (!message || typeof message !== \"object\") return;\n		if (message.type === \"INIT\" || message.type === \"UPDATE\") {\n			if (run && message.runId <= run.runId) return;\n			start(message);\n			return;\n		}\n		if (message.type === \"CANCEL\" || message.type === \"STOP\") {\n			if (!run || run.runId !== message.runId) return;\n			if (message.type === \"STOP\") {\n				run.cancelled = true;\n				if (run.timer !== null) clearTimeout(run.timer);\n				run.timer = null;\n				run.runtime.simulation.stop();\n				run = null;\n				return;\n			}\n			run.cancelled = true;\n			if (run.timer !== null) clearTimeout(run.timer);\n			run.timer = null;\n			finish(run, \"cancelled\");\n		}\n	});\n	//#endregion\n})();\n";
 		let objectUrl = null;
 		function createKnLayoutWorker() {
 			if (objectUrl === null) objectUrl = URL.createObjectURL(new Blob([KN_LAYOUT_WORKER_SOURCE], { type: "text/javascript" }));
@@ -3482,7 +3490,7 @@ window.__ModuleLoader__.load({
 			/** 同一轮内最后接受的快照序号 */
 			lastSequence = 0;
 			previous = null;
-			buffer = new Float32Array(0);
+			buffer = /* @__PURE__ */ new Float32Array(0);
 			status = "forming";
 			detail = { iterations: 0 };
 			disposed = false;
@@ -4537,7 +4545,8 @@ window.__ModuleLoader__.load({
 		* @returns 是否可达（r 退化到 0 ⇒ 不可达 ✓）。
 		*/
 		function anchorReachable(state, viewport, fovDeg, layoutAnchor, target) {
-			const radius = length(sub$2(displayOf(state, layoutAnchor), state.center));
+			const display = displayOf(state, layoutAnchor);
+			const radius = length(sub$2(display, state.center));
 			if (!(radius > .001)) return false;
 			const ray = cursorRay(state, viewport, fovDeg, target.x, target.y);
 			const toCenter = sub$2(ray.origin, state.center);
@@ -4792,7 +4801,8 @@ window.__ModuleLoader__.load({
 		function wheelTravel(deltaY, deltaMode, viewportHeight, options = DEFAULT_WHEEL) {
 			if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
 			const page = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : options.lineHeight * 20;
-			return clampNum$1(-(deltaY * (deltaMode === 1 ? options.lineHeight : deltaMode === 2 ? page : 1)) * options.speed, -options.maxStep, options.maxStep);
+			const travel = -(deltaY * (deltaMode === 1 ? options.lineHeight : deltaMode === 2 ? page : 1)) * options.speed;
+			return clampNum$1(travel, -options.maxStep, options.maxStep);
 		}
 		/**
 		* 相机沿视线前进/后退：`P ← P + F × travel`，**只动位置**（C/Q/S 都不变）✓。
@@ -4812,7 +4822,8 @@ window.__ModuleLoader__.load({
 				-1
 			]);
 			const next = add$3(state.eye, scale$1(forward, travel));
-			const distance = length(sub$2(next, state.center));
+			const offset = sub$2(next, state.center);
+			const distance = length(offset);
 			if (Number.isFinite(maxRange) && maxRange > 0 && distance > maxRange) {
 				const origin = sub$2(state.eye, state.center);
 				const b = 2 * dot$4(origin, forward);
@@ -4859,11 +4870,12 @@ window.__ModuleLoader__.load({
 		*/
 		function aimAt(state, target, distance) {
 			const display = displayOf(state, target);
-			const eye = sub$2(display, scale$1(rotateVec(state.view, [
+			const forward = rotateVec(state.view, [
 				0,
 				0,
 				-1
-			]), Math.max(.001, distance)));
+			]);
+			const eye = sub$2(display, scale$1(forward, Math.max(.001, distance)));
 			const toTarget = sub$2(display, eye);
 			state.eye = eye;
 			state.view = quatLookAt(normalize$3(toTarget), rotateVec(state.view, [
@@ -5099,7 +5111,7 @@ window.__ModuleLoader__.load({
 			disposed = false;
 			hover = null;
 			hoverEdge = null;
-			bounds = boundsOf(new Float32Array(0), 0);
+			bounds = boundsOf(/* @__PURE__ */ new Float32Array(0), 0);
 			viewport = {
 				width: 800,
 				height: 600
@@ -5471,24 +5483,26 @@ window.__ModuleLoader__.load({
 						if (pointer.panning) {
 							const unit = clampNum(this.state.radius, 30, 400) * .0016;
 							panEye(this.state, point.x - pointer.lastX, point.y - pointer.lastY, unit);
-						} else if (this.grab !== null) if (this.dragPhase === "grab") {
-							const target = {
-								x: this.grab.screen.x + dx,
-								y: this.grab.screen.y + dy
-							};
-							const result = anchorReachable(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target) ? dragAnchorTo(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target) : {
-								iterations: 0,
-								error: Number.POSITIVE_INFINITY,
-								lost: false,
-								stalled: true,
-								progressed: false
-							};
-							if (!result.stalled && !result.lost) {
-								const refresh = dragGainAt(this.state, this.viewport, FOV_DEG$1, this.grab.layout);
-								if (refresh !== null) this.spinGain = refresh;
-							}
-							if (result.lost || result.stalled) this.enterContinuousSpin(point);
-						} else this.applyContinuousSpin(point);
+						} else if (this.grab !== null) {
+							if (this.dragPhase === "grab") {
+								const target = {
+									x: this.grab.screen.x + dx,
+									y: this.grab.screen.y + dy
+								};
+								const result = anchorReachable(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target) ? dragAnchorTo(this.state, this.viewport, FOV_DEG$1, this.grab.layout, target) : {
+									iterations: 0,
+									error: Number.POSITIVE_INFINITY,
+									lost: false,
+									stalled: true,
+									progressed: false
+								};
+								if (!result.stalled && !result.lost) {
+									const refresh = dragGainAt(this.state, this.viewport, FOV_DEG$1, this.grab.layout);
+									if (refresh !== null) this.spinGain = refresh;
+								}
+								if (result.lost || result.stalled) this.enterContinuousSpin(point);
+							} else this.applyContinuousSpin(point);
+						}
 						this.syncCamera();
 						this.options.onCameraChange();
 						this.setHover(null);
@@ -11026,10 +11040,8 @@ window.__ModuleLoader__.load({
 					case ClampToEdgeWrapping:
 						uv.x = uv.x < 0 ? 0 : 1;
 						break;
-					case MirroredRepeatWrapping:
-						if (Math.abs(Math.floor(uv.x) % 2) === 1) uv.x = Math.ceil(uv.x) - uv.x;
-						else uv.x = uv.x - Math.floor(uv.x);
-						break;
+					case MirroredRepeatWrapping: if (Math.abs(Math.floor(uv.x) % 2) === 1) uv.x = Math.ceil(uv.x) - uv.x;
+					else uv.x = uv.x - Math.floor(uv.x);
 				}
 				if (uv.y < 0 || uv.y > 1) switch (this.wrapT) {
 					case RepeatWrapping:
@@ -11038,10 +11050,8 @@ window.__ModuleLoader__.load({
 					case ClampToEdgeWrapping:
 						uv.y = uv.y < 0 ? 0 : 1;
 						break;
-					case MirroredRepeatWrapping:
-						if (Math.abs(Math.floor(uv.y) % 2) === 1) uv.y = Math.ceil(uv.y) - uv.y;
-						else uv.y = uv.y - Math.floor(uv.y);
-						break;
+					case MirroredRepeatWrapping: if (Math.abs(Math.floor(uv.y) % 2) === 1) uv.y = Math.ceil(uv.y) - uv.y;
+					else uv.y = uv.y - Math.floor(uv.y);
 				}
 				if (this.flipY) uv.y = 1 - uv.y;
 				return uv;
@@ -11520,25 +11530,27 @@ window.__ModuleLoader__.load({
 					const xy = (m12 + m21) / 4;
 					const xz = (m13 + m31) / 4;
 					const yz = (m23 + m32) / 4;
-					if (xx > yy && xx > zz) if (xx < epsilon) {
-						x = 0;
-						y = .707106781;
-						z = .707106781;
-					} else {
-						x = Math.sqrt(xx);
-						y = xy / x;
-						z = xz / x;
-					}
-					else if (yy > zz) if (yy < epsilon) {
-						x = .707106781;
-						y = 0;
-						z = .707106781;
-					} else {
-						y = Math.sqrt(yy);
-						x = xy / y;
-						z = yz / y;
-					}
-					else if (zz < epsilon) {
+					if (xx > yy && xx > zz) {
+						if (xx < epsilon) {
+							x = 0;
+							y = .707106781;
+							z = .707106781;
+						} else {
+							x = Math.sqrt(xx);
+							y = xy / x;
+							z = xz / x;
+						}
+					} else if (yy > zz) {
+						if (yy < epsilon) {
+							x = .707106781;
+							y = 0;
+							z = .707106781;
+						} else {
+							y = Math.sqrt(yy);
+							x = xy / y;
+							z = yz / y;
+						}
+					} else if (zz < epsilon) {
 						x = .707106781;
 						y = .707106781;
 						z = 0;
@@ -12232,11 +12244,13 @@ window.__ModuleLoader__.load({
 				this.storeMultisampledColorBuffer = source.storeMultisampledColorBuffer;
 				this.storeMultisampledDepthBuffer = source.storeMultisampledDepthBuffer;
 				this.storeMultisampledStencilBuffer = source.storeMultisampledStencilBuffer;
-				if (source.depthTexture !== null) if (source.depthTexture.renderTarget === source) {
-					const depthTexture = source.depthTexture.clone();
-					depthTexture.renderTarget = null;
-					this.depthTexture = depthTexture;
-				} else this.depthTexture = source.depthTexture;
+				if (source.depthTexture !== null) {
+					if (source.depthTexture.renderTarget === source) {
+						const depthTexture = source.depthTexture.clone();
+						depthTexture.renderTarget = null;
+						this.depthTexture = depthTexture;
+					} else this.depthTexture = source.depthTexture;
+				}
 				this.samples = source.samples;
 				this.multiview = source.multiview;
 				this.useArrayDepthTexture = source.useArrayDepthTexture;
@@ -14740,8 +14754,10 @@ window.__ModuleLoader__.load({
 			updateMatrixWorld(force) {
 				if (this.matrixAutoUpdate) this.updateMatrix();
 				if (this.matrixWorldNeedsUpdate || force) {
-					if (this.matrixWorldAutoUpdate === true) if (this.parent === null) this.matrixWorld.copy(this.matrix);
-					else this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+					if (this.matrixWorldAutoUpdate === true) {
+						if (this.parent === null) this.matrixWorld.copy(this.matrix);
+						else this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+					}
 					this.matrixWorldNeedsUpdate = false;
 					force = true;
 				}
@@ -14762,8 +14778,10 @@ window.__ModuleLoader__.load({
 				if (updateParents === true && parent !== null) parent.updateWorldMatrix(true, false);
 				if (this.matrixAutoUpdate) this.updateMatrix();
 				if (this.matrixWorldNeedsUpdate || force) {
-					if (this.matrixWorldAutoUpdate === true) if (this.parent === null) this.matrixWorld.copy(this.matrix);
-					else this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+					if (this.matrixWorldAutoUpdate === true) {
+						if (this.parent === null) this.matrixWorld.copy(this.matrix);
+						else this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+					}
 					this.matrixWorldNeedsUpdate = false;
 					force = true;
 				}
@@ -14880,11 +14898,13 @@ window.__ModuleLoader__.load({
 						object.skeleton = this.skeleton.uuid;
 					}
 				}
-				if (this.material !== void 0) if (Array.isArray(this.material)) {
-					const uuids = [];
-					for (let i = 0, l = this.material.length; i < l; i++) uuids.push(serialize(meta.materials, this.material[i]));
-					object.material = uuids;
-				} else object.material = serialize(meta.materials, this.material);
+				if (this.material !== void 0) {
+					if (Array.isArray(this.material)) {
+						const uuids = [];
+						for (let i = 0, l = this.material.length; i < l; i++) uuids.push(serialize(meta.materials, this.material[i]));
+						object.material = uuids;
+					} else object.material = serialize(meta.materials, this.material);
+				}
 				if (this.children.length > 0) {
 					object.children = [];
 					for (let i = 0; i < this.children.length; i++) object.children.push(this.children[i].toJSON(meta).object);
@@ -15217,8 +15237,6 @@ window.__ModuleLoader__.load({
 						const indexTip = hand.joints["index-finger-tip"];
 						const thumbTip = hand.joints["thumb-tip"];
 						const distance = indexTip.position.distanceTo(thumbTip.position);
-						const distanceToPinch = .02;
-						const threshold = .005;
 						if (hand.inputState.pinching && distance > .025) {
 							hand.inputState.pinching = false;
 							this.dispatchEvent({
@@ -15226,7 +15244,7 @@ window.__ModuleLoader__.load({
 								handedness: inputSource.handedness,
 								target: this
 							});
-						} else if (!hand.inputState.pinching && distance <= distanceToPinch - threshold) {
+						} else if (!hand.inputState.pinching && distance <= .015) {
 							hand.inputState.pinching = true;
 							this.dispatchEvent({
 								type: "pinchstart",
@@ -15818,9 +15836,7 @@ window.__ModuleLoader__.load({
 						case g:
 							hue = (b - r) / delta + 2;
 							break;
-						case b:
-							hue = (r - g) / delta + 4;
-							break;
+						case b: hue = (r - g) / delta + 4;
 					}
 					hue /= 6;
 				}
@@ -20455,8 +20471,10 @@ window.__ModuleLoader__.load({
 				if (json.visible !== void 0) this.visible = json.visible;
 				if (json.toneMapped !== void 0) this.toneMapped = json.toneMapped;
 				if (json.userData !== void 0) this.userData = json.userData;
-				if (json.vertexColors !== void 0) if (typeof json.vertexColors === "number") this.vertexColors = json.vertexColors > 0;
-				else this.vertexColors = json.vertexColors;
+				if (json.vertexColors !== void 0) {
+					if (typeof json.vertexColors === "number") this.vertexColors = json.vertexColors > 0;
+					else this.vertexColors = json.vertexColors;
+				}
 				if (json.size !== void 0) this.size = json.size;
 				if (json.sizeAttenuation !== void 0) this.sizeAttenuation = json.sizeAttenuation;
 				if (json.map !== void 0) this.map = textures[json.map] || null;
@@ -20741,22 +20759,24 @@ window.__ModuleLoader__.load({
 					s0 = a01 * b1 - b0;
 					s1 = a01 * b0 - b1;
 					extDet = segExtent * det;
-					if (s0 >= 0) if (s1 >= -extDet) if (s1 <= extDet) {
-						const invDet = 1 / det;
-						s0 *= invDet;
-						s1 *= invDet;
-						sqrDist = s0 * (s0 + a01 * s1 + 2 * b0) + s1 * (a01 * s0 + s1 + 2 * b1) + c;
-					} else {
-						s1 = segExtent;
-						s0 = Math.max(0, -(a01 * s1 + b0));
-						sqrDist = -s0 * s0 + s1 * (s1 + 2 * b1) + c;
-					}
-					else {
-						s1 = -segExtent;
-						s0 = Math.max(0, -(a01 * s1 + b0));
-						sqrDist = -s0 * s0 + s1 * (s1 + 2 * b1) + c;
-					}
-					else if (s1 <= -extDet) {
+					if (s0 >= 0) {
+						if (s1 >= -extDet) {
+							if (s1 <= extDet) {
+								const invDet = 1 / det;
+								s0 *= invDet;
+								s1 *= invDet;
+								sqrDist = s0 * (s0 + a01 * s1 + 2 * b0) + s1 * (a01 * s0 + s1 + 2 * b1) + c;
+							} else {
+								s1 = segExtent;
+								s0 = Math.max(0, -(a01 * s1 + b0));
+								sqrDist = -s0 * s0 + s1 * (s1 + 2 * b1) + c;
+							}
+						} else {
+							s1 = -segExtent;
+							s0 = Math.max(0, -(a01 * s1 + b0));
+							sqrDist = -s0 * s0 + s1 * (s1 + 2 * b1) + c;
+						}
+					} else if (s1 <= -extDet) {
 						s0 = Math.max(0, -(-a01 * segExtent + b0));
 						s1 = s0 > 0 ? -segExtent : Math.min(Math.max(-segExtent, -b1), segExtent);
 						sqrDist = -s0 * s0 + s1 * (s1 + 2 * b1) + c;
@@ -21458,65 +21478,68 @@ window.__ModuleLoader__.load({
 				const normal = geometry.attributes.normal;
 				const groups = geometry.groups;
 				const drawRange = geometry.drawRange;
-				if (index !== null) if (Array.isArray(material)) for (let i = 0, il = groups.length; i < il; i++) {
-					const group = groups[i];
-					const groupMaterial = material[group.materialIndex];
-					const start = Math.max(group.start, drawRange.start);
-					const end = Math.min(index.count, Math.min(group.start + group.count, drawRange.start + drawRange.count));
-					for (let j = start, jl = end; j < jl; j += 3) {
-						const a = index.getX(j);
-						const b = index.getX(j + 1);
-						const c = index.getX(j + 2);
-						intersection = checkGeometryIntersection(this, groupMaterial, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
-						if (intersection) {
-							intersection.faceIndex = Math.floor(j / 3);
-							intersection.face.materialIndex = group.materialIndex;
-							intersects.push(intersection);
+				if (index !== null) {
+					if (Array.isArray(material)) for (let i = 0, il = groups.length; i < il; i++) {
+						const group = groups[i];
+						const groupMaterial = material[group.materialIndex];
+						const start = Math.max(group.start, drawRange.start);
+						const end = Math.min(index.count, Math.min(group.start + group.count, drawRange.start + drawRange.count));
+						for (let j = start, jl = end; j < jl; j += 3) {
+							const a = index.getX(j);
+							const b = index.getX(j + 1);
+							const c = index.getX(j + 2);
+							intersection = checkGeometryIntersection(this, groupMaterial, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
+							if (intersection) {
+								intersection.faceIndex = Math.floor(j / 3);
+								intersection.face.materialIndex = group.materialIndex;
+								intersects.push(intersection);
+							}
 						}
 					}
-				}
-				else {
-					const start = Math.max(0, drawRange.start);
-					const end = Math.min(index.count, drawRange.start + drawRange.count);
-					for (let i = start, il = end; i < il; i += 3) {
-						const a = index.getX(i);
-						const b = index.getX(i + 1);
-						const c = index.getX(i + 2);
-						intersection = checkGeometryIntersection(this, material, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
-						if (intersection) {
-							intersection.faceIndex = Math.floor(i / 3);
-							intersects.push(intersection);
+					else {
+						const start = Math.max(0, drawRange.start);
+						const end = Math.min(index.count, drawRange.start + drawRange.count);
+						for (let i = start, il = end; i < il; i += 3) {
+							const a = index.getX(i);
+							const b = index.getX(i + 1);
+							const c = index.getX(i + 2);
+							intersection = checkGeometryIntersection(this, material, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
+							if (intersection) {
+								intersection.faceIndex = Math.floor(i / 3);
+								intersects.push(intersection);
+							}
 						}
 					}
-				}
-				else if (position !== void 0) if (Array.isArray(material)) for (let i = 0, il = groups.length; i < il; i++) {
-					const group = groups[i];
-					const groupMaterial = material[group.materialIndex];
-					const start = Math.max(group.start, drawRange.start);
-					const end = Math.min(position.count, Math.min(group.start + group.count, drawRange.start + drawRange.count));
-					for (let j = start, jl = end; j < jl; j += 3) {
-						const a = j;
-						const b = j + 1;
-						const c = j + 2;
-						intersection = checkGeometryIntersection(this, groupMaterial, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
-						if (intersection) {
-							intersection.faceIndex = Math.floor(j / 3);
-							intersection.face.materialIndex = group.materialIndex;
-							intersects.push(intersection);
+				} else if (position !== void 0) {
+					if (Array.isArray(material)) for (let i = 0, il = groups.length; i < il; i++) {
+						const group = groups[i];
+						const groupMaterial = material[group.materialIndex];
+						const start = Math.max(group.start, drawRange.start);
+						const end = Math.min(position.count, Math.min(group.start + group.count, drawRange.start + drawRange.count));
+						for (let j = start, jl = end; j < jl; j += 3) {
+							const a = j;
+							const b = j + 1;
+							const c = j + 2;
+							intersection = checkGeometryIntersection(this, groupMaterial, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
+							if (intersection) {
+								intersection.faceIndex = Math.floor(j / 3);
+								intersection.face.materialIndex = group.materialIndex;
+								intersects.push(intersection);
+							}
 						}
 					}
-				}
-				else {
-					const start = Math.max(0, drawRange.start);
-					const end = Math.min(position.count, drawRange.start + drawRange.count);
-					for (let i = start, il = end; i < il; i += 3) {
-						const a = i;
-						const b = i + 1;
-						const c = i + 2;
-						intersection = checkGeometryIntersection(this, material, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
-						if (intersection) {
-							intersection.faceIndex = Math.floor(i / 3);
-							intersects.push(intersection);
+					else {
+						const start = Math.max(0, drawRange.start);
+						const end = Math.min(position.count, drawRange.start + drawRange.count);
+						for (let i = start, il = end; i < il; i += 3) {
+							const a = i;
+							const b = i + 1;
+							const c = i + 2;
+							intersection = checkGeometryIntersection(this, material, raycaster, rayLocalSpace, uv, uv1, normal, a, b, c);
+							if (intersection) {
+								intersection.faceIndex = Math.floor(i / 3);
+								intersects.push(intersection);
+							}
 						}
 					}
 				}
@@ -22056,7 +22079,8 @@ window.__ModuleLoader__.load({
 			*/
 			intersectsSprite(sprite) {
 				_sphere$3.center.set(0, 0, 0);
-				_sphere$3.radius = .7071067811865476 + _defaultSpriteCenter.distanceTo(sprite.center);
+				const offset = _defaultSpriteCenter.distanceTo(sprite.center);
+				_sphere$3.radius = .7071067811865476 + offset;
 				_sphere$3.applyMatrix4(sprite.matrixWorld);
 				return this.intersectsSphere(_sphere$3);
 			}
@@ -23638,16 +23662,18 @@ window.__ModuleLoader__.load({
 				dst[u] = {};
 				for (const p in src[u]) {
 					const property = src[u][p];
-					if (isThreeObject(property)) if (property.isRenderTargetTexture) {
-						warn$3("UniformsUtils: Textures of render targets cannot be cloned via cloneUniforms() or mergeUniforms().");
-						dst[u][p] = null;
-					} else dst[u][p] = property.clone();
-					else if (Array.isArray(property)) if (isThreeObject(property[0])) {
-						const clonedProperty = [];
-						for (let i = 0, l = property.length; i < l; i++) clonedProperty[i] = property[i].clone();
-						dst[u][p] = clonedProperty;
-					} else dst[u][p] = property.slice();
-					else dst[u][p] = property;
+					if (isThreeObject(property)) {
+						if (property.isRenderTargetTexture) {
+							warn$3("UniformsUtils: Textures of render targets cannot be cloned via cloneUniforms() or mergeUniforms().");
+							dst[u][p] = null;
+						} else dst[u][p] = property.clone();
+					} else if (Array.isArray(property)) {
+						if (isThreeObject(property[0])) {
+							const clonedProperty = [];
+							for (let i = 0, l = property.length; i < l; i++) clonedProperty[i] = property[i].clone();
+							dst[u][p] = clonedProperty;
+						} else dst[u][p] = property.slice();
+					} else dst[u][p] = property;
 				}
 			}
 			return dst;
@@ -24680,7 +24706,8 @@ window.__ModuleLoader__.load({
 					const inTangentOffset = i1 * tangentStride + i * 2;
 					const c1x = inTangents[inTangentOffset];
 					const c1y = inTangents[inTangentOffset + 1];
-					result[i] = cubicBezier(solveBezierParameter(t, t0, c0x, c1x, t1), v0, c0y, c1y, v1);
+					const s = solveBezierParameter(t, t0, c0x, c1x, t1);
+					result[i] = cubicBezier(s, v0, c0y, c1y, v1);
 				}
 				return result;
 			}
@@ -24838,14 +24865,14 @@ window.__ModuleLoader__.load({
 					case InterpolateSmooth:
 						factoryMethod = this.InterpolantFactoryMethodSmooth;
 						break;
-					case InterpolateBezier:
-						factoryMethod = this.InterpolantFactoryMethodBezier;
-						break;
+					case InterpolateBezier: factoryMethod = this.InterpolantFactoryMethodBezier;
 				}
 				if (factoryMethod === void 0) {
 					const message = "unsupported interpolation for " + this.ValueTypeName + " keyframe track named " + this.name;
-					if (this.createInterpolant === void 0) if (interpolation !== this.DefaultInterpolation) this.setInterpolation(this.DefaultInterpolation);
-					else throw new Error(message);
+					if (this.createInterpolant === void 0) {
+						if (interpolation !== this.DefaultInterpolation) this.setInterpolation(this.DefaultInterpolation);
+						else throw new Error(message);
+					}
 					warn$3("KeyframeTrack:", message);
 					return this;
 				}
@@ -24987,16 +25014,18 @@ window.__ModuleLoader__.load({
 				for (let i = 1; i < lastIndex; ++i) {
 					let keep = false;
 					const time = times[i];
-					if (time !== times[i + 1] && (i !== 1 || time !== times[0])) if (!smoothInterpolation) {
-						const offset = i * stride, offsetP = offset - stride, offsetN = offset + stride;
-						for (let j = 0; j !== stride; ++j) {
-							const value = values[offset + j];
-							if (value !== values[offsetP + j] || value !== values[offsetN + j]) {
-								keep = true;
-								break;
+					if (time !== times[i + 1] && (i !== 1 || time !== times[0])) {
+						if (!smoothInterpolation) {
+							const offset = i * stride, offsetP = offset - stride, offsetN = offset + stride;
+							for (let j = 0; j !== stride; ++j) {
+								const value = values[offset + j];
+								if (value !== values[offsetP + j] || value !== values[offsetN + j]) {
+									keep = true;
+									break;
+								}
 							}
-						}
-					} else keep = true;
+						} else keep = true;
+					}
 					if (keep) {
 						if (i !== writeIndex) {
 							times[writeIndex] = times[i];
@@ -27358,8 +27387,10 @@ window.__ModuleLoader__.load({
 			throw new Error(`THREE.TextureUtils: Unknown texture type ${type}.`);
 		}
 		if (typeof __THREE_DEVTOOLS__ !== "undefined") __THREE_DEVTOOLS__.dispatchEvent(new CustomEvent("register", { detail: { revision: "186" } }));
-		if (typeof window !== "undefined") if (window.__THREE__) warn$3("WARNING: Multiple instances of Three.js being imported.");
-		else window.__THREE__ = "186";
+		if (typeof window !== "undefined") {
+			if (window.__THREE__) warn$3("WARNING: Multiple instances of Three.js being imported.");
+			else window.__THREE__ = "186";
+		}
 		//#endregion
 		//#region node_modules/.pnpm/three@0.186.0/node_modules/three/build/three.module.js
 		/**
@@ -27409,9 +27440,10 @@ window.__ModuleLoader__.load({
 				let type;
 				if (array instanceof Float32Array) type = gl.FLOAT;
 				else if (typeof Float16Array !== "undefined" && array instanceof Float16Array) type = gl.HALF_FLOAT;
-				else if (array instanceof Uint16Array) if (attribute.isFloat16BufferAttribute) type = gl.HALF_FLOAT;
-				else type = gl.UNSIGNED_SHORT;
-				else if (array instanceof Int16Array) type = gl.SHORT;
+				else if (array instanceof Uint16Array) {
+					if (attribute.isFloat16BufferAttribute) type = gl.HALF_FLOAT;
+					else type = gl.UNSIGNED_SHORT;
+				} else if (array instanceof Int16Array) type = gl.SHORT;
 				else if (array instanceof Uint32Array) type = gl.UNSIGNED_INT;
 				else if (array instanceof Int32Array) type = gl.INT;
 				else if (array instanceof Int8Array) type = gl.BYTE;
@@ -28672,9 +28704,10 @@ window.__ModuleLoader__.load({
 			this.setState = function(material, camera, useCache) {
 				const planes = material.clippingPlanes, clipIntersection = material.clipIntersection, clipShadows = material.clipShadows;
 				const materialProperties = properties.get(material);
-				if (!localClippingEnabled || planes === null || planes.length === 0 || renderingShadows && !clipShadows) if (renderingShadows) projectPlanes(null);
-				else resetGlobalState();
-				else {
+				if (!localClippingEnabled || planes === null || planes.length === 0 || renderingShadows && !clipShadows) {
+					if (renderingShadows) projectPlanes(null);
+					else resetGlobalState();
+				} else {
 					const nGlobal = renderingShadows ? 0 : numGlobalPlanes, lGlobal = nGlobal * 4;
 					let dstArray = materialProperties.clippingState || null;
 					uniform.value = dstArray;
@@ -29110,8 +29143,8 @@ window.__ModuleLoader__.load({
 				const cubeFaces = 6;
 				const vertices = 6;
 				const positionSize = 3;
-				const position = new Float32Array(positionSize * vertices * cubeFaces);
-				const outputDirection = new Float32Array(positionSize * vertices * cubeFaces);
+				const position = /* @__PURE__ */ new Float32Array(108);
+				const outputDirection = /* @__PURE__ */ new Float32Array(108);
 				for (let face = 0; face < cubeFaces; face++) {
 					const x = face % 3 * 2 / 3 - 1;
 					const y = face > 2 ? 0 : -1;
@@ -29135,7 +29168,7 @@ window.__ModuleLoader__.load({
 						y + 1,
 						0
 					];
-					position.set(coordinates, positionSize * vertices * face);
+					position.set(coordinates, 18 * face);
 					for (let vertex = 0; vertex < vertices; vertex++) {
 						const u = uv1[vertex * 2] * 2 - 1;
 						const v = uv1[vertex * 2 + 1] * 2 - 1;
@@ -29599,18 +29632,20 @@ window.__ModuleLoader__.load({
 			function getCube(texture) {
 				if (texture && texture.isTexture) {
 					const mapping = texture.mapping;
-					if (mapping === 303 || mapping === 304) if (cubeMaps.has(texture)) {
-						const cubemap = cubeMaps.get(texture).texture;
-						return mapTextureMapping(cubemap, texture.mapping);
-					} else {
-						const image = texture.image;
-						if (image && image.height > 0) {
-							const renderTarget = new WebGLCubeRenderTarget(image.height);
-							renderTarget.fromEquirectangularTexture(renderer, texture);
-							cubeMaps.set(texture, renderTarget);
-							texture.addEventListener("dispose", onCubemapDispose);
-							return mapTextureMapping(renderTarget.texture, texture.mapping);
-						} else return null;
+					if (mapping === 303 || mapping === 304) {
+						if (cubeMaps.has(texture)) {
+							const cubemap = cubeMaps.get(texture).texture;
+							return mapTextureMapping(cubemap, texture.mapping);
+						} else {
+							const image = texture.image;
+							if (image && image.height > 0) {
+								const renderTarget = new WebGLCubeRenderTarget(image.height);
+								renderTarget.fromEquirectangularTexture(renderer, texture);
+								cubeMaps.set(texture, renderTarget);
+								texture.addEventListener("dispose", onCubemapDispose);
+								return mapTextureMapping(renderTarget.texture, texture.mapping);
+							} else return null;
+						}
 					}
 				}
 				return texture;
@@ -29852,9 +29887,7 @@ window.__ModuleLoader__.load({
 					case gl.POINTS:
 						render.points += instanceCount * count;
 						break;
-					default:
-						error("WebGLInfo: Unknown draw mode:", mode);
-						break;
+					default: error("WebGLInfo: Unknown draw mode:", mode);
 				}
 			}
 			function reset() {
@@ -30242,9 +30275,9 @@ window.__ModuleLoader__.load({
 		const emptyCubeTexture = /*@__PURE__*/ new CubeTexture();
 		const arrayCacheF32 = [];
 		const arrayCacheI32 = [];
-		const mat4array = new Float32Array(16);
-		const mat3array = new Float32Array(9);
-		const mat2array = new Float32Array(4);
+		const mat4array = /* @__PURE__ */ new Float32Array(16);
+		const mat3array = /* @__PURE__ */ new Float32Array(9);
+		const mat2array = /* @__PURE__ */ new Float32Array(4);
 		function flatten$1(array, nBlocks, blockSize) {
 			const firstElem = array[0];
 			if (firstElem <= 0 || firstElem > 0) return array;
@@ -32030,14 +32063,12 @@ window.__ModuleLoader__.load({
 							groundColor: new Color()
 						};
 						break;
-					case "RectAreaLight":
-						uniforms = {
-							color: new Color(),
-							position: new Vector3(),
-							halfWidth: new Vector3(),
-							halfHeight: new Vector3()
-						};
-						break;
+					case "RectAreaLight": uniforms = {
+						color: new Color(),
+						position: new Vector3(),
+						halfWidth: new Vector3(),
+						halfHeight: new Vector3()
+					};
 				}
 				lights[light.id] = uniforms;
 				return uniforms;
@@ -32068,17 +32099,15 @@ window.__ModuleLoader__.load({
 							shadowMapSize: new Vector2()
 						};
 						break;
-					case "PointLight":
-						uniforms = {
-							shadowIntensity: 1,
-							shadowBias: 0,
-							shadowNormalBias: 0,
-							shadowRadius: 1,
-							shadowMapSize: new Vector2(),
-							shadowCameraNear: 1,
-							shadowCameraFar: 1e3
-						};
-						break;
+					case "PointLight": uniforms = {
+						shadowIntensity: 1,
+						shadowBias: 0,
+						shadowNormalBias: 0,
+						shadowRadius: 1,
+						shadowMapSize: new Vector2(),
+						shadowCameraNear: 1,
+						shadowCameraFar: 1e3
+					};
 				}
 				lights[light.id] = uniforms;
 				return uniforms;
@@ -32166,8 +32195,10 @@ window.__ModuleLoader__.load({
 					const intensity = light.intensity;
 					const distance = light.distance;
 					let shadowMap = null;
-					if (light.shadow && light.shadow.map) if (light.shadow.map.texture.format === 1030) shadowMap = light.shadow.map.texture;
-					else shadowMap = light.shadow.map.depthTexture || light.shadow.map.texture;
+					if (light.shadow && light.shadow.map) {
+						if (light.shadow.map.texture.format === 1030) shadowMap = light.shadow.map.texture;
+						else shadowMap = light.shadow.map.depthTexture || light.shadow.map.texture;
+					}
 					if (light.isAmbientLight) {
 						r += color.r * intensity;
 						g += color.g * intensity;
@@ -32282,12 +32313,14 @@ window.__ModuleLoader__.load({
 						hemiLength++;
 					}
 				}
-				if (rectAreaLength > 0) if (extensions.has("OES_texture_float_linear") === true) {
-					state.rectAreaLTC1 = UniformsLib.LTC_FLOAT_1;
-					state.rectAreaLTC2 = UniformsLib.LTC_FLOAT_2;
-				} else {
-					state.rectAreaLTC1 = UniformsLib.LTC_HALF_1;
-					state.rectAreaLTC2 = UniformsLib.LTC_HALF_2;
+				if (rectAreaLength > 0) {
+					if (extensions.has("OES_texture_float_linear") === true) {
+						state.rectAreaLTC1 = UniformsLib.LTC_FLOAT_1;
+						state.rectAreaLTC2 = UniformsLib.LTC_FLOAT_2;
+					} else {
+						state.rectAreaLTC1 = UniformsLib.LTC_HALF_1;
+						state.rectAreaLTC2 = UniformsLib.LTC_HALF_2;
+					}
 				}
 				state.ambient[0] = r;
 				state.ambient[1] = g;
@@ -32540,8 +32573,10 @@ window.__ModuleLoader__.load({
 				_state.setScissorTest(false);
 				const typeChanged = _previousType !== this.type;
 				if (typeChanged) scene.traverse(function(object) {
-					if (object.material) if (Array.isArray(object.material)) object.material.forEach((mat) => mat.needsUpdate = true);
-					else object.material.needsUpdate = true;
+					if (object.material) {
+						if (Array.isArray(object.material)) object.material.forEach((mat) => mat.needsUpdate = true);
+						else object.material.needsUpdate = true;
+					}
 				});
 				for (let i = 0, il = lights.length; i < il; i++) {
 					const light = lights[i];
@@ -32905,8 +32940,10 @@ window.__ModuleLoader__.load({
 				let currentStencilClear = null;
 				return {
 					setTest: function(stencilTest) {
-						if (!locked) if (stencilTest) enable(gl.STENCIL_TEST);
-						else disable(gl.STENCIL_TEST);
+						if (!locked) {
+							if (stencilTest) enable(gl.STENCIL_TEST);
+							else disable(gl.STENCIL_TEST);
+						}
 					},
 					setMask: function(stencilMask) {
 						if (currentStencilMask !== stencilMask && !locked) {
@@ -32997,7 +33034,7 @@ window.__ModuleLoader__.load({
 			const currentScissor = new Vector4().fromArray(scissorParam);
 			const currentViewport = new Vector4().fromArray(viewportParam);
 			function createTexture(type, target, count, dimensions) {
-				const data = new Uint8Array(4);
+				const data = /* @__PURE__ */ new Uint8Array(4);
 				const texture = gl.createTexture();
 				gl.bindTexture(type, texture);
 				gl.texParameteri(type, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -33127,9 +33164,7 @@ window.__ModuleLoader__.load({
 							case 4:
 								gl.blendFuncSeparate(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
 								break;
-							default:
-								error("WebGLState: Invalid blending: ", blending);
-								break;
+							default: error("WebGLState: Invalid blending: ", blending);
 						}
 						else switch (blending) {
 							case 1:
@@ -33144,9 +33179,7 @@ window.__ModuleLoader__.load({
 							case 4:
 								error("WebGLState: MultiplyBlending requires material.premultipliedAlpha = true");
 								break;
-							default:
-								error("WebGLState: Invalid blending: ", blending);
-								break;
+							default: error("WebGLState: Invalid blending: ", blending);
 						}
 						currentBlendSrc = null;
 						currentBlendDst = null;
@@ -33212,9 +33245,11 @@ window.__ModuleLoader__.load({
 			function setCullFace(cullFace) {
 				if (cullFace !== 0) {
 					enable(gl.CULL_FACE);
-					if (cullFace !== currentCullFace) if (cullFace === 1) gl.cullFace(gl.BACK);
-					else if (cullFace === 2) gl.cullFace(gl.FRONT);
-					else gl.cullFace(gl.FRONT_AND_BACK);
+					if (cullFace !== currentCullFace) {
+						if (cullFace === 1) gl.cullFace(gl.BACK);
+						else if (cullFace === 2) gl.cullFace(gl.FRONT);
+						else gl.cullFace(gl.FRONT_AND_BACK);
+					}
 				} else disable(gl.CULL_FACE);
 				currentCullFace = cullFace;
 			}
@@ -33247,8 +33282,10 @@ window.__ModuleLoader__.load({
 				}
 			}
 			function bindTexture(webglType, webglTexture, webglSlot) {
-				if (webglSlot === void 0) if (currentTextureSlot === null) webglSlot = gl.TEXTURE0 + maxTextures - 1;
-				else webglSlot = currentTextureSlot;
+				if (webglSlot === void 0) {
+					if (currentTextureSlot === null) webglSlot = gl.TEXTURE0 + maxTextures - 1;
+					else webglSlot = currentTextureSlot;
+				}
 				let boundTexture = currentBoundTextures[webglSlot];
 				if (boundTexture === void 0) {
 					boundTexture = {
@@ -33521,19 +33558,21 @@ window.__ModuleLoader__.load({
 				let scale = 1;
 				const dimensions = getDimensions(image);
 				if (dimensions.width > maxSize || dimensions.height > maxSize) scale = maxSize / Math.max(dimensions.width, dimensions.height);
-				if (scale < 1) if (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement || typeof HTMLCanvasElement !== "undefined" && image instanceof HTMLCanvasElement || typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap || typeof VideoFrame !== "undefined" && image instanceof VideoFrame) {
-					const width = Math.floor(scale * dimensions.width);
-					const height = Math.floor(scale * dimensions.height);
-					if (_canvas === void 0) _canvas = createCanvas(width, height);
-					const canvas = needsNewCanvas ? createCanvas(width, height) : _canvas;
-					canvas.width = width;
-					canvas.height = height;
-					canvas.getContext("2d").drawImage(image, 0, 0, width, height);
-					warn$3("WebGLRenderer: Texture has been resized from (" + dimensions.width + "x" + dimensions.height + ") to (" + width + "x" + height + ").");
-					return canvas;
-				} else {
-					if ("data" in image) warn$3("WebGLRenderer: Image in DataTexture is too big (" + dimensions.width + "x" + dimensions.height + ").");
-					return image;
+				if (scale < 1) {
+					if (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement || typeof HTMLCanvasElement !== "undefined" && image instanceof HTMLCanvasElement || typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap || typeof VideoFrame !== "undefined" && image instanceof VideoFrame) {
+						const width = Math.floor(scale * dimensions.width);
+						const height = Math.floor(scale * dimensions.height);
+						if (_canvas === void 0) _canvas = createCanvas(width, height);
+						const canvas = needsNewCanvas ? createCanvas(width, height) : _canvas;
+						canvas.width = width;
+						canvas.height = height;
+						canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+						warn$3("WebGLRenderer: Texture has been resized from (" + dimensions.width + "x" + dimensions.height + ") to (" + width + "x" + height + ").");
+						return canvas;
+					} else {
+						if ("data" in image) warn$3("WebGLRenderer: Image in DataTexture is too big (" + dimensions.width + "x" + dimensions.height + ").");
+						return image;
+					}
 				}
 				return image;
 			}
@@ -33938,76 +33977,92 @@ window.__ModuleLoader__.load({
 					const levels = getMipLevels(texture, image);
 					if (texture.isDepthTexture) {
 						glInternalFormat = getInternalDepthFormat(texture.format === DepthStencilFormat, texture.type);
-						if (allocateMemory) if (useTexStorage) state.texStorage2D(_gl.TEXTURE_2D, 1, glInternalFormat, image.width, image.height);
-						else state.texImage2D(_gl.TEXTURE_2D, 0, glInternalFormat, image.width, image.height, 0, glFormat, glType, null);
-					} else if (texture.isDataTexture) if (mipmaps.length > 0) {
-						if (useTexStorage && allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height);
-						for (let i = 0, il = mipmaps.length; i < il; i++) {
-							mipmap = mipmaps[i];
-							if (useTexStorage) {
-								if (dataReady) state.texSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, glType, mipmap.data);
-							} else state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, glFormat, glType, mipmap.data);
+						if (allocateMemory) {
+							if (useTexStorage) state.texStorage2D(_gl.TEXTURE_2D, 1, glInternalFormat, image.width, image.height);
+							else state.texImage2D(_gl.TEXTURE_2D, 0, glInternalFormat, image.width, image.height, 0, glFormat, glType, null);
 						}
-						texture.generateMipmaps = false;
-					} else if (useTexStorage) {
-						if (allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, image.width, image.height);
-						if (dataReady) updateTexture(texture, image, glFormat, glType);
-					} else state.texImage2D(_gl.TEXTURE_2D, 0, glInternalFormat, image.width, image.height, 0, glFormat, glType, image.data);
-					else if (texture.isCompressedTexture) if (texture.isCompressedArrayTexture) {
-						if (useTexStorage && allocateMemory) state.texStorage3D(_gl.TEXTURE_2D_ARRAY, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height, image.depth);
-						for (let i = 0, il = mipmaps.length; i < il; i++) {
-							mipmap = mipmaps[i];
-							if (texture.format !== 1023) if (glFormat !== null) if (useTexStorage) {
-								if (dataReady) if (texture.layerUpdates.size > 0) {
-									const layerByteLength = getByteLength(mipmap.width, mipmap.height, texture.format, texture.type);
-									for (const layerIndex of texture.layerUpdates) {
-										const layerData = mipmap.data.subarray(layerIndex * layerByteLength / mipmap.data.BYTES_PER_ELEMENT, (layerIndex + 1) * layerByteLength / mipmap.data.BYTES_PER_ELEMENT);
-										state.compressedTexSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, layerIndex, mipmap.width, mipmap.height, 1, glFormat, layerData);
-									}
-								} else state.compressedTexSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, 0, mipmap.width, mipmap.height, image.depth, glFormat, mipmap.data);
-							} else state.compressedTexImage3D(_gl.TEXTURE_2D_ARRAY, i, glInternalFormat, mipmap.width, mipmap.height, image.depth, 0, mipmap.data, 0, 0);
-							else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .uploadTexture()");
-							else if (useTexStorage) {
-								if (dataReady) state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, 0, mipmap.width, mipmap.height, image.depth, glFormat, glType, mipmap.data);
-							} else state.texImage3D(_gl.TEXTURE_2D_ARRAY, i, glInternalFormat, mipmap.width, mipmap.height, image.depth, 0, glFormat, glType, mipmap.data);
-						}
-						if (texture.layerUpdates.size > 0) texture.clearLayerUpdates();
-					} else {
-						if (useTexStorage && allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height);
-						for (let i = 0, il = mipmaps.length; i < il; i++) {
-							mipmap = mipmaps[i];
-							if (texture.format !== 1023) if (glFormat !== null) if (useTexStorage) {
-								if (dataReady) state.compressedTexSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, mipmap.data);
-							} else state.compressedTexImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, mipmap.data);
-							else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .uploadTexture()");
-							else if (useTexStorage) {
-								if (dataReady) state.texSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, glType, mipmap.data);
-							} else state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, glFormat, glType, mipmap.data);
-						}
-					}
-					else if (texture.isDataArrayTexture) if (useTexStorage) {
-						if (allocateMemory) state.texStorage3D(_gl.TEXTURE_2D_ARRAY, levels, glInternalFormat, image.width, image.height, image.depth);
-						if (dataReady) if (texture.layerUpdates.size > 0) {
-							const layerByteLength = getByteLength(image.width, image.height, texture.format, texture.type);
-							for (const layerIndex of texture.layerUpdates) {
-								const layerData = image.data.subarray(layerIndex * layerByteLength / image.data.BYTES_PER_ELEMENT, (layerIndex + 1) * layerByteLength / image.data.BYTES_PER_ELEMENT);
-								state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, 0, 0, 0, layerIndex, image.width, image.height, 1, glFormat, glType, layerData);
+					} else if (texture.isDataTexture) {
+						if (mipmaps.length > 0) {
+							if (useTexStorage && allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height);
+							for (let i = 0, il = mipmaps.length; i < il; i++) {
+								mipmap = mipmaps[i];
+								if (useTexStorage) {
+									if (dataReady) state.texSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, glType, mipmap.data);
+								} else state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, glFormat, glType, mipmap.data);
 							}
-							texture.clearLayerUpdates();
-						} else state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, image.width, image.height, image.depth, glFormat, glType, image.data);
-					} else state.texImage3D(_gl.TEXTURE_2D_ARRAY, 0, glInternalFormat, image.width, image.height, image.depth, 0, glFormat, glType, image.data);
-					else if (texture.isData3DTexture) if (useTexStorage) {
-						if (allocateMemory) state.texStorage3D(_gl.TEXTURE_3D, levels, glInternalFormat, image.width, image.height, image.depth);
-						if (dataReady) state.texSubImage3D(_gl.TEXTURE_3D, 0, 0, 0, 0, image.width, image.height, image.depth, glFormat, glType, image.data);
-					} else state.texImage3D(_gl.TEXTURE_3D, 0, glInternalFormat, image.width, image.height, image.depth, 0, glFormat, glType, image.data);
-					else if (texture.isFramebufferTexture) {
-						if (allocateMemory) if (useTexStorage) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, image.width, image.height);
-						else {
-							let width = image.width, height = image.height;
-							for (let i = 0; i < levels; i++) {
-								state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, width, height, 0, glFormat, glType, null);
-								width >>= 1;
-								height >>= 1;
+							texture.generateMipmaps = false;
+						} else if (useTexStorage) {
+							if (allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, image.width, image.height);
+							if (dataReady) updateTexture(texture, image, glFormat, glType);
+						} else state.texImage2D(_gl.TEXTURE_2D, 0, glInternalFormat, image.width, image.height, 0, glFormat, glType, image.data);
+					} else if (texture.isCompressedTexture) {
+						if (texture.isCompressedArrayTexture) {
+							if (useTexStorage && allocateMemory) state.texStorage3D(_gl.TEXTURE_2D_ARRAY, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height, image.depth);
+							for (let i = 0, il = mipmaps.length; i < il; i++) {
+								mipmap = mipmaps[i];
+								if (texture.format !== 1023) {
+									if (glFormat !== null) {
+										if (useTexStorage) {
+											if (dataReady) {
+												if (texture.layerUpdates.size > 0) {
+													const layerByteLength = getByteLength(mipmap.width, mipmap.height, texture.format, texture.type);
+													for (const layerIndex of texture.layerUpdates) {
+														const layerData = mipmap.data.subarray(layerIndex * layerByteLength / mipmap.data.BYTES_PER_ELEMENT, (layerIndex + 1) * layerByteLength / mipmap.data.BYTES_PER_ELEMENT);
+														state.compressedTexSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, layerIndex, mipmap.width, mipmap.height, 1, glFormat, layerData);
+													}
+												} else state.compressedTexSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, 0, mipmap.width, mipmap.height, image.depth, glFormat, mipmap.data);
+											}
+										} else state.compressedTexImage3D(_gl.TEXTURE_2D_ARRAY, i, glInternalFormat, mipmap.width, mipmap.height, image.depth, 0, mipmap.data, 0, 0);
+									} else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .uploadTexture()");
+								} else if (useTexStorage) {
+									if (dataReady) state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, i, 0, 0, 0, mipmap.width, mipmap.height, image.depth, glFormat, glType, mipmap.data);
+								} else state.texImage3D(_gl.TEXTURE_2D_ARRAY, i, glInternalFormat, mipmap.width, mipmap.height, image.depth, 0, glFormat, glType, mipmap.data);
+							}
+							if (texture.layerUpdates.size > 0) texture.clearLayerUpdates();
+						} else {
+							if (useTexStorage && allocateMemory) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, mipmaps[0].width, mipmaps[0].height);
+							for (let i = 0, il = mipmaps.length; i < il; i++) {
+								mipmap = mipmaps[i];
+								if (texture.format !== 1023) {
+									if (glFormat !== null) {
+										if (useTexStorage) {
+											if (dataReady) state.compressedTexSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, mipmap.data);
+										} else state.compressedTexImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, mipmap.data);
+									} else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .uploadTexture()");
+								} else if (useTexStorage) {
+									if (dataReady) state.texSubImage2D(_gl.TEXTURE_2D, i, 0, 0, mipmap.width, mipmap.height, glFormat, glType, mipmap.data);
+								} else state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, mipmap.width, mipmap.height, 0, glFormat, glType, mipmap.data);
+							}
+						}
+					} else if (texture.isDataArrayTexture) {
+						if (useTexStorage) {
+							if (allocateMemory) state.texStorage3D(_gl.TEXTURE_2D_ARRAY, levels, glInternalFormat, image.width, image.height, image.depth);
+							if (dataReady) {
+								if (texture.layerUpdates.size > 0) {
+									const layerByteLength = getByteLength(image.width, image.height, texture.format, texture.type);
+									for (const layerIndex of texture.layerUpdates) {
+										const layerData = image.data.subarray(layerIndex * layerByteLength / image.data.BYTES_PER_ELEMENT, (layerIndex + 1) * layerByteLength / image.data.BYTES_PER_ELEMENT);
+										state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, 0, 0, 0, layerIndex, image.width, image.height, 1, glFormat, glType, layerData);
+									}
+									texture.clearLayerUpdates();
+								} else state.texSubImage3D(_gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, image.width, image.height, image.depth, glFormat, glType, image.data);
+							}
+						} else state.texImage3D(_gl.TEXTURE_2D_ARRAY, 0, glInternalFormat, image.width, image.height, image.depth, 0, glFormat, glType, image.data);
+					} else if (texture.isData3DTexture) {
+						if (useTexStorage) {
+							if (allocateMemory) state.texStorage3D(_gl.TEXTURE_3D, levels, glInternalFormat, image.width, image.height, image.depth);
+							if (dataReady) state.texSubImage3D(_gl.TEXTURE_3D, 0, 0, 0, 0, image.width, image.height, image.depth, glFormat, glType, image.data);
+						} else state.texImage3D(_gl.TEXTURE_3D, 0, glInternalFormat, image.width, image.height, image.depth, 0, glFormat, glType, image.data);
+					} else if (texture.isFramebufferTexture) {
+						if (allocateMemory) {
+							if (useTexStorage) state.texStorage2D(_gl.TEXTURE_2D, levels, glInternalFormat, image.width, image.height);
+							else {
+								let width = image.width, height = image.height;
+								for (let i = 0; i < levels; i++) {
+									state.texImage2D(_gl.TEXTURE_2D, i, glInternalFormat, width, height, 0, glFormat, glType, null);
+									width >>= 1;
+									height >>= 1;
+								}
 							}
 						}
 					} else if (texture.isHTMLTexture) {
@@ -34097,11 +34152,13 @@ window.__ModuleLoader__.load({
 							mipmaps = cubeImage[i].mipmaps;
 							for (let j = 0; j < mipmaps.length; j++) {
 								const mipmap = mipmaps[j];
-								if (texture.format !== 1023) if (glFormat !== null) if (useTexStorage) {
-									if (dataReady) state.compressedTexSubImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, 0, 0, mipmap.width, mipmap.height, glFormat, mipmap.data);
-								} else state.compressedTexImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, glInternalFormat, mipmap.width, mipmap.height, 0, mipmap.data);
-								else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .setTextureCube()");
-								else if (useTexStorage) {
+								if (texture.format !== 1023) {
+									if (glFormat !== null) {
+										if (useTexStorage) {
+											if (dataReady) state.compressedTexSubImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, 0, 0, mipmap.width, mipmap.height, glFormat, mipmap.data);
+										} else state.compressedTexImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, glInternalFormat, mipmap.width, mipmap.height, 0, mipmap.data);
+									} else warn$3("WebGLRenderer: Attempt to load unsupported compressed texture format in .setTextureCube()");
+								} else if (useTexStorage) {
 									if (dataReady) state.texSubImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, 0, 0, mipmap.width, mipmap.height, glFormat, glType, mipmap.data);
 								} else state.texImage2D(_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, j, glInternalFormat, mipmap.width, mipmap.height, 0, glFormat, glType, mipmap.data);
 							}
@@ -34216,11 +34273,13 @@ window.__ModuleLoader__.load({
 				const samples = getRenderTargetSamples(renderTarget);
 				const glTextureType = isCube ? _gl.TEXTURE_CUBE_MAP_POSITIVE_X + cubeFace : _gl.TEXTURE_2D;
 				const glAttachmentType = renderTarget.depthTexture.format === 1027 ? _gl.DEPTH_STENCIL_ATTACHMENT : _gl.DEPTH_ATTACHMENT;
-				if (renderTarget.depthTexture.format === 1026) if (useMultisampledRTT(renderTarget)) multisampledRTTExt.framebufferTexture2DMultisampleEXT(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0, samples);
-				else _gl.framebufferTexture2D(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0);
-				else if (renderTarget.depthTexture.format === 1027) if (useMultisampledRTT(renderTarget)) multisampledRTTExt.framebufferTexture2DMultisampleEXT(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0, samples);
-				else _gl.framebufferTexture2D(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0);
-				else throw new Error("THREE.WebGLTextures: Unknown depthTexture format.");
+				if (renderTarget.depthTexture.format === 1026) {
+					if (useMultisampledRTT(renderTarget)) multisampledRTTExt.framebufferTexture2DMultisampleEXT(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0, samples);
+					else _gl.framebufferTexture2D(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0);
+				} else if (renderTarget.depthTexture.format === 1027) {
+					if (useMultisampledRTT(renderTarget)) multisampledRTTExt.framebufferTexture2DMultisampleEXT(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0, samples);
+					else _gl.framebufferTexture2D(_gl.FRAMEBUFFER, glAttachmentType, glTextureType, webglDepthTexture, 0);
+				} else throw new Error("THREE.WebGLTextures: Unknown depthTexture format.");
 			}
 			function setupDepthRenderbuffer(renderTarget) {
 				const renderTargetProperties = properties.get(renderTarget);
@@ -34239,13 +34298,14 @@ window.__ModuleLoader__.load({
 					}
 					renderTargetProperties.__boundDepthTexture = depthTexture;
 				}
-				if (renderTarget.depthTexture && !renderTargetProperties.__autoAllocateDepthBuffer) if (isCube) for (let i = 0; i < 6; i++) setupDepthTexture(renderTargetProperties.__webglFramebuffer[i], renderTarget, i);
-				else {
-					const mipmaps = renderTarget.texture.mipmaps;
-					if (mipmaps && mipmaps.length > 0) setupDepthTexture(renderTargetProperties.__webglFramebuffer[0], renderTarget, 0);
-					else setupDepthTexture(renderTargetProperties.__webglFramebuffer, renderTarget, 0);
-				}
-				else if (isCube) {
+				if (renderTarget.depthTexture && !renderTargetProperties.__autoAllocateDepthBuffer) {
+					if (isCube) for (let i = 0; i < 6; i++) setupDepthTexture(renderTargetProperties.__webglFramebuffer[i], renderTarget, i);
+					else {
+						const mipmaps = renderTarget.texture.mipmaps;
+						if (mipmaps && mipmaps.length > 0) setupDepthTexture(renderTargetProperties.__webglFramebuffer[0], renderTarget, 0);
+						else setupDepthTexture(renderTargetProperties.__webglFramebuffer, renderTarget, 0);
+					}
+				} else if (isCube) {
 					renderTargetProperties.__webglDepthbuffer = [];
 					for (let i = 0; i < 6; i++) {
 						state.bindFramebuffer(_gl.FRAMEBUFFER, renderTargetProperties.__webglFramebuffer[i]);
@@ -34458,9 +34518,11 @@ window.__ModuleLoader__.load({
 				const format = texture.format;
 				const type = texture.type;
 				if (texture.isCompressedTexture === true || texture.isVideoTexture === true) return image;
-				if (colorSpace !== "srgb-linear" && colorSpace !== "") if (ColorManagement.getTransfer(colorSpace) === "srgb") {
-					if (format !== 1023 || type !== 1009) warn$3("WebGLTextures: sRGB encoded textures have to use RGBAFormat and UnsignedByteType.");
-				} else error("WebGLTextures: Unsupported texture color space:", colorSpace);
+				if (colorSpace !== "srgb-linear" && colorSpace !== "") {
+					if (ColorManagement.getTransfer(colorSpace) === "srgb") {
+						if (format !== 1023 || type !== 1009) warn$3("WebGLTextures: sRGB encoded textures have to use RGBAFormat and UnsignedByteType.");
+					} else error("WebGLTextures: Unsupported texture color space:", colorSpace);
+				}
 				return image;
 			}
 			function getDimensions(image) {
@@ -34521,22 +34583,24 @@ window.__ModuleLoader__.load({
 				if (p === 1030) return gl.RG;
 				if (p === 1031) return gl.RG_INTEGER;
 				if (p === 1033) return gl.RGBA_INTEGER;
-				if (p === 33776 || p === 33777 || p === 33778 || p === 33779) if (transfer === "srgb") {
-					extension = extensions.get("WEBGL_compressed_texture_s3tc_srgb");
-					if (extension !== null) {
-						if (p === 33776) return extension.COMPRESSED_SRGB_S3TC_DXT1_EXT;
-						if (p === 33777) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
-						if (p === 33778) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
-						if (p === 33779) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
-					} else return null;
-				} else {
-					extension = extensions.get("WEBGL_compressed_texture_s3tc");
-					if (extension !== null) {
-						if (p === 33776) return extension.COMPRESSED_RGB_S3TC_DXT1_EXT;
-						if (p === 33777) return extension.COMPRESSED_RGBA_S3TC_DXT1_EXT;
-						if (p === 33778) return extension.COMPRESSED_RGBA_S3TC_DXT3_EXT;
-						if (p === 33779) return extension.COMPRESSED_RGBA_S3TC_DXT5_EXT;
-					} else return null;
+				if (p === 33776 || p === 33777 || p === 33778 || p === 33779) {
+					if (transfer === "srgb") {
+						extension = extensions.get("WEBGL_compressed_texture_s3tc_srgb");
+						if (extension !== null) {
+							if (p === 33776) return extension.COMPRESSED_SRGB_S3TC_DXT1_EXT;
+							if (p === 33777) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
+							if (p === 33778) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
+							if (p === 33779) return extension.COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
+						} else return null;
+					} else {
+						extension = extensions.get("WEBGL_compressed_texture_s3tc");
+						if (extension !== null) {
+							if (p === 33776) return extension.COMPRESSED_RGB_S3TC_DXT1_EXT;
+							if (p === 33777) return extension.COMPRESSED_RGBA_S3TC_DXT1_EXT;
+							if (p === 33778) return extension.COMPRESSED_RGBA_S3TC_DXT3_EXT;
+							if (p === 33779) return extension.COMPRESSED_RGBA_S3TC_DXT5_EXT;
+						} else return null;
+					}
 				}
 				if (p === 35840 || p === 35841 || p === 35842 || p === 35843) {
 					extension = extensions.get("WEBGL_compressed_texture_pvrtc");
@@ -36390,12 +36454,12 @@ void main() {
 					_alpha = context.getContextAttributes().alpha;
 				} else _alpha = alpha;
 				const _outputBufferType = outputBufferType;
-				const INTEGER_FORMATS = new Set([
+				const INTEGER_FORMATS = /* @__PURE__ */ new Set([
 					RGBAIntegerFormat,
 					RGIntegerFormat,
 					RedIntegerFormat
 				]);
-				const UNSIGNED_TYPES = new Set([
+				const UNSIGNED_TYPES = /* @__PURE__ */ new Set([
 					UnsignedByteType,
 					UnsignedIntType,
 					UnsignedShortType,
@@ -36403,8 +36467,8 @@ void main() {
 					UnsignedShort4444Type,
 					UnsignedShort5551Type
 				]);
-				const uintClearColor = new Uint32Array(4);
-				const intClearColor = new Int32Array(4);
+				const uintClearColor = /* @__PURE__ */ new Uint32Array(4);
+				const intClearColor = /* @__PURE__ */ new Int32Array(4);
 				const objectPosition = new Vector3();
 				let currentRenderList = null;
 				let currentRenderState = null;
@@ -36604,8 +36668,10 @@ void main() {
 					if (_gl === null) {
 						const contextName = "webgl2";
 						_gl = getContext(contextName, contextAttributes);
-						if (_gl === null) if (getContext(contextName)) throw new Error("THREE.WebGLRenderer: Error creating WebGL context with your selected attributes.");
-						else throw new Error("THREE.WebGLRenderer: Error creating WebGL context.");
+						if (_gl === null) {
+							if (getContext(contextName)) throw new Error("THREE.WebGLRenderer: Error creating WebGL context with your selected attributes.");
+							else throw new Error("THREE.WebGLRenderer: Error creating WebGL context.");
+						}
 					}
 					initGLContext();
 				} catch (e) {
@@ -37153,11 +37219,12 @@ void main() {
 						renderer = indexedBufferRenderer;
 						renderer.setIndex(attribute);
 					}
-					if (object.isMesh) if (material.wireframe === true) {
-						state.setLineWidth(material.wireframeLinewidth * getTargetPixelRatio());
-						renderer.setMode(_gl.LINES);
-					} else renderer.setMode(_gl.TRIANGLES);
-					else if (object.isLine) {
+					if (object.isMesh) {
+						if (material.wireframe === true) {
+							state.setLineWidth(material.wireframeLinewidth * getTargetPixelRatio());
+							renderer.setMode(_gl.LINES);
+						} else renderer.setMode(_gl.TRIANGLES);
+					} else if (object.isLine) {
 						let lineWidth = material.linewidth;
 						if (lineWidth === void 0) lineWidth = 1;
 						state.setLineWidth(lineWidth * getTargetPixelRatio());
@@ -37166,18 +37233,19 @@ void main() {
 						else renderer.setMode(_gl.LINE_STRIP);
 					} else if (object.isPoints) renderer.setMode(_gl.POINTS);
 					else if (object.isSprite) renderer.setMode(_gl.TRIANGLES);
-					if (object.isBatchedMesh) if (!extensions.get("WEBGL_multi_draw")) {
-						const starts = object._multiDrawStarts;
-						const counts = object._multiDrawCounts;
-						const drawCount = object._multiDrawCount;
-						const bytesPerElement = index ? attributes.get(index).bytesPerElement : 1;
-						const uniforms = properties.get(material).currentProgram.getUniforms();
-						for (let i = 0; i < drawCount; i++) {
-							uniforms.setValue(_gl, "_gl_DrawID", i);
-							renderer.render(starts[i] / bytesPerElement, counts[i]);
-						}
-					} else renderer.renderMultiDraw(object._multiDrawStarts, object._multiDrawCounts, object._multiDrawCount);
-					else if (object.isInstancedMesh) renderer.renderInstances(drawStart, drawCount, object.count);
+					if (object.isBatchedMesh) {
+						if (!extensions.get("WEBGL_multi_draw")) {
+							const starts = object._multiDrawStarts;
+							const counts = object._multiDrawCounts;
+							const drawCount = object._multiDrawCount;
+							const bytesPerElement = index ? attributes.get(index).bytesPerElement : 1;
+							const uniforms = properties.get(material).currentProgram.getUniforms();
+							for (let i = 0; i < drawCount; i++) {
+								uniforms.setValue(_gl, "_gl_DrawID", i);
+								renderer.render(starts[i] / bytesPerElement, counts[i]);
+							}
+						} else renderer.renderMultiDraw(object._multiDrawStarts, object._multiDrawCounts, object._multiDrawCount);
+					} else if (object.isInstancedMesh) renderer.renderInstances(drawStart, drawCount, object.count);
 					else if (geometry.isInstancedBufferGeometry) {
 						const maxInstanceCount = geometry._maxInstanceCount !== void 0 ? geometry._maxInstanceCount : Infinity;
 						const instanceCount = Math.min(geometry.instanceCount, maxInstanceCount);
@@ -37237,14 +37305,16 @@ void main() {
 					scene.traverse(function(object) {
 						if (!(object.isMesh || object.isPoints || object.isLine || object.isSprite)) return;
 						const material = object.material;
-						if (material) if (Array.isArray(material)) for (let i = 0; i < material.length; i++) {
-							const material2 = material[i];
-							prepareMaterial(material2, targetScene, camera, object);
-							materials.add(material2);
-						}
-						else {
-							prepareMaterial(material, targetScene, camera, object);
-							materials.add(material);
+						if (material) {
+							if (Array.isArray(material)) for (let i = 0; i < material.length; i++) {
+								const material2 = material[i];
+								prepareMaterial(material2, targetScene, camera, object);
+								materials.add(material2);
+							}
+							else {
+								prepareMaterial(material, targetScene, camera, object);
+								materials.add(material);
+							}
 						}
 					});
 					currentRenderState = renderStateStack.pop();
@@ -38019,32 +38089,34 @@ void main() {
 					if (!(renderTarget && renderTarget.isWebGLRenderTarget)) throw new Error("THREE.WebGLRenderer.readRenderTargetPixels: renderTarget is not THREE.WebGLRenderTarget.");
 					let framebuffer = properties.get(renderTarget).__webglFramebuffer;
 					if (renderTarget.isWebGLCubeRenderTarget && activeCubeFaceIndex !== void 0) framebuffer = framebuffer[activeCubeFaceIndex];
-					if (framebuffer) if (x >= 0 && x <= renderTarget.width - width && y >= 0 && y <= renderTarget.height - height) {
-						state.bindFramebuffer(_gl.FRAMEBUFFER, framebuffer);
-						const texture = renderTarget.textures[textureIndex];
-						const textureFormat = texture.format;
-						const textureType = texture.type;
-						if (renderTarget.textures.length > 1) _gl.readBuffer(_gl.COLOR_ATTACHMENT0 + textureIndex);
-						const readableState = getReadableState(texture);
-						if (readableState.__formatReadable === false) throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: renderTarget is not in RGBA or implementation defined format.");
-						if (readableState.__typeReadable === false) throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: renderTarget is not in UnsignedByteType or implementation defined type.");
-						const glBuffer = _gl.createBuffer();
-						_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, glBuffer);
-						_gl.bufferData(_gl.PIXEL_PACK_BUFFER, buffer.byteLength, _gl.STREAM_READ);
-						_gl.readPixels(x, y, width, height, utils.convert(textureFormat), utils.convert(textureType), 0);
-						_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
-						const currFramebuffer = _currentRenderTarget !== null ? properties.get(_currentRenderTarget).__webglFramebuffer : null;
-						state.bindFramebuffer(_gl.FRAMEBUFFER, currFramebuffer);
-						const sync = _gl.fenceSync(_gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-						_gl.flush();
-						await probeAsync(_gl, sync, 4);
-						_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, glBuffer);
-						_gl.getBufferSubData(_gl.PIXEL_PACK_BUFFER, 0, buffer);
-						_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
-						_gl.deleteBuffer(glBuffer);
-						_gl.deleteSync(sync);
-						return buffer;
-					} else throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: requested read bounds are out of range.");
+					if (framebuffer) {
+						if (x >= 0 && x <= renderTarget.width - width && y >= 0 && y <= renderTarget.height - height) {
+							state.bindFramebuffer(_gl.FRAMEBUFFER, framebuffer);
+							const texture = renderTarget.textures[textureIndex];
+							const textureFormat = texture.format;
+							const textureType = texture.type;
+							if (renderTarget.textures.length > 1) _gl.readBuffer(_gl.COLOR_ATTACHMENT0 + textureIndex);
+							const readableState = getReadableState(texture);
+							if (readableState.__formatReadable === false) throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: renderTarget is not in RGBA or implementation defined format.");
+							if (readableState.__typeReadable === false) throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: renderTarget is not in UnsignedByteType or implementation defined type.");
+							const glBuffer = _gl.createBuffer();
+							_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, glBuffer);
+							_gl.bufferData(_gl.PIXEL_PACK_BUFFER, buffer.byteLength, _gl.STREAM_READ);
+							_gl.readPixels(x, y, width, height, utils.convert(textureFormat), utils.convert(textureType), 0);
+							_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
+							const currFramebuffer = _currentRenderTarget !== null ? properties.get(_currentRenderTarget).__webglFramebuffer : null;
+							state.bindFramebuffer(_gl.FRAMEBUFFER, currFramebuffer);
+							const sync = _gl.fenceSync(_gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+							_gl.flush();
+							await probeAsync(_gl, sync, 4);
+							_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, glBuffer);
+							_gl.getBufferSubData(_gl.PIXEL_PACK_BUFFER, 0, buffer);
+							_gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
+							_gl.deleteBuffer(glBuffer);
+							_gl.deleteSync(sync);
+							return buffer;
+						} else throw new Error("THREE.WebGLRenderer.readRenderTargetPixelsAsync: requested read bounds are out of range.");
+					}
 				};
 				/**
 				* Copies pixels from the current bound framebuffer into the given texture.
@@ -38168,10 +38240,11 @@ void main() {
 						}
 						state.bindFramebuffer(_gl.READ_FRAMEBUFFER, null);
 						state.bindFramebuffer(_gl.DRAW_FRAMEBUFFER, null);
-					} else if (isDst3D) if (srcTexture.isDataTexture || srcTexture.isData3DTexture) _gl.texSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, glType, image.data);
-					else if (dstTexture.isCompressedArrayTexture) _gl.compressedTexSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, image.data);
-					else _gl.texSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, glType, image);
-					else if (srcTexture.isDataTexture) _gl.texSubImage2D(_gl.TEXTURE_2D, dstLevel, dstX, dstY, width, height, glFormat, glType, image.data);
+					} else if (isDst3D) {
+						if (srcTexture.isDataTexture || srcTexture.isData3DTexture) _gl.texSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, glType, image.data);
+						else if (dstTexture.isCompressedArrayTexture) _gl.compressedTexSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, image.data);
+						else _gl.texSubImage3D(glTarget, dstLevel, dstX, dstY, dstZ, width, height, depth, glFormat, glType, image);
+					} else if (srcTexture.isDataTexture) _gl.texSubImage2D(_gl.TEXTURE_2D, dstLevel, dstX, dstY, width, height, glFormat, glType, image.data);
 					else if (srcTexture.isCompressedTexture) _gl.compressedTexSubImage2D(_gl.TEXTURE_2D, dstLevel, dstX, dstY, image.width, image.height, glFormat, image.data);
 					else _gl.texSubImage2D(_gl.TEXTURE_2D, dstLevel, dstX, dstY, width, height, glFormat, glType, image);
 					state.pixelStorei(_gl.UNPACK_ROW_LENGTH, currentUnpackRowLen);
@@ -39078,7 +39151,8 @@ void main() {
 		const _box = new Box3();
 		const _sphere = new Sphere();
 		const _clipToWorldVector = new Vector4();
-		let _ray, _lineWidth;
+		let _ray;
+		let _lineWidth;
 		function getWorldSpaceHalfWidth(camera, distance, resolution) {
 			_clipToWorldVector.set(0, 0, -distance, 1).applyMatrix4(camera.projectionMatrix);
 			_clipToWorldVector.multiplyScalar(1 / _clipToWorldVector.w);
@@ -39560,8 +39634,8 @@ void main() {
 			/** 坐标变过：强调边（宽线层）也要跟着挪，否则会停在上一帧的位置上 */
 			positionsDirty = false;
 			/** 强调边的顶点缓冲：复用，避免每次重建都新建数组 */
-			activeSegments = new Float32Array(0);
-			activeColors = new Float32Array(0);
+			activeSegments = /* @__PURE__ */ new Float32Array(0);
+			activeColors = /* @__PURE__ */ new Float32Array(0);
 			/** 强调边当前配色：只跟主题有关，用来避免每帧重传颜色缓冲 */
 			activeColorKey = "";
 			graph = null;
@@ -39579,7 +39653,7 @@ void main() {
 			edges = null;
 			activeEdges = null;
 			projected = [];
-			positions = new Float32Array(0);
+			positions = /* @__PURE__ */ new Float32Array(0);
 			palette;
 			selected = null;
 			/** 选中节点的屏幕半径（CSS 像素）：屏幕空间的环按它套上去 */
@@ -39651,7 +39725,7 @@ void main() {
 				this.ring.frustumCulled = false;
 				this.ring.visible = false;
 				this.group.add(this.ring);
-				const dustPositions = new Float32Array(DUST_COUNT * 3);
+				const dustPositions = /* @__PURE__ */ new Float32Array(0);
 				for (let i = 0; i < DUST_COUNT; i += 1) {
 					const t = i * .6180339887498949 % 1;
 					const phi = Math.acos(1 - 2 * t);
@@ -40213,7 +40287,7 @@ void main() {
 		/** 会话缓存的写入间隔：坐标没变就没必要每帧复制一份大数组 */
 		const CACHE_STORE_INTERVAL_MS = 250;
 		/** 没有节点时的包围体：常量复用，避免空图时每帧新建数组 */
-		const EMPTY_BOUNDS = boundsOf(new Float32Array(0), 0);
+		const EMPTY_BOUNDS = boundsOf(/* @__PURE__ */ new Float32Array(0), 0);
 		/**
 		* 标签测量用的字体栈。
 		*
@@ -40238,7 +40312,7 @@ void main() {
 			labelSlots = [];
 			graph = null;
 			/** 显式标注为 Float32Array（缓冲区来源不敏感）：主线程副本、Worker 转移、内部插值缓冲都往这里放 */
-			positions = new Float32Array(0);
+			positions = /* @__PURE__ */ new Float32Array(0);
 			viewport = {
 				width: 800,
 				height: 600
@@ -40407,7 +40481,7 @@ void main() {
 			*/
 			startLayout(graph) {
 				if (graph.ids.length === 0) {
-					this.positions = new Float32Array(0);
+					this.positions = /* @__PURE__ */ new Float32Array(0);
 					this.layoutAnimating = false;
 					this.layout.cancel();
 					return;
@@ -42032,7 +42106,8 @@ void main() {
 						report("plan-apply-failed", { message: body.error?.message ?? "" });
 						return;
 					}
-					setNote(describeApply(body));
+					const text = describeApply(body);
+					setNote(text);
 					report("plan-applied", { created: body.created?.length ?? 0 });
 					props.onChanged?.();
 					await reload();
@@ -42392,7 +42467,7 @@ void main() {
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("line", {
 							className: "kn-minimap-axis",
-							x1: CENTER - BALL_RADIUS - 5,
+							x1: 13,
 							y1: CENTER,
 							x2: 55,
 							y2: CENTER
@@ -42812,8 +42887,10 @@ void main() {
 				var unmasked = true;
 			} catch (e) {}
 			var result = nativeObjectToString$1.call(value);
-			if (unmasked) if (isOwn) value[symToStringTag$1] = tag;
-			else delete value[symToStringTag$1];
+			if (unmasked) {
+				if (isOwn) value[symToStringTag$1] = tag;
+				else delete value[symToStringTag$1];
+			}
 			return result;
 		}
 		//#endregion
@@ -42837,7 +42914,8 @@ void main() {
 		//#endregion
 		//#region node_modules/.pnpm/lodash-es@4.18.1/node_modules/lodash-es/_baseGetTag.js
 		/** `Object#toString` result references. */
-		var nullTag = "[object Null]", undefinedTag = "[object Undefined]";
+		var nullTag = "[object Null]";
+		var undefinedTag = "[object Undefined]";
 		/** Built-in value references. */
 		var symToStringTag = Symbol$1 ? Symbol$1.toStringTag : void 0;
 		/**
@@ -43063,7 +43141,10 @@ void main() {
 		//#endregion
 		//#region node_modules/.pnpm/lodash-es@4.18.1/node_modules/lodash-es/isFunction.js
 		/** `Object#toString` result references. */
-		var asyncTag = "[object AsyncFunction]", funcTag$1 = "[object Function]", genTag = "[object GeneratorFunction]", proxyTag = "[object Proxy]";
+		var asyncTag = "[object AsyncFunction]";
+		var funcTag$1 = "[object Function]";
+		var genTag = "[object GeneratorFunction]";
+		var proxyTag = "[object Proxy]";
 		/**
 		* Checks if `value` is classified as a `Function` object.
 		*
@@ -43139,7 +43220,8 @@ void main() {
 		/** Used to detect host constructors (Safari). */
 		var reIsHostCtor = /^\[object .+?Constructor\]$/;
 		/** Used for built-in method references. */
-		var funcProto$1 = Function.prototype, objectProto$3 = Object.prototype;
+		var funcProto$1 = Function.prototype;
+		var objectProto$3 = Object.prototype;
 		/** Used to resolve the decompiled source of functions. */
 		var funcToString$1 = funcProto$1.toString;
 		/** Used to check objects for own properties. */
@@ -43248,7 +43330,8 @@ void main() {
 		//#endregion
 		//#region node_modules/.pnpm/lodash-es@4.18.1/node_modules/lodash-es/_shortOut.js
 		/** Used to detect hot functions by number of calls within a span of milliseconds. */
-		var HOT_COUNT = 800, HOT_SPAN = 16;
+		var HOT_COUNT = 800;
+		var HOT_SPAN = 16;
 		var nativeNow = Date.now;
 		/**
 		* Creates a function that'll short out and invoke `identity` instead
@@ -43708,8 +43791,30 @@ void main() {
 		//#endregion
 		//#region node_modules/.pnpm/lodash-es@4.18.1/node_modules/lodash-es/_baseIsTypedArray.js
 		/** `Object#toString` result references. */
-		var argsTag = "[object Arguments]", arrayTag = "[object Array]", boolTag = "[object Boolean]", dateTag = "[object Date]", errorTag = "[object Error]", funcTag = "[object Function]", mapTag = "[object Map]", numberTag = "[object Number]", objectTag$1 = "[object Object]", regexpTag = "[object RegExp]", setTag = "[object Set]", stringTag = "[object String]", weakMapTag = "[object WeakMap]";
-		var arrayBufferTag = "[object ArrayBuffer]", dataViewTag = "[object DataView]", float32Tag = "[object Float32Array]", float64Tag = "[object Float64Array]", int8Tag = "[object Int8Array]", int16Tag = "[object Int16Array]", int32Tag = "[object Int32Array]", uint8Tag = "[object Uint8Array]", uint8ClampedTag = "[object Uint8ClampedArray]", uint16Tag = "[object Uint16Array]", uint32Tag = "[object Uint32Array]";
+		var argsTag = "[object Arguments]";
+		var arrayTag = "[object Array]";
+		var boolTag = "[object Boolean]";
+		var dateTag = "[object Date]";
+		var errorTag = "[object Error]";
+		var funcTag = "[object Function]";
+		var mapTag = "[object Map]";
+		var numberTag = "[object Number]";
+		var objectTag$1 = "[object Object]";
+		var regexpTag = "[object RegExp]";
+		var setTag = "[object Set]";
+		var stringTag = "[object String]";
+		var weakMapTag = "[object WeakMap]";
+		var arrayBufferTag = "[object ArrayBuffer]";
+		var dataViewTag = "[object DataView]";
+		var float32Tag = "[object Float32Array]";
+		var float64Tag = "[object Float64Array]";
+		var int8Tag = "[object Int8Array]";
+		var int16Tag = "[object Int16Array]";
+		var int32Tag = "[object Int32Array]";
+		var uint8Tag = "[object Uint8Array]";
+		var uint8ClampedTag = "[object Uint8ClampedArray]";
+		var uint16Tag = "[object Uint16Array]";
+		var uint32Tag = "[object Uint32Array]";
 		/** Used to identify `toStringTag` values of typed arrays. */
 		var typedArrayTags = {};
 		typedArrayTags[float32Tag] = typedArrayTags[float64Tag] = typedArrayTags[int8Tag] = typedArrayTags[int16Tag] = typedArrayTags[int32Tag] = typedArrayTags[uint8Tag] = typedArrayTags[uint8ClampedTag] = typedArrayTags[uint16Tag] = typedArrayTags[uint32Tag] = true;
@@ -44243,7 +44348,8 @@ void main() {
 		/** `Object#toString` result references. */
 		var objectTag = "[object Object]";
 		/** Used for built-in method references. */
-		var funcProto = Function.prototype, objectProto = Object.prototype;
+		var funcProto = Function.prototype;
+		var objectProto = Object.prototype;
 		/** Used to resolve the decompiled source of functions. */
 		var funcToString = funcProto.toString;
 		/** Used to check objects for own properties. */
@@ -44396,7 +44502,8 @@ void main() {
 		/** Detect free variable `module`. */
 		var freeModule = freeExports && typeof module == "object" && module && !module.nodeType && module;
 		/** Built-in value references. */
-		var Buffer$2 = freeModule && freeModule.exports === freeExports ? root$1.Buffer : void 0, allocUnsafe = Buffer$2 ? Buffer$2.allocUnsafe : void 0;
+		var Buffer$2 = freeModule && freeModule.exports === freeExports ? root$1.Buffer : void 0;
+		var allocUnsafe = Buffer$2 ? Buffer$2.allocUnsafe : void 0;
 		/**
 		* Creates a clone of  `buffer`.
 		*
@@ -44513,7 +44620,8 @@ void main() {
 		//#region node_modules/.pnpm/lodash-es@4.18.1/node_modules/lodash-es/debounce.js
 		/** Error message constants. */
 		var FUNC_ERROR_TEXT$1 = "Expected a function";
-		var nativeMax = Math.max, nativeMin = Math.min;
+		var nativeMax = Math.max;
+		var nativeMin = Math.min;
 		/**
 		* Creates a debounced function that delays invoking `func` until after `wait`
 		* milliseconds have elapsed since the last time the debounced function was
@@ -44753,16 +44861,17 @@ void main() {
 			if (isCommon) {
 				var isArr = isArray$1(srcValue), isBuff = !isArr && isBuffer(srcValue), isTyped = !isArr && !isBuff && isTypedArray(srcValue);
 				newValue = srcValue;
-				if (isArr || isBuff || isTyped) if (isArray$1(objValue)) newValue = objValue;
-				else if (isArrayLikeObject(objValue)) newValue = copyArray(objValue);
-				else if (isBuff) {
-					isCommon = false;
-					newValue = cloneBuffer(srcValue, true);
-				} else if (isTyped) {
-					isCommon = false;
-					newValue = cloneTypedArray(srcValue, true);
-				} else newValue = [];
-				else if (isPlainObject$2(srcValue) || isArguments(srcValue)) {
+				if (isArr || isBuff || isTyped) {
+					if (isArray$1(objValue)) newValue = objValue;
+					else if (isArrayLikeObject(objValue)) newValue = copyArray(objValue);
+					else if (isBuff) {
+						isCommon = false;
+						newValue = cloneBuffer(srcValue, true);
+					} else if (isTyped) {
+						isCommon = false;
+						newValue = cloneTypedArray(srcValue, true);
+					} else newValue = [];
+				} else if (isPlainObject$2(srcValue) || isArguments(srcValue)) {
 					newValue = objValue;
 					if (isArguments(objValue)) newValue = toPlainObject(objValue);
 					else if (!isObject$1(objValue) || isFunction$2(objValue)) newValue = initCloneObject(srcValue);
@@ -45172,9 +45281,10 @@ void main() {
 					let nodeStart = fork.start;
 					fork.next();
 					while (fork.pos > startPos) {
-						if (fork.size < 0) if (fork.size == -3 || fork.size == -4) localSkipped += 4;
-						else break scan;
-						else if (fork.id >= minRepeatType) localSkipped += 4;
+						if (fork.size < 0) {
+							if (fork.size == -3 || fork.size == -4) localSkipped += 4;
+							else break scan;
+						} else if (fork.id >= minRepeatType) localSkipped += 4;
 						fork.next();
 					}
 					start = nodeStart;
@@ -45341,15 +45451,19 @@ void main() {
 				}
 				pos = Math.min(nextA, nextB);
 				if (pos == 1e9) break;
-				if (nextA == pos) if (!inA) inA = true;
-				else {
-					inA = false;
-					iA++;
+				if (nextA == pos) {
+					if (!inA) inA = true;
+					else {
+						inA = false;
+						iA++;
+					}
 				}
-				if (nextB == pos) if (!inB) inB = true;
-				else {
-					inB = false;
-					iB++;
+				if (nextB == pos) {
+					if (!inB) inB = true;
+					else {
+						inB = false;
+						iB++;
+					}
 				}
 			}
 			return result;
@@ -45604,7 +45718,8 @@ void main() {
 					return new NodeSet(newTypes);
 				}
 			};
-			CachedNode = /* @__PURE__ */ new WeakMap(), CachedInnerNode = /* @__PURE__ */ new WeakMap();
+			CachedNode = /* @__PURE__ */ new WeakMap();
+			CachedInnerNode = /* @__PURE__ */ new WeakMap();
 			(function(IterMode) {
 				/**
 				When enabled, iteration will only visit [`Tree`](#common.Tree)
@@ -45687,7 +45802,8 @@ void main() {
 				[`moveTo`](#common.TreeCursor.moveTo).
 				*/
 				cursorAt(pos, side = 0, mode = 0) {
-					let cursor = new TreeCursor(CachedNode.get(this) || this.topNode);
+					let scope = CachedNode.get(this) || this.topNode;
+					let cursor = new TreeCursor(scope);
 					cursor.moveTo(pos, side);
 					CachedNode.set(this, cursor._tree);
 					return cursor;
@@ -46830,7 +46946,8 @@ void main() {
 		}
 		var rangeFrom, rangeTo, ZWJ;
 		var init_src = __esmMin((() => {
-			rangeFrom = [], rangeTo = [];
+			rangeFrom = [];
+			rangeTo = [];
 			(() => {
 				let numbers = "lc,34,7n,7,7b,19,,,,2,,2,,,20,b,1c,l,g,,2t,7,2,6,2,2,,4,z,,u,r,2j,b,1m,9,9,,o,4,,9,,3,,5,17,3,1n,9,16,o,,x,1i,3,,i,,7,a,2,t,3,1k,,,7,2,2,2,3,9,,a,2,q,,2,3,1k,,,5,4,2,2,3,3,,u,2,3,,b,3,1k,,,8,,3,,3,k,2,m,6,,3,1k,,,7,2,2,2,3,7,3,a,2,u,,1n,5,3,3,,4,9,,14,5,1j,,,7,,3,,4,7,2,b,2,t,3,1k,,,7,,3,,4,7,2,b,2,f,,c,4,1j,2,,7,,3,,4,9,,a,2,t,3,1y,,4,6,,,,8,i,2,1p,,,8,c,8,2q,,,a,b,7,21,2,r,,,,,,4,2,1d,k,,2,5,b,,10,9,,2u,b,,6,n,4,4,3,g,4,d,,,3,6,,f,,jj,3,qa,4,s,3,t,2,u,2,1s,w,9,,19,3,,,39,2,y,,3a,c,4,c,63,5,1l,a,,,,,2,o,2,,1c,1a,2,c,k,5,1b,h,12,9,c,3,u,d,1k,e,1c,k,48,3,,l,4,,6,,2,3,5i,1s,ek,,5f,x,2da,3,3x,,2o,w,fe,6,2x,2,n9w,4,,a,w,2,28,2,7k,,3,,4,,n,5,4,,2b,2,1e,i,q,i,d,,12,8,p,d,18,4,1b,e,10,,1v,e,c,,8,2,1a,,1f,,,3,2,2,5,2,,,15,5,5,2,6k,8,,2,fn4,,kh,g,g,g,a6,2,gt,,6a,,45,5,1ae,3,,2,5,4,14,3,4,,4l,2,fx,4,1t,5,8t,2,25,6,1y,b,1d,4,3e,3,1h,f,15,,2,2,a,4,19,b,7,,1p,3,10,e,g,2,18,,c,3,1c,e,8,4,,2,2k,c,6,,2,,4d,c,l,4,1j,2,,7,2,2,2,3,9,,a,2,2,7,3,5,1v,9,,,2,,,4,,5,,,e,2,2a,i,n,,29,k,6j,7,2,9,r,2,2a,h,2y,d,2t,3,2,a,74,f,6t,6,,2,2,4,,,,2,3x,7,2,7,3,,s,a,14,7,,4,8,,9,b,1a,g,5i,8,5j,8,,8,2a,m,,e,3e,6,3,,,2,,7,,,1u,5,,2,,5,9n,4,9,2,,,1c,7,3,5,n,,44l,,6,f,8ug,i,1xc,5,1n,7,t4,,,1j,7,4,29,,b,2,f57,2,3mp,1a,2,n,f2,5,3,6,8,8,2,7,u,4,44,3,1iz,1j,4,1e,8,,e,,m,5,,f,11s,7,,h,2,7,,2,,5,2s,,4g,7,af,,1p,4,e4,4,72,2,6r,,2,,7,2,5,,d6,7,31,7,240,5".split(",").map((s) => s ? parseInt(s, 36) : 1);
 				for (let i = 0, n = 0; i < numbers.length; i++) (i % 2 ? rangeTo : rangeFrom).push(n = n + numbers[i]);
@@ -47822,12 +47939,13 @@ void main() {
 					} else if (done) {
 						this.done = true;
 						this.value = "";
-					} else if (lineBreak) if (this.afterBreak) this.value = "";
-					else {
-						this.afterBreak = true;
-						this.next();
-					}
-					else {
+					} else if (lineBreak) {
+						if (this.afterBreak) this.value = "";
+						else {
+							this.afterBreak = true;
+							this.next();
+						}
+					} else {
 						this.value = value;
 						this.afterBreak = false;
 					}
@@ -48835,7 +48953,8 @@ void main() {
 							dynamicSlots.push((a) => dynamicFacetSlot(a, facet, providers));
 						}
 					}
-					return new Configuration$1(base, newCompartments, dynamicSlots.map((f) => f(address)), address, staticValues, facets);
+					let dynamic = dynamicSlots.map((f) => f(address));
+					return new Configuration$1(base, newCompartments, dynamic, address, staticValues, facets);
 				}
 			};
 			languageData = /*@__PURE__*/ Facet.define();
@@ -49111,10 +49230,10 @@ void main() {
 					for (let i = 0; i < this.config.dynamicSlots.length; i++) ensureAddr(this, i << 1);
 					this.computeSlot = null;
 				}
-				field(field, require = true) {
+				field(field, require$1 = true) {
 					let addr = this.config.address[field.id];
 					if (addr == null) {
-						if (require) throw new RangeError("Field is not present in this state");
+						if (require$1) throw new RangeError("Field is not present in this state");
 						return;
 					}
 					ensureAddr(this, addr);
@@ -49756,7 +49875,7 @@ void main() {
 				if they are equivalent in the given range.
 				*/
 				static eq(oldSets, newSets, from = 0, to) {
-					if (to == null) to = 999999999;
+					if (to == null) to = 1e9 - 1;
 					let a = oldSets.filter((set) => !set.isEmpty && newSets.indexOf(set) < 0);
 					let b = newSets.filter((set) => !set.isEmpty && oldSets.indexOf(set) < 0);
 					if (a.length != b.length) return false;
@@ -50556,27 +50675,29 @@ void main() {
 						if (side < 0 && rect.left < bounding.left + moveX) moveX = rect.left - (bounding.left + xMargin);
 					}
 				} else moveX = (x == "center" ? rect.left + (rect.right - rect.left) / 2 - (bounding.right - bounding.left) / 2 : x == "start" == ltr ? rect.left - xMargin : rect.right - (bounding.right - bounding.left) + xMargin) - bounding.left;
-				if (moveX || moveY) if (top) win.scrollBy(moveX, moveY);
-				else {
-					let movedX = 0, movedY = 0;
-					if (moveY) {
-						let start = cur.scrollTop;
-						cur.scrollTop += moveY / scaleY;
-						movedY = (cur.scrollTop - start) * scaleY;
+				if (moveX || moveY) {
+					if (top) win.scrollBy(moveX, moveY);
+					else {
+						let movedX = 0, movedY = 0;
+						if (moveY) {
+							let start = cur.scrollTop;
+							cur.scrollTop += moveY / scaleY;
+							movedY = (cur.scrollTop - start) * scaleY;
+						}
+						if (moveX) {
+							let start = cur.scrollLeft;
+							cur.scrollLeft += moveX / scaleX;
+							movedX = (cur.scrollLeft - start) * scaleX;
+						}
+						rect = {
+							left: rect.left - movedX,
+							top: rect.top - movedY,
+							right: rect.right - movedX,
+							bottom: rect.bottom - movedY
+						};
+						if (movedX && Math.abs(movedX - moveX) < 1) x = "nearest";
+						if (movedY && Math.abs(movedY - moveY) < 1) y = "nearest";
 					}
-					if (moveX) {
-						let start = cur.scrollLeft;
-						cur.scrollLeft += moveX / scaleX;
-						movedX = (cur.scrollLeft - start) * scaleX;
-					}
-					rect = {
-						left: rect.left - movedX,
-						top: rect.top - movedY,
-						right: rect.right - movedX,
-						bottom: rect.bottom - movedY
-					};
-					if (movedX && Math.abs(movedX - moveX) < 1) x = "nearest";
-					if (movedY && Math.abs(movedY - moveY) < 1) y = "nearest";
 				}
 				if (top) break;
 				if (rect.top < bounding.top || rect.bottom > bounding.bottom || rect.left < bounding.left || rect.right > bounding.right) rect = {
@@ -50741,9 +50862,10 @@ void main() {
 				}
 				for (let i = from, prev = prevType, prevStrong = prevType; i < to; i++) {
 					let type = types$6[i];
-					if (type == 128) if (i < to - 1 && prev == types$6[i + 1] && prev & 24) type = types$6[i] = prev;
-					else types$6[i] = 256;
-					else if (type == 64) {
+					if (type == 128) {
+						if (i < to - 1 && prev == types$6[i + 1] && prev & 24) type = types$6[i] = prev;
+						else types$6[i] = 256;
+					} else if (type == 64) {
 						let end = i + 1;
 						while (end < to && types$6[end] == 64) end++;
 						let replace = i && prev == 8 || end < rTo && types$6[end] == 8 ? prevStrong == 1 ? 1 : 8 : 256;
@@ -50759,21 +50881,22 @@ void main() {
 			let oppositeType = outerType == 1 ? 2 : 1;
 			for (let iI = 0, sI = 0, context = 0; iI <= isolates.length; iI++) {
 				let from = iI ? isolates[iI - 1].to : rFrom, to = iI < isolates.length ? isolates[iI].from : rTo;
-				for (let i = from, ch, br, type; i < to; i++) if (br = Brackets[ch = line.charCodeAt(i)]) if (br < 0) {
-					for (let sJ = sI - 3; sJ >= 0; sJ -= 3) if (BracketStack[sJ + 1] == -br) {
-						let flags = BracketStack[sJ + 2];
-						let type = flags & 2 ? outerType : !(flags & 4) ? 0 : flags & 1 ? oppositeType : outerType;
-						if (type) types$6[i] = types$6[BracketStack[sJ]] = type;
-						sI = sJ;
-						break;
+				for (let i = from, ch, br, type; i < to; i++) if (br = Brackets[ch = line.charCodeAt(i)]) {
+					if (br < 0) {
+						for (let sJ = sI - 3; sJ >= 0; sJ -= 3) if (BracketStack[sJ + 1] == -br) {
+							let flags = BracketStack[sJ + 2];
+							let type = flags & 2 ? outerType : !(flags & 4) ? 0 : flags & 1 ? oppositeType : outerType;
+							if (type) types$6[i] = types$6[BracketStack[sJ]] = type;
+							sI = sJ;
+							break;
+						}
+					} else if (BracketStack.length == 189) break;
+					else {
+						BracketStack[sI++] = i;
+						BracketStack[sI++] = ch;
+						BracketStack[sI++] = context;
 					}
-				} else if (BracketStack.length == 189) break;
-				else {
-					BracketStack[sI++] = i;
-					BracketStack[sI++] = ch;
-					BracketStack[sI++] = context;
-				}
-				else if ((type = types$6[i]) == 2 || type == 1) {
+				} else if ((type = types$6[i]) == 2 || type == 1) {
 					let embed = type == outerType;
 					context = embed ? 0 : 1;
 					for (let sJ = sI - 3; sJ >= 0; sJ -= 3) {
@@ -51270,8 +51393,10 @@ void main() {
 				} else {
 					let from = skipAtomicRanges(atoms, range.from, -1);
 					let to = skipAtomicRanges(atoms, range.to, 1);
-					if (from != range.from || to != range.to) if (range.undirectional) updated = EditorSelection.undirectionalRange(range.from, range.to);
-					else updated = EditorSelection.range(range.from == range.anchor ? from : to, range.from == range.head ? from : to);
+					if (from != range.from || to != range.to) {
+						if (range.undirectional) updated = EditorSelection.undirectionalRange(range.from, range.to);
+						else updated = EditorSelection.range(range.from == range.anchor ? from : to, range.from == range.head ? from : to);
+					}
 				}
 				if (updated) {
 					if (!ranges) ranges = sel.ranges.slice();
@@ -52012,9 +52137,10 @@ void main() {
 				else if (/^a(lt)?$/i.test(mod)) alt = true;
 				else if (/^(c|ctrl|control)$/i.test(mod)) ctrl = true;
 				else if (/^s(hift)?$/i.test(mod)) shift = true;
-				else if (/^mod$/i.test(mod)) if (platform == "mac") meta = true;
-				else ctrl = true;
-				else throw new Error("Unrecognized modifier name: " + mod);
+				else if (/^mod$/i.test(mod)) {
+					if (platform == "mac") meta = true;
+					else ctrl = true;
+				} else throw new Error("Unrecognized modifier name: " + mod);
 			}
 			if (alt) result = "Alt-" + result;
 			if (ctrl) result = "Ctrl-" + result;
@@ -53138,10 +53264,12 @@ void main() {
 				Direction[Direction["RTL"] = 1] = "RTL";
 				return Direction;
 			})(Direction || (Direction = {}));
-			LTR = Direction.LTR, RTL = Direction.RTL;
+			LTR = Direction.LTR;
+			RTL = Direction.RTL;
 			LowTypes = /*@__PURE__*/ dec("88888888888888888888888888888888888666888888787833333333337888888000000000000000000000000008888880000000000000000000000000088888888888888888888888888888888888887866668888088888663380888308888800000000000000000000000800000000000000000000000000000008");
 			ArabicTypes = /*@__PURE__*/ dec("4444448826627288999999999992222222222222222222222222222222222222222222222229999999999999999999994444444444644222822222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222999999949999999229989999223333333333");
-			Brackets = /*@__PURE__*/ Object.create(null), BracketStack = [];
+			Brackets = /*@__PURE__*/ Object.create(null);
+			BracketStack = [];
 			for (let p of [
 				"()",
 				"[]",
@@ -54280,19 +54408,20 @@ void main() {
 					let activeMarks = getMarks(this.old), openMarks = this.openMarks;
 					this.old.advance(length, incEnd ? 1 : -1, {
 						skip: (tile, from, to) => {
-							if (tile.isWidget()) if (this.openWidget) this.builder.continueWidget(to - from);
-							else {
-								let widget = to > 0 || from < tile.length ? WidgetTile.of(tile.widget, this.view, to - from, tile.flags & 496, this.cache.maybeReuse(tile)) : this.cache.reuse(tile);
-								if (widget.flags & 256) {
-									widget.flags &= -2;
-									this.builder.addBlockWidget(widget);
-								} else {
-									this.builder.ensureLine(null);
-									this.builder.addInlineWidget(widget, activeMarks, openMarks);
-									openMarks = activeMarks.length;
+							if (tile.isWidget()) {
+								if (this.openWidget) this.builder.continueWidget(to - from);
+								else {
+									let widget = to > 0 || from < tile.length ? WidgetTile.of(tile.widget, this.view, to - from, tile.flags & 496, this.cache.maybeReuse(tile)) : this.cache.reuse(tile);
+									if (widget.flags & 256) {
+										widget.flags &= -2;
+										this.builder.addBlockWidget(widget);
+									} else {
+										this.builder.ensureLine(null);
+										this.builder.addInlineWidget(widget, activeMarks, openMarks);
+										openMarks = activeMarks.length;
+									}
 								}
-							}
-							else if (tile.isText()) {
+							} else if (tile.isText()) {
 								this.builder.ensureLine(null);
 								if (!from && to == tile.length && !this.cache.reused.has(tile)) this.builder.addText(tile.text, activeMarks, openMarks, this.cache.reuse(tile));
 								else {
@@ -54470,10 +54599,12 @@ void main() {
 				update(update) {
 					var _a;
 					let changedRanges = update.changedRanges;
-					if (this.minWidth > 0 && changedRanges.length) if (!changedRanges.every(({ fromA, toA }) => toA < this.minWidthFrom || fromA > this.minWidthTo)) this.minWidth = this.minWidthFrom = this.minWidthTo = 0;
-					else {
-						this.minWidthFrom = update.changes.mapPos(this.minWidthFrom, 1);
-						this.minWidthTo = update.changes.mapPos(this.minWidthTo, 1);
+					if (this.minWidth > 0 && changedRanges.length) {
+						if (!changedRanges.every(({ fromA, toA }) => toA < this.minWidthFrom || fromA > this.minWidthTo)) this.minWidth = this.minWidthFrom = this.minWidthTo = 0;
+						else {
+							this.minWidthFrom = update.changes.mapPos(this.minWidthFrom, 1);
+							this.minWidthTo = update.changes.mapPos(this.minWidthTo, 1);
+						}
 					}
 					this.updateEditContextFormatting(update);
 					let readCompositionAt = -1;
@@ -54633,8 +54764,10 @@ void main() {
 							for (;;) {
 								let parent = node.parentNode;
 								if (parent == tile.dom) break;
-								if (bias == 0 && parent.firstChild != parent.lastChild) if (node == parent.firstChild) bias = -1;
-								else bias = 1;
+								if (bias == 0 && parent.firstChild != parent.lastChild) {
+									if (node == parent.firstChild) bias = -1;
+									else bias = 1;
+								}
 								node = parent;
 							}
 							if (bias < 0) after = node;
@@ -55508,7 +55641,9 @@ void main() {
 				return false;
 			};
 			BadMouseDetail = browser$1.ie && browser$1.ie_version <= 11;
-			lastMouseDown = null, lastMouseDownCount = 0, lastMouseDownTime = 0;
+			lastMouseDown = null;
+			lastMouseDownCount = 0;
+			lastMouseDownTime = 0;
 			handlers$1.dragstart = (view, event) => {
 				let { selection: { main: range } } = view.state;
 				if (event.target.draggable) {
@@ -55860,20 +55995,21 @@ void main() {
 				static of(nodes) {
 					if (nodes.length == 1) return nodes[0];
 					let i = 0, j = nodes.length, before = 0, after = 0;
-					for (;;) if (i == j) if (before > after * 2) {
-						let split = nodes[i - 1];
-						if (split.break) nodes.splice(--i, 1, split.left, null, split.right);
-						else nodes.splice(--i, 1, split.left, split.right);
-						j += 1 + split.break;
-						before -= split.size;
-					} else if (after > before * 2) {
-						let split = nodes[j];
-						if (split.break) nodes.splice(j, 1, split.left, null, split.right);
-						else nodes.splice(j, 1, split.left, split.right);
-						j += 2 + split.break;
-						after -= split.size;
-					} else break;
-					else if (before < after) {
+					for (;;) if (i == j) {
+						if (before > after * 2) {
+							let split = nodes[i - 1];
+							if (split.break) nodes.splice(--i, 1, split.left, null, split.right);
+							else nodes.splice(--i, 1, split.left, split.right);
+							j += 1 + split.break;
+							before -= split.size;
+						} else if (after > before * 2) {
+							let split = nodes[j];
+							if (split.break) nodes.splice(j, 1, split.left, null, split.right);
+							else nodes.splice(j, 1, split.left, split.right);
+							j += 2 + split.break;
+							after -= split.size;
+						} else break;
+					} else if (before < after) {
 						let next = nodes[i++];
 						if (next) before += next.size;
 					} else {
@@ -56531,7 +56667,7 @@ void main() {
 							if (scrollTarget.y == "center") topPos = (block.top + block.bottom) / 2 - viewHeight / 2;
 							else if (scrollTarget.y == "start" || scrollTarget.y == "nearest" && head < viewport.from) topPos = block.top;
 							else topPos = block.bottom - viewHeight;
-							viewport = new Viewport(map.lineAt(topPos - 1e3 / 2, QueryType$1.ByHeight, oracle, 0, 0).from, map.lineAt(topPos + viewHeight + 1e3 / 2, QueryType$1.ByHeight, oracle, 0, 0).to);
+							viewport = new Viewport(map.lineAt(topPos - 500, QueryType$1.ByHeight, oracle, 0, 0).from, map.lineAt(topPos + viewHeight + 500, QueryType$1.ByHeight, oracle, 0, 0).to);
 						}
 					}
 					return viewport;
@@ -56545,7 +56681,7 @@ void main() {
 					let { top } = this.heightMap.lineAt(from, QueryType$1.ByPos, this.heightOracle, 0, 0);
 					let { bottom } = this.heightMap.lineAt(to, QueryType$1.ByPos, this.heightOracle, 0, 0);
 					let { visibleTop, visibleBottom } = this;
-					return (from == 0 || top <= visibleTop - Math.max(10, Math.min(-bias, 250))) && (to == this.state.doc.length || bottom >= visibleBottom + Math.max(10, Math.min(bias, 250))) && top > visibleTop - 2 * 1e3 && bottom < visibleBottom + 2 * 1e3;
+					return (from == 0 || top <= visibleTop - Math.max(10, Math.min(-bias, 250))) && (to == this.state.doc.length || bottom >= visibleBottom + Math.max(10, Math.min(bias, 250))) && top > visibleTop - 2e3 && bottom < visibleBottom + 2e3;
 				}
 				mapLineGaps(gaps, changes) {
 					if (!gaps.length || changes.empty) return gaps;
@@ -56751,7 +56887,9 @@ void main() {
 			};
 			theme = /*@__PURE__*/ Facet.define({ combine: (strs) => strs.join(" ") });
 			darkTheme = /*@__PURE__*/ Facet.define({ combine: (values) => values.indexOf(true) > -1 });
-			baseThemeID = /*@__PURE__*/ StyleModule.newName(), baseLightID = /*@__PURE__*/ StyleModule.newName(), baseDarkID = /*@__PURE__*/ StyleModule.newName();
+			baseThemeID = /*@__PURE__*/ StyleModule.newName();
+			baseLightID = /*@__PURE__*/ StyleModule.newName();
+			baseDarkID = /*@__PURE__*/ StyleModule.newName();
 			lightDarkIDs = {
 				"&light": "." + baseLightID,
 				"&dark": "." + baseDarkID
@@ -57290,18 +57428,20 @@ void main() {
 				}
 				addWindowListeners(win) {
 					win.addEventListener("resize", this.onResize);
-					if (this.printQuery) if (this.printQuery.addEventListener) this.printQuery.addEventListener("change", this.onPrint);
-					else this.printQuery.addListener(this.onPrint);
-					else win.addEventListener("beforeprint", this.onPrint);
+					if (this.printQuery) {
+						if (this.printQuery.addEventListener) this.printQuery.addEventListener("change", this.onPrint);
+						else this.printQuery.addListener(this.onPrint);
+					} else win.addEventListener("beforeprint", this.onPrint);
 					win.addEventListener("scroll", this.onScroll);
 					win.document.addEventListener("selectionchange", this.onSelectionChange);
 				}
 				removeWindowListeners(win) {
 					win.removeEventListener("scroll", this.onScroll);
 					win.removeEventListener("resize", this.onResize);
-					if (this.printQuery) if (this.printQuery.removeEventListener) this.printQuery.removeEventListener("change", this.onPrint);
-					else this.printQuery.removeListener(this.onPrint);
-					else win.removeEventListener("beforeprint", this.onPrint);
+					if (this.printQuery) {
+						if (this.printQuery.removeEventListener) this.printQuery.removeEventListener("change", this.onPrint);
+						else this.printQuery.removeListener(this.onPrint);
+					} else win.removeEventListener("beforeprint", this.onPrint);
 					win.document.removeEventListener("selectionchange", this.onSelectionChange);
 				}
 				update(update) {
@@ -57431,14 +57571,16 @@ void main() {
 					update.changes.iterChanges((fromA, toA, _fromB, _toB, insert) => {
 						if (abort) return;
 						let dLen = insert.length - (toA - fromA);
-						if (pending && toA >= pending.to) if (pending.from == fromA && pending.to == toA && pending.insert.eq(insert)) {
-							pending = this.pendingContextChange = null;
-							off += dLen;
-							this.to += dLen;
-							return;
-						} else {
-							pending = null;
-							this.revertPending(update.state);
+						if (pending && toA >= pending.to) {
+							if (pending.from == fromA && pending.to == toA && pending.insert.eq(insert)) {
+								pending = this.pendingContextChange = null;
+								off += dLen;
+								this.to += dLen;
+								return;
+							} else {
+								pending = null;
+								this.revertPending(update.state);
+							}
 						}
 						fromA += off;
 						toA += off;
@@ -57492,7 +57634,7 @@ void main() {
 				}
 				rangeIsValid(state) {
 					let { head } = state.selection.main;
-					return !(this.from > 0 && head - this.from < 500 || this.to < state.doc.length && this.to - head < 500 || this.to - this.from > 1e4 * 3);
+					return !(this.from > 0 && head - this.from < 500 || this.to < state.doc.length && this.to - head < 500 || this.to - this.from > 3e4);
 				}
 				toEditorPos(contextPos, clipLen = this.to - this.from) {
 					contextPos = Math.min(contextPos, clipLen);
@@ -57844,20 +57986,22 @@ void main() {
 							}
 							if (redrawn) this.docView.updateSelection(true);
 							if (!update.viewportChanged && this.measureRequests.length == 0) {
-								if (this.viewState.editorHeight) if (this.viewState.scrollTarget) {
-									this.docView.scrollIntoView(this.viewState.scrollTarget);
-									this.viewState.scrollTarget = null;
-									scrollAnchorHeight = -1;
-									continue;
-								} else {
-									let diff = (scrollAnchorPos < 0 ? this.viewState.heightMap.height : this.viewState.lineBlockAt(scrollAnchorPos).top) / this.viewState.scaleY - scrollAnchorHeight / scrollScale;
-									if ((diff > 1 || diff < -1) && !(browser$1.ios && this.inputState.lastIOSMomentumScroll > Date.now() - 100) && (scroll == this.scrollDOM || this.hasFocus || Math.max(this.inputState.lastWheelEvent, this.inputState.lastTouchTime) > Date.now() - 100)) {
-										scrollOffset = scrollOffset + diff;
-										if (!scroll) this.win.scrollBy(0, diff);
-										else if (scrollAnchorPos < 0) scroll.scrollTop = scroll.scrollHeight;
-										else scroll.scrollTop += diff;
+								if (this.viewState.editorHeight) {
+									if (this.viewState.scrollTarget) {
+										this.docView.scrollIntoView(this.viewState.scrollTarget);
+										this.viewState.scrollTarget = null;
 										scrollAnchorHeight = -1;
 										continue;
+									} else {
+										let diff = (scrollAnchorPos < 0 ? this.viewState.heightMap.height : this.viewState.lineBlockAt(scrollAnchorPos).top) / this.viewState.scaleY - scrollAnchorHeight / scrollScale;
+										if ((diff > 1 || diff < -1) && !(browser$1.ios && this.inputState.lastIOSMomentumScroll > Date.now() - 100) && (scroll == this.scrollDOM || this.hasFocus || Math.max(this.inputState.lastWheelEvent, this.inputState.lastTouchTime) > Date.now() - 100)) {
+											scrollOffset = scrollOffset + diff;
+											if (!scroll) this.win.scrollBy(0, diff);
+											else if (scrollAnchorPos < 0) scroll.scrollTop = scroll.scrollHeight;
+											else scroll.scrollTop += diff;
+											scrollAnchorHeight = -1;
+											continue;
+										}
 									}
 								}
 								break;
@@ -58133,12 +58277,14 @@ void main() {
 					this.readMeasured();
 					let line = this.state.doc.lineAt(pos), order = this.bidiSpans(line);
 					let span = order[BidiSpan.find(order, pos - line.from, -1, side)];
-					if (line.length && (pos == line.from && side < 0 || pos == line.to && side > 0) && span.dir != this.textDirectionAt(line.from)) if (pos == line.to) {
-						pos = line.from + span.from;
-						side = 1;
-					} else {
-						pos = line.from + span.to;
-						side = -1;
+					if (line.length && (pos == line.from && side < 0 || pos == line.to && side > 0) && span.dir != this.textDirectionAt(line.from)) {
+						if (pos == line.to) {
+							pos = line.from + span.from;
+							side = 1;
+						} else {
+							pos = line.from + span.to;
+							side = -1;
+						}
 					}
 					return this.docView.coordsAt(pos, side, span.dir == Direction.RTL);
 				}
@@ -59234,13 +59380,15 @@ void main() {
 							makeAbsolute = Math.abs(rect.top + 1e4) > 1 || Math.abs(rect.left) > 1;
 						} else makeAbsolute = !!dom.offsetParent && dom.offsetParent != this.container.ownerDocument.body;
 					}
-					if (makeAbsolute || this.position == "absolute") if (this.parent) {
-						let rect = this.parent.getBoundingClientRect();
-						if (rect.width && rect.height) {
-							scaleX = rect.width / this.parent.offsetWidth;
-							scaleY = rect.height / this.parent.offsetHeight;
-						}
-					} else ({scaleX, scaleY} = this.view.viewState);
+					if (makeAbsolute || this.position == "absolute") {
+						if (this.parent) {
+							let rect = this.parent.getBoundingClientRect();
+							if (rect.width && rect.height) {
+								scaleX = rect.width / this.parent.offsetWidth;
+								scaleY = rect.height / this.parent.offsetHeight;
+							}
+						} else ({scaleX, scaleY} = this.view.viewState);
+					}
 					let visible = this.view.scrollDOM.getBoundingClientRect(), margins = getScrollMargins(this.view);
 					return {
 						visible: {
@@ -60006,8 +60154,10 @@ void main() {
 							}
 						}
 						if (!marker) break;
-						if (marker.toDOM) if (matched) domPos = domPos.nextSibling;
-						else this.dom.insertBefore(marker.toDOM(view), domPos);
+						if (marker.toDOM) {
+							if (matched) domPos = domPos.nextSibling;
+							else this.dom.insertBefore(marker.toDOM(view), domPos);
+						}
 						if (matched) iOld++;
 					}
 					this.dom.className = cls;
@@ -60417,7 +60567,20 @@ void main() {
 				}
 			};
 			t = Tag$1.define;
-			comment$2 = t(), name$1 = t(), typeName = t(name$1), propertyName = t(name$1), literal = t(), string$3 = t(literal), number = t(literal), content$3 = t(), heading$1 = t(content$3), keyword$1 = t(), operator$1 = t(), punctuation = t(), bracket = t(punctuation), meta = t();
+			comment$2 = t();
+			name$1 = t();
+			typeName = t(name$1);
+			propertyName = t(name$1);
+			literal = t();
+			string$3 = t(literal);
+			number = t(literal);
+			content$3 = t();
+			heading$1 = t(content$3);
+			keyword$1 = t();
+			operator$1 = t();
+			punctuation = t();
+			bracket = t(punctuation);
+			meta = t();
 			tags$1 = {
 				/**
 				A comment.
@@ -61030,9 +61193,9 @@ void main() {
 				let last = tree.lastChild, closed = last && close.indexOf(last.name) > -1;
 				return (cx) => delimitedStrategy(cx, true, 1, void 0, closed && !ignoreClosed(cx) ? last.from : void 0);
 			}
-			return tree.parent == null ? topIndent$1 : null;
+			return tree.parent == null ? topIndent$2 : null;
 		}
-		function topIndent$1() {
+		function topIndent$2() {
 			return 0;
 		}
 		function isParent$1(parent, of) {
@@ -61570,9 +61733,10 @@ void main() {
 				for (let part of name.split(".")) {
 					let value = extra[part] || tags$1[part];
 					if (!value) warnForPart(part, `Unknown highlighting tag ${part}`);
-					else if (typeof value == "function") if (!found.length) warnForPart(part, `Modifier ${part} used at start of tag`);
-					else found = found.map(value);
-					else if (found.length) warnForPart(part, `Tag ${part} used as modifier`);
+					else if (typeof value == "function") {
+						if (!found.length) warnForPart(part, `Modifier ${part} used at start of tag`);
+						else found = found.map(value);
+					} else if (found.length) warnForPart(part, `Tag ${part} used as modifier`);
 					else found = Array.isArray(value) ? value : [value];
 				}
 				for (let tag of found) tags$1$1.push(tag);
@@ -62178,18 +62342,20 @@ void main() {
 				lineAt(pos, bias = 1) {
 					let line = this.state.doc.lineAt(pos);
 					let { simulateBreak, simulateDoubleBreak } = this.options;
-					if (simulateBreak != null && simulateBreak >= line.from && simulateBreak <= line.to) if (simulateDoubleBreak && simulateBreak == pos) return {
-						text: "",
-						from: pos
-					};
-					else if (bias < 0 ? simulateBreak < pos : simulateBreak <= pos) return {
-						text: line.text.slice(simulateBreak - line.from),
-						from: simulateBreak
-					};
-					else return {
-						text: line.text.slice(0, simulateBreak - line.from),
-						from: line.from
-					};
+					if (simulateBreak != null && simulateBreak >= line.from && simulateBreak <= line.to) {
+						if (simulateDoubleBreak && simulateBreak == pos) return {
+							text: "",
+							from: pos
+						};
+						else if (bias < 0 ? simulateBreak < pos : simulateBreak <= pos) return {
+							text: line.text.slice(simulateBreak - line.from),
+							from: simulateBreak
+						};
+						else return {
+							text: line.text.slice(0, simulateBreak - line.from),
+							from: line.from
+						};
+					}
 					return line;
 				}
 				/**
@@ -62640,7 +62806,8 @@ void main() {
 				"&.cm-focused .cm-matchingBracket": { backgroundColor: "#328c8252" },
 				"&.cm-focused .cm-nonmatchingBracket": { backgroundColor: "#bb555544" }
 			});
-			DefaultScanDist = 1e4, DefaultBrackets = "()[]{}";
+			DefaultScanDist = 1e4;
+			DefaultBrackets = "()[]{}";
 			bracketMatchingConfig = /*@__PURE__*/ Facet.define({ combine(configs) {
 				return combineConfig(configs, {
 					afterCursor: true,
@@ -62649,19 +62816,22 @@ void main() {
 					renderMatch: defaultRenderMatch
 				});
 			} });
-			matchingMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-matchingBracket" }), nonmatchingMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-nonmatchingBracket" });
+			matchingMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-matchingBracket" });
+			nonmatchingMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-nonmatchingBracket" });
 			bracketMatchingUnique = [/* @__PURE__ */ ViewPlugin.fromClass(class {
 				constructor(view) {
 					this.paused = false;
 					this.decorations = bracketDeco(view.state);
 				}
 				update(update) {
-					if (update.docChanged || update.selectionSet || this.paused) if (update.view.composing) {
-						this.decorations = this.decorations.map(update.changes);
-						this.paused = true;
-					} else {
-						this.decorations = bracketDeco(update.state);
-						this.paused = false;
+					if (update.docChanged || update.selectionSet || this.paused) {
+						if (update.view.composing) {
+							this.decorations = this.decorations.map(update.changes);
+							this.paused = true;
+						} else {
+							this.decorations = bracketDeco(update.state);
+							this.paused = false;
+						}
 					}
 				}
 			}, { decorations: (v) => v.decorations }), baseTheme$3];
@@ -64013,10 +64183,12 @@ void main() {
 				addActions(stack, token, end, index) {
 					let { state } = stack, { parser } = stack.p, { data } = parser;
 					for (let set = 0; set < 2; set++) for (let i = parser.stateSlot(state, set ? 2 : 1);; i += 3) {
-						if (data[i] == 65535) if (data[i + 1] == 1) i = pair$1(data, i + 2);
-						else {
-							if (index == 0 && data[i + 1] == 2) index = this.putAction(pair$1(data, i + 2), token, end, index);
-							break;
+						if (data[i] == 65535) {
+							if (data[i + 1] == 1) i = pair$1(data, i + 2);
+							else {
+								if (index == 0 && data[i + 1] == 2) index = this.putAction(pair$1(data, i + 2), token, end, index);
+								break;
+							}
 						}
 						if (data[i] == token) index = this.putAction(pair$1(data, i + 1), token, end, index);
 					}
@@ -64104,10 +64276,12 @@ void main() {
 							let stack = newStacks[i];
 							for (let j = i + 1; j < newStacks.length; j++) {
 								let other = newStacks[j];
-								if (stack.sameState(other) || stack.buffer.length > 500 && other.buffer.length > 500) if ((stack.score - other.score || stack.buffer.length - other.buffer.length) > 0) newStacks.splice(j--, 1);
-								else {
-									newStacks.splice(i--, 1);
-									continue outer;
+								if (stack.sameState(other) || stack.buffer.length > 500 && other.buffer.length > 500) {
+									if ((stack.score - other.score || stack.buffer.length - other.buffer.length) > 0) newStacks.splice(j--, 1);
+									else {
+										newStacks.splice(i--, 1);
+										continue outer;
+									}
 								}
 							}
 						}
@@ -64340,9 +64514,11 @@ void main() {
 				hasAction(state, terminal) {
 					let data = this.data;
 					for (let set = 0; set < 2; set++) for (let i = this.stateSlot(state, set ? 2 : 1), next;; i += 3) {
-						if ((next = data[i]) == 65535) if (data[i + 1] == 1) next = data[i = pair$1(data, i + 2)];
-						else if (data[i + 1] == 2) return pair$1(data, i + 2);
-						else break;
+						if ((next = data[i]) == 65535) {
+							if (data[i + 1] == 1) next = data[i = pair$1(data, i + 2)];
+							else if (data[i + 1] == 2) return pair$1(data, i + 2);
+							else break;
+						}
 						if (next == terminal || next == 0) return pair$1(data, i + 1);
 					}
 					return 0;
@@ -64372,8 +64548,10 @@ void main() {
 					let deflt = this.stateSlot(state, 4);
 					let result = deflt ? action(deflt) : void 0;
 					for (let i = this.stateSlot(state, 1); result == null; i += 3) {
-						if (this.data[i] == 65535) if (this.data[i + 1] == 1) i = pair$1(this.data, i + 2);
-						else break;
+						if (this.data[i] == 65535) {
+							if (this.data[i + 1] == 1) i = pair$1(this.data, i + 2);
+							else break;
+						}
 						result = action(pair$1(this.data, i + 1));
 					}
 					return result;
@@ -64385,8 +64563,10 @@ void main() {
 				nextStates(state) {
 					let result = [];
 					for (let i = this.stateSlot(state, 1);; i += 3) {
-						if (this.data[i] == 65535) if (this.data[i + 1] == 1) i = pair$1(this.data, i + 2);
-						else break;
+						if (this.data[i] == 65535) {
+							if (this.data[i + 1] == 1) i = pair$1(this.data, i + 2);
+							else break;
+						}
 						if ((this.data[i + 2] & 1) == 0) {
 							let value = this.data[i + 1];
 							if (!result.some((v, i) => i & 1 && v == value)) result.push(this.data[i], value);
@@ -65230,11 +65410,13 @@ void main() {
 						let next = codePointAt(word, i);
 						if (direct < 0) {
 							if (preciseTo < len && next == chars[preciseTo]) precise[preciseTo++] = i;
-							if (adjacentTo < len) if (next == chars[adjacentTo] || next == folded[adjacentTo]) {
-								if (adjacentTo == 0) adjacentStart = i;
-								adjacentEnd = i + 1;
-								adjacentTo++;
-							} else adjacentTo = 0;
+							if (adjacentTo < len) {
+								if (next == chars[adjacentTo] || next == folded[adjacentTo]) {
+									if (adjacentTo == 0) adjacentStart = i;
+									adjacentEnd = i + 1;
+									adjacentTo++;
+								} else adjacentTo = 0;
+							}
 						}
 						let ch, type = next < 255 ? next >= 48 && next <= 57 || next >= 97 && next <= 122 ? 2 : next >= 65 && next <= 90 ? 1 : 0 : (ch = fromCodePoint(next)) != ch.toLowerCase() ? 1 : ch != ch.toUpperCase() ? 2 : 0;
 						if (!i || type == 1 && hasLower || prevType == 0 && type != 0) {
@@ -65468,10 +65650,12 @@ void main() {
 					return this.view.state.facet(completionConfig).positionInfo(this.view, listRect, selRect, infoRect, space, this.dom);
 				}
 				placeInfo(pos) {
-					if (this.info) if (pos) {
-						if (pos.style) this.info.style.cssText = pos.style;
-						this.info.className = "cm-tooltip cm-completionInfo " + (pos.class || "");
-					} else this.info.style.cssText = "top: -1e6px";
+					if (this.info) {
+						if (pos) {
+							if (pos.style) this.info.style.cssText = pos.style;
+							this.info.className = "cm-tooltip cm-completionInfo " + (pos.class || "");
+						} else this.info.style.cssText = "top: -1e6px";
+					}
 				}
 				createListBox(options, id, range) {
 					const ul = document.createElement("ul");
@@ -65700,7 +65884,8 @@ void main() {
 					this.done = void 0;
 				}
 			};
-			MaxUpdateCount = 50, MinAbortTime = 1e3;
+			MaxUpdateCount = 50;
+			MinAbortTime = 1e3;
 			completionPlugin = /*@__PURE__*/ ViewPlugin.fromClass(class {
 				constructor(view) {
 					this.view = view;
@@ -65748,8 +65933,8 @@ void main() {
 					if (this.running.length && cState.open && cState.open.disabled) this.debounceAccept = setTimeout(() => this.accept(), this.view.state.facet(completionConfig).updateSyncTime);
 				}
 				startQuery(active) {
-					let { state } = this.view;
-					let context = new CompletionContext(state, cur(state), active.explicit, this.view);
+					let { state } = this.view, pos = cur(state);
+					let context = new CompletionContext(state, pos, active.explicit, this.view);
 					let pending = new RunningQuery(active, context);
 					this.running.push(pending);
 					Promise.resolve(active.source(context)).then((result) => {
@@ -65787,11 +65972,13 @@ void main() {
 							}
 						}
 						let current = cState.active.find((a) => a.source == query.active.source);
-						if (current && current.isPending) if (query.done == null) {
-							let active = new ActiveSource(query.active.source, 0);
-							for (let tr of query.updates) active = active.update(tr, conf);
-							if (!active.isPending) updated.push(active);
-						} else this.startQuery(current);
+						if (current && current.isPending) {
+							if (query.done == null) {
+								let active = new ActiveSource(query.active.source, 0);
+								for (let tr of query.updates) active = active.update(tr, conf);
+								if (!active.isPending) updated.push(active);
+							} else this.startQuery(current);
+						}
 					}
 					if (updated.length || cState.open && cState.open.disabled) this.view.dispatch({ effects: setActiveEffect.of(updated) });
 				}
@@ -66524,7 +66711,8 @@ void main() {
 		}
 		function completeFromSchema$1(schema, tables, schemas, defaultTableName, defaultSchemaName, dialect) {
 			var _a;
-			let top = new CompletionLevel(((_a = dialect === null || dialect === void 0 ? void 0 : dialect.spec.identifierQuotes) === null || _a === void 0 ? void 0 : _a[0]) || "\"", !!(dialect === null || dialect === void 0 ? void 0 : dialect.spec.caseInsensitiveIdentifiers));
+			let idQuote = ((_a = dialect === null || dialect === void 0 ? void 0 : dialect.spec.identifierQuotes) === null || _a === void 0 ? void 0 : _a[0]) || "\"";
+			let top = new CompletionLevel(idQuote, !!(dialect === null || dialect === void 0 ? void 0 : dialect.spec.caseInsensitiveIdentifiers));
 			let defaultSchema = defaultSchemaName ? top.child(defaultSchemaName) : null;
 			top.addNamespace(schema);
 			if (tables) (defaultSchema || top).addCompletions(tables);
@@ -66610,14 +66798,40 @@ void main() {
 			let lang = config.dialect || StandardSQL;
 			return new LanguageSupport(lang.language, [schemaCompletion(config), lang.language.data.of({ autocomplete: keywordCompletionSource(lang, config.upperCaseKeywords, config.keywordCompletion) })]);
 		}
-		var whitespace$2, LineComment$2, BlockComment$1, String$1$3, Number$2, Bool$1, Null, ParenL$2, ParenR$1, BraceL$2, BraceR, BracketL$2, BracketR, Semi, Dot$1, Operator, Punctuation$1, SpecialVar, Identifier$5, QuotedIdentifier, Keyword, Type$1, Bits, Bytes, Builtin, Space$1, defaults$2, tokens$1, parser$1$1, EndFrom, Span$2, QuotedSpan, CompletionLevel, parser$22, SQLDialect, StandardSQL, PostgreSQL, MySQLTypes, MySQLBuiltin, MySQL, MariaSQL, MSSQL, SQLite, Cassandra, PLSQL;
+		var whitespace$2, LineComment$2, BlockComment$1, String$1$3, Number$2, Bool$1, Null, ParenL$2, ParenR$1, BraceL$2, BraceR, BracketL$2, BracketR, Semi, Dot$1, Operator, Punctuation$1, SpecialVar, Identifier$5, QuotedIdentifier, Keyword, Type$1, Bits, Bytes, Builtin, Space$1, SQLTypes, SQLKeywords, defaults$2, tokens$1, parser$1$1, EndFrom, Span$2, QuotedSpan, CompletionLevel, parser$22, SQLDialect, StandardSQL, PostgreSQL, MySQLKeywords, MySQLTypes, MySQLBuiltin, MySQL, MariaSQL, MSSQL, SQLite, Cassandra, PLSQL;
 		var init_dist$34 = __esmMin((() => {
 			init_dist$37();
 			init_dist$38();
 			init_dist$36();
 			init_dist$35();
-			whitespace$2 = 36, LineComment$2 = 1, BlockComment$1 = 2, String$1$3 = 3, Number$2 = 4, Bool$1 = 5, Null = 6, ParenL$2 = 7, ParenR$1 = 8, BraceL$2 = 9, BraceR = 10, BracketL$2 = 11, BracketR = 12, Semi = 13, Dot$1 = 14, Operator = 15, Punctuation$1 = 16, SpecialVar = 17, Identifier$5 = 18, QuotedIdentifier = 19, Keyword = 20, Type$1 = 21, Bits = 22, Bytes = 23, Builtin = 24;
+			whitespace$2 = 36;
+			LineComment$2 = 1;
+			BlockComment$1 = 2;
+			String$1$3 = 3;
+			Number$2 = 4;
+			Bool$1 = 5;
+			Null = 6;
+			ParenL$2 = 7;
+			ParenR$1 = 8;
+			BraceL$2 = 9;
+			BraceR = 10;
+			BracketL$2 = 11;
+			BracketR = 12;
+			Semi = 13;
+			Dot$1 = 14;
+			Operator = 15;
+			Punctuation$1 = 16;
+			SpecialVar = 17;
+			Identifier$5 = 18;
+			QuotedIdentifier = 19;
+			Keyword = 20;
+			Type$1 = 21;
+			Bits = 22;
+			Bytes = 23;
+			Builtin = 24;
 			Space$1 = " 	\r\n";
+			SQLTypes = "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying ";
+			SQLKeywords = "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone ";
 			defaults$2 = {
 				backslashEscapes: false,
 				hashComments: false,
@@ -66633,7 +66847,7 @@ void main() {
 				specialVar: "?",
 				identifierQuotes: "\"",
 				caseInsensitiveIdentifiers: false,
-				words: /*@__PURE__*/ keywords$42("absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone ", "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying ")
+				words: /*@__PURE__*/ keywords$42(SQLKeywords, SQLTypes)
 			};
 			tokens$1 = /*@__PURE__*/ tokensFor(defaults$2);
 			parser$1$1 = /*@__PURE__*/ LRParser.deserialize({
@@ -66664,7 +66878,8 @@ void main() {
 				tokenPrec: 0
 			});
 			EndFrom = /*@__PURE__*/ new Set(/*@__PURE__*/ "where group having order union intersect except all distinct limit offset fetch for".split(" "));
-			Span$2 = /^\w*$/, QuotedSpan = /^[`'"\[]?\w*[`'"\]]?$/;
+			Span$2 = /^\w*$/;
+			QuotedSpan = /^[`'"\[]?\w*[`'"\]]?$/;
 			CompletionLevel = class CompletionLevel {
 				constructor(idQuote, idCaseInsensitive) {
 					this.idQuote = idQuote;
@@ -66774,7 +66989,7 @@ void main() {
 				*/
 				static define(spec) {
 					let d = dialect(spec, spec.keywords, spec.types, spec.builtin);
-					return new SQLDialect(d, LRLanguage.define({
+					let language = LRLanguage.define({
 						name: "sql",
 						parser: parser$22.configure({ tokenizers: [{
 							from: tokens$1,
@@ -66797,7 +67012,8 @@ void main() {
 								"`"
 							] }
 						}
-					}), spec);
+					});
+					return new SQLDialect(d, language, spec);
 				}
 			};
 			StandardSQL = /*@__PURE__*/ SQLDialect.define({});
@@ -66806,10 +67022,11 @@ void main() {
 				doubleDollarQuotedStrings: true,
 				operatorChars: "+-*/<>=~!@#%^&|`?",
 				specialVar: "",
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone abort abs absent access according ada admin aggregate alias also always analyse analyze array_agg array_max_cardinality asensitive assert assignment asymmetric atomic attach attribute attributes avg backward base64 begin_frame begin_partition bernoulli bit_length blocked bom cache called cardinality catalog_name ceil ceiling chain char_length character_length character_set_catalog character_set_name character_set_schema characteristics characters checkpoint class class_origin cluster coalesce cobol collation_catalog collation_name collation_schema collect column_name columns command_function command_function_code comment comments committed concurrently condition_number configuration conflict connection_name constant constraint_catalog constraint_name constraint_schema contains content control conversion convert copy corr cost covar_pop covar_samp csv cume_dist current_catalog current_row current_schema cursor_name database datalink datatype datetime_interval_code datetime_interval_precision db debug defaults defined definer degree delimiter delimiters dense_rank depends derived detach detail dictionary disable discard dispatch dlnewcopy dlpreviouscopy dlurlcomplete dlurlcompleteonly dlurlcompletewrite dlurlpath dlurlpathonly dlurlpathwrite dlurlscheme dlurlserver dlvalue document dump dynamic_function dynamic_function_code element elsif empty enable encoding encrypted end_frame end_partition endexec enforced enum errcode error event every exclude excluding exclusive exp explain expression extension extract family file filter final first_value flag floor following force foreach fortran forward frame_row freeze fs functions fusion generated granted greatest groups handler header hex hierarchy hint id ignore ilike immediately immutable implementation implicit import include including increment indent index indexes info inherit inherits inline insensitive instance instantiable instead integrity intersection invoker isnull key_member key_type label lag last_value lead leakproof least length library like_regex link listen ln load location lock locked log logged lower mapping matched materialized max max_cardinality maxvalue member merge message message_length message_octet_length message_text min minvalue mod mode more move multiset mumps name namespace nfc nfd nfkc nfkd nil normalize normalized nothing notice notify notnull nowait nth_value ntile nullable nullif nulls number occurrences_regex octet_length octets off offset oids operator options ordering others over overlay overriding owned owner parallel parameter_mode parameter_name parameter_ordinal_position parameter_specific_catalog parameter_specific_name parameter_specific_schema parser partition pascal passing passthrough password percent percent_rank percentile_cont percentile_disc perform period permission pg_context pg_datatype_name pg_exception_context pg_exception_detail pg_exception_hint placing plans pli policy portion position position_regex power precedes preceding prepared print_strict_params procedural procedures program publication query quote raise range rank reassign recheck recovery refresh regr_avgx regr_avgy regr_count regr_intercept regr_r2 regr_slope regr_sxx regr_sxy regr_syy reindex rename repeatable replace replica requiring reset respect restart restore result_oid returned_cardinality returned_length returned_octet_length returned_sqlstate returning reverse routine_catalog routine_name routine_schema routines row_count row_number rowtype rule scale schema_name schemas scope scope_catalog scope_name scope_schema security selective self sensitive sequence sequences serializable server server_name setof share show simple skip slice snapshot source specific_name sqlcode sqlerror sqrt stable stacked standalone statement statistics stddev_pop stddev_samp stdin stdout storage strict strip structure style subclass_origin submultiset subscription substring substring_regex succeeds sum symmetric sysid system system_time table_name tables tablesample tablespace temp template ties token top_level_count transaction_active transactions_committed transactions_rolled_back transform transforms translate translate_regex trigger_catalog trigger_name trigger_schema trim trim_array truncate trusted type types uescape unbounded uncommitted unencrypted unlink unlisten unlogged unnamed untyped upper uri use_column use_variable user_defined_type_catalog user_defined_type_code user_defined_type_name user_defined_type_schema vacuum valid validate validator value_of var_pop var_samp varbinary variable_conflict variadic verbose version versioning views volatile warning whitespace width_bucket window within wrapper xmlagg xmlattributes xmlbinary xmlcast xmlcomment xmlconcat xmldeclaration xmldocument xmlelement xmlexists xmlforest xmliterate xmlnamespaces xmlparse xmlpi xmlquery xmlroot xmlschema xmlserialize xmltable xmltext xmlvalidate yes",
-				types: "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying bigint int8 bigserial serial8 varbit bool box bytea cidr circle precision float8 inet int4 json jsonb line lseg macaddr macaddr8 money numeric pg_lsn point polygon float4 int2 smallserial serial2 serial serial4 text timetz timestamptz tsquery tsvector txid_snapshot uuid xml"
+				keywords: SQLKeywords + "abort abs absent access according ada admin aggregate alias also always analyse analyze array_agg array_max_cardinality asensitive assert assignment asymmetric atomic attach attribute attributes avg backward base64 begin_frame begin_partition bernoulli bit_length blocked bom cache called cardinality catalog_name ceil ceiling chain char_length character_length character_set_catalog character_set_name character_set_schema characteristics characters checkpoint class class_origin cluster coalesce cobol collation_catalog collation_name collation_schema collect column_name columns command_function command_function_code comment comments committed concurrently condition_number configuration conflict connection_name constant constraint_catalog constraint_name constraint_schema contains content control conversion convert copy corr cost covar_pop covar_samp csv cume_dist current_catalog current_row current_schema cursor_name database datalink datatype datetime_interval_code datetime_interval_precision db debug defaults defined definer degree delimiter delimiters dense_rank depends derived detach detail dictionary disable discard dispatch dlnewcopy dlpreviouscopy dlurlcomplete dlurlcompleteonly dlurlcompletewrite dlurlpath dlurlpathonly dlurlpathwrite dlurlscheme dlurlserver dlvalue document dump dynamic_function dynamic_function_code element elsif empty enable encoding encrypted end_frame end_partition endexec enforced enum errcode error event every exclude excluding exclusive exp explain expression extension extract family file filter final first_value flag floor following force foreach fortran forward frame_row freeze fs functions fusion generated granted greatest groups handler header hex hierarchy hint id ignore ilike immediately immutable implementation implicit import include including increment indent index indexes info inherit inherits inline insensitive instance instantiable instead integrity intersection invoker isnull key_member key_type label lag last_value lead leakproof least length library like_regex link listen ln load location lock locked log logged lower mapping matched materialized max max_cardinality maxvalue member merge message message_length message_octet_length message_text min minvalue mod mode more move multiset mumps name namespace nfc nfd nfkc nfkd nil normalize normalized nothing notice notify notnull nowait nth_value ntile nullable nullif nulls number occurrences_regex octet_length octets off offset oids operator options ordering others over overlay overriding owned owner parallel parameter_mode parameter_name parameter_ordinal_position parameter_specific_catalog parameter_specific_name parameter_specific_schema parser partition pascal passing passthrough password percent percent_rank percentile_cont percentile_disc perform period permission pg_context pg_datatype_name pg_exception_context pg_exception_detail pg_exception_hint placing plans pli policy portion position position_regex power precedes preceding prepared print_strict_params procedural procedures program publication query quote raise range rank reassign recheck recovery refresh regr_avgx regr_avgy regr_count regr_intercept regr_r2 regr_slope regr_sxx regr_sxy regr_syy reindex rename repeatable replace replica requiring reset respect restart restore result_oid returned_cardinality returned_length returned_octet_length returned_sqlstate returning reverse routine_catalog routine_name routine_schema routines row_count row_number rowtype rule scale schema_name schemas scope scope_catalog scope_name scope_schema security selective self sensitive sequence sequences serializable server server_name setof share show simple skip slice snapshot source specific_name sqlcode sqlerror sqrt stable stacked standalone statement statistics stddev_pop stddev_samp stdin stdout storage strict strip structure style subclass_origin submultiset subscription substring substring_regex succeeds sum symmetric sysid system system_time table_name tables tablesample tablespace temp template ties token top_level_count transaction_active transactions_committed transactions_rolled_back transform transforms translate translate_regex trigger_catalog trigger_name trigger_schema trim trim_array truncate trusted type types uescape unbounded uncommitted unencrypted unlink unlisten unlogged unnamed untyped upper uri use_column use_variable user_defined_type_catalog user_defined_type_code user_defined_type_name user_defined_type_schema vacuum valid validate validator value_of var_pop var_samp varbinary variable_conflict variadic verbose version versioning views volatile warning whitespace width_bucket window within wrapper xmlagg xmlattributes xmlbinary xmlcast xmlcomment xmlconcat xmldeclaration xmldocument xmlelement xmlexists xmlforest xmliterate xmlnamespaces xmlparse xmlpi xmlquery xmlroot xmlschema xmlserialize xmltable xmltext xmlvalidate yes",
+				types: SQLTypes + "bigint int8 bigserial serial8 varbit bool box bytea cidr circle precision float8 inet int4 json jsonb line lseg macaddr macaddr8 money numeric pg_lsn point polygon float4 int2 smallserial serial2 serial serial4 text timetz timestamptz tsquery tsvector txid_snapshot uuid xml"
 			});
-			MySQLTypes = "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying bool blob long longblob longtext medium mediumblob mediumint mediumtext tinyblob tinyint tinytext text bigint int1 int2 int3 int4 int8 float4 float8 varbinary varcharacter precision datetime unsigned signed";
+			MySQLKeywords = "accessible algorithm analyze asensitive authors auto_increment autocommit avg avg_row_length binlog btree cache catalog_name chain change changed checkpoint checksum class_origin client_statistics coalesce code collations columns comment committed completion concurrent consistent contains contributors convert database databases day_hour day_microsecond day_minute day_second delay_key_write delayed delimiter des_key_file dev_pop dev_samp deviance directory disable discard distinctrow div dual dumpfile enable enclosed ends engine engines enum errors escaped even event events every explain extended fast field fields flush force found_rows fulltext grants handler hash high_priority hosts hour_microsecond hour_minute hour_second ignore ignore_server_ids import index index_statistics infile innodb insensitive insert_method install invoker iterate keys kill linear lines list load lock logs low_priority master master_heartbeat_period master_ssl_verify_server_cert masters max max_rows maxvalue message_text middleint migrate min min_rows minute_microsecond minute_second mod mode modify mutex mysql_errno no_write_to_binlog offline offset one online optimize optionally outfile pack_keys parser partition partitions password phase plugin plugins prev processlist profile profiles purge query quick range read_write rebuild recover regexp relaylog remove rename reorganize repair repeatable replace require resume rlike row_format rtree schedule schema_name schemas second_microsecond security sensitive separator serializable server share show slave slow snapshot soname spatial sql_big_result sql_buffer_result sql_cache sql_calc_found_rows sql_no_cache sql_small_result ssl starting starts std stddev stddev_pop stddev_samp storage straight_join subclass_origin sum suspend table_name table_statistics tables tablespace terminated triggers truncate uncommitted uninstall unlock upgrade use use_frm user_resources user_statistics utc_date utc_time utc_timestamp variables views warnings xa xor year_month zerofill";
+			MySQLTypes = SQLTypes + "bool blob long longblob longtext medium mediumblob mediumint mediumtext tinyblob tinyint tinytext text bigint int1 int2 int3 int4 int8 float4 float8 varbinary varcharacter precision datetime unsigned signed";
 			MySQLBuiltin = "charset clear edit ego help nopager notee nowarning pager print prompt quit rehash source status system tee";
 			MySQL = /*@__PURE__*/ SQLDialect.define({
 				operatorChars: "*+-%<>!=&|^",
@@ -66820,7 +67037,7 @@ void main() {
 				spaceAfterDashes: true,
 				specialVar: "@?",
 				identifierQuotes: "`",
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone group_concat accessible algorithm analyze asensitive authors auto_increment autocommit avg avg_row_length binlog btree cache catalog_name chain change changed checkpoint checksum class_origin client_statistics coalesce code collations columns comment committed completion concurrent consistent contains contributors convert database databases day_hour day_microsecond day_minute day_second delay_key_write delayed delimiter des_key_file dev_pop dev_samp deviance directory disable discard distinctrow div dual dumpfile enable enclosed ends engine engines enum errors escaped even event events every explain extended fast field fields flush force found_rows fulltext grants handler hash high_priority hosts hour_microsecond hour_minute hour_second ignore ignore_server_ids import index index_statistics infile innodb insensitive insert_method install invoker iterate keys kill linear lines list load lock logs low_priority master master_heartbeat_period master_ssl_verify_server_cert masters max max_rows maxvalue message_text middleint migrate min min_rows minute_microsecond minute_second mod mode modify mutex mysql_errno no_write_to_binlog offline offset one online optimize optionally outfile pack_keys parser partition partitions password phase plugin plugins prev processlist profile profiles purge query quick range read_write rebuild recover regexp relaylog remove rename reorganize repair repeatable replace require resume rlike row_format rtree schedule schema_name schemas second_microsecond security sensitive separator serializable server share show slave slow snapshot soname spatial sql_big_result sql_buffer_result sql_cache sql_calc_found_rows sql_no_cache sql_small_result ssl starting starts std stddev stddev_pop stddev_samp storage straight_join subclass_origin sum suspend table_name table_statistics tables tablespace terminated triggers truncate uncommitted uninstall unlock upgrade use use_frm user_resources user_statistics utc_date utc_time utc_timestamp variables views warnings xa xor year_month zerofill",
+				keywords: SQLKeywords + "group_concat " + MySQLKeywords,
 				types: MySQLTypes,
 				builtin: MySQLBuiltin
 			});
@@ -66833,21 +67050,21 @@ void main() {
 				spaceAfterDashes: true,
 				specialVar: "@?",
 				identifierQuotes: "`",
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone always generated groupby_concat hard persistent shutdown soft virtual accessible algorithm analyze asensitive authors auto_increment autocommit avg avg_row_length binlog btree cache catalog_name chain change changed checkpoint checksum class_origin client_statistics coalesce code collations columns comment committed completion concurrent consistent contains contributors convert database databases day_hour day_microsecond day_minute day_second delay_key_write delayed delimiter des_key_file dev_pop dev_samp deviance directory disable discard distinctrow div dual dumpfile enable enclosed ends engine engines enum errors escaped even event events every explain extended fast field fields flush force found_rows fulltext grants handler hash high_priority hosts hour_microsecond hour_minute hour_second ignore ignore_server_ids import index index_statistics infile innodb insensitive insert_method install invoker iterate keys kill linear lines list load lock logs low_priority master master_heartbeat_period master_ssl_verify_server_cert masters max max_rows maxvalue message_text middleint migrate min min_rows minute_microsecond minute_second mod mode modify mutex mysql_errno no_write_to_binlog offline offset one online optimize optionally outfile pack_keys parser partition partitions password phase plugin plugins prev processlist profile profiles purge query quick range read_write rebuild recover regexp relaylog remove rename reorganize repair repeatable replace require resume rlike row_format rtree schedule schema_name schemas second_microsecond security sensitive separator serializable server share show slave slow snapshot soname spatial sql_big_result sql_buffer_result sql_cache sql_calc_found_rows sql_no_cache sql_small_result ssl starting starts std stddev stddev_pop stddev_samp storage straight_join subclass_origin sum suspend table_name table_statistics tables tablespace terminated triggers truncate uncommitted uninstall unlock upgrade use use_frm user_resources user_statistics utc_date utc_time utc_timestamp variables views warnings xa xor year_month zerofill",
+				keywords: SQLKeywords + "always generated groupby_concat hard persistent shutdown soft virtual " + MySQLKeywords,
 				types: MySQLTypes,
 				builtin: MySQLBuiltin
 			});
 			MSSQL = /*@__PURE__*/ SQLDialect.define({
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone add external procedure all fetch public alter file raiserror and fillfactor read any for readtext as foreign reconfigure asc freetext references authorization freetexttable replication backup from restore begin full restrict between function return break goto revert browse grant revoke bulk group right by having rollback cascade holdlock rowcount case identity rowguidcol check identity_insert rule checkpoint identitycol save close if schema clustered in securityaudit coalesce index select collate inner semantickeyphrasetable column insert semanticsimilaritydetailstable commit intersect semanticsimilaritytable compute into session_user constraint is set contains join setuser containstable key shutdown continue kill some convert left statistics create like system_user cross lineno table current load tablesample current_date merge textsize current_time national then current_timestamp nocheck to current_user nonclustered top cursor not tran database null transaction dbcc nullif trigger deallocate of truncate declare off try_convert default offsets tsequal delete on union deny open unique desc opendatasource unpivot disk openquery update distinct openrowset updatetext distributed openxml use double option user drop or values dump order varying else outer view end over waitfor errlvl percent when escape pivot where except plan while exec precision with execute primary within group exists print writetext exit proc noexpand index forceseek forcescan holdlock nolock nowait paglock readcommitted readcommittedlock readpast readuncommitted repeatableread rowlock serializable snapshot spatial_window_max_cells tablock tablockx updlock xlock keepidentity keepdefaults ignore_constraints ignore_triggers",
-				types: "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying smalldatetime datetimeoffset datetime2 datetime bigint smallint smallmoney tinyint money real text nvarchar ntext varbinary image hierarchyid uniqueidentifier sql_variant xml",
+				keywords: SQLKeywords + "add external procedure all fetch public alter file raiserror and fillfactor read any for readtext as foreign reconfigure asc freetext references authorization freetexttable replication backup from restore begin full restrict between function return break goto revert browse grant revoke bulk group right by having rollback cascade holdlock rowcount case identity rowguidcol check identity_insert rule checkpoint identitycol save close if schema clustered in securityaudit coalesce index select collate inner semantickeyphrasetable column insert semanticsimilaritydetailstable commit intersect semanticsimilaritytable compute into session_user constraint is set contains join setuser containstable key shutdown continue kill some convert left statistics create like system_user cross lineno table current load tablesample current_date merge textsize current_time national then current_timestamp nocheck to current_user nonclustered top cursor not tran database null transaction dbcc nullif trigger deallocate of truncate declare off try_convert default offsets tsequal delete on union deny open unique desc opendatasource unpivot disk openquery update distinct openrowset updatetext distributed openxml use double option user drop or values dump order varying else outer view end over waitfor errlvl percent when escape pivot where except plan while exec precision with execute primary within group exists print writetext exit proc noexpand index forceseek forcescan holdlock nolock nowait paglock readcommitted readcommittedlock readpast readuncommitted repeatableread rowlock serializable snapshot spatial_window_max_cells tablock tablockx updlock xlock keepidentity keepdefaults ignore_constraints ignore_triggers",
+				types: SQLTypes + "smalldatetime datetimeoffset datetime2 datetime bigint smallint smallmoney tinyint money real text nvarchar ntext varbinary image hierarchyid uniqueidentifier sql_variant xml",
 				builtin: "approx_count_distinct approx_percentile_cont approx_percentile_disc avg checksum_agg count count_big grouping grouping_id max min product stdev stdevp sum var varp ai_generate_embeddings ai_generate_chunks cume_dist first_value lag last_value lead percentile_cont percentile_disc percent_rank left_shift right_shift bit_count get_bit set_bit collationproperty tertiary_weights @@datefirst @@dbts @@langid @@language @@lock_timeout @@max_connections @@max_precision @@nestlevel @@options @@remserver @@servername @@servicename @@spid @@textsize @@version cast convert parse try_cast try_convert try_parse asymkey_id asymkeyproperty certproperty cert_id crypt_gen_random decryptbyasymkey decryptbycert decryptbykey decryptbykeyautoasymkey decryptbykeyautocert decryptbypassphrase encryptbyasymkey encryptbycert encryptbykey encryptbypassphrase hashbytes is_objectsigned key_guid key_id key_name signbyasymkey signbycert symkeyproperty verifysignedbycert verifysignedbyasymkey @@cursor_rows @@fetch_status cursor_status datalength ident_current ident_incr ident_seed identity sql_variant_property @@datefirst current_timestamp current_timezone current_timezone_id date_bucket dateadd datediff datediff_big datefromparts datename datepart datetime2fromparts datetimefromparts datetimeoffsetfromparts datetrunc day eomonth getdate getutcdate isdate month smalldatetimefromparts switchoffset sysdatetime sysdatetimeoffset sysutcdatetime timefromparts todatetimeoffset year edit_distance edit_distance_similarity jaro_winkler_distance jaro_winkler_similarity edge_id_from_parts graph_id_from_edge_id graph_id_from_node_id node_id_from_parts object_id_from_edge_id object_id_from_node_id json isjson json_array json_contains json_modify json_object json_path_exists json_query json_value regexp_like regexp_replace regexp_substr regexp_instr regexp_count regexp_matches regexp_split_to_table abs acos asin atan atn2 ceiling cos cot degrees exp floor log log10 pi power radians rand round sign sin sqrt square tan choose greatest iif least @@procid app_name applock_mode applock_test assemblyproperty col_length col_name columnproperty databasepropertyex db_id db_name file_id file_idex file_name filegroup_id filegroup_name filegroupproperty fileproperty filepropertyex fulltextcatalogproperty fulltextserviceproperty index_col indexkey_property indexproperty next value for object_definition object_id object_name object_schema_name objectproperty objectpropertyex original_db_name parsename schema_id schema_name scope_identity serverproperty stats_date type_id type_name typeproperty dense_rank ntile rank row_number publishingservername certenclosed certprivatekey current_user database_principal_id has_dbaccess has_perms_by_name is_member is_rolemember is_srvrolemember loginproperty original_login permissions pwdencrypt pwdcompare session_user sessionproperty suser_id suser_name suser_sid suser_sname system_user user user_id user_name ascii char charindex concat concat_ws difference format left len lower ltrim nchar patindex quotename replace replicate reverse right rtrim soundex space str string_agg string_escape stuff substring translate trim unicode upper $partition @@error @@identity @@pack_received @@rowcount @@trancount binary_checksum checksum compress connectionproperty context_info current_request_id current_transaction_id decompress error_line error_message error_number error_procedure error_severity error_state formatmessage get_filestream_transaction_context getansinull host_id host_name isnull isnumeric min_active_rowversion newid newsequentialid rowcount_big session_context xact_state @@connections @@cpu_busy @@idle @@io_busy @@pack_sent @@packet_errors @@timeticks @@total_errors @@total_read @@total_write textptr textvalid columns_updated eventdata trigger_nestlevel vector_distance vectorproperty vector_search generate_series opendatasource openjson openquery openrowset openxml predict string_split coalesce nullif apply catch filter force include keep keepfixed modify optimize parameterization parameters partition recompile sequence set",
 				operatorChars: "*+-%<>!=^&|/",
 				specialVar: "@",
 				identifierQuotes: "\"["
 			});
 			SQLite = /*@__PURE__*/ SQLDialect.define({
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone abort analyze attach autoincrement conflict database detach exclusive fail glob ignore index indexed instead isnull notnull offset plan pragma query raise regexp reindex rename replace temp vacuum virtual",
-				types: "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying bool blob long longblob longtext medium mediumblob mediumint mediumtext tinyblob tinyint tinytext text bigint int2 int8 unsigned signed real",
+				keywords: SQLKeywords + "abort analyze attach autoincrement conflict database detach exclusive fail glob ignore index indexed instead isnull notnull offset plan pragma query raise regexp reindex rename replace temp vacuum virtual",
+				types: SQLTypes + "bool blob long longblob longtext medium mediumblob mediumint mediumtext tinyblob tinyint tinytext text bigint int2 int8 unsigned signed real",
 				builtin: "auth backup bail changes clone databases dbinfo dump echo eqp explain fullschema headers help import imposter indexes iotrace lint load log mode nullvalue once print prompt quit restore save scanstats separator shell show stats system tables testcase timeout timer trace vfsinfo vfslist vfsname width",
 				operatorChars: "*+-%<>!=&|/~",
 				identifierQuotes: "`\"",
@@ -66855,13 +67072,13 @@ void main() {
 			});
 			Cassandra = /*@__PURE__*/ SQLDialect.define({
 				keywords: "add all allow alter and any apply as asc authorize batch begin by clustering columnfamily compact consistency count create custom delete desc distinct drop each_quorum exists filtering from grant if in index insert into key keyspace keyspaces level limit local_one local_quorum modify nan norecursive nosuperuser not of on one order password permission permissions primary quorum rename revoke schema select set storage superuser table three to token truncate ttl two type unlogged update use user users using values where with writetime infinity NaN",
-				types: "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying ascii bigint blob counter frozen inet list map static text timeuuid tuple uuid varint",
+				types: SQLTypes + "ascii bigint blob counter frozen inet list map static text timeuuid tuple uuid varint",
 				slashComments: true
 			});
 			PLSQL = /*@__PURE__*/ SQLDialect.define({
-				keywords: "absolute action add after all allocate alter and any are as asc assertion at authorization before begin between both breadth by call cascade cascaded case cast catalog check close collate collation column commit condition connect connection constraint constraints constructor continue corresponding count create cross cube current current_date current_default_transform_group current_transform_group_for_type current_path current_role current_time current_timestamp current_user cursor cycle data day deallocate declare default deferrable deferred delete depth deref desc describe descriptor deterministic diagnostics disconnect distinct do domain drop dynamic each else elseif end end-exec equals escape except exception exec execute exists exit external fetch first for foreign found from free full function general get global go goto grant group grouping handle having hold hour identity if immediate in indicator initially inner inout input insert intersect into is isolation join key language last lateral leading leave left level like limit local localtime localtimestamp locator loop map match method minute modifies module month names natural nesting new next no none not of old on only open option or order ordinality out outer output overlaps pad parameter partial path prepare preserve primary prior privileges procedure public read reads recursive redo ref references referencing relative release repeat resignal restrict result return returns revoke right role rollback rollup routine row rows savepoint schema scroll search second section select session session_user set sets signal similar size some space specific specifictype sql sqlexception sqlstate sqlwarning start state static system_user table temporary then timezone_hour timezone_minute to trailing transaction translation treat trigger under undo union unique unnest until update usage user using value values view when whenever where while with without work write year zone abort accept access add all alter and any arraylen as asc assert assign at attributes audit authorization avg base_table begin between binary_integer body by case cast char_base check close cluster clusters colauth column comment commit compress connected constant constraint crash create current currval cursor data_base database dba deallocate debugoff debugon declare default definition delay delete desc digits dispose distinct do drop else elseif elsif enable end entry exception exception_init exchange exclusive exists external fast fetch file for force form from function generic goto grant group having identified if immediate in increment index indexes indicator initial initrans insert interface intersect into is key level library like limited local lock log logging loop master maxextents maxtrans member minextents minus mislabel mode modify multiset new next no noaudit nocompress nologging noparallel not nowait number_base of off offline on online only option or order out package parallel partition pctfree pctincrease pctused pls_integer positive positiven pragma primary prior private privileges procedure public raise range raw rebuild record ref references refresh rename replace resource restrict return returning returns reverse revoke rollback row rowid rowlabel rownum rows run savepoint schema segment select separate set share snapshot some space split sql start statement storage subtype successful synonym tabauth table tables tablespace task terminate then to trigger truncate type union unique unlimited unrecoverable unusable update use using validate value values variable view views when whenever where while with work",
+				keywords: SQLKeywords + "abort accept access add all alter and any arraylen as asc assert assign at attributes audit authorization avg base_table begin between binary_integer body by case cast char_base check close cluster clusters colauth column comment commit compress connected constant constraint crash create current currval cursor data_base database dba deallocate debugoff debugon declare default definition delay delete desc digits dispose distinct do drop else elseif elsif enable end entry exception exception_init exchange exclusive exists external fast fetch file for force form from function generic goto grant group having identified if immediate in increment index indexes indicator initial initrans insert interface intersect into is key level library like limited local lock log logging loop master maxextents maxtrans member minextents minus mislabel mode modify multiset new next no noaudit nocompress nologging noparallel not nowait number_base of off offline on online only option or order out package parallel partition pctfree pctincrease pctused pls_integer positive positiven pragma primary prior private privileges procedure public raise range raw rebuild record ref references refresh rename replace resource restrict return returning returns reverse revoke rollback row rowid rowlabel rownum rows run savepoint schema segment select separate set share snapshot some space split sql start statement storage subtype successful synonym tabauth table tables tablespace task terminate then to trigger truncate type union unique unlimited unrecoverable unusable update use using validate value values variable view views when whenever where while with work",
 				builtin: "appinfo arraysize autocommit autoprint autorecovery autotrace blockterminator break btitle cmdsep colsep compatibility compute concat copycommit copytypecheck define echo editfile embedded feedback flagger flush heading headsep instance linesize lno loboffset logsource longchunksize markup native newpage numformat numwidth pagesize pause pno recsep recsepchar repfooter repheader serveroutput shiftinout show showmode spool sqlblanklines sqlcase sqlcode sqlcontinue sqlnumber sqlpluscompatibility sqlprefix sqlprompt sqlterminator suffix tab term termout timing trimout trimspool ttitle underline verify version wrap",
-				types: "array binary bit boolean char character clob date decimal double float int integer interval large national nchar nclob numeric object precision real smallint time timestamp varchar varying ascii bfile bfilename bigserial bit blob dec long number nvarchar nvarchar2 serial smallint string text uid varchar2 xml",
+				types: SQLTypes + "ascii bfile bfilename bigserial bit blob dec long number nvarchar nvarchar2 serial smallint string text uid varchar2 xml",
 				operatorChars: "*/+-%<>!=~",
 				doubleQuotedStrings: true,
 				charSetCasts: true,
@@ -66874,8 +67091,24 @@ void main() {
 		var init_dist$33 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			RawString$1 = 1, templateArgsEndFallback = 2, MacroName = 3;
-			R = 82, L = 76, u = 117, U = 85, a = 97, z = 122, A$1 = 65, Z = 90, Underscore = 95, Zero = 48, Quote$1 = 34, ParenL$1 = 40, ParenR = 41, Space = 32, GreaterThan$1 = 62;
+			RawString$1 = 1;
+			templateArgsEndFallback = 2;
+			MacroName = 3;
+			R = 82;
+			L = 76;
+			u = 117;
+			U = 85;
+			a = 97;
+			z = 122;
+			A$1 = 65;
+			Z = 90;
+			Underscore = 95;
+			Zero = 48;
+			Quote$1 = 34;
+			ParenL$1 = 40;
+			ParenR = 41;
+			Space = 32;
+			GreaterThan$1 = 62;
 			rawString = new ExternalTokenizer((input) => {
 				if (input.next == L || input.next == U) input.advance();
 				else if (input.next == u) {
@@ -67362,7 +67595,15 @@ void main() {
 		var init_dist$31 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			descendantOp$2 = 148, Unit$2 = 1, identifier$6 = 149, callee$1 = 150, VariableName$1 = 2, queryIdentifier$1 = 151, queryVariableName = 3, QueryCallee = 4, hashNameColor = 152;
+			descendantOp$2 = 148;
+			Unit$2 = 1;
+			identifier$6 = 149;
+			callee$1 = 150;
+			VariableName$1 = 2;
+			queryIdentifier$1 = 151;
+			queryVariableName = 3;
+			QueryCallee = 4;
+			hashNameColor = 152;
 			space$6 = [
 				9,
 				10,
@@ -67390,7 +67631,18 @@ void main() {
 				8287,
 				12288
 			];
-			colon$2 = 58, parenL$1 = 40, underscore$1 = 95, bracketL$2 = 91, dash$2 = 45, period$1 = 46, hash$2 = 35, percent$1 = 37, ampersand = 38, backslash$1 = 92, newline$5 = 10, asterisk$2 = 42;
+			colon$2 = 58;
+			parenL$1 = 40;
+			underscore$1 = 95;
+			bracketL$2 = 91;
+			dash$2 = 45;
+			period$1 = 46;
+			hash$2 = 35;
+			percent$1 = 37;
+			ampersand = 38;
+			backslash$1 = 92;
+			newline$5 = 10;
+			asterisk$2 = 42;
 			identifierTokens = (id, varName, callee) => (input, stack) => {
 				for (let inside = false, dashes = 0, i = 0;; i++) {
 					let { next } = input;
@@ -68432,7 +68684,8 @@ void main() {
 				type: "keyword",
 				label
 			}));
-			identifier$5 = /^(\w[\w-]*|-\w[\w-]*|)$/, variable$1 = /^-(-[\w-]*)?$/;
+			identifier$5 = /^(\w[\w-]*|-\w[\w-]*|)$/;
+			variable$1 = /^-(-[\w-]*)?$/;
 			VariablesByNode = /*@__PURE__*/ new NodeWeakMap();
 			declSelector = ["Declaration"];
 			defineCSSCompletionSource = (isVariable) => (context) => {
@@ -68514,8 +68767,27 @@ void main() {
 		var init_dist$29 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			insertedSemi = 177, space$1$1 = 179, identifier$4 = 184, String$2 = 12, closeParen$1 = 13, Number$1 = 17, Rune = 20, closeBrace$1 = 25, closeBracket = 53, IncDecOp = 95, _return$1 = 142, _break$1 = 144, _continue$1 = 145, fallthrough = 148;
-			newline$4 = 10, carriageReturn$1 = 13, space$5 = 32, tab$1 = 9, slash$3 = 47, closeParen = 41, closeBrace = 125;
+			insertedSemi = 177;
+			space$1$1 = 179;
+			identifier$4 = 184;
+			String$2 = 12;
+			closeParen$1 = 13;
+			Number$1 = 17;
+			Rune = 20;
+			closeBrace$1 = 25;
+			closeBracket = 53;
+			IncDecOp = 95;
+			_return$1 = 142;
+			_break$1 = 144;
+			_continue$1 = 145;
+			fallthrough = 148;
+			newline$4 = 10;
+			carriageReturn$1 = 13;
+			space$5 = 32;
+			tab$1 = 9;
+			slash$3 = 47;
+			closeParen = 41;
+			closeBrace = 125;
 			semicolon$2 = new ExternalTokenizer((input, stack) => {
 				for (let scan = 0, next = input.next;;) {
 					if (stack.context && (next < 0 || next == newline$4 || next == carriageReturn$1 || next == slash$3 && input.peek(scan + 1) == slash$3) || next == closeParen || next == closeBrace) input.acceptToken(insertedSemi);
@@ -68523,7 +68795,7 @@ void main() {
 					next = input.peek(++scan);
 				}
 			}, { contextual: true });
-			trackedTokens = new Set([
+			trackedTokens = /* @__PURE__ */ new Set([
 				IncDecOp,
 				identifier$4,
 				Rune,
@@ -69099,7 +69371,39 @@ void main() {
 			init_dist$36();
 			init_dist$38();
 			init_dist$41();
-			scriptText = 55, StartCloseScriptTag = 1, styleText = 56, StartCloseStyleTag = 2, textareaText = 57, StartCloseTextareaTag = 3, EndTag = 4, SelfClosingEndTag = 5, StartTag$1 = 6, StartScriptTag = 7, StartStyleTag = 8, StartTextareaTag = 9, StartSelfClosingTag = 10, StartCloseTag$1 = 11, NoMatchStartCloseTag = 12, MismatchedStartCloseTag = 13, missingCloseTag = 58, IncompleteTag = 14, IncompleteCloseTag = 15, commentContent$1$1 = 59, Element$4 = 21, TagName = 23, Attribute$1 = 24, AttributeName = 25, AttributeValue = 27, UnquotedAttributeValue = 28, ScriptText = 29, StyleText = 32, TextareaText = 35, OpenTag$1 = 37, CloseTag = 38, Dialect_noMatch = 0, Dialect_selfClosing = 1;
+			scriptText = 55;
+			StartCloseScriptTag = 1;
+			styleText = 56;
+			StartCloseStyleTag = 2;
+			textareaText = 57;
+			StartCloseTextareaTag = 3;
+			EndTag = 4;
+			SelfClosingEndTag = 5;
+			StartTag$1 = 6;
+			StartScriptTag = 7;
+			StartStyleTag = 8;
+			StartTextareaTag = 9;
+			StartSelfClosingTag = 10;
+			StartCloseTag$1 = 11;
+			NoMatchStartCloseTag = 12;
+			MismatchedStartCloseTag = 13;
+			missingCloseTag = 58;
+			IncompleteTag = 14;
+			IncompleteCloseTag = 15;
+			commentContent$1$1 = 59;
+			Element$4 = 21;
+			TagName = 23;
+			Attribute$1 = 24;
+			AttributeName = 25;
+			AttributeValue = 27;
+			UnquotedAttributeValue = 28;
+			ScriptText = 29;
+			StyleText = 32;
+			TextareaText = 35;
+			OpenTag$1 = 37;
+			CloseTag = 38;
+			Dialect_noMatch = 0;
+			Dialect_selfClosing = 1;
 			selfClosers$1 = {
 				area: true,
 				base: true,
@@ -69205,8 +69509,15 @@ void main() {
 				},
 				tr: { tr: true }
 			};
-			cachedName$1 = null, cachedInput$1 = null, cachedPos$1 = 0;
-			lessThan = 60, greaterThan = 62, slash$2 = 47, question$1 = 63, bang = 33, dash$1 = 45;
+			cachedName$1 = null;
+			cachedInput$1 = null;
+			cachedPos$1 = 0;
+			lessThan = 60;
+			greaterThan = 62;
+			slash$2 = 47;
+			question$1 = 63;
+			bang = 33;
+			dash$1 = 45;
 			startTagTerms = [
 				StartTag$1,
 				StartSelfClosingTag,
@@ -69415,7 +69726,18 @@ void main() {
 		var init_dist$26 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			noSemi = 317, noSemiType = 318, incdec = 1, incdecPrefix = 2, questionDot = 3, JSXStartTag = 4, insertSemi = 319, spaces$1 = 321, newline$3 = 322, LineComment$1 = 5, BlockComment = 6, Dialect_jsx = 0;
+			noSemi = 317;
+			noSemiType = 318;
+			incdec = 1;
+			incdecPrefix = 2;
+			questionDot = 3;
+			JSXStartTag = 4;
+			insertSemi = 319;
+			spaces$1 = 321;
+			newline$3 = 322;
+			LineComment$1 = 5;
+			BlockComment = 6;
+			Dialect_jsx = 0;
 			space$4 = [
 				9,
 				10,
@@ -69443,7 +69765,17 @@ void main() {
 				8287,
 				12288
 			];
-			braceR$1 = 125, semicolon$1 = 59, slash$1 = 47, star = 42, plus$1 = 43, minus = 45, lt = 60, comma = 44, question = 63, dot$2 = 46, bracketL$1 = 91;
+			braceR$1 = 125;
+			semicolon$1 = 59;
+			slash$1 = 47;
+			star = 42;
+			plus$1 = 43;
+			minus = 45;
+			lt = 60;
+			comma = 44;
+			question = 63;
+			dot$2 = 46;
+			bracketL$1 = 91;
 			trackNewline = new ContextTracker({
 				start: false,
 				shift(context, term) {
@@ -70429,8 +70761,10 @@ void main() {
 			return name ? doc.sliceString(name.from, Math.min(name.to, max)) : "";
 		}
 		function findParentElement$1(tree, skip = false) {
-			for (; tree; tree = tree.parent) if (tree.name == "Element") if (skip) skip = false;
-			else return tree;
+			for (; tree; tree = tree.parent) if (tree.name == "Element") {
+				if (skip) skip = false;
+				else return tree;
+			}
 			return null;
 		}
 		function allowedChildren(doc, tree, schema) {
@@ -70585,10 +70919,11 @@ void main() {
 			if (config.matchClosingTags === false) dialect = "noMatch";
 			if (config.selfClosingTags === true) dialect = (dialect ? dialect + " " : "") + "selfClosing";
 			if (config.nestedLanguages && config.nestedLanguages.length || config.nestedAttributes && config.nestedAttributes.length) wrap = configureNesting((config.nestedLanguages || []).concat(defaultNesting), (config.nestedAttributes || []).concat(defaultAttrs$1));
-			return new LanguageSupport(wrap ? htmlPlain.configure({
+			let lang = wrap ? htmlPlain.configure({
 				wrap,
 				dialect
-			}) : dialect ? htmlLanguage.configure({ dialect }) : htmlLanguage, [
+			}) : dialect ? htmlLanguage.configure({ dialect }) : htmlLanguage;
+			return new LanguageSupport(lang, [
 				htmlLanguage.data.of({ autocomplete: htmlCompletionSourceWith(config) }),
 				config.autoCloseTags !== false ? autoCloseTags$1 : [],
 				javascript$1().support,
@@ -71860,7 +72195,12 @@ void main() {
 			init_dist$36();
 			init_dist$40();
 			init_dist$39();
-			interpolationStart$1 = 1, commentTagStart = 2, tagStart$1 = 3, text$10 = 155, endrawTagStart$1 = 4, rawText$1 = 156;
+			interpolationStart$1 = 1;
+			commentTagStart = 2;
+			tagStart$1 = 3;
+			text$10 = 155;
+			endrawTagStart$1 = 4;
+			rawText$1 = 156;
 			base$3 = /*@__PURE__*/ new ExternalTokenizer((input) => {
 				let start = input.pos;
 				for (;;) {
@@ -72253,7 +72593,9 @@ void main() {
 			init_dist$30();
 			init_dist$36();
 			init_dist$38();
-			descendantOp$1 = 110, Unit$1 = 1, openArgList = 2;
+			descendantOp$1 = 110;
+			Unit$1 = 1;
+			openArgList = 2;
 			space$3 = [
 				9,
 				10,
@@ -72620,7 +72962,15 @@ void main() {
 			init_dist$36();
 			init_dist$40();
 			init_dist$39();
-			interpolationStart = 1, tagStart = 2, endTagStart = 3, text$9 = 180, endrawTagStart = 4, rawText = 181, endcommentTagStart = 5, commentText = 182, InlineComment = 6;
+			interpolationStart = 1;
+			tagStart = 2;
+			endTagStart = 3;
+			text$9 = 180;
+			endrawTagStart = 4;
+			rawText = 181;
+			endcommentTagStart = 5;
+			commentText = 182;
+			InlineComment = 6;
 			base$2 = /*@__PURE__*/ new ExternalTokenizer((input) => {
 				let start = input.pos;
 				for (;;) {
@@ -73290,7 +73640,8 @@ void main() {
 			init_dist$38();
 			CompositeBlock = class CompositeBlock {
 				static create(type, value, from, parentHash, end) {
-					return new CompositeBlock(type, value, from, parentHash + (parentHash << 8) + type + (value << 4) | 0, end, [], []);
+					let hash = parentHash + (parentHash << 8) + type + (value << 4) | 0;
+					return new CompositeBlock(type, value, from, hash, end, [], []);
 				}
 				constructor(type, value, from, hash, end, children, positions) {
 					this.type = type;
@@ -73518,7 +73869,9 @@ void main() {
 					return true;
 				}
 			};
-			EmptyLine = /^[ \t]*$/, CommentEnd = /-->/, ProcessingEnd = /\?>/;
+			EmptyLine = /^[ \t]*$/;
+			CommentEnd = /-->/;
+			ProcessingEnd = /\?>/;
 			HTMLBlockStyle = [
 				[/^<(?:script|pre|style)(?:\s|>|$)/i, /<\/(?:script|pre|style)>/i],
 				[/^\s*<!--/, CommentEnd],
@@ -74242,7 +74595,8 @@ void main() {
 				resolve: "Emphasis",
 				mark: "EmphasisMark"
 			};
-			LinkStart = {}, ImageStart = {};
+			LinkStart = {};
+			ImageStart = {};
 			InlineDelimiter = class {
 				constructor(type, from, to, side) {
 					this.type = type;
@@ -74254,7 +74608,7 @@ void main() {
 			Escapable = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 			Punctuation = /[!"#$%&'()*+,\-.\/:;<=>?@\[\\\]^_`{|}~\xA1\u2010-\u2027]/;
 			try {
-				Punctuation = /* @__PURE__ */ new RegExp("[\\p{S}|\\p{P}]", "u");
+				Punctuation = new RegExp("[\\p{S}|\\p{P}]", "u");
 			} catch (_) {}
 			DefaultInline = {
 				Escape(cx, next, start) {
@@ -75278,7 +75632,73 @@ void main() {
 		var init_dist$14 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			castOpen = 1, HeredocString = 2, interpolatedStringContent = 276, EscapeSequence = 3, afterInterpolation = 277, automaticSemicolon = 278, eof$3 = 279, abstract = 4, and$1 = 5, array = 6, as = 7, Boolean$1 = 8, _break = 9, _case = 10, _catch = 11, clone$1 = 12, _const = 13, _continue = 14, _default = 15, declare = 16, _do = 17, echo = 18, _else = 19, elseif = 20, enddeclare = 21, endfor = 22, endforeach = 23, endif = 24, endswitch = 25, endwhile = 26, _enum = 27, _extends = 28, final = 29, _finally = 30, fn = 31, _for = 32, foreach = 33, from$1 = 34, _function = 35, global$1 = 36, goto = 37, _if = 38, _implements = 39, include$1 = 40, include_once = 41, _instanceof = 42, insteadof = 43, _interface = 44, list$3 = 45, match = 46, namespace = 47, _new = 48, _null = 49, or = 50, print = 51, readonly$1 = 52, _require = 53, require_once = 54, _return = 55, _switch = 56, _throw = 57, trait = 58, _try = 59, unset = 60, use = 61, _var = 62, Visibility = 63;
+			castOpen = 1;
+			HeredocString = 2;
+			interpolatedStringContent = 276;
+			EscapeSequence = 3;
+			afterInterpolation = 277;
+			automaticSemicolon = 278;
+			eof$3 = 279;
+			abstract = 4;
+			and$1 = 5;
+			array = 6;
+			as = 7;
+			Boolean$1 = 8;
+			_break = 9;
+			_case = 10;
+			_catch = 11;
+			clone$1 = 12;
+			_const = 13;
+			_continue = 14;
+			_default = 15;
+			declare = 16;
+			_do = 17;
+			echo = 18;
+			_else = 19;
+			elseif = 20;
+			enddeclare = 21;
+			endfor = 22;
+			endforeach = 23;
+			endif = 24;
+			endswitch = 25;
+			endwhile = 26;
+			_enum = 27;
+			_extends = 28;
+			final = 29;
+			_finally = 30;
+			fn = 31;
+			_for = 32;
+			foreach = 33;
+			from$1 = 34;
+			_function = 35;
+			global$1 = 36;
+			goto = 37;
+			_if = 38;
+			_implements = 39;
+			include$1 = 40;
+			include_once = 41;
+			_instanceof = 42;
+			insteadof = 43;
+			_interface = 44;
+			list$3 = 45;
+			match = 46;
+			namespace = 47;
+			_new = 48;
+			_null = 49;
+			or = 50;
+			print = 51;
+			readonly$1 = 52;
+			_require = 53;
+			require_once = 54;
+			_return = 55;
+			_switch = 56;
+			_throw = 57;
+			trait = 58;
+			_try = 59;
+			unset = 60;
+			use = 61;
+			_var = 62;
+			Visibility = 63;
 			keywordMap = {
 				abstract,
 				and: and$1,
@@ -75422,8 +75842,10 @@ void main() {
 					if (input.next == 34 || input.next < 0 || input.next == 36 && (isIdentifierStart(input.peek(1)) || input.peek(1) == 123) || input.next == 123 && input.peek(1) == 36) break;
 					else if (input.next == 92) {
 						let escaped = scanEscape(input);
-						if (escaped) if (content) break;
-						else return input.acceptToken(EscapeSequence, escaped);
+						if (escaped) {
+							if (content) break;
+							else return input.acceptToken(EscapeSequence, escaped);
+						}
 					} else if (!content && (input.next == 91 || input.next == 45 && input.peek(1) == 62 && isIdentifierStart(input.peek(2)) || input.next == 63 && input.peek(1) == 45 && input.peek(2) == 62 && isIdentifierStart(input.peek(3))) && stack.canShift(afterInterpolation)) break;
 					input.advance();
 				}
@@ -75740,13 +76162,79 @@ void main() {
 				}
 			}
 		}
-		var printKeyword, indent$6, dedent$3, newline$1, blankLineStart$1, newlineBracketed, eof$2, stringContent, Escape, replacementStart, stringEnd, ParenL, ParenthesizedExpression, TupleExpression, ComprehensionExpression, BracketL$1, ArrayExpression, ArrayComprehensionExpression, BraceL$1, DictionaryExpression, DictionaryComprehensionExpression, SetExpression, SetComprehensionExpression, ArgList, subscript, String$1, stringStart, stringStartD, stringStartL, stringStartLD, stringStartR, stringStartRD, stringStartRL, stringStartRLD, FormatString, stringStartF, stringStartFD, stringStartFL, stringStartFLD, stringStartFR, stringStartFRD, stringStartFRL, stringStartFRLD, FormatReplacement, nestedFormatReplacement, importList, TypeParamList, ParamList, SequencePattern, MappingPattern, PatternArgList, newline$2, carriageReturn, space$1, tab, hash$1, parenOpen, dot$1, braceOpen, braceClose, singleQuote$1, doubleQuote$1, backslash, letter_o, letter_x, letter_N, letter_u, letter_U, bracketed$1, newlines$1, indentation$2, cx_Bracketed, cx_String, cx_DoubleQuote, cx_Long, cx_Raw, cx_Format, topIndent, stringFlags, trackIndent$1, legacyPrint, strings$1, pythonHighlighting, spec_identifier$2, parser$9;
+		var printKeyword, indent$6, dedent$3, newline$1, blankLineStart$1, newlineBracketed, eof$2, stringContent, Escape, replacementStart, stringEnd, ParenL, ParenthesizedExpression, TupleExpression, ComprehensionExpression, BracketL$1, ArrayExpression, ArrayComprehensionExpression, BraceL$1, DictionaryExpression, DictionaryComprehensionExpression, SetExpression, SetComprehensionExpression, ArgList, subscript, String$1, stringStart, stringStartD, stringStartL, stringStartLD, stringStartR, stringStartRD, stringStartRL, stringStartRLD, FormatString, stringStartF, stringStartFD, stringStartFL, stringStartFLD, stringStartFR, stringStartFRD, stringStartFRL, stringStartFRLD, FormatReplacement, nestedFormatReplacement, importList, TypeParamList, ParamList, SequencePattern, MappingPattern, PatternArgList, newline$2, carriageReturn, space$1, tab, hash$1, parenOpen, dot$1, braceOpen, braceClose, singleQuote$1, doubleQuote$1, backslash, letter_o, letter_x, letter_N, letter_u, letter_U, bracketed$1, newlines$1, indentation$2, cx_Bracketed, cx_String, cx_DoubleQuote, cx_Long, cx_Raw, cx_Format, topIndent$1, stringFlags, trackIndent$1, legacyPrint, strings$1, pythonHighlighting, spec_identifier$2, parser$9;
 		var init_dist$12 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			printKeyword = 1, indent$6 = 194, dedent$3 = 195, newline$1 = 196, blankLineStart$1 = 197, newlineBracketed = 198, eof$2 = 199, stringContent = 200, Escape = 2, replacementStart = 3, stringEnd = 201, ParenL = 24, ParenthesizedExpression = 25, TupleExpression = 49, ComprehensionExpression = 50, BracketL$1 = 55, ArrayExpression = 56, ArrayComprehensionExpression = 57, BraceL$1 = 59, DictionaryExpression = 60, DictionaryComprehensionExpression = 61, SetExpression = 62, SetComprehensionExpression = 63, ArgList = 65, subscript = 238, String$1 = 71, stringStart = 241, stringStartD = 242, stringStartL = 243, stringStartLD = 244, stringStartR = 245, stringStartRD = 246, stringStartRL = 247, stringStartRLD = 248, FormatString = 72, stringStartF = 249, stringStartFD = 250, stringStartFL = 251, stringStartFLD = 252, stringStartFR = 253, stringStartFRD = 254, stringStartFRL = 255, stringStartFRLD = 256, FormatReplacement = 73, nestedFormatReplacement = 77, importList = 263, TypeParamList = 112, ParamList = 130, SequencePattern = 151, MappingPattern = 152, PatternArgList = 155;
-			newline$2 = 10, carriageReturn = 13, space$1 = 32, tab = 9, hash$1 = 35, parenOpen = 40, dot$1 = 46, braceOpen = 123, braceClose = 125, singleQuote$1 = 39, doubleQuote$1 = 34, backslash = 92, letter_o = 111, letter_x = 120, letter_N = 78, letter_u = 117, letter_U = 85;
-			bracketed$1 = new Set([
+			printKeyword = 1;
+			indent$6 = 194;
+			dedent$3 = 195;
+			newline$1 = 196;
+			blankLineStart$1 = 197;
+			newlineBracketed = 198;
+			eof$2 = 199;
+			stringContent = 200;
+			Escape = 2;
+			replacementStart = 3;
+			stringEnd = 201;
+			ParenL = 24;
+			ParenthesizedExpression = 25;
+			TupleExpression = 49;
+			ComprehensionExpression = 50;
+			BracketL$1 = 55;
+			ArrayExpression = 56;
+			ArrayComprehensionExpression = 57;
+			BraceL$1 = 59;
+			DictionaryExpression = 60;
+			DictionaryComprehensionExpression = 61;
+			SetExpression = 62;
+			SetComprehensionExpression = 63;
+			ArgList = 65;
+			subscript = 238;
+			String$1 = 71;
+			stringStart = 241;
+			stringStartD = 242;
+			stringStartL = 243;
+			stringStartLD = 244;
+			stringStartR = 245;
+			stringStartRD = 246;
+			stringStartRL = 247;
+			stringStartRLD = 248;
+			FormatString = 72;
+			stringStartF = 249;
+			stringStartFD = 250;
+			stringStartFL = 251;
+			stringStartFLD = 252;
+			stringStartFR = 253;
+			stringStartFRD = 254;
+			stringStartFRL = 255;
+			stringStartFRLD = 256;
+			FormatReplacement = 73;
+			nestedFormatReplacement = 77;
+			importList = 263;
+			TypeParamList = 112;
+			ParamList = 130;
+			SequencePattern = 151;
+			MappingPattern = 152;
+			PatternArgList = 155;
+			newline$2 = 10;
+			carriageReturn = 13;
+			space$1 = 32;
+			tab = 9;
+			hash$1 = 35;
+			parenOpen = 40;
+			dot$1 = 46;
+			braceOpen = 123;
+			braceClose = 125;
+			singleQuote$1 = 39;
+			doubleQuote$1 = 34;
+			backslash = 92;
+			letter_o = 111;
+			letter_x = 120;
+			letter_N = 78;
+			letter_u = 117;
+			letter_U = 85;
+			bracketed$1 = /* @__PURE__ */ new Set([
 				ParenthesizedExpression,
 				TupleExpression,
 				ComprehensionExpression,
@@ -75795,12 +76283,19 @@ void main() {
 						input.advance();
 						chars++;
 					}
-					if (depth != context.indent && input.next != newline$2 && input.next != carriageReturn && input.next != hash$1) if (depth < context.indent) input.acceptToken(dedent$3, -chars);
-					else input.acceptToken(indent$6);
+					if (depth != context.indent && input.next != newline$2 && input.next != carriageReturn && input.next != hash$1) {
+						if (depth < context.indent) input.acceptToken(dedent$3, -chars);
+						else input.acceptToken(indent$6);
+					}
 				}
 			});
-			cx_Bracketed = 1, cx_String = 2, cx_DoubleQuote = 4, cx_Long = 8, cx_Raw = 16, cx_Format = 32;
-			topIndent = new Context$12(null, 0, 0);
+			cx_Bracketed = 1;
+			cx_String = 2;
+			cx_DoubleQuote = 4;
+			cx_Long = 8;
+			cx_Raw = 16;
+			cx_Format = 32;
+			topIndent$1 = new Context$12(null, 0, 0);
 			stringFlags = new Map([
 				[stringStart, 0],
 				[stringStartD, cx_DoubleQuote],
@@ -75820,7 +76315,7 @@ void main() {
 				[stringStartFRLD, 60]
 			].map(([term, flags]) => [term, flags | cx_String]));
 			trackIndent$1 = new ContextTracker({
-				start: topIndent,
+				start: topIndent$1,
 				reduce(context, term, _, input) {
 					if (context.flags & cx_Bracketed && bracketed$1.has(term) || (term == String$1 || term == FormatString) && context.flags & cx_String) return context.parent;
 					return context;
@@ -75857,15 +76352,16 @@ void main() {
 				let format = (flags & cx_Format) > 0;
 				let start = input.pos;
 				for (;;) if (input.next < 0) break;
-				else if (format && input.next == braceOpen) if (input.peek(1) == braceOpen) input.advance(2);
-				else {
-					if (input.pos == start) {
-						input.acceptToken(replacementStart, 1);
-						return;
+				else if (format && input.next == braceOpen) {
+					if (input.peek(1) == braceOpen) input.advance(2);
+					else {
+						if (input.pos == start) {
+							input.acceptToken(replacementStart, 1);
+							return;
+						}
+						break;
 					}
-					break;
-				}
-				else if (escapes && input.next == backslash) {
+				} else if (escapes && input.next == backslash) {
 					if (input.pos == start) {
 						input.advance();
 						let escaped = input.next;
@@ -76540,7 +77036,27 @@ void main() {
 		var init_dist$10 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			closureParamDelim = 1, tpOpen = 2, tpClose = 3, RawString = 4, Float = 5, andand = 301, _b = 98, _e = 101, _f = 102, _r = 114, _E = 69, Dot = 46, Plus = 43, Minus = 45, Hash = 35, Quote = 34, Pipe = 124, LessThan = 60, GreaterThan = 62, Equal = 61, And = 38;
+			closureParamDelim = 1;
+			tpOpen = 2;
+			tpClose = 3;
+			RawString = 4;
+			Float = 5;
+			andand = 301;
+			_b = 98;
+			_e = 101;
+			_f = 102;
+			_r = 114;
+			_E = 69;
+			Dot = 46;
+			Plus = 43;
+			Minus = 45;
+			Hash = 35;
+			Quote = 34;
+			Pipe = 124;
+			LessThan = 60;
+			GreaterThan = 62;
+			Equal = 61;
+			And = 38;
 			literalTokens = new ExternalTokenizer((input, stack) => {
 				if (isNum(input.next)) {
 					let isFloat = false;
@@ -76938,11 +77454,30 @@ void main() {
 			this.depth = depth;
 			this.hash = (parent ? parent.hash + parent.hash << 8 : 0) + depth + (depth << 4);
 		}
-		var indent$5, dedent$2, descendantOp, InterpolationEnd, InterpolationContinue, Unit, callee, identifier$2, VariableName, queryIdentifier, InterpolationStart, newline, blankLineStart, eof$1, whitespace$1, LineComment, Comment$1, IndentedMixin, IndentedInclude, Dialect_indented, space, colon$1, parenL, underscore, bracketL, dash, period, hash, percent, braceL, braceR, slash, asterisk$1, newlineChar, equals, plus, and, spaces, comments, indentedMixins, indentation$1, identifiers$8, interpolationEnd, descendant, unitToken, trackIndent, cssHighlighting, spec_identifier, spec_callee, spec_AtKeyword, spec_queryIdentifier, parser$7;
+		var indent$5, dedent$2, descendantOp, InterpolationEnd, InterpolationContinue, Unit, callee, identifier$2, VariableName, queryIdentifier, InterpolationStart, newline, blankLineStart, eof$1, whitespace$1, LineComment, Comment$1, IndentedMixin, IndentedInclude, Dialect_indented, space, colon$1, parenL, underscore, bracketL, dash, period, hash, percent, braceL, braceR, slash, asterisk$1, newlineChar, equals, plus, and, spaces, comments, indentedMixins, indentation$1, identifiers$8, interpolationEnd, descendant, unitToken, topIndent, trackIndent, cssHighlighting, spec_identifier, spec_callee, spec_AtKeyword, spec_queryIdentifier, parser$7;
 		var init_dist$8 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			indent$5 = 168, dedent$2 = 169, descendantOp = 170, InterpolationEnd = 1, InterpolationContinue = 2, Unit = 3, callee = 171, identifier$2 = 172, VariableName = 4, queryIdentifier = 173, InterpolationStart = 5, newline = 174, blankLineStart = 175, eof$1 = 176, whitespace$1 = 177, LineComment = 6, Comment$1 = 7, IndentedMixin = 8, IndentedInclude = 9, Dialect_indented = 0;
+			indent$5 = 168;
+			dedent$2 = 169;
+			descendantOp = 170;
+			InterpolationEnd = 1;
+			InterpolationContinue = 2;
+			Unit = 3;
+			callee = 171;
+			identifier$2 = 172;
+			VariableName = 4;
+			queryIdentifier = 173;
+			InterpolationStart = 5;
+			newline = 174;
+			blankLineStart = 175;
+			eof$1 = 176;
+			whitespace$1 = 177;
+			LineComment = 6;
+			Comment$1 = 7;
+			IndentedMixin = 8;
+			IndentedInclude = 9;
+			Dialect_indented = 0;
 			space = [
 				9,
 				10,
@@ -76970,7 +77505,22 @@ void main() {
 				8287,
 				12288
 			];
-			colon$1 = 58, parenL = 40, underscore = 95, bracketL = 91, dash = 45, period = 46, hash = 35, percent = 37, braceL = 123, braceR = 125, slash = 47, asterisk$1 = 42, newlineChar = 10, equals = 61, plus = 43, and = 38;
+			colon$1 = 58;
+			parenL = 40;
+			underscore = 95;
+			bracketL = 91;
+			dash = 45;
+			period = 46;
+			hash = 35;
+			percent = 37;
+			braceL = 123;
+			braceR = 125;
+			slash = 47;
+			asterisk$1 = 42;
+			newlineChar = 10;
+			equals = 61;
+			plus = 43;
+			and = 38;
 			spaces = new ExternalTokenizer((input, stack) => {
 				if (stack.dialectEnabled(Dialect_indented)) {
 					let prev;
@@ -77064,8 +77614,10 @@ void main() {
 						input.advance();
 						depth++;
 					}
-					if (depth != cDepth && input.next != newlineChar && !startOfComment(input)) if (depth < cDepth) input.acceptToken(dedent$2, -depth);
-					else input.acceptToken(indent$5);
+					if (depth != cDepth && input.next != newlineChar && !startOfComment(input)) {
+						if (depth < cDepth) input.acceptToken(dedent$2, -depth);
+						else input.acceptToken(indent$5);
+					}
 				}
 			});
 			identifiers$8 = new ExternalTokenizer((input, stack) => {
@@ -77113,8 +77665,9 @@ void main() {
 					}
 				}
 			});
+			topIndent = new IndentLevel(null, 0);
 			trackIndent = new ContextTracker({
-				start: new IndentLevel(null, 0),
+				start: topIndent,
 				shift(context, term, stack, input) {
 					if (term == indent$5) return new IndentLevel(context, stack.pos - input.pos);
 					if (term == dedent$2) return context.parent;
@@ -77528,8 +78081,19 @@ void main() {
 		var init_dist$5 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			StartTag = 1, StartCloseTag = 2, MissingCloseTag = 3, mismatchedStartCloseTag = 4, incompleteStartCloseTag = 5, commentContent$1 = 36, piContent$1 = 37, cdataContent$1 = 38, Element$2 = 11, OpenTag = 13;
-			cachedName = null, cachedInput = null, cachedPos = 0;
+			StartTag = 1;
+			StartCloseTag = 2;
+			MissingCloseTag = 3;
+			mismatchedStartCloseTag = 4;
+			incompleteStartCloseTag = 5;
+			commentContent$1 = 36;
+			piContent$1 = 37;
+			cdataContent$1 = 38;
+			Element$2 = 11;
+			OpenTag = 13;
+			cachedName = null;
+			cachedInput = null;
+			cachedPos = 0;
 			elementContext = new ContextTracker({
 				start: null,
 				shift(context, term, stack, input) {
@@ -78006,10 +78570,12 @@ void main() {
 				let ch = input.next;
 				if (ch < 0) break;
 				input.advance();
-				if (ch == quote) if (ch == 39) if (input.next == 39) input.advance();
-				else break;
-				else break;
-				else if (ch == 92 && quote == 34) {
+				if (ch == quote) {
+					if (ch == 39) {
+						if (input.next == 39) input.advance();
+						else break;
+					} else break;
+				} else if (ch == 92 && quote == 34) {
 					if (input.next >= 0) input.advance();
 				} else if (isBreakSpace(ch)) {
 					if (scan) return false;
@@ -78065,8 +78631,34 @@ void main() {
 		var init_dist$3 = __esmMin((() => {
 			init_dist$36();
 			init_dist$38();
-			blockEnd = 63, eof = 64, DirectiveEnd = 1, DocEnd = 2, sequenceStartMark = 3, sequenceContinueMark = 4, explicitMapStartMark = 5, explicitMapContinueMark = 6, flowMapMark = 7, mapStartMark = 65, mapContinueMark = 66, Literal = 8, QuotedLiteral = 9, Anchor$1 = 10, Alias = 11, Tag = 12, BlockLiteralContent = 13, BracketL = 19, FlowSequence = 20, Colon = 29, BraceL = 33, FlowMapping = 34, BlockLiteralHeader = 47;
-			type_Top = 0, type_Seq = 1, type_Map = 2, type_Flow = 3, type_Lit = 4;
+			blockEnd = 63;
+			eof = 64;
+			DirectiveEnd = 1;
+			DocEnd = 2;
+			sequenceStartMark = 3;
+			sequenceContinueMark = 4;
+			explicitMapStartMark = 5;
+			explicitMapContinueMark = 6;
+			flowMapMark = 7;
+			mapStartMark = 65;
+			mapContinueMark = 66;
+			Literal = 8;
+			QuotedLiteral = 9;
+			Anchor$1 = 10;
+			Alias = 11;
+			Tag = 12;
+			BlockLiteralContent = 13;
+			BracketL = 19;
+			FlowSequence = 20;
+			Colon = 29;
+			BraceL = 33;
+			FlowMapping = 34;
+			BlockLiteralHeader = 47;
+			type_Top = 0;
+			type_Seq = 1;
+			type_Map = 2;
+			type_Flow = 3;
+			type_Lit = 4;
 			Context$11 = class {
 				constructor(parent, depth, type) {
 					this.parent = parent;
@@ -78101,10 +78693,14 @@ void main() {
 				if (input.next == -1 && stack.canShift(eof)) return input.acceptToken(eof);
 				let prev = input.peek(-1);
 				if ((isBreakSpace(prev) || prev < 0) && stack.context.type != type_Flow) {
-					if (three(input, 45)) if (stack.canShift(blockEnd)) input.acceptToken(blockEnd);
-					else return input.acceptToken(DirectiveEnd, 3);
-					if (three(input, 46)) if (stack.canShift(blockEnd)) input.acceptToken(blockEnd);
-					else return input.acceptToken(DocEnd, 3);
+					if (three(input, 45)) {
+						if (stack.canShift(blockEnd)) input.acceptToken(blockEnd);
+						else return input.acceptToken(DirectiveEnd, 3);
+					}
+					if (three(input, 46)) {
+						if (stack.canShift(blockEnd)) input.acceptToken(blockEnd);
+						else return input.acceptToken(DocEnd, 3);
+					}
 					let depth = 0;
 					while (input.next == 32) {
 						depth++;
@@ -78490,28 +79086,30 @@ void main() {
 							return "tag";
 						}
 						return errorIfNotEmpty(stream);
-					} else if (state.state == "headers") if (stream.sol() && stream.match(/^\w+:/)) {
-						state.state = "header";
-						return "atom";
-					} else {
-						var result = errorIfNotEmpty(stream);
-						if (result) state.state = "body";
-						return result;
-					}
-					else if (state.state == "header") {
+					} else if (state.state == "headers") {
+						if (stream.sol() && stream.match(/^\w+:/)) {
+							state.state = "header";
+							return "atom";
+						} else {
+							var result = errorIfNotEmpty(stream);
+							if (result) state.state = "body";
+							return result;
+						}
+					} else if (state.state == "header") {
 						stream.skipToEnd();
 						state.state = "headers";
 						return "string";
-					} else if (state.state == "body") if (stream.sol() && (m = stream.match(/^-----END (.*)?-----\s*$/))) {
-						if (m[1] != state.type) return "error";
-						state.state = "end";
-						return "tag";
-					} else if (stream.eatWhile(/[A-Za-z0-9+\/=]/)) return null;
-					else {
-						stream.next();
-						return "error";
-					}
-					else if (state.state == "end") return errorIfNotEmpty(stream);
+					} else if (state.state == "body") {
+						if (stream.sol() && (m = stream.match(/^-----END (.*)?-----\s*$/))) {
+							if (m[1] != state.type) return "error";
+							state.state = "end";
+							return "tag";
+						} else if (stream.eatWhile(/[A-Za-z0-9+\/=]/)) return null;
+						else {
+							stream.next();
+							return "error";
+						}
+					} else if (state.state == "end") return errorIfNotEmpty(stream);
 				},
 				blankLine: function(state) {
 					if (state.state == "headers") state.state = "body";
@@ -78727,10 +79325,7 @@ void main() {
 						break;
 					case "include":
 					case "switch":
-					case "ignorepat":
-						state.extenInclude = true;
-						break;
-					default: break;
+					case "ignorepat": state.extenInclude = true;
 				}
 				return "atom";
 			}
@@ -78743,7 +79338,9 @@ void main() {
 				"include",
 				"ignorepat",
 				"switch"
-			], dpcmd = ["#include", "#exec"], apps = [
+			];
+			dpcmd = ["#include", "#exec"];
+			apps = [
 				"addqueuemember",
 				"adsiprog",
 				"aelsub",
@@ -79089,7 +79686,15 @@ void main() {
 		}
 		var BUILTIN$1, COMMENT$1, STRING$1, ATOM$1, NUMBER$1, KEYWORD, MODTAG, COBOLLINENUM, PERIOD, atoms$13, keywords$38, builtins$9, tests, cobol;
 		var init_cobol = __esmMin((() => {
-			BUILTIN$1 = "builtin", COMMENT$1 = "comment", STRING$1 = "string", ATOM$1 = "atom", NUMBER$1 = "number", KEYWORD = "keyword", MODTAG = "header", COBOLLINENUM = "def", PERIOD = "link";
+			BUILTIN$1 = "builtin";
+			COMMENT$1 = "comment";
+			STRING$1 = "string";
+			ATOM$1 = "atom";
+			NUMBER$1 = "number";
+			KEYWORD = "keyword";
+			MODTAG = "header";
+			COBOLLINENUM = "def";
+			PERIOD = "link";
 			atoms$13 = makeKeywords$1("TRUE FALSE ZEROES ZEROS ZERO SPACES SPACE LOW-VALUE LOW-VALUES ");
 			keywords$38 = makeKeywords$1("ACCEPT ACCESS ACQUIRE ADD ADDRESS ADVANCING AFTER ALIAS ALL ALPHABET ALPHABETIC ALPHABETIC-LOWER ALPHABETIC-UPPER ALPHANUMERIC ALPHANUMERIC-EDITED ALSO ALTER ALTERNATE AND ANY ARE AREA AREAS ARITHMETIC ASCENDING ASSIGN AT ATTRIBUTE AUTHOR AUTO AUTO-SKIP AUTOMATIC B-AND B-EXOR B-LESS B-NOT B-OR BACKGROUND-COLOR BACKGROUND-COLOUR BEEP BEFORE BELL BINARY BIT BITS BLANK BLINK BLOCK BOOLEAN BOTTOM BY CALL CANCEL CD CF CH CHARACTER CHARACTERS CLASS CLOCK-UNITS CLOSE COBOL CODE CODE-SET COL COLLATING COLUMN COMMA COMMIT COMMITMENT COMMON COMMUNICATION COMP COMP-0 COMP-1 COMP-2 COMP-3 COMP-4 COMP-5 COMP-6 COMP-7 COMP-8 COMP-9 COMPUTATIONAL COMPUTATIONAL-0 COMPUTATIONAL-1 COMPUTATIONAL-2 COMPUTATIONAL-3 COMPUTATIONAL-4 COMPUTATIONAL-5 COMPUTATIONAL-6 COMPUTATIONAL-7 COMPUTATIONAL-8 COMPUTATIONAL-9 COMPUTE CONFIGURATION CONNECT CONSOLE CONTAINED CONTAINS CONTENT CONTINUE CONTROL CONTROL-AREA CONTROLS CONVERTING COPY CORR CORRESPONDING COUNT CRT CRT-UNDER CURRENCY CURRENT CURSOR DATA DATE DATE-COMPILED DATE-WRITTEN DAY DAY-OF-WEEK DB DB-ACCESS-CONTROL-KEY DB-DATA-NAME DB-EXCEPTION DB-FORMAT-NAME DB-RECORD-NAME DB-SET-NAME DB-STATUS DBCS DBCS-EDITED DE DEBUG-CONTENTS DEBUG-ITEM DEBUG-LINE DEBUG-NAME DEBUG-SUB-1 DEBUG-SUB-2 DEBUG-SUB-3 DEBUGGING DECIMAL-POINT DECLARATIVES DEFAULT DELETE DELIMITED DELIMITER DEPENDING DESCENDING DESCRIBED DESTINATION DETAIL DISABLE DISCONNECT DISPLAY DISPLAY-1 DISPLAY-2 DISPLAY-3 DISPLAY-4 DISPLAY-5 DISPLAY-6 DISPLAY-7 DISPLAY-8 DISPLAY-9 DIVIDE DIVISION DOWN DROP DUPLICATE DUPLICATES DYNAMIC EBCDIC EGI EJECT ELSE EMI EMPTY EMPTY-CHECK ENABLE END END. END-ACCEPT END-ACCEPT. END-ADD END-CALL END-COMPUTE END-DELETE END-DISPLAY END-DIVIDE END-EVALUATE END-IF END-INVOKE END-MULTIPLY END-OF-PAGE END-PERFORM END-READ END-RECEIVE END-RETURN END-REWRITE END-SEARCH END-START END-STRING END-SUBTRACT END-UNSTRING END-WRITE END-XML ENTER ENTRY ENVIRONMENT EOP EQUAL EQUALS ERASE ERROR ESI EVALUATE EVERY EXCEEDS EXCEPTION EXCLUSIVE EXIT EXTEND EXTERNAL EXTERNALLY-DESCRIBED-KEY FD FETCH FILE FILE-CONTROL FILE-STREAM FILES FILLER FINAL FIND FINISH FIRST FOOTING FOR FOREGROUND-COLOR FOREGROUND-COLOUR FORMAT FREE FROM FULL FUNCTION GENERATE GET GIVING GLOBAL GO GOBACK GREATER GROUP HEADING HIGH-VALUE HIGH-VALUES HIGHLIGHT I-O I-O-CONTROL ID IDENTIFICATION IF IN INDEX INDEX-1 INDEX-2 INDEX-3 INDEX-4 INDEX-5 INDEX-6 INDEX-7 INDEX-8 INDEX-9 INDEXED INDIC INDICATE INDICATOR INDICATORS INITIAL INITIALIZE INITIATE INPUT INPUT-OUTPUT INSPECT INSTALLATION INTO INVALID INVOKE IS JUST JUSTIFIED KANJI KEEP KEY LABEL LAST LD LEADING LEFT LEFT-JUSTIFY LENGTH LENGTH-CHECK LESS LIBRARY LIKE LIMIT LIMITS LINAGE LINAGE-COUNTER LINE LINE-COUNTER LINES LINKAGE LOCAL-STORAGE LOCALE LOCALLY LOCK MEMBER MEMORY MERGE MESSAGE METACLASS MODE MODIFIED MODIFY MODULES MOVE MULTIPLE MULTIPLY NATIONAL NATIVE NEGATIVE NEXT NO NO-ECHO NONE NOT NULL NULL-KEY-MAP NULL-MAP NULLS NUMBER NUMERIC NUMERIC-EDITED OBJECT OBJECT-COMPUTER OCCURS OF OFF OMITTED ON ONLY OPEN OPTIONAL OR ORDER ORGANIZATION OTHER OUTPUT OVERFLOW OWNER PACKED-DECIMAL PADDING PAGE PAGE-COUNTER PARSE PERFORM PF PH PIC PICTURE PLUS POINTER POSITION POSITIVE PREFIX PRESENT PRINTING PRIOR PROCEDURE PROCEDURE-POINTER PROCEDURES PROCEED PROCESS PROCESSING PROGRAM PROGRAM-ID PROMPT PROTECTED PURGE QUEUE QUOTE QUOTES RANDOM RD READ READY REALM RECEIVE RECONNECT RECORD RECORD-NAME RECORDS RECURSIVE REDEFINES REEL REFERENCE REFERENCE-MONITOR REFERENCES RELATION RELATIVE RELEASE REMAINDER REMOVAL RENAMES REPEATED REPLACE REPLACING REPORT REPORTING REPORTS REPOSITORY REQUIRED RERUN RESERVE RESET RETAINING RETRIEVAL RETURN RETURN-CODE RETURNING REVERSE-VIDEO REVERSED REWIND REWRITE RF RH RIGHT RIGHT-JUSTIFY ROLLBACK ROLLING ROUNDED RUN SAME SCREEN SD SEARCH SECTION SECURE SECURITY SEGMENT SEGMENT-LIMIT SELECT SEND SENTENCE SEPARATE SEQUENCE SEQUENTIAL SET SHARED SIGN SIZE SKIP1 SKIP2 SKIP3 SORT SORT-MERGE SORT-RETURN SOURCE SOURCE-COMPUTER SPACE-FILL SPECIAL-NAMES STANDARD STANDARD-1 STANDARD-2 START STARTING STATUS STOP STORE STRING SUB-QUEUE-1 SUB-QUEUE-2 SUB-QUEUE-3 SUB-SCHEMA SUBFILE SUBSTITUTE SUBTRACT SUM SUPPRESS SYMBOLIC SYNC SYNCHRONIZED SYSIN SYSOUT TABLE TALLYING TAPE TENANT TERMINAL TERMINATE TEST TEXT THAN THEN THROUGH THRU TIME TIMES TITLE TO TOP TRAILING TRAILING-SIGN TRANSACTION TYPE TYPEDEF UNDERLINE UNEQUAL UNIT UNSTRING UNTIL UP UPDATE UPON USAGE USAGE-MODE USE USING VALID VALIDATE VALUE VALUES VARYING VLR WAIT WHEN WHEN-COMPILED WITH WITHIN WORDS WORKING-STORAGE WRITE XML XML-CODE XML-EVENT XML-NTEXT XML-TEXT ZERO ZERO-FILL ");
 			builtins$9 = makeKeywords$1("- * ** / + < <= = > >= ");
@@ -79454,14 +80059,15 @@ void main() {
 		function tokenNestedComment$1(depth) {
 			return function(stream, state) {
 				var ch;
-				while (ch = stream.next()) if (ch == "*" && stream.eat("/")) if (depth == 1) {
-					state.tokenize = null;
-					break;
-				} else {
-					state.tokenize = tokenNestedComment$1(depth - 1);
-					return state.tokenize(stream, state);
-				}
-				else if (ch == "/" && stream.eat("*")) {
+				while (ch = stream.next()) if (ch == "*" && stream.eat("/")) {
+					if (depth == 1) {
+						state.tokenize = null;
+						break;
+					} else {
+						state.tokenize = tokenNestedComment$1(depth - 1);
+						return state.tokenize(stream, state);
+					}
+				} else if (ch == "/" && stream.eat("*")) {
 					state.tokenize = tokenNestedComment$1(depth + 1);
 					return state.tokenize(stream, state);
 				}
@@ -79519,8 +80125,10 @@ void main() {
 		}
 		function tokenDartString(quote, stream, state, raw) {
 			var tripleQuoted = false;
-			if (stream.eat(quote)) if (stream.eat(quote)) tripleQuoted = true;
-			else return "string";
+			if (stream.eat(quote)) {
+				if (stream.eat(quote)) tripleQuoted = true;
+				else return "string";
+			}
 			function tokenStringHelper(stream, state) {
 				var escaped = false;
 				while (!stream.eol()) {
@@ -80748,9 +81356,10 @@ void main() {
 					var style = typeStylePair[1];
 					var current = stream.current();
 					if (type !== "space") {
-						if (state.lastToken === "(" && state.ctx.indentTo === null) if (type === "symbol" && is(current, hasBodyParameter)) state.ctx.indentTo = state.ctx.start + stream.indentUnit;
-						else state.ctx.indentTo = "next";
-						else if (state.ctx.indentTo === "next") state.ctx.indentTo = stream.column();
+						if (state.lastToken === "(" && state.ctx.indentTo === null) {
+							if (type === "symbol" && is(current, hasBodyParameter)) state.ctx.indentTo = state.ctx.start + stream.indentUnit;
+							else state.ctx.indentTo = "next";
+						} else if (state.ctx.indentTo === "next") state.ctx.indentTo = stream.column();
 						state.lastToken = current;
 					}
 					if (type === "open") state.ctx = {
@@ -81114,7 +81723,8 @@ void main() {
 				"regexp",
 				"url",
 				"url-prefix"
-			], documentTypes$1 = keySet$1(documentTypes_$1);
+			];
+			documentTypes$1 = keySet$1(documentTypes_$1);
 			mediaTypes_$1 = [
 				"all",
 				"aural",
@@ -81126,7 +81736,8 @@ void main() {
 				"tty",
 				"tv",
 				"embossed"
-			], mediaTypes$1 = keySet$1(mediaTypes_$1);
+			];
+			mediaTypes$1 = keySet$1(mediaTypes_$1);
 			mediaFeatures_$1 = [
 				"width",
 				"min-width",
@@ -81171,7 +81782,8 @@ void main() {
 				"prefers-color-scheme",
 				"dynamic-range",
 				"video-dynamic-range"
-			], mediaFeatures$1 = keySet$1(mediaFeatures_$1);
+			];
+			mediaFeatures$1 = keySet$1(mediaFeatures_$1);
 			mediaValueKeywords_ = [
 				"landscape",
 				"portrait",
@@ -81186,7 +81798,8 @@ void main() {
 				"light",
 				"standard",
 				"high"
-			], mediaValueKeywords = keySet$1(mediaValueKeywords_);
+			];
+			mediaValueKeywords = keySet$1(mediaValueKeywords_);
 			propertyKeywords_$1 = [
 				"align-content",
 				"align-items",
@@ -81632,7 +82245,8 @@ void main() {
 				"glyph-orientation-vertical",
 				"text-anchor",
 				"writing-mode"
-			], propertyKeywords$1 = keySet$1(propertyKeywords_$1);
+			];
+			propertyKeywords$1 = keySet$1(propertyKeywords_$1);
 			nonStandardPropertyKeywords_$1 = [
 				"accent-color",
 				"aspect-ratio",
@@ -81690,7 +82304,8 @@ void main() {
 				"searchfield-results-decoration",
 				"shape-inside",
 				"zoom"
-			], nonStandardPropertyKeywords$1 = keySet$1(nonStandardPropertyKeywords_$1);
+			];
+			nonStandardPropertyKeywords$1 = keySet$1(nonStandardPropertyKeywords_$1);
 			fontProperties_$1 = [
 				"font-display",
 				"font-family",
@@ -81701,7 +82316,8 @@ void main() {
 				"font-stretch",
 				"font-weight",
 				"font-style"
-			], fontProperties$1 = keySet$1(fontProperties_$1);
+			];
+			fontProperties$1 = keySet$1(fontProperties_$1);
 			counterDescriptors = keySet$1([
 				"additive-symbols",
 				"fallback",
@@ -81863,7 +82479,8 @@ void main() {
 				"whitesmoke",
 				"yellow",
 				"yellowgreen"
-			], colorKeywords$1 = keySet$1(colorKeywords_$1);
+			];
+			colorKeywords$1 = keySet$1(colorKeywords_$1);
 			valueKeywords_$1 = [
 				"above",
 				"absolute",
@@ -82384,7 +83001,8 @@ void main() {
 				"xor",
 				"xx-large",
 				"xx-small"
-			], valueKeywords$1 = keySet$1(valueKeywords_$1);
+			];
+			valueKeywords$1 = keySet$1(valueKeywords_$1);
 			allWords = documentTypes_$1.concat(mediaTypes_$1).concat(mediaFeatures_$1).concat(mediaValueKeywords_).concat(propertyKeywords_$1).concat(nonStandardPropertyKeywords_$1).concat(colorKeywords_$1).concat(valueKeywords_$1);
 			keywords$37 = {
 				properties: propertyKeywords_$1,
@@ -82614,10 +83232,12 @@ void main() {
 				state.tokenize = tokenFactory(stream.current(), false, "string");
 				return state.tokenize(stream, state);
 			}
-			if (stream.match(regexPrefixes)) if (stream.current() != "/" || stream.match(/^.*\//, false)) {
-				state.tokenize = tokenFactory(stream.current(), true, "string.special");
-				return state.tokenize(stream, state);
-			} else stream.backUp(1);
+			if (stream.match(regexPrefixes)) {
+				if (stream.current() != "/" || stream.match(/^.*\//, false)) {
+					state.tokenize = tokenFactory(stream.current(), true, "string.special");
+					return state.tokenize(stream, state);
+				} else stream.backUp(1);
+			}
 			if (stream.match(operators$5) || stream.match(wordOperators$2)) return "operator";
 			if (stream.match(delimiters$2)) return "punctuation";
 			if (stream.match(constants)) return "atom";
@@ -82845,14 +83465,15 @@ void main() {
 				type$5 = "ws";
 				return "comment";
 			} else if (/['`,@]/.test(ch)) return null;
-			else if (ch == "|") if (stream.skipTo("|")) {
-				stream.next();
-				return "variableName";
-			} else {
-				stream.skipToEnd();
-				return "error";
-			}
-			else if (ch == "#") {
+			else if (ch == "|") {
+				if (stream.skipTo("|")) {
+					stream.next();
+					return "variableName";
+				} else {
+					stream.skipToEnd();
+					return "error";
+				}
+			} else if (ch == "#") {
 				var ch = stream.next();
 				if (ch == "(") {
 					type$5 = "open";
@@ -82925,9 +83546,10 @@ void main() {
 					type$5 = null;
 					var style = state.tokenize(stream, state);
 					if (type$5 != "ws") {
-						if (state.ctx.indentTo == null) if (type$5 == "symbol" && assumeBody.test(stream.current())) state.ctx.indentTo = state.ctx.start + stream.indentUnit;
-						else state.ctx.indentTo = "next";
-						else if (state.ctx.indentTo == "next") state.ctx.indentTo = stream.column();
+						if (state.ctx.indentTo == null) {
+							if (type$5 == "symbol" && assumeBody.test(stream.current())) state.ctx.indentTo = state.ctx.start + stream.indentUnit;
+							else state.ctx.indentTo = "next";
+						} else if (state.ctx.indentTo == "next") state.ctx.indentTo = stream.column();
 						state.lastType = type$5;
 					}
 					if (type$5 == "open") state.ctx = {
@@ -83364,7 +83986,7 @@ void main() {
 						return null;
 					} else {
 						var style = tokenBaseInner(stream, state);
-						if (scopeOffset > 0 && dedent(stream, state)) style += " " + ERRORCLASS;
+						if (scopeOffset > 0 && dedent(stream, state)) style += " error";
 						return style;
 					}
 				}
@@ -83396,12 +84018,14 @@ void main() {
 						return "number";
 					}
 				}
-				if (stream.match(stringPrefixes)) if (!(stream.current().toLowerCase().indexOf("f") !== -1)) {
-					state.tokenize = tokenStringFactory(stream.current(), state.tokenize);
-					return state.tokenize(stream, state);
-				} else {
-					state.tokenize = formatStringFactory(stream.current(), state.tokenize);
-					return state.tokenize(stream, state);
+				if (stream.match(stringPrefixes)) {
+					if (!(stream.current().toLowerCase().indexOf("f") !== -1)) {
+						state.tokenize = tokenStringFactory(stream.current(), state.tokenize);
+						return state.tokenize(stream, state);
+					} else {
+						state.tokenize = formatStringFactory(stream.current(), state.tokenize);
+						return state.tokenize(stream, state);
+					}
 				}
 				for (var i = 0; i < operators.length; i++) if (stream.match(operators[i])) return "operator";
 				if (stream.match(delimiters)) return "punctuation";
@@ -83425,8 +84049,10 @@ void main() {
 						var inner = tokenBaseInner(stream, state, true);
 						if (inner == "punctuation") {
 							if (stream.current() == "{") state.tokenize = tokenNestedExpr(depth + 1);
-							else if (stream.current() == "}") if (depth > 1) state.tokenize = tokenNestedExpr(depth - 1);
-							else state.tokenize = tokenString;
+							else if (stream.current() == "}") {
+								if (depth > 1) state.tokenize = tokenNestedExpr(depth - 1);
+								else state.tokenize = tokenString;
+							}
 						}
 						return inner;
 					};
@@ -83449,8 +84075,10 @@ void main() {
 						else if (stream.match("}")) return ERRORCLASS;
 						else stream.eat(/['"]/);
 					}
-					if (singleline) if (parserConf.singleLineStringErrors) return ERRORCLASS;
-					else state.tokenize = tokenOuter;
+					if (singleline) {
+						if (parserConf.singleLineStringErrors) return ERRORCLASS;
+						else state.tokenize = tokenOuter;
+					}
 					return OUTCLASS;
 				}
 				tokenString.isString = true;
@@ -83471,8 +84099,10 @@ void main() {
 							return OUTCLASS;
 						} else stream.eat(/['"]/);
 					}
-					if (singleline) if (parserConf.singleLineStringErrors) return ERRORCLASS;
-					else state.tokenize = tokenOuter;
+					if (singleline) {
+						if (parserConf.singleLineStringErrors) return ERRORCLASS;
+						else state.tokenize = tokenOuter;
+					}
 					return OUTCLASS;
 				}
 				tokenString.isString = true;
@@ -83519,8 +84149,10 @@ void main() {
 					var delimiter_index = "[({".indexOf(current);
 					if (delimiter_index != -1) pushBracketScope(stream, state, "])}".slice(delimiter_index, delimiter_index + 1));
 					delimiter_index = "])}".indexOf(current);
-					if (delimiter_index != -1) if (top(state).type == current) state.indent = state.scopes.pop().offset - (hangingIndent || stream.indentUnit);
-					else return ERRORCLASS;
+					if (delimiter_index != -1) {
+						if (top(state).type == current) state.indent = state.scopes.pop().offset - (hangingIndent || stream.indentUnit);
+						else return ERRORCLASS;
+					}
 				}
 				if (state.dedent && stream.eol() && top(state).type == "py" && state.scopes.length > 1) state.scopes.pop();
 				return style;
@@ -84181,7 +84813,13 @@ void main() {
 					return "meta";
 				} }
 			};
-			statementIndentUnit = parserConfig$2.statementIndentUnit, keywords$33 = parserConfig$2.keywords, builtin$3 = parserConfig$2.builtin, blockKeywords$4 = parserConfig$2.blockKeywords, atoms$11 = parserConfig$2.atoms, hooks$2 = parserConfig$2.hooks, multiLineStrings$3 = parserConfig$2.multiLineStrings;
+			statementIndentUnit = parserConfig$2.statementIndentUnit;
+			keywords$33 = parserConfig$2.keywords;
+			builtin$3 = parserConfig$2.builtin;
+			blockKeywords$4 = parserConfig$2.blockKeywords;
+			atoms$11 = parserConfig$2.atoms;
+			hooks$2 = parserConfig$2.hooks;
+			multiLineStrings$3 = parserConfig$2.multiLineStrings;
 			isOperatorChar$13 = /[+\-*&%=<>!?|\/]/;
 			d$1 = {
 				name: "d",
@@ -84421,7 +85059,9 @@ void main() {
 				"stopsignal",
 				"healthcheck",
 				"shell"
-			]).join("|") + ")", instructionOnlyLine = new RegExp("^(\\s*)" + instructionRegex + "(\\s*)(#.*)?$", "i"), instructionWithArguments = new RegExp("^(\\s*)" + instructionRegex + "(\\s+)", "i");
+			]).join("|") + ")";
+			instructionOnlyLine = new RegExp("^(\\s*)" + instructionRegex + "(\\s*)(#.*)?$", "i");
+			instructionWithArguments = new RegExp("^(\\s*)" + instructionRegex + "(\\s+)", "i");
 			dockerFile = simpleMode({
 				start: [
 					{
@@ -84816,12 +85456,13 @@ void main() {
 		function tokenComment$17(stream, state) {
 			var maybeEnd = false, maybeNested = false, nestedCount = 0, ch;
 			while (ch = stream.next()) {
-				if (ch == "/" && maybeEnd) if (nestedCount > 0) nestedCount--;
-				else {
-					state.tokenize = tokenBase$38;
-					break;
-				}
-				else if (ch == "*" && maybeNested) nestedCount++;
+				if (ch == "/" && maybeEnd) {
+					if (nestedCount > 0) nestedCount--;
+					else {
+						state.tokenize = tokenBase$38;
+						break;
+					}
+				} else if (ch == "*" && maybeNested) nestedCount++;
 				maybeEnd = ch == "*";
 				maybeNested = ch == "/";
 			}
@@ -85573,8 +86214,10 @@ void main() {
 				return rval(state, stream, "atom");
 			}
 			if (stream.eatSpace()) return rval(state, stream, "whitespace");
-			if (!peekToken(state) && stream.match(/-\s*[a-zß-öø-ÿ][\wØ-ÞÀ-Öß-öø-ÿ]*/)) if (is_member(stream.current(), typeWords)) return rval(state, stream, "type");
-			else return rval(state, stream, "attribute");
+			if (!peekToken(state) && stream.match(/-\s*[a-zß-öø-ÿ][\wØ-ÞÀ-Öß-öø-ÿ]*/)) {
+				if (is_member(stream.current(), typeWords)) return rval(state, stream, "type");
+				else return rval(state, stream, "attribute");
+			}
 			var ch = stream.next();
 			if (ch == "%") {
 				stream.skipToEnd();
@@ -85623,12 +86266,14 @@ void main() {
 				var w = stream.current();
 				if (is_member(w, keywordWords)) return rval(state, stream, "keyword");
 				else if (is_member(w, operatorAtomWords)) return rval(state, stream, "operator");
-				else if (stream.match(/\s*\(/, false)) if (is_member(w, bifWords) && (peekToken(state).token != ":" || peekToken(state, 2).token == "erlang")) return rval(state, stream, "builtin");
-				else if (is_member(w, guardWords)) return rval(state, stream, "guard");
-				else return rval(state, stream, "function");
-				else if (lookahead(stream) == ":") if (w == "erlang") return rval(state, stream, "builtin");
-				else return rval(state, stream, "function");
-				else if (is_member(w, ["true", "false"])) return rval(state, stream, "boolean");
+				else if (stream.match(/\s*\(/, false)) {
+					if (is_member(w, bifWords) && (peekToken(state).token != ":" || peekToken(state, 2).token == "erlang")) return rval(state, stream, "builtin");
+					else if (is_member(w, guardWords)) return rval(state, stream, "guard");
+					else return rval(state, stream, "function");
+				} else if (lookahead(stream) == ":") {
+					if (w == "erlang") return rval(state, stream, "builtin");
+					else return rval(state, stream, "function");
+				} else if (is_member(w, ["true", "false"])) return rval(state, stream, "boolean");
 				else return rval(state, stream, "atom");
 			}
 			var digitRE = /[0-9]/;
@@ -85866,14 +86511,15 @@ void main() {
 			])) {
 				t = postcommaToken(state);
 				return t ? t.column + t.token.length : cx.unit;
-			} else if (currT.token == "->") if (is_member(prevT.token, [
-				"receive",
-				"case",
-				"if",
-				"try"
-			])) return prevT.column + cx.unit + cx.unit;
-			else return prevT.column + cx.unit;
-			else if (is_member(currT.token, openParenWords)) return currT.column + currT.token.length;
+			} else if (currT.token == "->") {
+				if (is_member(prevT.token, [
+					"receive",
+					"case",
+					"if",
+					"try"
+				])) return prevT.column + cx.unit + cx.unit;
+				else return prevT.column + cx.unit;
+			} else if (is_member(currT.token, openParenWords)) return currT.column + currT.token.length;
 			else {
 				t = defaultToken(state);
 				return truthy(t) ? t.column + cx.unit : 0;
@@ -86807,8 +87453,8 @@ void main() {
 			return ret;
 		}
 		function searchWordList(wordList, word) {
-			var i;
-			for (i = wordList.length - 1; i >= 0; i--) if (wordList[i].name === word.toUpperCase()) return wordList[i];
+			var i = wordList.length - 1;
+			for (; i >= 0; i--) if (wordList[i].name === word.toUpperCase()) return wordList[i];
 		}
 		var coreWordList, immediateWordList, forth;
 		var init_forth = __esmMin((() => {
@@ -87997,10 +88643,12 @@ void main() {
 							} else stream.match(/.*/);
 							return "string";
 						}
-						if (state.inMultilineTable) if (stream.match(/\|\s*/)) return "bracket";
-						else {
-							stream.match(/[^\|]*/);
-							return state.tableHeaderLine ? "header" : "string";
+						if (state.inMultilineTable) {
+							if (stream.match(/\|\s*/)) return "bracket";
+							else {
+								stream.match(/[^\|]*/);
+								return state.tableHeaderLine ? "header" : "string";
+							}
 						}
 						if (stream.match("\"\"\"")) {
 							state.inMultilineString = true;
@@ -88126,8 +88774,10 @@ void main() {
 		}
 		function startString$1(quote, stream, state) {
 			var tripleQuoted = false;
-			if (quote != "/" && stream.eat(quote)) if (stream.eat(quote)) tripleQuoted = true;
-			else return "string";
+			if (quote != "/" && stream.eat(quote)) {
+				if (stream.eat(quote)) tripleQuoted = true;
+				else return "string";
+			}
 			function t(stream, state) {
 				var escaped = false, next, end = !tripleQuoted;
 				while ((next = stream.next()) != null) {
@@ -88489,15 +89139,16 @@ void main() {
 				toUnescaped(stream, "/");
 				stream.eatWhile(/[gimsu]/);
 				return ret$1("regexp", "string.special");
-			} else if (ch == "/") if (stream.eat("*")) return chain$7(stream, state, haxeTokenComment);
-			else if (stream.eat("/")) {
-				stream.skipToEnd();
-				return ret$1("comment", "comment");
-			} else {
-				stream.eatWhile(isOperatorChar$9);
-				return ret$1("operator", null, stream.current());
-			}
-			else if (ch == "#") {
+			} else if (ch == "/") {
+				if (stream.eat("*")) return chain$7(stream, state, haxeTokenComment);
+				else if (stream.eat("/")) {
+					stream.skipToEnd();
+					return ret$1("comment", "comment");
+				} else {
+					stream.eatWhile(isOperatorChar$9);
+					return ret$1("operator", null, stream.current());
+				}
+			} else if (ch == "#") {
 				stream.skipToEnd();
 				return ret$1("conditional", "meta");
 			} else if (ch == "@") {
@@ -88780,11 +89431,15 @@ void main() {
 		}
 		var A, B, C, operator, atom, attribute$1, type$3, keywords$28, isOperatorChar$9, content$2, atomicTypes, cx, defaultVars, haxe, hxml;
 		var init_haxe = __esmMin((() => {
-			A = kw("keyword a"), B = kw("keyword b"), C = kw("keyword c");
-			operator = kw("operator"), atom = {
+			A = kw("keyword a");
+			B = kw("keyword b");
+			C = kw("keyword c");
+			operator = kw("operator");
+			atom = {
 				type: "atom",
 				style: "atom"
-			}, attribute$1 = {
+			};
+			attribute$1 = {
 				type: "attribute",
 				style: "attribute"
 			};
@@ -89001,12 +89656,13 @@ void main() {
 			} else return failFirstLine(stream, state);
 		}
 		function header$1(stream) {
-			if (stream.sol() && !stream.eat(/[ \t]/)) if (stream.match(/^.*?:/)) return "atom";
-			else {
-				stream.skipToEnd();
-				return "error";
-			}
-			else {
+			if (stream.sol() && !stream.eat(/[ \t]/)) {
+				if (stream.match(/^.*?:/)) return "atom";
+				else {
+					stream.skipToEnd();
+					return "error";
+				}
+			} else {
 				stream.skipToEnd();
 				return "string";
 			}
@@ -90105,21 +90761,22 @@ void main() {
 				else if (/\d/.test(ch)) {
 					stream.match(/^[\d_]*(?:n|(?:\.[\d_]*)?(?:[eE][+\-]?[\d_]+)?)?/);
 					return ret("number", "number");
-				} else if (ch == "/") if (stream.eat("*")) {
-					state.tokenize = tokenComment;
-					return tokenComment(stream, state);
-				} else if (stream.eat("/")) {
-					stream.skipToEnd();
-					return ret("comment", "comment");
-				} else if (expressionAllowed(stream, state, 1)) {
-					readRegexp(stream);
-					stream.match(/^\b(([gimyus])(?![gimyus]*\2))+\b/);
-					return ret("regexp", "string.special");
-				} else {
-					stream.eat("=");
-					return ret("operator", "operator", stream.current());
-				}
-				else if (ch == "`") {
+				} else if (ch == "/") {
+					if (stream.eat("*")) {
+						state.tokenize = tokenComment;
+						return tokenComment(stream, state);
+					} else if (stream.eat("/")) {
+						stream.skipToEnd();
+						return ret("comment", "comment");
+					} else if (expressionAllowed(stream, state, 1)) {
+						readRegexp(stream);
+						stream.match(/^\b(([gimyus])(?![gimyus]*\2))+\b/);
+						return ret("regexp", "string.special");
+					} else {
+						stream.eat("=");
+						return ret("operator", "operator", stream.current());
+					}
+				} else if (ch == "`") {
 					state.tokenize = tokenQuasi;
 					return tokenQuasi(stream, state);
 				} else if (ch == "#" && stream.peek() == "!") {
@@ -90380,21 +91037,23 @@ void main() {
 					cx.marked = "keyword";
 					return cont(pushlex("form", type == "class" ? type : value), className, poplex);
 				}
-				if (type == "variable") if (isTS && value == "declare") {
-					cx.marked = "keyword";
-					return cont(statement);
-				} else if (isTS && (value == "module" || value == "enum" || value == "type") && cx.stream.match(/^\s*\w/, false)) {
-					cx.marked = "keyword";
-					if (value == "enum") return cont(enumdef);
-					else if (value == "type") return cont(typename, expect("operator"), typeexpr, expect(";"));
-					else return cont(pushlex("form"), pattern, expect("{"), pushlex("}"), block, poplex, poplex);
-				} else if (isTS && value == "namespace") {
-					cx.marked = "keyword";
-					return cont(pushlex("form"), expression, statement, poplex);
-				} else if (isTS && value == "abstract") {
-					cx.marked = "keyword";
-					return cont(statement);
-				} else return cont(pushlex("stat"), maybelabel);
+				if (type == "variable") {
+					if (isTS && value == "declare") {
+						cx.marked = "keyword";
+						return cont(statement);
+					} else if (isTS && (value == "module" || value == "enum" || value == "type") && cx.stream.match(/^\s*\w/, false)) {
+						cx.marked = "keyword";
+						if (value == "enum") return cont(enumdef);
+						else if (value == "type") return cont(typename, expect("operator"), typeexpr, expect(";"));
+						else return cont(pushlex("form"), pattern, expect("{"), pushlex("}"), block, poplex, poplex);
+					} else if (isTS && value == "namespace") {
+						cx.marked = "keyword";
+						return cont(pushlex("form"), expression, statement, poplex);
+					} else if (isTS && value == "abstract") {
+						cx.marked = "keyword";
+						return cont(statement);
+					} else return cont(pushlex("stat"), maybelabel);
+				}
 				if (type == "switch") return cont(pushlex("form"), parenExpr, expect("{"), pushlex("}", "switch"), pushblockcontext, block, poplex, poplex, popcontext);
 				if (type == "case") return cont(expression, expect(":"));
 				if (type == "default") return cont(expect(":"));
@@ -90592,8 +91251,10 @@ void main() {
 				if (isTS && (type == ":" || value == "in")) return cont(typeexpr);
 			}
 			function mayberettype(type) {
-				if (isTS && type == ":") if (cx.stream.match(/^\s*\w+\s+is\b/, false)) return cont(expression, isKW, typeexpr);
-				else return cont(typeexpr);
+				if (isTS && type == ":") {
+					if (cx.stream.match(/^\s*\w+\s+is\b/, false)) return cont(expression, isKW, typeexpr);
+					else return cont(typeexpr);
+				}
 			}
 			function isKW(_, value) {
 				if (value == "is") {
@@ -91347,12 +92008,14 @@ void main() {
 						stream.next();
 						return "error";
 					}
-					if (stream.match(r = Rules[next_rule])) if (r.regex && stream.match(r.regex)) {
-						state.next = r.next;
-						return r.token;
-					} else {
-						stream.next();
-						return "error";
+					if (stream.match(r = Rules[next_rule])) {
+						if (r.regex && stream.match(r.regex)) {
+							state.next = r.next;
+							return r.token;
+						} else {
+							stream.next();
+							return "error";
+						}
 					}
 				}
 				stream.next();
@@ -92221,20 +92884,24 @@ void main() {
 				state.label = false;
 				if (state.commandMode == 0) state.commandMode = 1;
 				else if (state.commandMode < 0 || state.commandMode == 2) state.commandMode = 0;
-			} else if (ch != "." && state.commandMode > 0) if (ch == ":") state.commandMode = -1;
-			else state.commandMode = 2;
+			} else if (ch != "." && state.commandMode > 0) {
+				if (ch == ":") state.commandMode = -1;
+				else state.commandMode = 2;
+			}
 			if (ch === "(" || ch === "	") state.label = false;
 			if (ch === ";") {
 				stream.skipToEnd();
 				return "comment";
 			}
 			if (stream.match(/^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?/)) return "number";
-			if (ch == "\"") if (stream.skipTo("\"")) {
-				stream.next();
-				return "string";
-			} else {
-				stream.skipToEnd();
-				return "error";
+			if (ch == "\"") {
+				if (stream.skipTo("\"")) {
+					stream.next();
+					return "string";
+				} else {
+					stream.skipToEnd();
+					return "error";
+				}
 			}
 			if (stream.match(doubleOperators$3) || stream.match(singleOperators$4)) return "operator";
 			if (stream.match(singleDelimiters$2)) return null;
@@ -92618,9 +93285,10 @@ void main() {
 						else if (!context || context == "@media{") style = "tag";
 					}
 					if (context == "rule" && /^[\{\};]$/.test(type$2)) state.stack.pop();
-					if (type$2 == "{") if (context == "@media") state.stack[state.stack.length - 1] = "@media{";
-					else state.stack.push("{");
-					else if (type$2 == "}") state.stack.pop();
+					if (type$2 == "{") {
+						if (context == "@media") state.stack[state.stack.length - 1] = "@media{";
+						else state.stack.push("{");
+					} else if (type$2 == "}") state.stack.pop();
 					else if (type$2 == "@media") state.stack.push("@media");
 					else if (context == "{" && type$2 != "comment") state.stack.push("rule");
 					return style;
@@ -93675,8 +94343,10 @@ void main() {
 				}
 			}
 			if (ch == "`") return tokenChain(stream, state, [ch], "builtin");
-			if (ch == "/") if (!/~\s*$/.test(prefix(stream))) return "operator";
-			else return tokenChain(stream, state, [ch], RXstyle, RXmodifiers);
+			if (ch == "/") {
+				if (!/~\s*$/.test(prefix(stream))) return "operator";
+				else return tokenChain(stream, state, [ch], RXstyle, RXmodifiers);
+			}
 			if (ch == "$") {
 				var p = stream.pos;
 				if (stream.eatWhile(/\d/) || stream.eat("{") && stream.eatWhile(/\d/) && stream.eat("}")) return "builtin";
@@ -93730,13 +94400,14 @@ void main() {
 					var c = PERL[stream.current()];
 					if (!c) return "meta";
 					if (c[1]) c = c[0];
-					if (l != ":") if (c == 1) return "keyword";
-					else if (c == 2) return "def";
-					else if (c == 3) return "atom";
-					else if (c == 4) return "operator";
-					else if (c == 5) return "builtin";
-					else return "meta";
-					else return "meta";
+					if (l != ":") {
+						if (c == 1) return "keyword";
+						else if (c == 2) return "def";
+						else if (c == 3) return "atom";
+						else if (c == 4) return "operator";
+						else if (c == 5) return "builtin";
+						else return "meta";
+					} else return "meta";
 				}
 			}
 			if (/[a-zA-Z_]/.test(ch)) {
@@ -93745,13 +94416,14 @@ void main() {
 				var c = PERL[stream.current()];
 				if (!c) return "meta";
 				if (c[1]) c = c[0];
-				if (l != ":") if (c == 1) return "keyword";
-				else if (c == 2) return "def";
-				else if (c == 3) return "atom";
-				else if (c == 4) return "operator";
-				else if (c == 5) return "builtin";
-				else return "meta";
-				else return "meta";
+				if (l != ":") {
+					if (c == 1) return "keyword";
+					else if (c == 2) return "def";
+					else if (c == 3) return "atom";
+					else if (c == 4) return "operator";
+					else if (c == 5) return "builtin";
+					else return "meta";
+				} else return "meta";
 			}
 			return null;
 		}
@@ -94271,19 +94943,21 @@ void main() {
 			else if (/\d/.test(ch)) {
 				stream.eatWhile(/[\w\.]/);
 				return "number";
-			} else if (ch == "/") if (stream.eat("*")) return chain$5(stream, state, tokenComment$7);
-			else {
-				stream.eatWhile(isOperatorChar$6);
-				return "operator";
-			}
-			else if (ch == "-") if (stream.eat("-")) {
-				stream.skipToEnd();
-				return "comment";
-			} else {
-				stream.eatWhile(isOperatorChar$6);
-				return "operator";
-			}
-			else if (isOperatorChar$6.test(ch)) {
+			} else if (ch == "/") {
+				if (stream.eat("*")) return chain$5(stream, state, tokenComment$7);
+				else {
+					stream.eatWhile(isOperatorChar$6);
+					return "operator";
+				}
+			} else if (ch == "-") {
+				if (stream.eat("-")) {
+					stream.skipToEnd();
+					return "comment";
+				} else {
+					stream.eatWhile(isOperatorChar$6);
+					return "operator";
+				}
+			} else if (isOperatorChar$6.test(ch)) {
 				stream.eatWhile(isOperatorChar$6);
 				return "operator";
 			} else {
@@ -94301,7 +94975,9 @@ void main() {
 			pBuiltins = "ABS ACOS ARITY ASIN ATAN AVG BAGSIZE BINSTORAGE BLOOM BUILDBLOOM CBRT CEIL CONCAT COR COS COSH COUNT COUNT_STAR COV CONSTANTSIZE CUBEDIMENSIONS DIFF DISTINCT DOUBLEABS DOUBLEAVG DOUBLEBASE DOUBLEMAX DOUBLEMIN DOUBLEROUND DOUBLESUM EXP FLOOR FLOATABS FLOATAVG FLOATMAX FLOATMIN FLOATROUND FLOATSUM GENERICINVOKER INDEXOF INTABS INTAVG INTMAX INTMIN INTSUM INVOKEFORDOUBLE INVOKEFORFLOAT INVOKEFORINT INVOKEFORLONG INVOKEFORSTRING INVOKER ISEMPTY JSONLOADER JSONMETADATA JSONSTORAGE LAST_INDEX_OF LCFIRST LOG LOG10 LOWER LONGABS LONGAVG LONGMAX LONGMIN LONGSUM MAX MIN MAPSIZE MONITOREDUDF NONDETERMINISTIC OUTPUTSCHEMA  PIGSTORAGE PIGSTREAMING RANDOM REGEX_EXTRACT REGEX_EXTRACT_ALL REPLACE ROUND SIN SINH SIZE SQRT STRSPLIT SUBSTRING SUM STRINGCONCAT STRINGMAX STRINGMIN STRINGSIZE TAN TANH TOBAG TOKENIZE TOMAP TOP TOTUPLE TRIM TEXTLOADER TUPLESIZE UCFIRST UPPER UTF8STORAGECONVERTER ";
 			pKeywords = "VOID IMPORT RETURNS DEFINE LOAD FILTER FOREACH ORDER CUBE DISTINCT COGROUP JOIN CROSS UNION SPLIT INTO IF OTHERWISE ALL AS BY USING INNER OUTER ONSCHEMA PARALLEL PARTITION GROUP AND OR NOT GENERATE FLATTEN ASC DESC IS STREAM THROUGH STORE MAPREDUCE SHIP CACHE INPUT OUTPUT STDERROR STDIN STDOUT LIMIT SAMPLE LEFT RIGHT FULL EQ GT LT GTE LTE NEQ MATCHES TRUE FALSE DUMP";
 			pTypes = "BOOLEAN INT LONG FLOAT DOUBLE CHARARRAY BYTEARRAY BAG TUPLE MAP ";
-			builtins$3 = words$9(pBuiltins), keywords$19 = words$9(pKeywords), types$4 = words$9(pTypes);
+			builtins$3 = words$9(pBuiltins);
+			keywords$19 = words$9(pKeywords);
+			types$4 = words$9(pTypes);
 			isOperatorChar$6 = /[*+\-%<>=&?:\/!|]/;
 			pig = {
 				name: "pig",
@@ -94633,10 +95309,12 @@ void main() {
 					var sol = stream.sol() || state.afterSection;
 					var eol = stream.eol();
 					state.afterSection = false;
-					if (sol) if (state.nextMultiline) {
-						state.inMultiline = true;
-						state.nextMultiline = false;
-					} else state.position = "def";
+					if (sol) {
+						if (state.nextMultiline) {
+							state.inMultiline = true;
+							state.nextMultiline = false;
+						} else state.position = "def";
+					}
 					if (eol && !state.nextMultiline) {
 						state.inMultiline = false;
 						state.position = "def";
@@ -95244,8 +95922,10 @@ void main() {
 			curPunc$7 = null;
 			if (sol) {
 				if (c == "/") return (state.tokenize = tokenLineComment)(stream, state);
-				else if (c == "\\") if (stream.eol() || /\s/.test(stream.peek())) return stream.skipToEnd(), /^\\\s*$/.test(stream.current()) ? (state.tokenize = tokenCommentToEOF)(stream) : state.tokenize = tokenBase$19, "comment";
-				else return state.tokenize = tokenBase$19, "builtin";
+				else if (c == "\\") {
+					if (stream.eol() || /\s/.test(stream.peek())) return stream.skipToEnd(), /^\\\s*$/.test(stream.current()) ? (state.tokenize = tokenCommentToEOF)(stream) : state.tokenize = tokenBase$19, "comment";
+					else return state.tokenize = tokenBase$19, "builtin";
+				}
 			}
 			if (/\s/.test(c)) return stream.peek() == "/" ? (stream.skipToEnd(), "comment") : "null";
 			if (c == "\"") return (state.tokenize = tokenString$13)(stream, state);
@@ -95472,7 +96152,8 @@ void main() {
 				"xlog",
 				"xprev",
 				"xrank"
-			]), E = /[|/&^!+:\\\-*%$=~#;@><,?_\'\"\[\(\]\)\s{}]/;
+			]);
+			E = /[|/&^!+:\\\-*%$=~#;@><,?_\'\"\[\(\]\)\s{}]/;
 			q = {
 				name: "q",
 				startState: function() {
@@ -95671,7 +96352,9 @@ void main() {
 			keywords$16 = wordObj$1(commonKeywords$2);
 			blockkeywords = wordObj$1(commonBlockKeywords);
 			opChars = /[+\-*\/^<>=!&|~$:]/;
-			ALIGN_YES = 1, ALIGN_NO = 2, BRACELESS = 4;
+			ALIGN_YES = 1;
+			ALIGN_NO = 2;
+			BRACELESS = 4;
 			r$1 = {
 				name: "r",
 				startState: function(indentUnit) {
@@ -95825,9 +96508,10 @@ void main() {
 			if (stream.eatSpace()) return null;
 			var ch = stream.next(), m;
 			if (ch == "`" || ch == "'" || ch == "\"") return chain$4(readQuoted(ch, "string", ch == "\"" || ch == "`"), stream, state);
-			else if (ch == "/") if (regexpAhead(stream)) return chain$4(readQuoted(ch, "string.special", true), stream, state);
-			else return "operator";
-			else if (ch == "%") {
+			else if (ch == "/") {
+				if (regexpAhead(stream)) return chain$4(readQuoted(ch, "string.special", true), stream, state);
+				else return "operator";
+			} else if (ch == "%") {
 				var style = "string", embed = true;
 				if (stream.eat("s")) style = "atom";
 				else if (stream.eat(/[WQ]/)) style = "string";
@@ -95918,11 +96602,12 @@ void main() {
 		function tokenBaseUntilBrace(depth) {
 			if (!depth) depth = 1;
 			return function(stream, state) {
-				if (stream.peek() == "}") if (depth == 1) {
-					state.tokenize.pop();
-					return state.tokenize[state.tokenize.length - 1](stream, state);
-				} else state.tokenize[state.tokenize.length - 1] = tokenBaseUntilBrace(depth - 1);
-				else if (stream.peek() == "{") state.tokenize[state.tokenize.length - 1] = tokenBaseUntilBrace(depth + 1);
+				if (stream.peek() == "}") {
+					if (depth == 1) {
+						state.tokenize.pop();
+						return state.tokenize[state.tokenize.length - 1](stream, state);
+					} else state.tokenize[state.tokenize.length - 1] = tokenBaseUntilBrace(depth - 1);
+				} else if (stream.peek() == "{") state.tokenize[state.tokenize.length - 1] = tokenBaseUntilBrace(depth + 1);
 				return tokenBase$17(stream, state);
 			};
 		}
@@ -96042,7 +96727,8 @@ void main() {
 				"__FILE__",
 				"__LINE__",
 				"__dir__"
-			], keywords$15 = wordObj(keywordList);
+			];
+			keywords$15 = wordObj(keywordList);
 			indentWords = wordObj([
 				"def",
 				"class",
@@ -96198,8 +96884,10 @@ void main() {
 					state.inDataStep = false;
 					return "builtin";
 				}
-				if (word && stream.next() === ".") if (/\w/.test(stream.peek())) return "variableName.special";
-				else return "variable";
+				if (word && stream.next() === ".") {
+					if (/\w/.test(stream.peek())) return "variableName.special";
+					else return "variable";
+				}
 				if (word && words$7.hasOwnProperty(word) && (words$7[word].state.indexOf("inDataStep") !== -1 || words$7[word].state.indexOf("ALL") !== -1)) {
 					if (stream.start < stream.pos) stream.backUp(stream.pos - stream.start);
 					for (var i = 0; i < word.length; ++i) stream.next();
@@ -96358,7 +97046,13 @@ void main() {
 		}
 		var BUILTIN, COMMENT, STRING, SYMBOL, ATOM, NUMBER, BRACKET, INDENT_WORD_SKIP, keywords$14, indentKeys, binaryMatcher, octalMatcher, hexMatcher, decimalMatcher, scheme;
 		var init_scheme = __esmMin((() => {
-			BUILTIN = "builtin", COMMENT = "comment", STRING = "string", SYMBOL = "symbol", ATOM = "atom", NUMBER = "number", BRACKET = "bracket";
+			BUILTIN = "builtin";
+			COMMENT = "comment";
+			STRING = "string";
+			SYMBOL = "symbol";
+			ATOM = "atom";
+			NUMBER = "number";
+			BRACKET = "bracket";
 			INDENT_WORD_SKIP = 2;
 			keywords$14 = makeKeywords("λ case-lambda call/cc class cond-expand define-class define-values exit-handler field import inherit init-field interface let*-values let-values let/ec mixin opt-lambda override protect provide public rename require require-for-syntax syntax syntax-case syntax-error unit/sig unless when with-syntax and begin call-with-current-continuation call-with-input-file call-with-output-file case cond define define-syntax define-macro defmacro delay do dynamic-wind else for-each if lambda let let* let-syntax letrec letrec-syntax map or syntax-rules abs acos angle append apply asin assoc assq assv atan boolean? caar cadr call-with-input-file call-with-output-file call-with-values car cdddar cddddr cdr ceiling char->integer char-alphabetic? char-ci<=? char-ci<? char-ci=? char-ci>=? char-ci>? char-downcase char-lower-case? char-numeric? char-ready? char-upcase char-upper-case? char-whitespace? char<=? char<? char=? char>=? char>? char? close-input-port close-output-port complex? cons cos current-input-port current-output-port denominator display eof-object? eq? equal? eqv? eval even? exact->inexact exact? exp expt #f floor force gcd imag-part inexact->exact inexact? input-port? integer->char integer? interaction-environment lcm length list list->string list->vector list-ref list-tail list? load log magnitude make-polar make-rectangular make-string make-vector max member memq memv min modulo negative? newline not null-environment null? number->string number? numerator odd? open-input-file open-output-file output-port? pair? peek-char port? positive? procedure? quasiquote quote quotient rational? rationalize read read-char real-part real? remainder reverse round scheme-report-environment set! set-car! set-cdr! sin sqrt string string->list string->number string->symbol string-append string-ci<=? string-ci<? string-ci=? string-ci>=? string-ci>? string-copy string-fill! string-length string-ref string-set! string<=? string<? string=? string>=? string>? string? substring symbol->string symbol? #t tan transcript-off transcript-on truncate values vector vector->list vector-fill! vector-length vector-ref vector-set! with-input-from-file with-output-to-file write write-char zero?");
 			indentKeys = makeKeywords("define let letrec let* lambda define-macro defmacro let-syntax letrec-syntax let-values let*-values define-syntax syntax-rules define-values when unless");
@@ -96420,41 +97114,43 @@ void main() {
 							if (ch == "\"") {
 								state.mode = "string";
 								returnType = STRING;
-							} else if (ch == "'") if (stream.peek() == "(" || stream.peek() == "[") {
-								if (typeof state.sExprQuote != "number") state.sExprQuote = 0;
-								returnType = ATOM;
-							} else {
-								stream.eatWhile(/[\w_\-!$%&*+\.\/:<=>?@\^~]/);
-								returnType = ATOM;
-							}
-							else if (ch == "|") {
+							} else if (ch == "'") {
+								if (stream.peek() == "(" || stream.peek() == "[") {
+									if (typeof state.sExprQuote != "number") state.sExprQuote = 0;
+									returnType = ATOM;
+								} else {
+									stream.eatWhile(/[\w_\-!$%&*+\.\/:<=>?@\^~]/);
+									returnType = ATOM;
+								}
+							} else if (ch == "|") {
 								state.mode = "symbol";
 								returnType = SYMBOL;
-							} else if (ch == "#") if (stream.eat("|")) {
-								state.mode = "comment";
-								returnType = COMMENT;
-							} else if (stream.eat(/[tf]/i)) returnType = ATOM;
-							else if (stream.eat(";")) {
-								state.mode = "s-expr-comment";
-								returnType = COMMENT;
-							} else {
-								var numTest = null, hasExactness = false, hasRadix = true;
-								if (stream.eat(/[ei]/i)) hasExactness = true;
-								else stream.backUp(1);
-								if (stream.match(/^#b/i)) numTest = isBinaryNumber;
-								else if (stream.match(/^#o/i)) numTest = isOctalNumber;
-								else if (stream.match(/^#x/i)) numTest = isHexNumber;
-								else if (stream.match(/^#d/i)) numTest = isDecimalNumber;
-								else if (stream.match(/^[-+0-9.]/, false)) {
-									hasRadix = false;
-									numTest = isDecimalNumber;
-								} else if (!hasExactness) stream.eat("#");
-								if (numTest != null) {
-									if (hasRadix && !hasExactness) stream.match(/^#[ei]/i);
-									if (numTest(stream)) returnType = NUMBER;
+							} else if (ch == "#") {
+								if (stream.eat("|")) {
+									state.mode = "comment";
+									returnType = COMMENT;
+								} else if (stream.eat(/[tf]/i)) returnType = ATOM;
+								else if (stream.eat(";")) {
+									state.mode = "s-expr-comment";
+									returnType = COMMENT;
+								} else {
+									var numTest = null, hasExactness = false, hasRadix = true;
+									if (stream.eat(/[ei]/i)) hasExactness = true;
+									else stream.backUp(1);
+									if (stream.match(/^#b/i)) numTest = isBinaryNumber;
+									else if (stream.match(/^#o/i)) numTest = isOctalNumber;
+									else if (stream.match(/^#x/i)) numTest = isHexNumber;
+									else if (stream.match(/^#d/i)) numTest = isDecimalNumber;
+									else if (stream.match(/^[-+0-9.]/, false)) {
+										hasRadix = false;
+										numTest = isDecimalNumber;
+									} else if (!hasExactness) stream.eat("#");
+									if (numTest != null) {
+										if (hasRadix && !hasExactness) stream.match(/^#[ei]/i);
+										if (numTest(stream)) returnType = NUMBER;
+									}
 								}
-							}
-							else if (/^[-+0-9.]/.test(ch) && isDecimalNumber(stream, true)) returnType = NUMBER;
+							} else if (/^[-+0-9.]/.test(ch) && isDecimalNumber(stream, true)) returnType = NUMBER;
 							else if (ch == ";") {
 								stream.skipToEnd();
 								returnType = COMMENT;
@@ -96901,12 +97597,13 @@ void main() {
 				var aChar = stream.next();
 				if (aChar === "\"") token = nextComment(stream, new Context$5(nextComment, context));
 				else if (aChar === "'") token = nextString(stream, new Context$5(nextString, context));
-				else if (aChar === "#") if (stream.peek() === "'") {
-					stream.next();
-					token = nextSymbol(stream, new Context$5(nextSymbol, context));
-				} else if (stream.eatWhile(/[^\s.{}\[\]()]/)) token.name = "string.special";
-				else token.name = "meta";
-				else if (aChar === "$") {
+				else if (aChar === "#") {
+					if (stream.peek() === "'") {
+						stream.next();
+						token = nextSymbol(stream, new Context$5(nextSymbol, context));
+					} else if (stream.eatWhile(/[^\s.{}\[\]()]/)) token.name = "string.special";
+					else token.name = "meta";
+				} else if (aChar === "$") {
 					if (stream.next() === "<") {
 						stream.eatWhile(/[^\s>]/);
 						stream.next();
@@ -97074,7 +97771,7 @@ void main() {
 			}
 			stream.eatWhile(/[_\w\d]/);
 			var word = stream.current();
-			if (ops$1.test(word)) return "builtin";
+			if (ops.test(word)) return "builtin";
 			else if (keywords$11.test(word)) return "keyword";
 			else return "variable";
 		}
@@ -97106,9 +97803,9 @@ void main() {
 			state.indent = state.context.indent;
 			state.context = state.context.prev;
 		}
-		var curPunc$4, ops$1, keywords$11, operatorChars$1, PN_CHARS, PREFIX_START, PREFIX_REMAINDER, sparql;
+		var curPunc$4, ops, keywords$11, operatorChars$1, PN_CHARS, PREFIX_START, PREFIX_REMAINDER, sparql;
 		var init_sparql = __esmMin((() => {
-			ops$1 = wordRegexp$5([
+			ops = wordRegexp$5([
 				"str",
 				"lang",
 				"langmatches",
@@ -98773,14 +99470,16 @@ void main() {
 				"isnt",
 				"defined",
 				"if unless"
-			], blockKeywords_ = [
+			];
+			blockKeywords_ = [
 				"for",
 				"if",
 				"else",
 				"unless",
 				"from",
 				"to"
-			], commonAtoms_ = [
+			];
+			commonAtoms_ = [
 				"null",
 				"true",
 				"false",
@@ -98802,7 +99501,24 @@ void main() {
 				"@block",
 				"@css"
 			]);
-			tagKeywords = keySet(tagKeywords_), tagVariablesRegexp = /^(a|b|i|s|col|em)$/i, propertyKeywords = keySet(propertyKeywords_), nonStandardPropertyKeywords = keySet(nonStandardPropertyKeywords_), valueKeywords = keySet(valueKeywords_), colorKeywords = keySet(colorKeywords_), documentTypes = keySet(documentTypes_), documentTypesRegexp = wordRegexp$4(documentTypes_), mediaFeatures = keySet(mediaFeatures_), mediaTypes = keySet(mediaTypes_), fontProperties = keySet(fontProperties_), operatorsRegexp = /^\s*([.]{2,3}|&&|\|\||\*\*|[?!=:]?=|[-+*\/%<>]=?|\?:|\~)/, wordOperatorKeywordsRegexp = wordRegexp$4(wordOperatorKeywords_), blockKeywords$1 = keySet(blockKeywords_), vendorPrefixesRegexp = /* @__PURE__ */ new RegExp(/^\-(moz|ms|o|webkit)-/i), commonAtoms = keySet(commonAtoms_), firstWordMatch = "", states = {};
+			tagKeywords = keySet(tagKeywords_);
+			tagVariablesRegexp = /^(a|b|i|s|col|em)$/i;
+			propertyKeywords = keySet(propertyKeywords_);
+			nonStandardPropertyKeywords = keySet(nonStandardPropertyKeywords_);
+			valueKeywords = keySet(valueKeywords_);
+			colorKeywords = keySet(colorKeywords_);
+			documentTypes = keySet(documentTypes_);
+			documentTypesRegexp = wordRegexp$4(documentTypes_);
+			mediaFeatures = keySet(mediaFeatures_);
+			mediaTypes = keySet(mediaTypes_);
+			fontProperties = keySet(fontProperties_);
+			operatorsRegexp = /^\s*([.]{2,3}|&&|\|\||\*\*|[?!=:]?=|[-+*\/%<>]=?|\?:|\~)/;
+			wordOperatorKeywordsRegexp = wordRegexp$4(wordOperatorKeywords_);
+			blockKeywords$1 = keySet(blockKeywords_);
+			vendorPrefixesRegexp = /* @__PURE__ */ new RegExp(/^\-(moz|ms|o|webkit)-/i);
+			commonAtoms = keySet(commonAtoms_);
+			firstWordMatch = "";
+			states = {};
 			/**
 			* Block
 			*/
@@ -98814,8 +99530,10 @@ void main() {
 				}
 				if (typeIsBlock(type, stream)) return pushContext$6(state, stream, "block");
 				if (type == "}" && endOfLine(stream)) return pushContext$6(state, stream, "block", 0);
-				if (type == "variable-name") if (stream.string.match(/^\s?\$[\w-\.\[\]\'\"]+$/) || wordIsBlock(firstWordOfLine(stream))) return pushContext$6(state, stream, "variableName");
-				else return pushContext$6(state, stream, "variableName", 0);
+				if (type == "variable-name") {
+					if (stream.string.match(/^\s?\$[\w-\.\[\]\'\"]+$/) || wordIsBlock(firstWordOfLine(stream))) return pushContext$6(state, stream, "variableName");
+					else return pushContext$6(state, stream, "variableName", 0);
+				}
 				if (type == "=") {
 					if (!endOfLine(stream) && !wordIsBlock(firstWordOfLine(stream))) return pushContext$6(state, stream, "block", 0);
 					return pushContext$6(state, stream, "block");
@@ -98844,10 +99562,12 @@ void main() {
 				if (type == "word") {
 					var word = stream.current();
 					override = wordAsValue(word);
-					if (override == "property") if (startOfLine(stream)) return pushContext$6(state, stream, "block", 0);
-					else {
-						override = "atom";
-						return "block";
+					if (override == "property") {
+						if (startOfLine(stream)) return pushContext$6(state, stream, "block", 0);
+						else {
+							override = "atom";
+							return "block";
+						}
 					}
 					if (override == "tag") {
 						if (/embed|menu|pre|progress|sub|table/.test(word)) {
@@ -98946,8 +99666,10 @@ void main() {
 			};
 			states.atBlock_parens = function(type, stream, state) {
 				if (type == "{" || type == "}") return state.context.type;
-				if (type == ")") if (endOfLine(stream)) return pushContext$6(state, stream, "block");
-				else return pushContext$6(state, stream, "atBlock");
+				if (type == ")") {
+					if (endOfLine(stream)) return pushContext$6(state, stream, "block");
+					else return pushContext$6(state, stream, "atBlock");
+				}
 				if (type == "word") {
 					var word = stream.current().toLowerCase();
 					override = wordAsValue(word);
@@ -98963,8 +99685,10 @@ void main() {
 			states.keyframes = function(type, stream, state) {
 				if (stream.indentation() == "0" && (type == "}" && startOfLine(stream) || type == "]" || type == "hash" || type == "qualifier" || wordIsTag(stream.current()))) return popAndPass(type, stream, state);
 				if (type == "{") return pushContext$6(state, stream, "keyframes");
-				if (type == "}") if (startOfLine(stream)) return popContext$6(state, stream, true);
-				else return pushContext$6(state, stream, "keyframes");
+				if (type == "}") {
+					if (startOfLine(stream)) return popContext$6(state, stream, true);
+					else return pushContext$6(state, stream, "keyframes");
+				}
 				if (type == "unit" && /^[0-9]+\%$/.test(stream.current())) return pushContext$6(state, stream, "keyframes");
 				if (type == "word") {
 					override = wordAsValue(stream.current());
@@ -99041,14 +99765,17 @@ void main() {
 					if (cx.prev && (ch == "}" && (cx.type == "block" || cx.type == "atBlock" || cx.type == "keyframes") || ch == ")" && (cx.type == "parens" || cx.type == "atBlock_parens") || ch == "{" && cx.type == "at")) indent = cx.indent - iCx.unit;
 					else if (!/(\})/.test(ch)) {
 						if (/@|\$|\d/.test(ch) || /^\{/.test(textAfter) || /^\s*\/(\/|\*)/.test(textAfter) || /^\s*\/\*/.test(prevLineFirstWord) || /^\s*[\w-\.\[\]\'\"]+\s*(\?|:|\+)?=/i.test(textAfter) || /^(\+|-)?[a-z][\w-]*\(/i.test(textAfter) || /^return/.test(textAfter) || wordIsBlock(lineFirstWord)) indent = lineIndent;
-						else if (/(\.|#|:|\[|\*|&|>|~|\+|\/)/.test(ch) || wordIsTag(lineFirstWord)) if (/\,\s*$/.test(prevLineFirstWord)) indent = prevLineIndent;
-						else if (/(\.|#|:|\[|\*|&|>|~|\+|\/)/.test(prevLineFirstWord) || wordIsTag(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? prevLineIndent : prevLineIndent + iCx.unit;
-						else indent = lineIndent;
-						else if (!/,\s*$/.test(textAfter) && (wordIsVendorPrefix(lineFirstWord) || wordIsProperty(lineFirstWord))) if (wordIsBlock(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? prevLineIndent : prevLineIndent + iCx.unit;
-						else if (/^\{/.test(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? lineIndent : prevLineIndent + iCx.unit;
-						else if (wordIsVendorPrefix(prevLineFirstWord) || wordIsProperty(prevLineFirstWord)) indent = lineIndent >= prevLineIndent ? prevLineIndent : lineIndent;
-						else if (/^(\.|#|:|\[|\*|&|@|\+|\-|>|~|\/)/.test(prevLineFirstWord) || /=\s*$/.test(prevLineFirstWord) || wordIsTag(prevLineFirstWord) || /^\$[\w-\.\[\]\'\"]/.test(prevLineFirstWord)) indent = prevLineIndent + iCx.unit;
-						else indent = lineIndent;
+						else if (/(\.|#|:|\[|\*|&|>|~|\+|\/)/.test(ch) || wordIsTag(lineFirstWord)) {
+							if (/\,\s*$/.test(prevLineFirstWord)) indent = prevLineIndent;
+							else if (/(\.|#|:|\[|\*|&|>|~|\+|\/)/.test(prevLineFirstWord) || wordIsTag(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? prevLineIndent : prevLineIndent + iCx.unit;
+							else indent = lineIndent;
+						} else if (!/,\s*$/.test(textAfter) && (wordIsVendorPrefix(lineFirstWord) || wordIsProperty(lineFirstWord))) {
+							if (wordIsBlock(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? prevLineIndent : prevLineIndent + iCx.unit;
+							else if (/^\{/.test(prevLineFirstWord)) indent = lineIndent <= prevLineIndent ? lineIndent : prevLineIndent + iCx.unit;
+							else if (wordIsVendorPrefix(prevLineFirstWord) || wordIsProperty(prevLineFirstWord)) indent = lineIndent >= prevLineIndent ? prevLineIndent : lineIndent;
+							else if (/^(\.|#|:|\[|\*|&|@|\+|\-|>|~|\/)/.test(prevLineFirstWord) || /=\s*$/.test(prevLineFirstWord) || wordIsTag(prevLineFirstWord) || /^\$[\w-\.\[\]\'\"]/.test(prevLineFirstWord)) indent = prevLineIndent + iCx.unit;
+							else indent = lineIndent;
+						}
 					}
 					return indent;
 				},
@@ -99129,11 +99856,13 @@ void main() {
 				var inner = tokenBase$11(stream, state, prev);
 				if (inner == "punctuation") {
 					if (stream.current() == "(") ++depth;
-					else if (stream.current() == ")") if (depth == 0) {
-						stream.backUp(1);
-						state.tokenize.pop();
-						return state.tokenize[state.tokenize.length - 1](stream, state);
-					} else --depth;
+					else if (stream.current() == ")") {
+						if (depth == 0) {
+							stream.backUp(1);
+							state.tokenize.pop();
+							return state.tokenize[state.tokenize.length - 1](stream, state);
+						} else --depth;
+					}
 				}
 				return inner;
 			};
@@ -99790,9 +100519,11 @@ void main() {
 					else if (curPunc == "(") pushContext(state, stream.column(), ")");
 					else if (ctx && ctx.type == "endcase" && curPunc == ":") pushContext(state, stream.column(), "statement");
 					else if (curPunc == "newstatement") pushContext(state, stream.column(), "statement");
-					else if (curPunc == "newblock") if (curKeyword == "function" && ctx && (ctx.type == "statement" || ctx.type == "endgroup")) {} else if (curKeyword == "task" && ctx && ctx.type == "statement") {} else {
-						var close = openClose[curKeyword];
-						pushContext(state, stream.column(), close);
+					else if (curPunc == "newblock") {
+						if (curKeyword == "function" && ctx && (ctx.type == "statement" || ctx.type == "endgroup")) {} else if (curKeyword == "task" && ctx && ctx.type == "statement") {} else {
+							var close = openClose[curKeyword];
+							pushContext(state, stream.column(), close);
+						}
 					}
 					state.startOfLine = false;
 					return style;
@@ -100074,8 +100805,10 @@ void main() {
 			if (state.layoutType === "definitionList" && state.spanningLayout && stream.match(RE("definitionListEnd"), false)) state.spanningLayout = false;
 		}
 		function handlePhraseModifier(stream, state, ch) {
-			if (ch === "_") if (stream.eat("_")) return togglePhraseModifier(stream, state, "italic", /__/, 2);
-			else return togglePhraseModifier(stream, state, "em", /_/, 1);
+			if (ch === "_") {
+				if (stream.eat("_")) return togglePhraseModifier(stream, state, "italic", /__/, 2);
+				else return togglePhraseModifier(stream, state, "em", /_/, 1);
+			}
 			if (ch === "*") {
 				if (stream.eat("*")) return togglePhraseModifier(stream, state, "bold", /\*\*/, 2);
 				return togglePhraseModifier(stream, state, "strong", /\*/, 1);
@@ -100559,7 +101292,18 @@ void main() {
 				"with": true,
 				"filter": true
 			};
-			isSpaceName = /[\w_\-]/i, reHR = /^\-\-\-\-+$/, reWikiCommentStart = /^\/\*\*\*$/, reWikiCommentStop = /^\*\*\*\/$/, reBlockQuote = /^<<<$/, reJsCodeStart = /^\/\/\{\{\{$/, reJsCodeStop = /^\/\/\}\}\}$/, reXmlCodeStart = /^<!--\{\{\{-->$/, reXmlCodeStop = /^<!--\}\}\}-->$/, reCodeBlockStart = /^\{\{\{$/, reCodeBlockStop = /^\}\}\}$/, reUntilCodeStop = /.*?\}\}\}/;
+			isSpaceName = /[\w_\-]/i;
+			reHR = /^\-\-\-\-+$/;
+			reWikiCommentStart = /^\/\*\*\*$/;
+			reWikiCommentStop = /^\*\*\*\/$/;
+			reBlockQuote = /^<<<$/;
+			reJsCodeStart = /^\/\/\{\{\{$/;
+			reJsCodeStop = /^\/\/\}\}\}$/;
+			reXmlCodeStart = /^<!--\{\{\{-->$/;
+			reXmlCodeStop = /^<!--\}\}\}-->$/;
+			reCodeBlockStart = /^\{\{\{$/;
+			reCodeBlockStop = /^\}\}\}$/;
+			reUntilCodeStop = /.*?\}\}\}/;
 			tiddlyWiki = {
 				name: "tiddlywiki",
 				startState: function() {
@@ -100632,18 +101376,14 @@ void main() {
 					if (stream.eat(":")) return chain(inBlock("comment", "::"));
 					break;
 				case "^": return chain(inBlock("tw-box", "^"));
-				case "~":
-					if (stream.match("np~")) return chain(inBlock("meta", "~/np~"));
-					break;
+				case "~": if (stream.match("np~")) return chain(inBlock("meta", "~/np~"));
 			}
 			if (sol) switch (ch) {
-				case "!":
-					if (stream.match("!!!!!")) return chain(inLine("header string"));
-					else if (stream.match("!!!!")) return chain(inLine("header string"));
-					else if (stream.match("!!!")) return chain(inLine("header string"));
-					else if (stream.match("!!")) return chain(inLine("header string"));
-					else return chain(inLine("header string"));
-					break;
+				case "!": if (stream.match("!!!!!")) return chain(inLine("header string"));
+				else if (stream.match("!!!!")) return chain(inLine("header string"));
+				else if (stream.match("!!!")) return chain(inLine("header string"));
+				else if (stream.match("!!")) return chain(inLine("header string"));
+				else return chain(inLine("header string"));
 				case "*":
 				case "#":
 				case "+": return chain(inLine("tw-listitem bracket"));
@@ -101071,7 +101811,22 @@ void main() {
 			add(parserConfig$1.builtin);
 			add(parserConfig$1.timerOps);
 			add(parserConfig$1.portOps);
-			keywords$7 = parserConfig$1.keywords || {}, builtin = parserConfig$1.builtin || {}, timerOps = parserConfig$1.timerOps || {}, portOps = parserConfig$1.portOps || {}, configOps = parserConfig$1.configOps || {}, verdictOps = parserConfig$1.verdictOps || {}, sutOps = parserConfig$1.sutOps || {}, functionOps = parserConfig$1.functionOps || {}, verdictConsts = parserConfig$1.verdictConsts || {}, booleanConsts = parserConfig$1.booleanConsts || {}, otherConsts = parserConfig$1.otherConsts || {}, types$2 = parserConfig$1.types || {}, visibilityModifiers = parserConfig$1.visibilityModifiers || {}, templateMatch = parserConfig$1.templateMatch || {}, multiLineStrings$2 = parserConfig$1.multiLineStrings, indentStatements$1 = parserConfig$1.indentStatements !== false;
+			keywords$7 = parserConfig$1.keywords || {};
+			builtin = parserConfig$1.builtin || {};
+			timerOps = parserConfig$1.timerOps || {};
+			portOps = parserConfig$1.portOps || {};
+			configOps = parserConfig$1.configOps || {};
+			verdictOps = parserConfig$1.verdictOps || {};
+			sutOps = parserConfig$1.sutOps || {};
+			functionOps = parserConfig$1.functionOps || {};
+			verdictConsts = parserConfig$1.verdictConsts || {};
+			booleanConsts = parserConfig$1.booleanConsts || {};
+			otherConsts = parserConfig$1.otherConsts || {};
+			types$2 = parserConfig$1.types || {};
+			visibilityModifiers = parserConfig$1.visibilityModifiers || {};
+			templateMatch = parserConfig$1.templateMatch || {};
+			multiLineStrings$2 = parserConfig$1.multiLineStrings;
+			indentStatements$1 = parserConfig$1.indentStatements !== false;
 			isOperatorChar$3 = /[+\-*&@=<>!\/]/;
 			ttcn = {
 				name: "ttcn",
@@ -101207,7 +101962,11 @@ void main() {
 				externalCommands: words$2("BeginControlPart EndControlPart BeginTestCase EndTestCase"),
 				multiLineStrings: true
 			};
-			keywords$6 = parserConfig.keywords, fileNCtrlMaskOptions = parserConfig.fileNCtrlMaskOptions, externalCommands = parserConfig.externalCommands, multiLineStrings$1 = parserConfig.multiLineStrings, indentStatements = parserConfig.indentStatements !== false;
+			keywords$6 = parserConfig.keywords;
+			fileNCtrlMaskOptions = parserConfig.fileNCtrlMaskOptions;
+			externalCommands = parserConfig.externalCommands;
+			multiLineStrings$1 = parserConfig.multiLineStrings;
+			indentStatements = parserConfig.indentStatements !== false;
 			isOperatorChar$2 = /[\|]/;
 			ttcnCfg = {
 				name: "ttcn",
@@ -101284,10 +102043,7 @@ void main() {
 					if (ch >= "A" && ch <= "Z") return "comment";
 					else return "keyword";
 				}
-				var word = stream.current();
-				if (ops.test(word)) return null;
-				else if (keywords$5.test(word)) return "meta";
-				else return "variable";
+				var word;
 			}
 		}
 		function tokenLiteral(quote) {
@@ -101315,9 +102071,9 @@ void main() {
 			state.indent = state.context.indent;
 			state.context = state.context.prev;
 		}
-		var curPunc$1, ops, keywords$5, operatorChars, turtle;
+		var curPunc$1, keywords$5, operatorChars, turtle;
 		var init_turtle = __esmMin((() => {
-			ops = wordRegexp$3([]);
+			wordRegexp$3([]);
 			keywords$5 = wordRegexp$3([
 				"@prefix",
 				"@base",
@@ -102665,10 +103421,12 @@ void main() {
 		}
 		var atoms, hooks, multiLineStrings, keywords$1, blockKeywords, isOperatorChar, curPunc, vhdl;
 		var init_vhdl = __esmMin((() => {
-			atoms = words$1("null"), hooks = {
+			atoms = words$1("null");
+			hooks = {
 				"`": metaHook,
 				"$": metaHook
-			}, multiLineStrings = false;
+			};
+			multiLineStrings = false;
 			keywords$1 = words$1("abs,access,after,alias,all,and,architecture,array,assert,attribute,begin,block,body,buffer,bus,case,component,configuration,constant,disconnect,downto,else,elsif,end,end block,end case,end component,end for,end generate,end if,end loop,end process,end record,end units,entity,exit,file,for,function,generate,generic,generic map,group,guarded,if,impure,in,inertial,inout,is,label,library,linkage,literal,loop,map,mod,nand,new,next,nor,null,of,on,open,or,others,out,package,package body,port,port map,postponed,procedure,process,pure,range,record,register,reject,rem,report,return,rol,ror,select,severity,signal,sla,sll,sra,srl,subtype,then,to,transport,type,unaffected,units,until,use,variable,wait,when,while,with,xnor,xor");
 			blockKeywords = words$1("architecture,entity,begin,case,port,else,elsif,end,for,function,if");
 			isOperatorChar = /[&|~><!\)\(*#%@+\/=?\:;}{,\.\^\-\[\]]/;
@@ -102747,12 +103505,13 @@ void main() {
 			} else if (ch == "}") {
 				popStateStack(state);
 				return null;
-			} else if (isInXmlBlock(state)) if (ch == ">") return "tag";
-			else if (ch == "/" && stream.eat(">")) {
-				popStateStack(state);
-				return "tag";
-			} else return "variable";
-			else if (/\d/.test(ch)) {
+			} else if (isInXmlBlock(state)) {
+				if (ch == ">") return "tag";
+				else if (ch == "/" && stream.eat(">")) {
+					popStateStack(state);
+					return "tag";
+				} else return "variable";
+			} else if (/\d/.test(ch)) {
 				stream.match(/^\d*(?:\.\d*)?(?:E[+\-]?\d+)?/);
 				return "atom";
 			} else if (ch === "(" && stream.eat(":")) {
@@ -102798,12 +103557,13 @@ void main() {
 		function tokenComment$1(stream, state) {
 			var maybeEnd = false, maybeNested = false, nestedCount = 0, ch;
 			while (ch = stream.next()) {
-				if (ch == ")" && maybeEnd) if (nestedCount > 0) nestedCount--;
-				else {
-					popStateStack(state);
-					break;
-				}
-				else if (ch == ":" && maybeNested) nestedCount++;
+				if (ch == ")" && maybeEnd) {
+					if (nestedCount > 0) nestedCount--;
+					else {
+						popStateStack(state);
+						break;
+					}
+				} else if (ch == ":" && maybeNested) nestedCount++;
 				maybeEnd = ch == ":";
 				maybeNested = ch == "(";
 			}
@@ -103858,7 +104618,8 @@ void main() {
 				wrap: /*@__PURE__*/ parseMixed((node, input) => node.name == "AttributeScript" ? exprMixed$1 : null),
 				top: "Attribute"
 			});
-			textMixed$1 = { parser: textParser$1 }, attrMixed$1 = { parser: attrParser$1 };
+			textMixed$1 = { parser: textParser$1 };
+			attrMixed$1 = { parser: attrParser$1 };
 			baseHTML$1 = /*@__PURE__*/ html$3();
 			vueLanguage = /*@__PURE__*/ makeVue(baseHTML$1.language);
 		}));
@@ -103911,7 +104672,11 @@ void main() {
 			init_dist$38();
 			init_dist$41();
 			init_dist$36();
-			Text$2 = 1, attributeContentSingle = 33, attributeContentDouble = 34, scriptAttributeContentSingle = 35, scriptAttributeContentDouble = 36;
+			Text$2 = 1;
+			attributeContentSingle = 33;
+			attributeContentDouble = 34;
+			scriptAttributeContentSingle = 35;
+			scriptAttributeContentDouble = 36;
 			text$7 = /*@__PURE__*/ new ExternalTokenizer((input) => {
 				let start = input.pos;
 				for (;;) {
@@ -103994,7 +104759,8 @@ void main() {
 				"[ ]": tags$1.bracket,
 				"# '*'": tags$1.punctuation
 			})] });
-			exprMixed = { parser: exprParser }, statementMixed = { parser: javascriptLanguage.parser };
+			exprMixed = { parser: exprParser };
+			statementMixed = { parser: javascriptLanguage.parser };
 			textParser = /*@__PURE__*/ baseParser.configure({ wrap: /*@__PURE__*/ parseMixed((node, input) => node.name == "InterpolationContent" ? exprMixed : null) });
 			attrParser = /*@__PURE__*/ baseParser.configure({
 				wrap: /*@__PURE__*/ parseMixed((node, input) => {
@@ -104003,7 +104769,8 @@ void main() {
 				}),
 				top: "Attribute"
 			});
-			textMixed = { parser: textParser }, attrMixed = { parser: attrParser };
+			textMixed = { parser: textParser };
+			attrMixed = { parser: attrParser };
 			baseHTML = /*@__PURE__*/ html$3({ selfClosingTags: true });
 			angularLanguage = /*@__PURE__*/ mkAngular(baseHTML.language);
 		}));
@@ -105202,7 +105969,22 @@ void main() {
 		init_dist$39();
 		init_dist$37();
 		init_dist$38();
-		const chalky = "#e5c07b", coral = "#e06c75", cyan = "#56b6c2", invalid$1 = "#ffffff", ivory = "#abb2bf", stone = "#7d8799", malibu = "#61afef", sage = "#98c379", whiskey = "#d19a66", violet = "#c678dd", darkBackground = "#21252b", highlightBackground = "#2c313a", background = "#282c34", tooltipBackground = "#353a42", selection = "#3E4451", cursor$2 = "#528bff";
+		const chalky = "#e5c07b";
+		const coral = "#e06c75";
+		const cyan = "#56b6c2";
+		const invalid$1 = "#ffffff";
+		const ivory = "#abb2bf";
+		const stone = "#7d8799";
+		const malibu = "#61afef";
+		const sage = "#98c379";
+		const whiskey = "#d19a66";
+		const violet = "#c678dd";
+		const darkBackground = "#21252b";
+		const highlightBackground = "#2c313a";
+		const background = "#282c34";
+		const tooltipBackground = "#353a42";
+		const selection = "#3E4451";
+		const cursor$2 = "#528bff";
 		/**
 		Extension to enable the One Dark theme (both the editor theme and
 		the highlight style).
@@ -113402,8 +114184,10 @@ void main() {
 				/** @type {Array<number>} */
 				const listStack = [];
 				let index = -1;
-				while (++index < events.length) if (events[index][1].type === "listOrdered" || events[index][1].type === "listUnordered") if (events[index][0] === "enter") listStack.push(index);
-				else index = prepareList(events, listStack.pop(), index);
+				while (++index < events.length) if (events[index][1].type === "listOrdered" || events[index][1].type === "listUnordered") {
+					if (events[index][0] === "enter") listStack.push(index);
+					else index = prepareList(events, listStack.pop(), index);
+				}
 				index = -1;
 				while (++index < events.length) {
 					const handler = config[events[index][0]];
@@ -113593,8 +114377,10 @@ void main() {
 					start: token.start,
 					end: token.end
 				}) + "): it’s not open");
-				else if (open[0].type !== token.type) if (onExitError) onExitError.call(this, token, open[0]);
-				else (open[1] || defaultOnError).call(this, token, open[0]);
+				else if (open[0].type !== token.type) {
+					if (onExitError) onExitError.call(this, token, open[0]);
+					else (open[1] || defaultOnError).call(this, token, open[0]);
+				}
 				node.position.end = point(token.end);
 			}
 			/**
@@ -114212,7 +114998,7 @@ void main() {
 		* @param {Test} [test]
 		* @returns {Check}
 		*/
-function(test) {
+		function(test) {
 			if (test === null || test === void 0) return ok$1;
 			if (typeof test === "function") return castFactory(test);
 			if (typeof test === "object") return Array.isArray(test) ? anyFactory(test) : propertiesFactory(test);
@@ -116931,7 +117717,7 @@ function(test) {
 		*
 		* @type {Map<string, boolean>}
 		*/
-		const builtins = new Map([["*", false], ["_", true]]);
+		const builtins = /* @__PURE__ */ new Map([["*", false], ["_", true]]);
 		/**
 		* @typedef AttentionResult
 		*   Attention, of which the sequence is chosen later.
@@ -117189,7 +117975,7 @@ function(test) {
 							wrong.delete(openToken);
 							wrong.delete(closeToken);
 						} else {
-							const involved = [...new Set([...opening, ...closing])];
+							const involved = [.../* @__PURE__ */ new Set([...opening, ...closing])];
 							for (const token of involved) {
 								const list = wrong.get(token);
 								if (list) list.push(...involved);
@@ -118139,9 +118925,11 @@ function(test) {
 					if (fnExpectsCallback && called) throw exception;
 					return done(exception);
 				}
-				if (!fnExpectsCallback) if (result && result.then && typeof result.then === "function") result.then(then, done);
-				else if (result instanceof Error) done(result);
-				else then(result);
+				if (!fnExpectsCallback) {
+					if (result && result.then && typeof result.then === "function") result.then(then, done);
+					else if (result instanceof Error) done(result);
+					else then(result);
+				}
 			}
 			/**
 			* Call `callback`, only once.
@@ -118253,13 +119041,15 @@ function(test) {
 				/** @type {Options} */
 				let options = {};
 				let legacyCause = false;
-				if (optionsOrParentOrPlace) if ("line" in optionsOrParentOrPlace && "column" in optionsOrParentOrPlace) options = { place: optionsOrParentOrPlace };
-				else if ("start" in optionsOrParentOrPlace && "end" in optionsOrParentOrPlace) options = { place: optionsOrParentOrPlace };
-				else if ("type" in optionsOrParentOrPlace) options = {
-					ancestors: [optionsOrParentOrPlace],
-					place: optionsOrParentOrPlace.position
-				};
-				else options = { ...optionsOrParentOrPlace };
+				if (optionsOrParentOrPlace) {
+					if ("line" in optionsOrParentOrPlace && "column" in optionsOrParentOrPlace) options = { place: optionsOrParentOrPlace };
+					else if ("start" in optionsOrParentOrPlace && "end" in optionsOrParentOrPlace) options = { place: optionsOrParentOrPlace };
+					else if ("type" in optionsOrParentOrPlace) options = {
+						ancestors: [optionsOrParentOrPlace],
+						place: optionsOrParentOrPlace.position
+					};
+					else options = { ...optionsOrParentOrPlace };
+				}
 				if (typeof causeOrReason === "string") reason = causeOrReason;
 				else if (!options.cause && causeOrReason) {
 					legacyCause = true;
@@ -118460,11 +119250,13 @@ function(test) {
 					seenNonSlash = true;
 					firstNonSlashEnd = index + 1;
 				}
-				if (extnameIndex > -1) if (path.codePointAt(index) === extname.codePointAt(extnameIndex--)) {
-					if (extnameIndex < 0) end = index;
-				} else {
-					extnameIndex = -1;
-					end = firstNonSlashEnd;
+				if (extnameIndex > -1) {
+					if (path.codePointAt(index) === extname.codePointAt(extnameIndex--)) {
+						if (extnameIndex < 0) end = index;
+					} else {
+						extnameIndex = -1;
+						end = firstNonSlashEnd;
+					}
 				}
 			}
 			if (start === end) end = firstNonSlashEnd;
@@ -119250,7 +120042,7 @@ function(test) {
 		* @param {string | symbol} property
 		* @returns {(...parameters: Array<unknown>) => unknown}
 		*/
-function(property) {
+		function(property) {
 			const proto = this.constructor.prototype;
 			const func = proto[property];
 			/** @type {(...parameters: Array<unknown>) => unknown} */
@@ -120199,9 +120991,10 @@ function(property) {
 				const namespace = this.namespace;
 				assertUnfrozen("use", this.frozen);
 				if (value === null || value === void 0) {} else if (typeof value === "function") addPlugin(value, parameters);
-				else if (typeof value === "object") if (Array.isArray(value)) addList(value);
-				else addPreset(value);
-				else throw new TypeError("Expected usable value, not `" + value + "`");
+				else if (typeof value === "object") {
+					if (Array.isArray(value)) addList(value);
+					else addPreset(value);
+				} else throw new TypeError("Expected usable value, not `" + value + "`");
 				return this;
 				/**
 				* @param {Pluggable} value
@@ -120209,11 +121002,12 @@ function(property) {
 				*/
 				function add(value) {
 					if (typeof value === "function") addPlugin(value, []);
-					else if (typeof value === "object") if (Array.isArray(value)) {
-						const [plugin, ...parameters] = value;
-						addPlugin(plugin, parameters);
-					} else addPreset(value);
-					else throw new TypeError("Expected usable value, not `" + value + "`");
+					else if (typeof value === "object") {
+						if (Array.isArray(value)) {
+							const [plugin, ...parameters] = value;
+							addPlugin(plugin, parameters);
+						} else addPreset(value);
+					} else throw new TypeError("Expected usable value, not `" + value + "`");
 				}
 				/**
 				* @param {Preset} result
@@ -120544,8 +121338,10 @@ function(property) {
 				let text = "", first = true;
 				this.nodesBetween(from, to, (node, pos) => {
 					let nodeText = node.isText ? node.text.slice(Math.max(from, pos) - pos, to - pos) : !node.isLeaf ? "" : leafText ? typeof leafText === "function" ? leafText(node) : leafText : node.type.spec.leafText ? node.type.spec.leafText(node) : "";
-					if (node.isBlock && (node.isLeaf && nodeText || node.isTextblock) && blockSeparator) if (first) first = false;
-					else text += blockSeparator;
+					if (node.isBlock && (node.isLeaf && nodeText || node.isTextblock) && blockSeparator) {
+						if (first) first = false;
+						else text += blockSeparator;
+					}
 					text += nodeText;
 				}, 0);
 				return text;
@@ -120574,8 +121370,10 @@ function(property) {
 				if (to > from) for (let i = 0, pos = 0; pos < to; i++) {
 					let child = this.content[i], end = pos + child.nodeSize;
 					if (end > from) {
-						if (pos < from || end > to) if (child.isText) child = child.cut(Math.max(0, from - pos), Math.min(child.text.length, to - pos));
-						else child = child.cut(Math.max(0, from - pos - 1), Math.min(child.content.size, to - pos - 1));
+						if (pos < from || end > to) {
+							if (child.isText) child = child.cut(Math.max(0, from - pos), Math.min(child.text.length, to - pos));
+							else child = child.cut(Math.max(0, from - pos - 1), Math.min(child.content.size, to - pos - 1));
+						}
 						result.push(child);
 						size += child.nodeSize;
 					}
@@ -121357,7 +122155,8 @@ function(property) {
 				this.i = 0;
 			}
 		};
-		const resolveCacheSize = 12, resolveCache = /* @__PURE__ */ new WeakMap();
+		const resolveCacheSize = 12;
+		const resolveCache = /* @__PURE__ */ new WeakMap();
 		/**
 		Represents a flat range of content, i.e. one that starts and
 		ends in the same node.
@@ -122104,8 +122903,10 @@ function(property) {
 		}
 		function parseExprRange(stream, expr) {
 			let min = parseNum(stream), max = min;
-			if (stream.eat(",")) if (stream.next != "}") max = parseNum(stream);
-			else max = -1;
+			if (stream.eat(",")) {
+				if (stream.next != "}") max = parseNum(stream);
+				else max = -1;
+			}
 			if (!stream.eat("}")) stream.err("Unclosed braced range");
 			return {
 				type: "range",
@@ -122271,9 +123072,10 @@ function(property) {
 			for (let name in attrs) {
 				let attr = attrs[name];
 				let given = value && value[name];
-				if (given === void 0) if (attr.hasDefault) given = attr.default;
-				else throw new RangeError("No value supplied for attribute " + name);
-				else if (attr.validate) attr.validate(given);
+				if (given === void 0) {
+					if (attr.hasDefault) given = attr.default;
+					else throw new RangeError("No value supplied for attribute " + name);
+				} else if (attr.validate) attr.validate(given);
 				built[name] = given;
 			}
 			return built;
@@ -122832,7 +123634,9 @@ function(property) {
 			ol: true,
 			ul: true
 		};
-		const OPT_PRESERVE_WS = 1, OPT_PRESERVE_WS_FULL = 2, OPT_OPEN_LEFT = 4;
+		const OPT_PRESERVE_WS = 1;
+		const OPT_PRESERVE_WS_FULL = 2;
+		const OPT_OPEN_LEFT = 4;
 		function wsOptionsFor(type, preserveWhitespace, base) {
 			if (preserveWhitespace != null) return (preserveWhitespace ? OPT_PRESERVE_WS : 0) | (preserveWhitespace === "full" ? OPT_PRESERVE_WS_FULL : 0);
 			return type && type.whitespace == "pre" ? 3 : base & -5;
@@ -123345,11 +124149,14 @@ function(property) {
 		function suspiciousAttributesInner(attrs) {
 			let result = null;
 			function scan(value) {
-				if (value && typeof value == "object") if (Array.isArray(value)) if (typeof value[0] == "string") {
-					if (!result) result = [];
-					result.push(value);
-				} else for (let i = 0; i < value.length; i++) scan(value[i]);
-				else for (let prop in value) scan(value[prop]);
+				if (value && typeof value == "object") {
+					if (Array.isArray(value)) {
+						if (typeof value[0] == "string") {
+							if (!result) result = [];
+							result.push(value);
+						} else for (let i = 0; i < value.length; i++) scan(value[i]);
+					} else for (let prop in value) scan(value[prop]);
+				}
 			}
 			scan(attrs);
 			return result;
@@ -123413,7 +124220,10 @@ function(property) {
 		function recoverOffset(value) {
 			return (value - (value & lower16)) / factor16;
 		}
-		const DEL_BEFORE = 1, DEL_AFTER = 2, DEL_ACROSS = 4, DEL_SIDE = 8;
+		const DEL_BEFORE = 1;
+		const DEL_AFTER = 2;
+		const DEL_ACROSS = 4;
+		const DEL_SIDE = 8;
 		/**
 		An object representing a mapped position with extra
 		information.
@@ -124167,8 +124977,10 @@ function(property) {
 				if (!mark.isInSet(marks) && parent.type.allowsMarkType(mark.type)) {
 					let start = Math.max(pos, from), end = Math.min(pos + node.nodeSize, to);
 					let newSet = mark.addToSet(marks);
-					for (let i = 0; i < marks.length; i++) if (!marks[i].isInSet(newSet)) if (removing && removing.to == start && removing.mark.eq(marks[i])) removing.to = end;
-					else removed.push(removing = new RemoveMarkStep(start, end, marks[i]));
+					for (let i = 0; i < marks.length; i++) if (!marks[i].isInSet(newSet)) {
+						if (removing && removing.to == start && removing.mark.eq(marks[i])) removing.to = end;
+						else removed.push(removing = new RemoveMarkStep(start, end, marks[i]));
+					}
 					if (adding && adding.to == start) adding.to = end;
 					else added.push(adding = new AddMarkStep(start, end, mark));
 				}
@@ -125505,10 +126317,12 @@ function(property) {
 					if (found) $head = found.$head;
 					else return Selection.near($head, bias);
 				}
-				if (!$anchor.parent.inlineContent) if (dPos == 0) $anchor = $head;
-				else {
-					$anchor = (Selection.findFrom($anchor, -bias, true) || Selection.findFrom($anchor, bias, true)).$anchor;
-					if ($anchor.pos < $head.pos != dPos < 0) $anchor = $head;
+				if (!$anchor.parent.inlineContent) {
+					if (dPos == 0) $anchor = $head;
+					else {
+						$anchor = (Selection.findFrom($anchor, -bias, true) || Selection.findFrom($anchor, bias, true)).$anchor;
+						if ($anchor.pos < $head.pos != dPos < 0) $anchor = $head;
+					}
 				}
 				return new TextSelection($anchor, $head);
 			}
@@ -125673,7 +126487,9 @@ function(property) {
 			});
 			tr.setSelection(Selection.near(tr.doc.resolve(end), bias));
 		}
-		const UPDATED_SEL = 1, UPDATED_MARKS = 2, UPDATED_SCROLL = 4;
+		const UPDATED_SEL = 1;
+		const UPDATED_MARKS = 2;
+		const UPDATED_SCROLL = 4;
 		/**
 		An editor state transaction, which can be applied to a state to
 		create an updated state. Use
@@ -126665,35 +127481,38 @@ function(property) {
 			return function(state, dispatch) {
 				let { empty, $cursor, ranges } = state.selection;
 				if (empty && !$cursor || !markApplies(state.doc, ranges, markType, enterAtoms)) return false;
-				if (dispatch) if ($cursor) if (markType.isInSet(state.storedMarks || $cursor.marks())) dispatch(state.tr.removeStoredMark(markType));
-				else dispatch(state.tr.addStoredMark(markType.create(attrs)));
-				else {
-					let add, tr = state.tr;
-					if (!enterAtoms) ranges = removeInlineAtoms(ranges);
-					if (removeWhenPresent) add = !ranges.some((r) => state.doc.rangeHasMark(r.$from.pos, r.$to.pos, markType));
-					else add = !ranges.every((r) => {
-						let missing = false;
-						tr.doc.nodesBetween(r.$from.pos, r.$to.pos, (node, pos, parent) => {
-							if (missing) return false;
-							missing = !markType.isInSet(node.marks) && !!parent && parent.type.allowsMarkType(markType) && !(node.isText && /^\s*$/.test(node.textBetween(Math.max(0, r.$from.pos - pos), Math.min(node.nodeSize, r.$to.pos - pos))));
+				if (dispatch) {
+					if ($cursor) {
+						if (markType.isInSet(state.storedMarks || $cursor.marks())) dispatch(state.tr.removeStoredMark(markType));
+						else dispatch(state.tr.addStoredMark(markType.create(attrs)));
+					} else {
+						let add, tr = state.tr;
+						if (!enterAtoms) ranges = removeInlineAtoms(ranges);
+						if (removeWhenPresent) add = !ranges.some((r) => state.doc.rangeHasMark(r.$from.pos, r.$to.pos, markType));
+						else add = !ranges.every((r) => {
+							let missing = false;
+							tr.doc.nodesBetween(r.$from.pos, r.$to.pos, (node, pos, parent) => {
+								if (missing) return false;
+								missing = !markType.isInSet(node.marks) && !!parent && parent.type.allowsMarkType(markType) && !(node.isText && /^\s*$/.test(node.textBetween(Math.max(0, r.$from.pos - pos), Math.min(node.nodeSize, r.$to.pos - pos))));
+							});
+							return !missing;
 						});
-						return !missing;
-					});
-					for (let i = 0; i < ranges.length; i++) {
-						let { $from, $to } = ranges[i];
-						if (!add) tr.removeMark($from.pos, $to.pos, markType);
-						else {
-							let from = $from.pos, to = $to.pos, start = $from.nodeAfter, end = $to.nodeBefore;
-							let spaceStart = dropSpace && start && start.isText ? /^\s*/.exec(start.text)[0].length : 0;
-							let spaceEnd = dropSpace && end && end.isText ? /\s*$/.exec(end.text)[0].length : 0;
-							if (from + spaceStart < to) {
-								from += spaceStart;
-								to -= spaceEnd;
+						for (let i = 0; i < ranges.length; i++) {
+							let { $from, $to } = ranges[i];
+							if (!add) tr.removeMark($from.pos, $to.pos, markType);
+							else {
+								let from = $from.pos, to = $to.pos, start = $from.nodeAfter, end = $to.nodeBefore;
+								let spaceStart = dropSpace && start && start.isText ? /^\s*/.exec(start.text)[0].length : 0;
+								let spaceEnd = dropSpace && end && end.isText ? /\s*$/.exec(end.text)[0].length : 0;
+								if (from + spaceStart < to) {
+									from += spaceStart;
+									to -= spaceEnd;
+								}
+								tr.addMark(from, to, markType.create(attrs));
 							}
-							tr.addMark(from, to, markType.create(attrs));
 						}
+						dispatch(tr.scrollIntoView());
 					}
-					dispatch(tr.scrollIntoView());
 				}
 				return true;
 			};
@@ -127227,9 +128046,10 @@ function(property) {
 				else if (/^a(lt)?$/i.test(mod)) alt = true;
 				else if (/^(c|ctrl|control)$/i.test(mod)) ctrl = true;
 				else if (/^s(hift)?$/i.test(mod)) shift = true;
-				else if (/^mod$/i.test(mod)) if (mac$1) meta = true;
-				else ctrl = true;
-				else throw new Error("Unrecognized modifier name: " + mod);
+				else if (/^mod$/i.test(mod)) {
+					if (mac$1) meta = true;
+					else ctrl = true;
+				} else throw new Error("Unrecognized modifier name: " + mod);
 			}
 			if (alt) result = "Alt-" + result;
 			if (ctrl) result = "Ctrl-" + result;
@@ -127730,9 +128550,10 @@ function(property) {
 					node = parent;
 				} else if (isElt(node)) {
 					let child = node.childNodes[off + (dir < 0 ? -1 : 0)];
-					if (isElt(child) && child.contentEditable == "false") if ((_a = child.pmViewDesc) === null || _a === void 0 ? void 0 : _a.ignoreForSelection) off += dir;
-					else return false;
-					else {
+					if (isElt(child) && child.contentEditable == "false") {
+						if ((_a = child.pmViewDesc) === null || _a === void 0 ? void 0 : _a.ignoreForSelection) off += dir;
+						else return false;
+					} else {
 						node = child;
 						off = dir < 0 ? nodeSize(node) : 0;
 					}
@@ -127889,18 +128710,20 @@ function(property) {
 				else if (rect.bottom > bounding.bottom - getSide$1(scrollThreshold, "bottom")) moveY = rect.bottom - rect.top > bounding.bottom - bounding.top ? rect.top + getSide$1(scrollMargin, "top") - bounding.top : rect.bottom - bounding.bottom + getSide$1(scrollMargin, "bottom");
 				if (rect.left < bounding.left + getSide$1(scrollThreshold, "left")) moveX = -(bounding.left - rect.left + getSide$1(scrollMargin, "left"));
 				else if (rect.right > bounding.right - getSide$1(scrollThreshold, "right")) moveX = rect.right - bounding.right + getSide$1(scrollMargin, "right");
-				if (moveX || moveY) if (atTop) doc.defaultView.scrollBy(moveX, moveY);
-				else {
-					let startX = parent.scrollLeft, startY = parent.scrollTop;
-					if (moveY) parent.scrollTop += moveY;
-					if (moveX) parent.scrollLeft += moveX;
-					let dX = parent.scrollLeft - startX, dY = parent.scrollTop - startY;
-					rect = {
-						left: rect.left - dX,
-						top: rect.top - dY,
-						right: rect.right - dX,
-						bottom: rect.bottom - dY
-					};
+				if (moveX || moveY) {
+					if (atTop) doc.defaultView.scrollBy(moveX, moveY);
+					else {
+						let startX = parent.scrollLeft, startY = parent.scrollTop;
+						if (moveY) parent.scrollTop += moveY;
+						if (moveX) parent.scrollLeft += moveX;
+						let dX = parent.scrollLeft - startX, dY = parent.scrollTop - startY;
+						rect = {
+							left: rect.left - dX,
+							top: rect.top - dY,
+							right: rect.right - dX,
+							bottom: rect.bottom - dY
+						};
+					}
 				}
 				let pos = atTop ? "fixed" : getComputedStyle(parent).position;
 				if (/^(fixed|sticky)$/.test(pos)) break;
@@ -128133,27 +128956,29 @@ function(property) {
 		function coordsAtPos(view, pos, side) {
 			let { node, offset, atom } = view.docView.domFromPos(pos, side < 0 ? -1 : 1);
 			let supportEmptyRange = webkit || gecko;
-			if (isText(node)) if (supportEmptyRange && (BIDI.test(node.nodeValue) || (side < 0 ? !offset : offset == node.nodeValue.length))) {
-				let rect = singleRect(textRange(node, offset, offset), side);
-				if (gecko && offset && /\s/.test(node.nodeValue[offset - 1]) && offset < node.nodeValue.length) {
-					let rectBefore = singleRect(textRange(node, offset - 1, offset - 1), -1);
-					if (rectBefore.top == rect.top) {
-						let rectAfter = singleRect(textRange(node, offset, offset + 1), -1);
-						if (rectAfter.top != rect.top) return flattenV(rectAfter, rectAfter.left < rectBefore.left);
+			if (isText(node)) {
+				if (supportEmptyRange && (BIDI.test(node.nodeValue) || (side < 0 ? !offset : offset == node.nodeValue.length))) {
+					let rect = singleRect(textRange(node, offset, offset), side);
+					if (gecko && offset && /\s/.test(node.nodeValue[offset - 1]) && offset < node.nodeValue.length) {
+						let rectBefore = singleRect(textRange(node, offset - 1, offset - 1), -1);
+						if (rectBefore.top == rect.top) {
+							let rectAfter = singleRect(textRange(node, offset, offset + 1), -1);
+							if (rectAfter.top != rect.top) return flattenV(rectAfter, rectAfter.left < rectBefore.left);
+						}
 					}
+					return rect;
+				} else {
+					let from = offset, to = offset, takeSide = side < 0 ? 1 : -1;
+					if (side < 0 && !offset) {
+						to++;
+						takeSide = -1;
+					} else if (side >= 0 && offset == node.nodeValue.length) {
+						from--;
+						takeSide = 1;
+					} else if (side < 0) from--;
+					else to++;
+					return flattenV(singleRect(textRange(node, from, to), takeSide), takeSide < 0);
 				}
-				return rect;
-			} else {
-				let from = offset, to = offset, takeSide = side < 0 ? 1 : -1;
-				if (side < 0 && !offset) {
-					to++;
-					takeSide = -1;
-				} else if (side >= 0 && offset == node.nodeValue.length) {
-					from--;
-					takeSide = 1;
-				} else if (side < 0) from--;
-				else to++;
-				return flattenV(singleRect(textRange(node, from, to), takeSide), takeSide < 0);
 			}
 			if (!view.state.doc.resolve(pos - (atom || 0)).parent.inlineContent) {
 				if (atom == null && offset && (side < 0 || offset == nodeSize(node))) {
@@ -128270,7 +129095,10 @@ function(property) {
 			cachedDir = dir;
 			return cachedResult = dir == "up" || dir == "down" ? endOfTextblockVertical(view, state, dir) : endOfTextblockHorizontal(view, state, dir);
 		}
-		const NOT_DIRTY = 0, CHILD_DIRTY = 1, CONTENT_DIRTY = 2, NODE_DIRTY = 3;
+		const NOT_DIRTY = 0;
+		const CHILD_DIRTY = 1;
+		const CONTENT_DIRTY = 2;
+		const NODE_DIRTY = 3;
 		var ViewDesc = class {
 			constructor(parent, children, dom, contentDOM) {
 				this.parent = parent;
@@ -128331,24 +129159,26 @@ function(property) {
 				return this.posAtStart + this.size - 2 * this.border;
 			}
 			localPosFromDOM(dom, offset, bias) {
-				if (this.contentDOM && contains(this.contentDOM, dom)) if (bias < 0) {
-					let domBefore, desc;
-					if (dom == this.contentDOM) domBefore = dom.childNodes[offset - 1];
-					else {
-						while (dom.parentNode != this.contentDOM) dom = dom.parentNode;
-						domBefore = dom.previousSibling;
+				if (this.contentDOM && contains(this.contentDOM, dom)) {
+					if (bias < 0) {
+						let domBefore, desc;
+						if (dom == this.contentDOM) domBefore = dom.childNodes[offset - 1];
+						else {
+							while (dom.parentNode != this.contentDOM) dom = dom.parentNode;
+							domBefore = dom.previousSibling;
+						}
+						while (domBefore && !((desc = domBefore.pmViewDesc) && desc.parent == this)) domBefore = domBefore.previousSibling;
+						return domBefore ? this.posBeforeChild(desc) + desc.size : this.posAtStart;
+					} else {
+						let domAfter, desc;
+						if (dom == this.contentDOM) domAfter = dom.childNodes[offset];
+						else {
+							while (dom.parentNode != this.contentDOM) dom = dom.parentNode;
+							domAfter = dom.nextSibling;
+						}
+						while (domAfter && !((desc = domAfter.pmViewDesc) && desc.parent == this)) domAfter = domAfter.nextSibling;
+						return domAfter ? this.posBeforeChild(desc) : this.posAtEnd;
 					}
-					while (domBefore && !((desc = domBefore.pmViewDesc) && desc.parent == this)) domBefore = domBefore.previousSibling;
-					return domBefore ? this.posBeforeChild(desc) + desc.size : this.posAtStart;
-				} else {
-					let domAfter, desc;
-					if (dom == this.contentDOM) domAfter = dom.childNodes[offset];
-					else {
-						while (dom.parentNode != this.contentDOM) dom = dom.parentNode;
-						domAfter = dom.nextSibling;
-					}
-					while (domAfter && !((desc = domAfter.pmViewDesc) && desc.parent == this)) domAfter = domAfter.nextSibling;
-					return domAfter ? this.posBeforeChild(desc) : this.posAtEnd;
 				}
 				let atEnd;
 				if (dom == this.dom && this.contentDOM) atEnd = offset > domIndex(this.contentDOM);
@@ -128374,8 +129204,10 @@ function(property) {
 			nearestDesc(dom, onlyNodes = false) {
 				for (let first = true, cur = dom; cur; cur = cur.parentNode) {
 					let desc = this.getDesc(cur), nodeDOM;
-					if (desc && (!onlyNodes || desc.node)) if (first && (nodeDOM = desc.nodeDOM) && !(isElt(nodeDOM) ? contains(nodeDOM, dom) : nodeDOM == dom)) first = false;
-					else return desc;
+					if (desc && (!onlyNodes || desc.node)) {
+						if (first && (nodeDOM = desc.nodeDOM) && !(isElt(nodeDOM) ? contains(nodeDOM, dom) : nodeDOM == dom)) first = false;
+						else return desc;
+					}
 				}
 			}
 			getDesc(dom) {
@@ -129339,13 +130171,17 @@ function(property) {
 				let widget, widgets;
 				while (decoIndex < locals.length && locals[decoIndex].to == offset) {
 					let next = locals[decoIndex++];
-					if (next.widget) if (!widget) widget = next;
-					else (widgets || (widgets = [widget])).push(next);
+					if (next.widget) {
+						if (!widget) widget = next;
+						else (widgets || (widgets = [widget])).push(next);
+					}
 				}
-				if (widget) if (widgets) {
-					widgets.sort(compareSide);
-					for (let i = 0; i < widgets.length; i++) onWidget(widgets[i], parentIndex, !!restNode);
-				} else onWidget(widget, parentIndex, !!restNode);
+				if (widget) {
+					if (widgets) {
+						widgets.sort(compareSide);
+						for (let i = 0; i < widgets.length; i++) onWidget(widgets[i], parentIndex, !!restNode);
+					} else onWidget(widget, parentIndex, !!restNode);
+				}
 				let child, index;
 				if (restNode) {
 					index = -1;
@@ -130875,7 +131711,8 @@ function(property) {
 				return this.type instanceof WidgetType;
 			}
 		};
-		const none$1 = [], noSpec = {};
+		const none$1 = [];
+		const noSpec = {};
 		/**
 		A collection of [decorations](https://prosemirror.net/docs/ref/#view.Decoration), organized in such
 		a way that the drawing algorithm can efficiently use and compare
@@ -131689,21 +132526,23 @@ function(property) {
 				view.input.lastIOSEnter = 0;
 				return;
 			}
-			if (!change) if (typeOver && sel instanceof TextSelection && !sel.empty && sel.$head.sameParent(sel.$anchor) && !view.composing && !(parse.sel && parse.sel.anchor != parse.sel.head)) change = {
-				start: sel.from,
-				endA: sel.to,
-				endB: sel.to
-			};
-			else {
-				if (parse.sel) {
-					let sel = resolveSelection(view, view.state.doc, parse.sel);
-					if (sel && !sel.eq(view.state.selection)) {
-						let tr = view.state.tr.setSelection(sel);
-						if (compositionID) tr.setMeta("composition", compositionID);
-						view.dispatch(tr);
+			if (!change) {
+				if (typeOver && sel instanceof TextSelection && !sel.empty && sel.$head.sameParent(sel.$anchor) && !view.composing && !(parse.sel && parse.sel.anchor != parse.sel.head)) change = {
+					start: sel.from,
+					endA: sel.to,
+					endB: sel.to
+				};
+				else {
+					if (parse.sel) {
+						let sel = resolveSelection(view, view.state.doc, parse.sel);
+						if (sel && !sel.eq(view.state.selection)) {
+							let tr = view.state.tr.setSelection(sel);
+							if (compositionID) tr.setMeta("composition", compositionID);
+							view.dispatch(tr);
+						}
 					}
+					return;
 				}
-				return;
 			}
 			if (view.state.selection.from < view.state.selection.to && change.start == change.endB && view.state.selection instanceof TextSelection) {
 				if (change.start > view.state.selection.from && change.start <= view.state.selection.from + 2 && view.state.selection.from >= parse.from) change.start = view.state.selection.from;
@@ -131750,26 +132589,27 @@ function(property) {
 				return tr.scrollIntoView();
 			};
 			let markChange;
-			if (inlineChange) if ($from.pos == $to.pos) {
-				if (ie && ie_version <= 11 && $from.parentOffset == 0) {
-					view.domObserver.suppressSelectionUpdates();
-					setTimeout(() => selectionToDOM(view), 20);
-				}
-				let tr = mkTr(view.state.tr.delete(chFrom, chTo));
-				let marks = doc.resolve(change.start).marksAcross(doc.resolve(change.endA));
-				if (marks) tr.ensureMarks(marks);
-				view.dispatch(tr);
-			} else if (change.endA == change.endB && (markChange = isMarkChange($from.parent.content.cut($from.parentOffset, $to.parentOffset), $fromA.parent.content.cut($fromA.parentOffset, change.endA - $fromA.start())))) {
-				let tr = mkTr(view.state.tr);
-				if (markChange.type == "add") tr.addMark(chFrom, chTo, markChange.mark);
-				else tr.removeMark(chFrom, chTo, markChange.mark);
-				view.dispatch(tr);
-			} else if ($from.parent.child($from.index()).isText && $from.index() == $to.index() - ($to.textOffset ? 0 : 1)) {
-				let text = $from.parent.textBetween($from.parentOffset, $to.parentOffset);
-				let deflt = () => mkTr(view.state.tr.insertText(text, chFrom, chTo));
-				if (!view.someProp("handleTextInput", (f) => f(view, chFrom, chTo, text, deflt))) view.dispatch(deflt());
+			if (inlineChange) {
+				if ($from.pos == $to.pos) {
+					if (ie && ie_version <= 11 && $from.parentOffset == 0) {
+						view.domObserver.suppressSelectionUpdates();
+						setTimeout(() => selectionToDOM(view), 20);
+					}
+					let tr = mkTr(view.state.tr.delete(chFrom, chTo));
+					let marks = doc.resolve(change.start).marksAcross(doc.resolve(change.endA));
+					if (marks) tr.ensureMarks(marks);
+					view.dispatch(tr);
+				} else if (change.endA == change.endB && (markChange = isMarkChange($from.parent.content.cut($from.parentOffset, $to.parentOffset), $fromA.parent.content.cut($fromA.parentOffset, change.endA - $fromA.start())))) {
+					let tr = mkTr(view.state.tr);
+					if (markChange.type == "add") tr.addMark(chFrom, chTo, markChange.mark);
+					else tr.removeMark(chFrom, chTo, markChange.mark);
+					view.dispatch(tr);
+				} else if ($from.parent.child($from.index()).isText && $from.index() == $to.index() - ($to.textOffset ? 0 : 1)) {
+					let text = $from.parent.textBetween($from.parentOffset, $to.parentOffset);
+					let deflt = () => mkTr(view.state.tr.insertText(text, chFrom, chTo));
+					if (!view.someProp("handleTextInput", (f) => f(view, chFrom, chTo, text, deflt))) view.dispatch(deflt());
+				} else view.dispatch(mkTr());
 			} else view.dispatch(mkTr());
-			else view.dispatch(mkTr());
 		}
 		function resolveSelection(view, doc, parsedSel) {
 			if (Math.max(parsedSel.anchor, parsedSel.head) > doc.content.size) return null;
@@ -133025,7 +133865,7 @@ function(property) {
 					}
 				};
 			}
-			let step = Math.ceil(1.6 * 256 * defaultSize / safeByteCutoff);
+			let step = Math.ceil(409.6 * defaultSize / safeByteCutoff);
 			return (size = defaultSize) => {
 				if (!size) return "";
 				let id = "";
@@ -133308,18 +134148,21 @@ function(property) {
 			for (let i = 0, off = 0; i < frag.childCount; i++) {
 				let child = frag.child(i), endOff = off + child.nodeSize;
 				let from = Math.max(off, start), to = Math.min(endOff, end);
-				if (from < to) if (child.isText) for (let j = from; j < to; j++) target.push(encoder.encodeCharacter(child.text.charCodeAt(j - off), child.marks));
-				else if (child.isLeaf) target.push(encoder.encodeNodeStart(child));
-				else {
-					if (from == off) target.push(encoder.encodeNodeStart(child));
-					tokens(child.content, encoder, Math.max(off + 1, from) - off - 1, Math.min(endOff - 1, to) - off - 1, target);
-					if (to == endOff) target.push(encoder.encodeNodeEnd(child));
+				if (from < to) {
+					if (child.isText) for (let j = from; j < to; j++) target.push(encoder.encodeCharacter(child.text.charCodeAt(j - off), child.marks));
+					else if (child.isLeaf) target.push(encoder.encodeNodeStart(child));
+					else {
+						if (from == off) target.push(encoder.encodeNodeStart(child));
+						tokens(child.content, encoder, Math.max(off + 1, from) - off - 1, Math.min(endOff - 1, to) - off - 1, target);
+						if (to == endOff) target.push(encoder.encodeNodeEnd(child));
+					}
 				}
 				off = endOff;
 			}
 			return target;
 		}
-		const MAX_DIFF_SIZE = 2500, MAX_TOKEN_SIZE = 1e4;
+		const MAX_DIFF_SIZE = 2500;
+		const MAX_TOKEN_SIZE = 1e4;
 		function minUnchanged(sizeA, sizeB) {
 			return Math.min(15, Math.max(2, Math.floor(Math.max(sizeA, sizeB) / 10)));
 		}
@@ -133548,6 +134391,9 @@ function(property) {
 				return this;
 			}
 		};
+		try {
+			new RegExp("[\\p{Alphabetic}_]", "u");
+		} catch (_) {}
 		/**
 		A change set tracks the changes to a document from a given point
 		in the past. It condenses a number of step maps down to a flat
@@ -134585,8 +135431,10 @@ function(property) {
 				const seg = segments[j];
 				const segDeletion = seg.fromA < seg.toA;
 				const segInsertion = seg.fromB < seg.toB;
-				if (segDeletion) if (seg.isBlock) addBlockDeletionDecorations(doc, seg.fromA, seg.toA, decorations);
-				else decorations.push(Decoration.inline(seg.fromA, seg.toA, { class: `${DIFF_CLASS_PREFIX}-removed` }));
+				if (segDeletion) {
+					if (seg.isBlock) addBlockDeletionDecorations(doc, seg.fromA, seg.toA, decorations);
+					else decorations.push(Decoration.inline(seg.fromA, seg.toA, { class: `${DIFF_CLASS_PREFIX}-removed` }));
+				}
 				if (segInsertion) {
 					const widgetPos = seg.isBlock ? snapToBlockBoundary(doc, segDeletion ? seg.toA : seg.fromA) : segDeletion ? seg.toA : seg.fromA;
 					const widget = createInsertedWidget(newDoc, seg, seg.isBlock);
@@ -134643,8 +135491,10 @@ function(property) {
 						continue;
 					}
 				}
-				if (isDeletion) if (change.isCustomBlock || isBlockLevel) addBlockDeletionDecorations(doc, change.fromA, change.toA, decorations);
-				else decorations.push(Decoration.inline(change.fromA, change.toA, { class: `${DIFF_CLASS_PREFIX}-removed` }));
+				if (isDeletion) {
+					if (change.isCustomBlock || isBlockLevel) addBlockDeletionDecorations(doc, change.fromA, change.toA, decorations);
+					else decorations.push(Decoration.inline(change.fromA, change.toA, { class: `${DIFF_CLASS_PREFIX}-removed` }));
+				}
 				const rawWidgetPos = isDeletion ? change.toA : change.fromA;
 				const widgetPos = isBlockLevel ? snapToBlockBoundary(doc, rawWidgetPos) : rawWidgetPos;
 				if (isInsertion) {
@@ -135019,8 +135869,10 @@ function(property) {
 						lastKnownBufferLen = -1;
 						return;
 					}
-					if (state.buffer.length !== lastKnownBufferLen) if (Date.now() - state.lastApplyTime >= config.throttleMs) flush();
-					else scheduleTrailingFlush();
+					if (state.buffer.length !== lastKnownBufferLen) {
+						if (Date.now() - state.lastApplyTime >= config.throttleMs) flush();
+						else scheduleTrailingFlush();
+					}
 				},
 				destroy() {
 					if (trailingTimer != null) {
@@ -135037,24 +135889,26 @@ function(property) {
 				if (dispatch) {
 					let insertPos;
 					let insertEndPos;
-					if (options?.insertAt != null) if (options.insertAt === "selection") {
-						insertPos = state.selection.from;
-						insertEndPos = state.selection.to;
-						if (state.selection.empty) {
+					if (options?.insertAt != null) {
+						if (options.insertAt === "selection") {
+							insertPos = state.selection.from;
+							insertEndPos = state.selection.to;
+							if (state.selection.empty) {
+								const resolved = state.doc.resolve(insertPos);
+								if (resolved.parent.isTextblock && !resolved.parent.type.spec.code && resolved.parent.content.size === 0 && resolved.depth === 1) {
+									insertPos = resolved.before(resolved.depth);
+									insertEndPos = resolved.after(resolved.depth);
+								}
+							}
+						} else {
+							const rawPos = options.insertAt === "cursor" ? state.selection.head : options.insertAt;
+							if (!Number.isFinite(rawPos)) return false;
+							insertPos = Math.max(0, Math.min(Math.round(rawPos), state.doc.content.size));
 							const resolved = state.doc.resolve(insertPos);
 							if (resolved.parent.isTextblock && !resolved.parent.type.spec.code && resolved.parent.content.size === 0 && resolved.depth === 1) {
 								insertPos = resolved.before(resolved.depth);
 								insertEndPos = resolved.after(resolved.depth);
 							}
-						}
-					} else {
-						const rawPos = options.insertAt === "cursor" ? state.selection.head : options.insertAt;
-						if (!Number.isFinite(rawPos)) return false;
-						insertPos = Math.max(0, Math.min(Math.round(rawPos), state.doc.content.size));
-						const resolved = state.doc.resolve(insertPos);
-						if (resolved.parent.isTextblock && !resolved.parent.type.spec.code && resolved.parent.content.size === 0 && resolved.depth === 1) {
-							insertPos = resolved.before(resolved.depth);
-							insertEndPos = resolved.after(resolved.depth);
 						}
 					}
 					dispatch(state.tr.setMeta(streamingPluginKey, {
@@ -135360,9 +136214,11 @@ function(property) {
 				var _ref3 = _slicedToArray(_ref2, 2);
 				const property = _ref3[0];
 				const value = _ref3[1];
-				if (objectHasOwnProperty(object, property)) if (arrayIsArray(value)) newObject[property] = cleanArray(value);
-				else if (value && typeof value === "object" && value.constructor === Object) newObject[property] = clone(value);
-				else newObject[property] = value;
+				if (objectHasOwnProperty(object, property)) {
+					if (arrayIsArray(value)) newObject[property] = cleanArray(value);
+					else if (value && typeof value === "object" && value.constructor === Object) newObject[property] = clone(value);
+					else newObject[property] = value;
+				}
 			}
 			return newObject;
 		}
@@ -136746,12 +137602,14 @@ function(property) {
 						element.removeAttribute(name);
 					} catch (_) {}
 				}
-				if (name === "is") if (RETURN_DOM || RETURN_DOM_FRAGMENT) try {
-					_forceRemove(element);
-				} catch (_) {}
-				else try {
-					element.setAttribute(name, "");
-				} catch (_) {}
+				if (name === "is") {
+					if (RETURN_DOM || RETURN_DOM_FRAGMENT) try {
+						_forceRemove(element);
+					} catch (_) {}
+					else try {
+						element.setAttribute(name, "");
+					} catch (_) {}
+				}
 			};
 			/**
 			* _stripDisallowedAttributes
@@ -137560,7 +138418,8 @@ function(property) {
 				return trustedTypesPolicy && RETURN_TRUSTED_TYPE ? _createTrustedHTML(serializedHTML) : serializedHTML;
 			};
 			DOMPurify.setConfig = function() {
-				_parseConfig(arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : {});
+				let cfg = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : {};
+				_parseConfig(cfg);
 				SET_CONFIG = true;
 				SET_CONFIG_ALLOWED_TAGS = ALLOWED_TAGS;
 				SET_CONFIG_ALLOWED_ATTR = ALLOWED_ATTR;
@@ -137575,7 +138434,9 @@ function(property) {
 			};
 			DOMPurify.isValidAttribute = function(tag, attr, value) {
 				if (!CONFIG) _parseConfig({});
-				return _isValidAttribute(transformCaseFunc(tag), transformCaseFunc(attr), value);
+				const lcTag = transformCaseFunc(tag);
+				const lcName = transformCaseFunc(attr);
+				return _isValidAttribute(lcTag, lcName, value);
 			};
 			DOMPurify.addHook = function(entryPoint, hookFunction) {
 				if (typeof hookFunction !== "function") return;
@@ -137944,9 +138805,7 @@ function(property) {
 								if (placement) resetPlacement = placement;
 								break;
 							}
-							case "initialPlacement":
-								resetPlacement = initialPlacement;
-								break;
+							case "initialPlacement": resetPlacement = initialPlacement;
 						}
 						if (placement !== resetPlacement) return { reset: { placement: resetPlacement } };
 					}
@@ -138229,9 +139088,11 @@ function(property) {
 			const clientRect = element.getBoundingClientRect();
 			const domElement = unwrapElement(element);
 			let scale = createCoords(1);
-			if (includeScale) if (offsetParent) {
-				if (isElement$1(offsetParent)) scale = getScale(offsetParent);
-			} else scale = getScale(element);
+			if (includeScale) {
+				if (offsetParent) {
+					if (isElement$1(offsetParent)) scale = getScale(offsetParent);
+				} else scale = getScale(element);
+			}
 			const visualOffsets = shouldAddVisualOffsets(domElement, isFixedStrategy, offsetParent) ? getVisualOffsets(domElement) : createCoords(0);
 			let x = (clientRect.left + visualOffsets.x) / scale.x;
 			let y = (clientRect.top + visualOffsets.y) / scale.y;
@@ -139050,12 +139911,14 @@ function(property) {
 				this._isPaused = false;
 				this._warnOnRun = true;
 				this.__v_skip = true;
-				if (!detached && activeEffectScope) if (activeEffectScope.active) {
-					this.parent = activeEffectScope;
-					this.index = (activeEffectScope.scopes || (activeEffectScope.scopes = [])).push(this) - 1;
-				} else {
-					this._active = false;
-					this._warnOnRun = false;
+				if (!detached && activeEffectScope) {
+					if (activeEffectScope.active) {
+						this.parent = activeEffectScope;
+						this.index = (activeEffectScope.scopes || (activeEffectScope.scopes = [])).push(this) - 1;
+					} else {
+						this._active = false;
+						this._warnOnRun = false;
+					}
 				}
 			}
 			get active() {
@@ -139183,8 +140046,10 @@ function(property) {
 				*/
 				this.cleanup = void 0;
 				this.scheduler = void 0;
-				if (activeEffectScope) if (activeEffectScope.active) activeEffectScope.effects.push(this);
-				else this.flags &= -2;
+				if (activeEffectScope) {
+					if (activeEffectScope.active) activeEffectScope.effects.push(this);
+					else this.flags &= -2;
+				}
 			}
 			pause() {
 				this.flags |= 64;
@@ -139567,9 +140432,7 @@ function(property) {
 								if (isMap(target)) run(depsMap.get(MAP_KEY_ITERATE_KEY));
 							}
 							break;
-						case "set":
-							if (isMap(target)) run(depsMap.get(ITERATE_KEY));
-							break;
+						case "set": if (isMap(target)) run(depsMap.get(ITERATE_KEY));
 					}
 				}
 			}
@@ -139806,12 +140669,14 @@ function(property) {
 						oldValue = /* @__PURE__ */ toRaw(oldValue);
 						value = /* @__PURE__ */ toRaw(value);
 					}
-					if (!isArrayWithIntegerKey && /* @__PURE__ */ isRef(oldValue) && !/* @__PURE__ */ isRef(value)) if (isOldValueReadonly) {
-						warn$2(`Set operation on key "${String(key)}" failed: target is readonly.`, target[key]);
-						return true;
-					} else {
-						oldValue.value = value;
-						return true;
+					if (!isArrayWithIntegerKey && /* @__PURE__ */ isRef(oldValue) && !/* @__PURE__ */ isRef(value)) {
+						if (isOldValueReadonly) {
+							warn$2(`Set operation on key "${String(key)}" failed: target is readonly.`, target[key]);
+							return true;
+						} else {
+							oldValue.value = value;
+							return true;
+						}
 					}
 				}
 				const hadKey = isArrayWithIntegerKey ? Number(key) < target.length : hasOwn(target, key);
@@ -140278,25 +141143,26 @@ function(property) {
 					else if (isFunction(s)) return call ? call(s, 2) : s();
 					else warnInvalidSource(s);
 				});
-			} else if (isFunction(source)) if (cb) getter = call ? () => call(source, 2) : source;
-			else getter = () => {
-				if (cleanup) {
-					pauseTracking();
-					try {
-						cleanup();
-					} finally {
-						resetTracking();
+			} else if (isFunction(source)) {
+				if (cb) getter = call ? () => call(source, 2) : source;
+				else getter = () => {
+					if (cleanup) {
+						pauseTracking();
+						try {
+							cleanup();
+						} finally {
+							resetTracking();
+						}
 					}
-				}
-				const currentEffect = activeWatcher;
-				activeWatcher = effect;
-				try {
-					return call ? call(source, 3, [boundCleanup]) : source(boundCleanup);
-				} finally {
-					activeWatcher = currentEffect;
-				}
-			};
-			else {
+					const currentEffect = activeWatcher;
+					activeWatcher = effect;
+					try {
+						return call ? call(source, 3, [boundCleanup]) : source(boundCleanup);
+					} finally {
+						activeWatcher = currentEffect;
+					}
+				};
+			} else {
 				getter = NOOP;
 				warnInvalidSource(source);
 			}
@@ -140355,9 +141221,10 @@ function(property) {
 			};
 			effect.onTrack = options.onTrack;
 			effect.onTrigger = options.onTrigger;
-			if (cb) if (immediate) job(true);
-			else oldValue = effect.run();
-			else if (scheduler) scheduler(job.bind(null, true), true);
+			if (cb) {
+				if (immediate) job(true);
+				else oldValue = effect.run();
+			} else if (scheduler) scheduler(job.bind(null, true), true);
 			else effect.run();
 			watchHandle.pause = effect.pause.bind(effect);
 			watchHandle.resume = effect.resume.bind(effect);
@@ -141135,15 +142002,16 @@ function(property) {
 						if (rawRef.f) {
 							const existing = _isString ? canSetSetupRef(ref) ? setupState[ref] : refs[ref] : canSetRef(ref) || !rawRef.k ? ref.value : refs[rawRef.k];
 							if (isUnmount) isArray(existing) && remove(existing, refValue);
-							else if (!isArray(existing)) if (_isString) {
-								refs[ref] = [refValue];
-								if (canSetSetupRef(ref)) setupState[ref] = refs[ref];
-							} else {
-								const newVal = [refValue];
-								if (canSetRef(ref, rawRef.k)) ref.value = newVal;
-								if (rawRef.k) refs[rawRef.k] = newVal;
-							}
-							else if (!existing.includes(refValue)) existing.push(refValue);
+							else if (!isArray(existing)) {
+								if (_isString) {
+									refs[ref] = [refValue];
+									if (canSetSetupRef(ref)) setupState[ref] = refs[ref];
+								} else {
+									const newVal = [refValue];
+									if (canSetRef(ref, rawRef.k)) ref.value = newVal;
+									if (rawRef.k) refs[rawRef.k] = newVal;
+								}
+							} else if (!existing.includes(refValue)) existing.push(refValue);
 						} else if (_isString) {
 							refs[ref] = value;
 							if (canSetSetupRef(ref)) setupState[ref] = value;
@@ -141482,11 +142350,12 @@ function(property) {
 				const opt = computedOptions[key];
 				const get = isFunction(opt) ? opt.bind(publicThis, publicThis) : isFunction(opt.get) ? opt.get.bind(publicThis, publicThis) : NOOP;
 				if (get === NOOP) warn$1(`Computed property "${key}" has no getter.`);
+				const set = !isFunction(opt) && isFunction(opt.set) ? opt.set.bind(publicThis) : () => {
+					warn$1(`Write operation failed: computed property "${key}" is readonly.`);
+				};
 				const c = computed({
 					get,
-					set: !isFunction(opt) && isFunction(opt.set) ? opt.set.bind(publicThis) : () => {
-						warn$1(`Write operation failed: computed property "${key}" is readonly.`);
-					}
+					set
 				});
 				Object.defineProperty(ctx, key, {
 					enumerable: true,
@@ -141543,9 +142412,10 @@ function(property) {
 			for (const key in injectOptions) {
 				const opt = injectOptions[key];
 				let injected;
-				if (isObject(opt)) if ("default" in opt) injected = inject$1(opt.from || key, opt.default, true);
-				else injected = inject$1(opt.from || key);
-				else injected = inject$1(opt);
+				if (isObject(opt)) {
+					if ("default" in opt) injected = inject$1(opt.from || key, opt.default, true);
+					else injected = inject$1(opt.from || key);
+				} else injected = inject$1(opt);
 				if (/* @__PURE__ */ isRef(injected)) Object.defineProperty(ctx, key, {
 					enumerable: true,
 					configurable: true,
@@ -141566,13 +142436,14 @@ function(property) {
 				if (isFunction(handler)) watch(getter, handler);
 				else warn$1(`Invalid watch handler specified by key "${raw}"`, handler);
 			} else if (isFunction(raw)) watch(getter, raw.bind(publicThis));
-			else if (isObject(raw)) if (isArray(raw)) raw.forEach((r) => createWatcher(r, ctx, publicThis, key));
-			else {
-				const handler = isFunction(raw.handler) ? raw.handler.bind(publicThis) : ctx[raw.handler];
-				if (isFunction(handler)) watch(getter, handler, raw);
-				else warn$1(`Invalid watch handler specified by key "${raw.handler}"`, handler);
-			}
-			else warn$1(`Invalid watch option: "${key}"`, raw);
+			else if (isObject(raw)) {
+				if (isArray(raw)) raw.forEach((r) => createWatcher(r, ctx, publicThis, key));
+				else {
+					const handler = isFunction(raw.handler) ? raw.handler.bind(publicThis) : ctx[raw.handler];
+					if (isFunction(handler)) watch(getter, handler, raw);
+					else warn$1(`Invalid watch handler specified by key "${raw.handler}"`, handler);
+				}
+			} else warn$1(`Invalid watch option: "${key}"`, raw);
 		}
 		function resolveMergedOptions(instance) {
 			const base = instance.type;
@@ -141723,9 +142594,10 @@ function(property) {
 						return app;
 					},
 					mixin(mixin) {
-						if (__VUE_OPTIONS_API__) if (!context.mixins.includes(mixin)) context.mixins.push(mixin);
-						else warn$1("Mixin has already been applied to target app" + (mixin.name ? `: ${mixin.name}` : ""));
-						else warn$1("Mixins are only available in builds supporting Options API");
+						if (__VUE_OPTIONS_API__) {
+							if (!context.mixins.includes(mixin)) context.mixins.push(mixin);
+							else warn$1("Mixin has already been applied to target app" + (mixin.name ? `: ${mixin.name}` : ""));
+						} else warn$1("Mixins are only available in builds supporting Options API");
 						return app;
 					},
 					component(name, component) {
@@ -141780,8 +142652,10 @@ If you want to remount the same app, move your app creation logic into a factory
 						} else warn$1(`Cannot unmount an app that is not mounted.`);
 					},
 					provide(key, value) {
-						if (key in context.provides) if (hasOwn(context.provides, key)) warn$1(`App already provides property with key "${String(key)}". It will be overwritten with the new value.`);
-						else warn$1(`App already provides property with key "${String(key)}" inherited from its parent element. It will be overwritten with the new value.`);
+						if (key in context.provides) {
+							if (hasOwn(context.provides, key)) warn$1(`App already provides property with key "${String(key)}". It will be overwritten with the new value.`);
+							else warn$1(`App already provides property with key "${String(key)}" inherited from its parent element. It will be overwritten with the new value.`);
+						}
 						context.provides[key] = value;
 						return app;
 					},
@@ -141807,12 +142681,14 @@ If you want to remount the same app, move your app creation logic into a factory
 			const props = instance.vnode.props || EMPTY_OBJ;
 			{
 				const { emitsOptions, propsOptions: [propsOptions] } = instance;
-				if (emitsOptions) if (!(event in emitsOptions) && true) {
-					if (!propsOptions || !(toHandlerKey(camelize(event)) in propsOptions)) warn$1(`Component emitted event "${event}" but it is neither declared in the emits option nor as an "${toHandlerKey(camelize(event))}" prop.`);
-				} else {
-					const validator = emitsOptions[event];
-					if (isFunction(validator)) {
-						if (!validator(...rawArgs)) warn$1(`Invalid event arguments: event validation failed for event "${event}".`);
+				if (emitsOptions) {
+					if (!(event in emitsOptions) && true) {
+						if (!propsOptions || !(toHandlerKey(camelize(event)) in propsOptions)) warn$1(`Component emitted event "${event}" but it is neither declared in the emits option nor as an "${toHandlerKey(camelize(event))}" prop.`);
+					} else {
+						const validator = emitsOptions[event];
+						if (isFunction(validator)) {
+							if (!validator(...rawArgs)) warn$1(`Invalid event arguments: event validation failed for event "${event}".`);
+						}
 					}
 				}
 			}
@@ -141974,10 +142850,12 @@ If you want to remount the same app, move your app creation logic into a factory
 			for (let i = 0; i < children.length; i++) {
 				const child = children[i];
 				if (isVNode(child)) {
-					if (child.type !== Comment || child.children === "v-if") if (singleRoot) return;
-					else {
-						singleRoot = child;
-						if (recurse && singleRoot.patchFlag > 0 && singleRoot.patchFlag & 2048) return filterSingleRoot(singleRoot.children);
+					if (child.type !== Comment || child.children === "v-if") {
+						if (singleRoot) return;
+						else {
+							singleRoot = child;
+							if (recurse && singleRoot.patchFlag > 0 && singleRoot.patchFlag & 2048) return filterSingleRoot(singleRoot.children);
+						}
 					}
 				} else return;
 			}
@@ -142087,16 +142965,17 @@ If you want to remount the same app, move your app creation logic into a factory
 						let key = propsToUpdate[i];
 						if (isEmitListener(instance.emitsOptions, key)) continue;
 						const value = rawProps[key];
-						if (options) if (hasOwn(attrs, key)) {
-							if (value !== attrs[key]) {
-								attrs[key] = value;
-								hasAttrsChanged = true;
+						if (options) {
+							if (hasOwn(attrs, key)) {
+								if (value !== attrs[key]) {
+									attrs[key] = value;
+									hasAttrsChanged = true;
+								}
+							} else {
+								const camelizedKey = camelize(key);
+								props[camelizedKey] = resolvePropValue(options, rawCurrentProps, camelizedKey, value, instance, false);
 							}
-						} else {
-							const camelizedKey = camelize(key);
-							props[camelizedKey] = resolvePropValue(options, rawCurrentProps, camelizedKey, value, instance, false);
-						}
-						else if (value !== attrs[key]) {
+						} else if (value !== attrs[key]) {
 							attrs[key] = value;
 							hasAttrsChanged = true;
 						}
@@ -142105,9 +142984,11 @@ If you want to remount the same app, move your app creation logic into a factory
 			} else {
 				if (setFullProps(instance, rawProps, props, attrs)) hasAttrsChanged = true;
 				let kebabKey;
-				for (const key in rawCurrentProps) if (!rawProps || !hasOwn(rawProps, key) && ((kebabKey = hyphenate$1(key)) === key || !hasOwn(rawProps, kebabKey))) if (options) {
-					if (rawPrevProps && (rawPrevProps[key] !== void 0 || rawPrevProps[kebabKey] !== void 0)) props[key] = resolvePropValue(options, rawCurrentProps, key, void 0, instance, true);
-				} else delete props[key];
+				for (const key in rawCurrentProps) if (!rawProps || !hasOwn(rawProps, key) && ((kebabKey = hyphenate$1(key)) === key || !hasOwn(rawProps, kebabKey))) {
+					if (options) {
+						if (rawPrevProps && (rawPrevProps[key] !== void 0 || rawPrevProps[kebabKey] !== void 0)) props[key] = resolvePropValue(options, rawCurrentProps, key, void 0, instance, true);
+					} else delete props[key];
+				}
 				if (attrs !== rawCurrentProps) {
 					for (const key in attrs) if (!rawProps || !hasOwn(rawProps, key) && true) {
 						delete attrs[key];
@@ -142126,9 +143007,10 @@ If you want to remount the same app, move your app creation logic into a factory
 				if (isReservedProp(key)) continue;
 				const value = rawProps[key];
 				let camelKey;
-				if (options && hasOwn(options, camelKey = camelize(key))) if (!needCastKeys || !needCastKeys.includes(camelKey)) props[camelKey] = value;
-				else (rawCastValues || (rawCastValues = {}))[camelKey] = value;
-				else if (!isEmitListener(instance.emitsOptions, key)) {
+				if (options && hasOwn(options, camelKey = camelize(key))) {
+					if (!needCastKeys || !needCastKeys.includes(camelKey)) props[camelKey] = value;
+					else (rawCastValues || (rawCastValues = {}))[camelKey] = value;
+				} else if (!isEmitListener(instance.emitsOptions, key)) {
 					if (!(key in attrs) || value !== attrs[key]) {
 						attrs[key] = value;
 						hasAttrsChanged = true;
@@ -142367,12 +143249,13 @@ If you want to remount the same app, move your app creation logic into a factory
 			let deletionComparisonTarget = EMPTY_OBJ;
 			if (vnode.shapeFlag & 32) {
 				const type = children._;
-				if (type) if (isHmrUpdating) {
-					assignSlots(slots, children, optimized);
-					trigger(instance, "set", "$slots");
-				} else if (optimized && type === 1) needDeletionCheck = false;
-				else assignSlots(slots, children, optimized);
-				else {
+				if (type) {
+					if (isHmrUpdating) {
+						assignSlots(slots, children, optimized);
+						trigger(instance, "set", "$slots");
+					} else if (optimized && type === 1) needDeletionCheck = false;
+					else assignSlots(slots, children, optimized);
+				} else {
 					needDeletionCheck = !children.$stable;
 					normalizeObjectSlots(children, slots);
 				}
@@ -142586,7 +143469,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 				}
 			};
 			const mountChildren = (children, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized, start = 0) => {
-				for (let i = start; i < children.length; i++) patch(null, children[i] = optimized ? cloneIfMounted(children[i]) : normalizeVNode(children[i]), container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
+				for (let i = start; i < children.length; i++) {
+					const child = children[i] = optimized ? cloneIfMounted(children[i]) : normalizeVNode(children[i]);
+					patch(null, child, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
+				}
 			};
 			const patchElement = (n1, n2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
 				const el = n2.el = n1.el;
@@ -142640,7 +143526,8 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 				for (let i = 0; i < newChildren.length; i++) {
 					const oldVNode = oldChildren[i];
 					const newVNode = newChildren[i];
-					patch(oldVNode, newVNode, oldVNode.el && (oldVNode.type === Fragment$1 || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldVNode.el) : fallbackContainer, null, parentComponent, parentSuspense, namespace, slotScopeIds, true);
+					const container = oldVNode.el && (oldVNode.type === Fragment$1 || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldVNode.el) : fallbackContainer;
+					patch(oldVNode, newVNode, container, null, parentComponent, parentSuspense, namespace, slotScopeIds, true);
 				}
 			};
 			const patchProps = (el, oldProps, newProps, parentComponent, namespace) => {
@@ -142678,9 +143565,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 			};
 			const processComponent = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
 				n2.slotScopeIds = slotScopeIds;
-				if (n1 == null) if (n2.shapeFlag & 512) parentComponent.ctx.activate(n2, container, anchor, namespace, optimized);
-				else mountComponent(n2, container, anchor, parentComponent, parentSuspense, namespace, optimized);
-				else updateComponent(n1, n2, optimized);
+				if (n1 == null) {
+					if (n2.shapeFlag & 512) parentComponent.ctx.activate(n2, container, anchor, namespace, optimized);
+					else mountComponent(n2, container, anchor, parentComponent, parentSuspense, namespace, optimized);
+				} else updateComponent(n1, n2, optimized);
 			};
 			const mountComponent = (initialVNode, container, anchor, parentComponent, parentSuspense, namespace, optimized) => {
 				const instance = initialVNode.component = createComponentInstance(initialVNode, parentComponent, parentSuspense);
@@ -142705,17 +143593,18 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 			};
 			const updateComponent = (n1, n2, optimized) => {
 				const instance = n2.component = n1.component;
-				if (shouldUpdateComponent(n1, n2, optimized)) if (instance.asyncDep && !instance.asyncResolved) {
-					pushWarningContext(n2);
-					n2.el = n1.el;
-					updateComponentPreRender(instance, n2, optimized);
-					popWarningContext();
-					return;
+				if (shouldUpdateComponent(n1, n2, optimized)) {
+					if (instance.asyncDep && !instance.asyncResolved) {
+						pushWarningContext(n2);
+						n2.el = n1.el;
+						updateComponentPreRender(instance, n2, optimized);
+						popWarningContext();
+						return;
+					} else {
+						instance.next = n2;
+						instance.update();
+					}
 				} else {
-					instance.next = n2;
-					instance.update();
-				}
-				else {
 					n2.el = n1.el;
 					instance.vnode = n2;
 				}
@@ -142846,9 +143735,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 				if (shapeFlag & 8) {
 					if (prevShapeFlag & 16) unmountChildren(c1, parentComponent, parentSuspense);
 					if (c2 !== c1) hostSetElementText(container, c2);
-				} else if (prevShapeFlag & 16) if (shapeFlag & 16) patchKeyedChildren(c1, c2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
-				else unmountChildren(c1, parentComponent, parentSuspense, true);
-				else {
+				} else if (prevShapeFlag & 16) {
+					if (shapeFlag & 16) patchKeyedChildren(c1, c2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
+					else unmountChildren(c1, parentComponent, parentSuspense, true);
+				} else {
 					if (prevShapeFlag & 8) hostSetElementText(container, "");
 					if (shapeFlag & 16) mountChildren(c2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
 				}
@@ -142859,8 +143749,8 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 				const oldLength = c1.length;
 				const newLength = c2.length;
 				const commonLength = Math.min(oldLength, newLength);
-				let i;
-				for (i = 0; i < commonLength; i++) {
+				let i = 0;
+				for (; i < commonLength; i++) {
 					const nextChild = c2[i] = optimized ? cloneIfMounted(c2[i]) : normalizeVNode(c2[i]);
 					patch(c1[i], nextChild, container, null, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
 				}
@@ -142947,8 +143837,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 						const anchorVNode = c2[nextIndex + 1];
 						const anchor = nextIndex + 1 < l2 ? anchorVNode.el || resolveAsyncComponentPlaceholder(anchorVNode) : parentAnchor;
 						if (newIndexToOldIndexMap[i] === 0) patch(null, nextChild, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized);
-						else if (moved) if (j < 0 || i !== increasingNewIndexSequence[j]) move(nextChild, container, anchor, 2);
-						else j--;
+						else if (moved) {
+							if (j < 0 || i !== increasingNewIndexSequence[j]) move(nextChild, container, anchor, 2);
+							else j--;
+						}
 					}
 				}
 			};
@@ -142976,31 +143868,33 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 					moveStaticNode(vnode, container, anchor);
 					return;
 				}
-				if (moveType !== 2 && shapeFlag & 1 && transition) if (moveType === 0) if (transition.persisted && !el[leaveCbKey]) hostInsert(el, container, anchor);
-				else {
-					transition.beforeEnter(el);
-					hostInsert(el, container, anchor);
-					queuePostRenderEffect(() => transition.enter(el), parentSuspense);
-				}
-				else {
-					const { leave, delayLeave, afterLeave } = transition;
-					const remove2 = () => {
-						if (vnode.ctx.isUnmounted) hostRemove(el);
-						else hostInsert(el, container, anchor);
-					};
-					const performLeave = () => {
-						const wasLeaving = el._isLeaving || !!el[leaveCbKey];
-						if (el._isLeaving) el[leaveCbKey](true);
-						if (transition.persisted && !wasLeaving) remove2();
-						else leave(el, () => {
-							remove2();
-							afterLeave && afterLeave();
-						});
-					};
-					if (delayLeave) delayLeave(el, remove2, performLeave);
-					else performLeave();
-				}
-				else hostInsert(el, container, anchor);
+				if (moveType !== 2 && shapeFlag & 1 && transition) {
+					if (moveType === 0) {
+						if (transition.persisted && !el[leaveCbKey]) hostInsert(el, container, anchor);
+						else {
+							transition.beforeEnter(el);
+							hostInsert(el, container, anchor);
+							queuePostRenderEffect(() => transition.enter(el), parentSuspense);
+						}
+					} else {
+						const { leave, delayLeave, afterLeave } = transition;
+						const remove2 = () => {
+							if (vnode.ctx.isUnmounted) hostRemove(el);
+							else hostInsert(el, container, anchor);
+						};
+						const performLeave = () => {
+							const wasLeaving = el._isLeaving || !!el[leaveCbKey];
+							if (el._isLeaving) el[leaveCbKey](true);
+							if (transition.persisted && !wasLeaving) remove2();
+							else leave(el, () => {
+								remove2();
+								afterLeave && afterLeave();
+							});
+						};
+						if (delayLeave) delayLeave(el, remove2, performLeave);
+						else performLeave();
+					}
+				} else hostInsert(el, container, anchor);
 			};
 			const unmount = (vnode, parentComponent, parentSuspense, doRemove = false, optimized = false) => {
 				const { type, props, ref, children, dynamicChildren, shapeFlag, patchFlag, dirs, cacheIndex, memo } = vnode;
@@ -143214,8 +144108,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 		}
 		function locateNonHydratedAsyncRoot(instance) {
 			const subComponent = instance.subTree.component;
-			if (subComponent) if (subComponent.asyncDep && !subComponent.asyncResolved) return subComponent;
-			else return locateNonHydratedAsyncRoot(subComponent);
+			if (subComponent) {
+				if (subComponent.asyncDep && !subComponent.asyncResolved) return subComponent;
+				else return locateNonHydratedAsyncRoot(subComponent);
+			}
 		}
 		function invalidateMount(hooks) {
 			if (hooks) for (let i = 0; i < hooks.length; i++) hooks[i].flags |= 8;
@@ -143228,9 +144124,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 		}
 		const isSuspense = (type) => type.__isSuspense;
 		function queueEffectWithSuspense(fn, suspense) {
-			if (suspense && suspense.pendingBranch) if (isArray(fn)) suspense.effects.push(...fn);
-			else suspense.effects.push(fn);
-			else queuePostFlushCb(fn);
+			if (suspense && suspense.pendingBranch) {
+				if (isArray(fn)) suspense.effects.push(...fn);
+				else suspense.effects.push(fn);
+			} else queuePostFlushCb(fn);
 		}
 		const Fragment$1 = /* @__PURE__ */ Symbol.for("v-fgt");
 		const Text$1 = /* @__PURE__ */ Symbol.for("v-txt");
@@ -143330,8 +144227,10 @@ For more details, see https://link.vuejs.org/feature-flags.`);
 			if (isVNode(type)) {
 				const cloned = cloneVNode(type, props, true);
 				if (children) normalizeChildren(cloned, children);
-				if (isBlockTreeEnabled > 0 && !isBlockNode && currentBlock) if (cloned.shapeFlag & 6) currentBlock[currentBlock.indexOf(type)] = cloned;
-				else currentBlock.push(cloned);
+				if (isBlockTreeEnabled > 0 && !isBlockNode && currentBlock) {
+					if (cloned.shapeFlag & 6) currentBlock[currentBlock.indexOf(type)] = cloned;
+					else currentBlock.push(cloned);
+				}
 				cloned.patchFlag = -2;
 				return cloned;
 			}
@@ -143417,25 +144316,28 @@ Component that was made reactive: `, type);
 			const { shapeFlag } = vnode;
 			if (children == null) children = null;
 			else if (isArray(children)) type = 16;
-			else if (typeof children === "object") if (shapeFlag & 65) {
-				const slot = children.default;
-				if (slot) {
-					slot._c && (slot._d = false);
-					normalizeChildren(vnode, slot());
-					slot._c && (slot._d = true);
+			else if (typeof children === "object") {
+				if (shapeFlag & 65) {
+					const slot = children.default;
+					if (slot) {
+						slot._c && (slot._d = false);
+						normalizeChildren(vnode, slot());
+						slot._c && (slot._d = true);
+					}
+					return;
+				} else {
+					type = 32;
+					const slotFlag = children._;
+					if (!slotFlag && !isInternalObject(children)) children._ctx = currentRenderingInstance;
+					else if (slotFlag === 3 && currentRenderingInstance) {
+						if (currentRenderingInstance.slots._ === 1) children._ = 1;
+						else {
+							children._ = 2;
+							vnode.patchFlag |= 1024;
+						}
+					}
 				}
-				return;
-			} else {
-				type = 32;
-				const slotFlag = children._;
-				if (!slotFlag && !isInternalObject(children)) children._ctx = currentRenderingInstance;
-				else if (slotFlag === 3 && currentRenderingInstance) if (currentRenderingInstance.slots._ === 1) children._ = 1;
-				else {
-					children._ = 2;
-					vnode.patchFlag |= 1024;
-				}
-			}
-			else if (isFunction(children)) {
+			} else if (isFunction(children)) {
 				if (shapeFlag & 65) {
 					normalizeChildren(vnode, { default: children });
 					return;
@@ -143643,9 +144545,10 @@ Component that was made reactive: `, type);
 			} else finishComponentSetup(instance, isSSR);
 		}
 		function handleSetupResult(instance, setupResult, isSSR) {
-			if (isFunction(setupResult)) if (instance.type.__ssrInlineRender) instance.ssrRender = setupResult;
-			else instance.render = setupResult;
-			else if (isObject(setupResult)) {
+			if (isFunction(setupResult)) {
+				if (instance.type.__ssrInlineRender) instance.ssrRender = setupResult;
+				else instance.render = setupResult;
+			} else if (isObject(setupResult)) {
 				if (isVNode(setupResult)) warn$1(`setup() should not return VNodes directly - return a render function instead.`);
 				instance.devtoolsRawSetupState = setupResult;
 				instance.setupState = proxyRefs(setupResult);
@@ -143667,8 +144570,10 @@ Component that was made reactive: `, type);
 					reset();
 				}
 			}
-			if (!Component.render && instance.render === NOOP && !isSSR) if (Component.template) warn$1("Component provided template option but runtime compilation is not supported in this build of Vue. Configure your bundler to alias \"vue\" to \"vue/dist/vue.esm-bundler.js\".");
-			else warn$1(`Component is missing template or render function: `, Component);
+			if (!Component.render && instance.render === NOOP && !isSSR) {
+				if (Component.template) warn$1("Component provided template option but runtime compilation is not supported in this build of Vue. Configure your bundler to alias \"vue\" to \"vue/dist/vue.esm-bundler.js\".");
+				else warn$1(`Component is missing template or render function: `, Component);
+			}
 		}
 		const attrsProxyHandlers = {
 			get(target, key) {
@@ -143767,11 +144672,12 @@ Component that was made reactive: `, type);
 			try {
 				setBlockTracking(-1);
 				const l = arguments.length;
-				if (l === 2) if (isObject(propsOrChildren) && !isArray(propsOrChildren)) {
-					if (isVNode(propsOrChildren)) return createVNode(type, null, [propsOrChildren]);
-					return createVNode(type, propsOrChildren);
-				} else return createVNode(type, null, propsOrChildren);
-				else {
+				if (l === 2) {
+					if (isObject(propsOrChildren) && !isArray(propsOrChildren)) {
+						if (isVNode(propsOrChildren)) return createVNode(type, null, [propsOrChildren]);
+						return createVNode(type, propsOrChildren);
+					} else return createVNode(type, null, propsOrChildren);
+				} else {
 					if (l > 3) children = Array.prototype.slice.call(arguments, 2);
 					else if (l === 3 && isVNode(children)) children = [children];
 					return createVNode(type, propsOrChildren, children);
@@ -144026,11 +144932,13 @@ Component that was made reactive: `, type);
 			const isCssString = isString(next);
 			let hasControlledDisplay = false;
 			if (next && !isCssString) {
-				if (prev) if (!isString(prev)) {
-					for (const key in prev) if (next[key] == null) setStyle(style, key, "");
-				} else for (const prevStyle of prev.split(";")) {
-					const key = prevStyle.slice(0, prevStyle.indexOf(":")).trim();
-					if (next[key] == null) setStyle(style, key, "");
+				if (prev) {
+					if (!isString(prev)) {
+						for (const key in prev) if (next[key] == null) setStyle(style, key, "");
+					} else for (const prevStyle of prev.split(";")) {
+						const key = prevStyle.slice(0, prevStyle.indexOf(":")).trim();
+						if (next[key] == null) setStyle(style, key, "");
+					}
 				}
 				for (const key in next) {
 					if (key === "display") hasControlledDisplay = true;
@@ -144059,9 +144967,10 @@ Component that was made reactive: `, type);
 			else {
 				if (val == null) val = "";
 				if (semicolonRE.test(val)) warn(`Unexpected semicolon at the end of '${name}' style value: '${val}'`);
-				if (name.startsWith("--")) if (importantRE.test(val)) style.setProperty(name, val.replace(importantRE, ""), "important");
-				else style.setProperty(name, val);
-				else {
+				if (name.startsWith("--")) {
+					if (importantRE.test(val)) style.setProperty(name, val.replace(importantRE, ""), "important");
+					else style.setProperty(name, val);
+				} else {
 					const prefixed = autoPrefix(style, name);
 					if (importantRE.test(val)) style.setProperty(hyphenate$1(prefixed), val.replace(importantRE, ""), "important");
 					else style[prefixed] = val;
@@ -144091,9 +145000,10 @@ Component that was made reactive: `, type);
 		}
 		const xlinkNS = "http://www.w3.org/1999/xlink";
 		function patchAttr(el, key, value, isSVG, instance, isBoolean = isSpecialBooleanAttr(key)) {
-			if (isSVG && key.startsWith("xlink:")) if (value == null) el.removeAttributeNS(xlinkNS, key.slice(6, key.length));
-			else el.setAttributeNS(xlinkNS, key, value);
-			else if (value == null || isBoolean && !includeBooleanAttr(value)) el.removeAttribute(key);
+			if (isSVG && key.startsWith("xlink:")) {
+				if (value == null) el.removeAttributeNS(xlinkNS, key.slice(6, key.length));
+				else el.setAttributeNS(xlinkNS, key, value);
+			} else if (value == null || isBoolean && !includeBooleanAttr(value)) el.removeAttribute(key);
 			else el.setAttribute(key, isBoolean ? "" : isSymbol(value) ? String(value) : value);
 		}
 		function patchDOMProp(el, key, value, parentComponent, attrName) {
@@ -144693,7 +145603,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 					};
 					const middleware = [flip()];
 					if (this.#getOffset) {
-						const offsetExt = offset(this.#getOffset(deriveContext));
+						const offsetOption = this.#getOffset(deriveContext);
+						const offsetExt = offset(offsetOption);
 						middleware.push(offsetExt);
 					}
 					computePosition(virtualEl, this.#element, {
@@ -151094,14 +152005,15 @@ Expected function or array of functions, received type ${typeof value}.`);
 						const size = longestCellByColumn[columnIndex] - (sizes[columnIndex] || 0);
 						const code = alignments[columnIndex];
 						if (code === 114) before = " ".repeat(size);
-						else if (code === 99) if (size % 2) {
-							before = " ".repeat(size / 2 + .5);
-							after = " ".repeat(size / 2 - .5);
-						} else {
-							before = " ".repeat(size / 2);
-							after = before;
-						}
-						else after = " ".repeat(size);
+						else if (code === 99) {
+							if (size % 2) {
+								before = " ".repeat(size / 2 + .5);
+								after = " ".repeat(size / 2 - .5);
+							} else {
+								before = " ".repeat(size / 2);
+								after = before;
+							}
+						} else after = " ".repeat(size);
 					}
 					if (settings.delimiterStart !== false && !columnIndex) line.push("|");
 					if (settings.padding !== false && !(settings.alignDelimiters === false && cell === "") && (settings.delimiterStart !== false || columnIndex)) line.push(" ");
@@ -153507,19 +154419,21 @@ Expected function or array of functions, received type ${typeof value}.`);
 							}
 							cell[2] = index;
 						}
-					} else if (token.type === "tableCellDivider") if (inFirstCellAwaitingPipe) inFirstCellAwaitingPipe = false;
-					else {
-						if (lastCell[1] !== 0) {
-							cell[0] = cell[1];
-							currentCell = flushCell(map, context, lastCell, rowKind, void 0, currentCell);
+					} else if (token.type === "tableCellDivider") {
+						if (inFirstCellAwaitingPipe) inFirstCellAwaitingPipe = false;
+						else {
+							if (lastCell[1] !== 0) {
+								cell[0] = cell[1];
+								currentCell = flushCell(map, context, lastCell, rowKind, void 0, currentCell);
+							}
+							lastCell = cell;
+							cell = [
+								lastCell[1],
+								index,
+								0,
+								0
+							];
 						}
-						lastCell = cell;
-						cell = [
-							lastCell[1],
-							index,
-							0,
-							0
-						];
 					}
 				} else if (token.type === "tableHead") {
 					afterHeadAwaitingFirstBodyRow = true;
@@ -154885,7 +155799,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				}
 			};
 			let startText, endText;
-			if (to - from <= 2 * SearchMargin) startText = endText = state.sliceDoc(from, to);
+			if (to - from <= 100) startText = endText = state.sliceDoc(from, to);
 			else {
 				startText = state.sliceDoc(from, from + SearchMargin);
 				endText = state.sliceDoc(to - SearchMargin, to);
@@ -156800,7 +157714,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				}, start);
 				let newMaps = [];
 				for (let i = rebasedCount; i < newUntil; i++) newMaps.push(new Item(mapping.maps[i]));
-				let branch = new Branch(this.items.slice(0, start).append(newMaps).append(rebasedItems), eventCount);
+				let items = this.items.slice(0, start).append(newMaps).append(rebasedItems);
+				let branch = new Branch(items, eventCount);
 				if (branch.emptyItemCount() > max_empty_items) branch = branch.compress(this.items.length - rebasedItems.length);
 				return branch;
 			}
@@ -156875,9 +157790,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 			if (tr.getMeta(closeHistoryKey)) history = new HistoryState(history.done, history.undone, null, 0, -1);
 			let appended = tr.getMeta("appendedTransaction");
 			if (tr.steps.length == 0) return history;
-			else if (appended && appended.getMeta(historyKey)) if (appended.getMeta(historyKey).redo) return new HistoryState(history.done.addTransform(tr, void 0, options, mustPreserveItems(state)), history.undone, rangesFor(tr.mapping.maps), history.prevTime, history.prevComposition);
-			else return new HistoryState(history.done, history.undone.addTransform(tr, void 0, options, mustPreserveItems(state)), null, history.prevTime, history.prevComposition);
-			else if (tr.getMeta("addToHistory") !== false && !(appended && appended.getMeta("addToHistory") === false)) {
+			else if (appended && appended.getMeta(historyKey)) {
+				if (appended.getMeta(historyKey).redo) return new HistoryState(history.done.addTransform(tr, void 0, options, mustPreserveItems(state)), history.undone, rangesFor(tr.mapping.maps), history.prevTime, history.prevComposition);
+				else return new HistoryState(history.done, history.undone.addTransform(tr, void 0, options, mustPreserveItems(state)), null, history.prevTime, history.prevComposition);
+			} else if (tr.getMeta("addToHistory") !== false && !(appended && appended.getMeta("addToHistory") === false)) {
 				let composition = tr.getMeta("composition");
 				let newGroup = history.prevTime == 0 || !appended && history.prevComposition != composition && (history.prevTime < (tr.time || 0) - options.newGroupDelay || !isAdjacentTo(tr, history.prevRanges));
 				let prevRanges = appended ? mapRanges(history.prevRanges, tr.mapping) : rangesFor(tr.mapping.maps);
@@ -156921,7 +157837,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				historyState: newHist
 			});
 		}
-		let cachedPreserveItems = false, cachedPreserveItemsPlugins = null;
+		let cachedPreserveItems = false;
+		let cachedPreserveItemsPlugins = null;
 		function mustPreserveItems(state) {
 			let plugins = state.plugins;
 			if (cachedPreserveItemsPlugins != plugins) {
@@ -157224,7 +158141,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 					}, 0);
 				};
 				const changeFilter = (e) => {
-					filter.value = e.target.value;
+					const target = e.target;
+					filter.value = target.value;
 				};
 				const onSearchKeydown = (e) => {
 					if (e.key === "Escape") filter.value = "";
@@ -157865,28 +158783,32 @@ Expected function or array of functions, received type ${typeof value}.`);
 				let match = null;
 				for (let i = 0; i < this.matches.length;) {
 					let partial = this.matches[i], keep = false;
-					if (this.query.charCodeAt(partial.index) == code) if (partial.index == this.query.length - 1) match = {
-						from: partial.from,
-						to: end,
-						precise: endPrecise && partial.precise
-					};
-					else {
-						partial.index++;
-						keep = true;
+					if (this.query.charCodeAt(partial.index) == code) {
+						if (partial.index == this.query.length - 1) match = {
+							from: partial.from,
+							to: end,
+							precise: endPrecise && partial.precise
+						};
+						else {
+							partial.index++;
+							keep = true;
+						}
 					}
 					if (keep) i++;
 					else this.matches.splice(i, 1);
 				}
-				if (this.query.charCodeAt(0) == code) if (this.query.length == 1) match = {
-					from: pos,
-					to: end,
-					precise: posPrecise && endPrecise
-				};
-				else this.matches.push({
-					from: pos,
-					index: 1,
-					precise: posPrecise
-				});
+				if (this.query.charCodeAt(0) == code) {
+					if (this.query.length == 1) match = {
+						from: pos,
+						to: end,
+						precise: posPrecise && endPrecise
+					};
+					else this.matches.push({
+						from: pos,
+						index: 1,
+						precise: posPrecise
+					});
+				}
 				if (match && this.test && !this.test(match.from, match.to, this.buffer, this.bufferStart)) match = null;
 				return match;
 			}
@@ -158467,7 +159389,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				this.panel = panel;
 			}
 		};
-		const matchMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-searchMatch" }), selectedMatchMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-searchMatch cm-searchMatch-selected" });
+		const matchMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-searchMatch" });
+		const selectedMatchMark = /*@__PURE__*/ Decoration$1.mark({ class: "cm-searchMatch cm-searchMatch-selected" });
 		const searchHighlighter = /*@__PURE__*/ ViewPlugin.fromClass(class {
 			constructor(view) {
 				this.view = view;
@@ -160567,14 +161490,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* a single element, we want to pull that out.
 		*/
 		var getBaseElem = (group) => {
-			if (group.type === "ordgroup") if (group.body.length === 1) return getBaseElem(group.body[0]);
-			else return group;
-			else if (group.type === "color") if (group.body.length === 1) return getBaseElem(group.body[0]);
-			else return group;
-			else if (group.type === "font") return getBaseElem(group.body);
+			if (group.type === "ordgroup") {
+				if (group.body.length === 1) return getBaseElem(group.body[0]);
+				else return group;
+			} else if (group.type === "color") {
+				if (group.body.length === 1) return getBaseElem(group.body[0]);
+				else return group;
+			} else if (group.type === "font") return getBaseElem(group.body);
 			else return group;
 		};
-		var characterNodesTypes = new Set([
+		var characterNodesTypes = /* @__PURE__ */ new Set([
 			"mathord",
 			"textord",
 			"atom"
@@ -177666,7 +178591,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* Then, the buildExpression, buildGroup, and various groupBuilders functions
 		* are called, to produce a final HTML tree.
 		*/
-		var binLeftCanceller = new Set([
+		var binLeftCanceller = /* @__PURE__ */ new Set([
 			"leftmost",
 			"mbin",
 			"mopen",
@@ -177674,7 +178599,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			"mop",
 			"mpunct"
 		]);
-		var binRightCanceller = new Set([
+		var binRightCanceller = /* @__PURE__ */ new Set([
 			"rightmost",
 			"mrel",
 			"mclose",
@@ -177753,10 +178678,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 				var nonspace = !node.hasClass("mspace");
 				if (nonspace) {
 					var result = callback(node, prev.node);
-					if (result) if (prev.insertAfter) prev.insertAfter(result);
-					else {
-						nodes.unshift(result);
-						i++;
+					if (result) {
+						if (prev.insertAfter) prev.insertAfter(result);
+						else {
+							nodes.unshift(result);
+							i++;
+						}
 					}
 				}
 				if (nonspace) prev.node = node;
@@ -178043,8 +178970,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* entry point is the `buildMathML` function, which takes a parse tree from the
 		* parser.
 		*/
-		var noVariantSymbols = new Set(["\\imath", "\\jmath"]);
-		var rowLikeTypes = new Set(["mrow", "mtable"]);
+		var noVariantSymbols = /* @__PURE__ */ new Set(["\\imath", "\\jmath"]);
+		var rowLikeTypes = /* @__PURE__ */ new Set(["mrow", "mtable"]);
 		/**
 		* Takes a symbol and converts it into a MathML text node after performing
 		* optional replacement from symbols.js.
@@ -178080,11 +179007,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var getVariant = (group, options) => {
 			if (group.mode === "text") {
 				if (options.fontFamily === "texttt") return "monospace";
-				else if (options.fontFamily === "textsf") if (options.fontShape === "textit" && options.fontWeight === "textbf") return "sans-serif-bold-italic";
-				else if (options.fontShape === "textit") return "sans-serif-italic";
-				else if (options.fontWeight === "textbf") return "bold-sans-serif";
-				else return "sans-serif";
-				else if (options.fontShape === "textit" && options.fontWeight === "textbf") return "bold-italic";
+				else if (options.fontFamily === "textsf") {
+					if (options.fontShape === "textit" && options.fontWeight === "textbf") return "sans-serif-bold-italic";
+					else if (options.fontShape === "textit") return "sans-serif-italic";
+					else if (options.fontWeight === "textbf") return "bold-sans-serif";
+					else return "sans-serif";
+				} else if (options.fontShape === "textit" && options.fontWeight === "textbf") return "bold-italic";
 				else if (options.fontShape === "textit") return "italic";
 				else if (options.fontWeight === "textbf") return "bold";
 			}
@@ -178822,7 +179750,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				716
 			]
 		};
-		var wideAccentLabels = new Set([
+		var wideAccentLabels = /* @__PURE__ */ new Set([
 			"widehat",
 			"widecheck",
 			"widetilde",
@@ -178837,18 +179765,19 @@ Expected function or array of functions, received type ${typeof value}.`);
 					var viewBoxHeight;
 					var pathName;
 					var _height;
-					if (numChars > 5) if (label === "widehat" || label === "widecheck") {
-						viewBoxHeight = 420;
-						viewBoxWidth = 2364;
-						_height = .42;
-						pathName = label + "4";
+					if (numChars > 5) {
+						if (label === "widehat" || label === "widecheck") {
+							viewBoxHeight = 420;
+							viewBoxWidth = 2364;
+							_height = .42;
+							pathName = label + "4";
+						} else {
+							viewBoxHeight = 312;
+							viewBoxWidth = 2340;
+							_height = .34;
+							pathName = "tilde4";
+						}
 					} else {
-						viewBoxHeight = 312;
-						viewBoxWidth = 2340;
-						_height = .34;
-						pathName = "tilde4";
-					}
-					else {
 						var imgIndex = [
 							1,
 							1,
@@ -179452,11 +180381,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 			var node;
 			var inner = buildExpression(group.body, options);
 			if (group.mclass === "minner") node = new MathNode("mpadded", inner);
-			else if (group.mclass === "mord") if (group.isCharacterBox) {
-				node = inner[0];
-				node.type = "mi";
-			} else node = new MathNode("mi", inner);
-			else {
+			else if (group.mclass === "mord") {
+				if (group.isCharacterBox) {
+					node = inner[0];
+					node.type = "mi";
+				} else node = new MathNode("mi", inner);
+			} else {
 				if (group.isCharacterBox) {
 					node = inner[0];
 					node.type = "mo";
@@ -180153,13 +181083,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			type: "kern",
 			size: -1 * lapInEms
 		};
-		var verts = new Set([
+		var verts = /* @__PURE__ */ new Set([
 			"|",
 			"\\lvert",
 			"\\rvert",
 			"\\vert"
 		]);
-		var doubleVerts = new Set([
+		var doubleVerts = /* @__PURE__ */ new Set([
 			"\\|",
 			"\\lVert",
 			"\\rVert",
@@ -180401,7 +181331,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				ruleWidth: (options.fontMetrics().sqrtRuleThickness + extraVinculum) * sizeMultiplier
 			};
 		};
-		var stackLargeDelimiters = new Set([
+		var stackLargeDelimiters = /* @__PURE__ */ new Set([
 			"(",
 			"\\lparen",
 			")",
@@ -180424,7 +181354,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			"⌉",
 			"\\surd"
 		]);
-		var stackAlwaysDelimiters = new Set([
+		var stackAlwaysDelimiters = /* @__PURE__ */ new Set([
 			"\\uparrow",
 			"\\downarrow",
 			"\\updownarrow",
@@ -180448,7 +181378,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			"⎰",
 			"⎱"
 		]);
-		var stackNeverDelimiters = new Set([
+		var stackNeverDelimiters = /* @__PURE__ */ new Set([
 			"<",
 			">",
 			"\\langle",
@@ -180675,7 +181605,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				size: 4
 			}
 		};
-		var delimiters = new Set([
+		var delimiters = /* @__PURE__ */ new Set([
 			"(",
 			"\\lparen",
 			")",
@@ -181053,9 +181983,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 						node.setAttribute("style", "border: " + makeEm(thk) + " solid " + group.borderColor);
 					}
 					break;
-				case "\\xcancel":
-					node.setAttribute("notation", "updiagonalstrike downdiagonalstrike");
-					break;
+				case "\\xcancel": node.setAttribute("notation", "updiagonalstrike downdiagonalstrike");
 			}
 			if (group.backgroundColor) node.setAttribute("mathbackground", group.backgroundColor);
 			return node;
@@ -181278,7 +182206,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var validateAmsEnvironmentContext = (context) => {
 			if (!context.parser.settings.displayMode) throw new ParseError("{" + context.envName + "} can be used only in display mode.");
 		};
-		var gatherEnvironments = new Set(["gather", "gather*"]);
+		var gatherEnvironments = /* @__PURE__ */ new Set(["gather", "gather*"]);
 		function getAutoTag(name) {
 			if (!name.includes("ed")) return !name.includes("*");
 		}
@@ -181310,10 +182238,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 				if (autoTag) parser.gullet.macros.set("\\@eqnsw", "1", true);
 			}
 			function endRow() {
-				if (tags) if (parser.gullet.macros.get("\\df@tag")) {
-					tags.push(parser.subparse([new Token("\\df@tag")]));
-					parser.gullet.macros.set("\\df@tag", void 0, true);
-				} else tags.push(Boolean(autoTag) && parser.gullet.macros.get("\\@eqnsw") === "1");
+				if (tags) {
+					if (parser.gullet.macros.get("\\df@tag")) {
+						tags.push(parser.subparse([new Token("\\df@tag")]));
+						parser.gullet.macros.set("\\df@tag", void 0, true);
+					} else tags.push(Boolean(autoTag) && parser.gullet.macros.get("\\@eqnsw") === "1");
+				}
 			}
 			beginRow();
 			hLinesBeforeRow.push(getHLines(parser));
@@ -181336,8 +182266,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 				row.push(cell);
 				var next = parser.fetch().text;
 				if (next === "&") {
-					if (maxNumCols && row.length === maxNumCols) if (singleRow || colSeparationType) throw new ParseError("Too many tab characters: &", parser.nextToken);
-					else parser.settings.reportNonstrict("textEnv", "Too few columns specified in the {array} column argument.");
+					if (maxNumCols && row.length === maxNumCols) {
+						if (singleRow || colSeparationType) throw new ParseError("Too many tab characters: &", parser.nextToken);
+						else parser.settings.reportNonstrict("textEnv", "Too few columns specified in the {array} column argument.");
+					}
 					parser.consume();
 				} else if (next === "\\end") {
 					endRow();
@@ -183159,7 +184091,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			}
 			return makeSpan(["mop", "op-limits"], parts, options);
 		};
-		var noSuccessor = new Set(["\\smallint"]);
+		var noSuccessor = /* @__PURE__ */ new Set(["\\smallint"]);
 		var htmlBuilder$2 = (grp, options) => {
 			var supGroup;
 			var subGroup;
@@ -184185,8 +185117,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				return node;
 			}
 		});
-		var cssSpace = new Map([["\\nobreak", "nobreak"], ["\\allowbreak", "allowbreak"]]);
-		var regularSpace = new Map([
+		var cssSpace = /* @__PURE__ */ new Map([["\\nobreak", "nobreak"], ["\\allowbreak", "allowbreak"]]);
+		var regularSpace = /* @__PURE__ */ new Map([
 			[" ", {}],
 			["\\ ", {}],
 			["~", { className: "nobreak" }],
@@ -184830,7 +185762,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			"\\idotsint": "\\dotsi",
 			"\\DOTSX": "\\dotsx"
 		};
-		var dotsbGroups = new Set(["bin", "rel"]);
+		var dotsbGroups = /* @__PURE__ */ new Set(["bin", "rel"]);
 		defineMacro("\\dots", function(context) {
 			var thedots = "\\dotso";
 			var next = context.expandAfterFuture().text;
@@ -185298,13 +186230,15 @@ Expected function or array of functions, received type ${typeof value}.`);
 						--depth;
 						if (depth === -1) throw new ParseError("Extra }", tok);
 					} else if (tok.text === "EOF") throw new ParseError("Unexpected end of input in a macro argument, expected '" + (delims && isDelimited ? delims[match] : "}") + "'", tok);
-					if (delims && isDelimited) if ((depth === 0 || depth === 1 && delims[match] === "{") && tok.text === delims[match]) {
-						++match;
-						if (match === delims.length) {
-							tokens.splice(-match, match);
-							break;
-						}
-					} else match = 0;
+					if (delims && isDelimited) {
+						if ((depth === 0 || depth === 1 && delims[match] === "{") && tok.text === delims[match]) {
+							++match;
+							if (match === delims.length) {
+								tokens.splice(-match, match);
+								break;
+							}
+						} else match = 0;
+					}
 				} while (depth !== 0 || isDelimited);
 				if (start.text === "{" && tokens[tokens.length - 1].text === "}") {
 					tokens.pop();
@@ -186676,7 +187610,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				return symbol;
 			}
 		};
-		Parser.endOfExpression = new Set([
+		Parser.endOfExpression = /* @__PURE__ */ new Set([
 			"}",
 			"\\endgroup",
 			"\\end",
@@ -187844,7 +188778,18 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$1$1 = (obj, member, getter) => (__accessCheck$1$11(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$1$11 = (obj, member, value) => member.has(obj) ? __typeError$1$11("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$1$1 = (obj, member, value, setter) => (__accessCheck$1$11(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$1$1, _provider$1$1, _data, _app$1$1, _config$1, _src$1, _reset, _onOutsidePointerDown, _startOutsideClickListener, _stopOutsideClickListener, _confirmEdit, _enterEditMode;
+		var _content$1$1;
+		var _provider$1$1;
+		var _data;
+		var _app$1$1;
+		var _config$1;
+		var _src$1;
+		var _reset;
+		var _onOutsidePointerDown;
+		var _startOutsideClickListener;
+		var _stopOutsideClickListener;
+		var _confirmEdit;
+		var _enterEditMode;
 		const defaultData = {
 			from: -1,
 			to: -1,
@@ -188126,7 +189071,20 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$10 = (obj, member, getter) => (__accessCheck$12(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$12 = (obj, member, value) => member.has(obj) ? __typeError$12("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$10 = (obj, member, value, setter) => (__accessCheck$12(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$5, _provider$3, _slice, _config$2, _src, _onEdit, _onRemove, _app$6, _editorView, _hovering, _onStateChange, _onMouseEnter, _onMouseLeave, _hide;
+		var _content$5;
+		var _provider$3;
+		var _slice;
+		var _config$2;
+		var _src;
+		var _onEdit;
+		var _onRemove;
+		var _app$6;
+		var _editorView;
+		var _hovering;
+		var _onStateChange;
+		var _onMouseEnter;
+		var _onMouseLeave;
+		var _hide;
 		var LinkPreviewTooltip = class {
 			constructor(ctx, view) {
 				this.ctx = ctx;
@@ -189367,7 +190325,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __accessCheck$10 = (obj, member, msg) => member.has(obj) || __typeError$10("Cannot " + msg);
 		var __privateAdd$10 = (obj, member, value) => member.has(obj) ? __typeError$10("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateMethod$1 = (obj, member, method) => (__accessCheck$10(obj, member, "access private method"), method);
-		var _TableNodeView_instances, handleClick_fn;
+		var _TableNodeView_instances;
+		var handleClick_fn;
 		var TableNodeView = class {
 			constructor(ctx, node, view, getPos) {
 				this.ctx = ctx;
@@ -190928,7 +191887,22 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateAdd$a = (obj, member, value) => member.has(obj) ? __typeError$a("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$a = (obj, member, value, setter) => (__accessCheck$a(obj, member, "write to private field"), member.set(obj, value), value);
 		var __privateMethod = (obj, member, method) => (__accessCheck$a(obj, member, "access private method"), method);
-		var _panel, _host, _retryBtn, _config, _visible, _diffActive, _diffStartDoc, _ownedByAI, _DiffActionsPanelView_instances, findHost_fn, makeButton_fn, makeShortcutChip_fn, _retry, canRetry_fn, _rejectAll, _acceptAll;
+		var _panel;
+		var _host;
+		var _retryBtn;
+		var _config;
+		var _visible;
+		var _diffActive;
+		var _diffStartDoc;
+		var _ownedByAI;
+		var _DiffActionsPanelView_instances;
+		var findHost_fn;
+		var makeButton_fn;
+		var makeShortcutChip_fn;
+		var _retry;
+		var canRetry_fn;
+		var _rejectAll;
+		var _acceptAll;
 		const PANEL_CLASS = "milkdown-ai-diff-actions";
 		function setSanitizedIcon(host, svg) {
 			host.innerHTML = purify_default.sanitize(svg.trim());
@@ -191123,7 +192097,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$9 = (obj, member, getter) => (__accessCheck$9(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$9 = (obj, member, value) => member.has(obj) ? __typeError$9("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$9 = (obj, member, value, setter) => (__accessCheck$9(obj, member, "write to private field"), member.set(obj, value), value);
-		var _nodes, _removeById;
+		var _nodes;
+		var _removeById;
 		function createSubmenuBuilder(node) {
 			const builder = {
 				addItem: (id, item) => {
@@ -191577,7 +192552,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$8 = (obj, member, getter) => (__accessCheck$8(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$8 = (obj, member, value) => member.has(obj) ? __typeError$8("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$8 = (obj, member, value, setter) => (__accessCheck$8(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$4, _provider$2, _app$5, _placeholder, _resetSignal, _from, _to, _wantsShow, _onConfirm, _onCancel;
+		var _content$4;
+		var _provider$2;
+		var _app$5;
+		var _placeholder;
+		var _resetSignal;
+		var _from;
+		var _to;
+		var _wantsShow;
+		var _onConfirm;
+		var _onCancel;
 		var AIInstructionTooltipView = class {
 			constructor(ctx, view, config) {
 				this.ctx = ctx;
@@ -191733,7 +192717,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$7 = (obj, member, getter) => (__accessCheck$7(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$7 = (obj, member, value) => member.has(obj) ? __typeError$7("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$7 = (obj, member, value, setter) => (__accessCheck$7(obj, member, "write to private field"), member.set(obj, value), value);
-		var _spinner, _label, _fallbackLabel, _start, _lastLabelText, _rafId, _tick;
+		var _spinner;
+		var _label;
+		var _fallbackLabel;
+		var _start;
+		var _lastLabelText;
+		var _rafId;
+		var _tick;
 		const CLASS_PREFIX = "milkdown-ai-streaming";
 		const SPINNER_PERIOD_MS = 800;
 		const DEFAULT_STREAMING_FALLBACK_LABEL = "Generating";
@@ -191932,7 +192922,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$6 = (obj, member, getter) => (__accessCheck$6(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$6 = (obj, member, value) => member.has(obj) ? __typeError$6("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$6 = (obj, member, value, setter) => (__accessCheck$6(obj, member, "write to private field"), member.set(obj, value), value);
-		var _groups, _getGroupInstance;
+		var _groups;
+		var _getGroupInstance;
 		var GroupBuilder = class {
 			constructor() {
 				__privateAdd$6(this, _groups, []);
@@ -192358,7 +193349,11 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$5 = (obj, member, getter) => (__accessCheck$5(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$5 = (obj, member, value) => member.has(obj) ? __typeError$5("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$5 = (obj, member, value, setter) => (__accessCheck$5(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$3, _app$4, _filter, _slashProvider, _programmaticallyPos;
+		var _content$3;
+		var _app$4;
+		var _filter;
+		var _slashProvider;
+		var _programmaticallyPos;
 		const menu = slashFactory("CREPE_MENU");
 		const menuAPI = $ctx({
 			show: () => {},
@@ -192506,7 +193501,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$4 = (obj, member, getter) => (__accessCheck$4(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$4 = (obj, member, value) => member.has(obj) ? __typeError$4("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$4 = (obj, member, value, setter) => (__accessCheck$4(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$2, _provider$1, _app$3, _ctx;
+		var _content$2;
+		var _provider$1;
+		var _app$3;
+		var _ctx;
 		var BlockHandleView = class {
 			constructor(ctx, config) {
 				__privateAdd$4(this, _content$2);
@@ -192785,7 +193783,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$3 = (obj, member, getter) => (__accessCheck$3(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$3 = (obj, member, value) => member.has(obj) ? __typeError$3("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$3 = (obj, member, value, setter) => (__accessCheck$3(obj, member, "write to private field"), member.set(obj, value), value);
-		var _content$1, _provider, _dom, _innerView, _updateValue, _app$2, _onHide, _shouldShow;
+		var _content$1;
+		var _provider;
+		var _dom;
+		var _innerView;
+		var _updateValue;
+		var _app$2;
+		var _onHide;
+		var _shouldShow;
 		var LatexInlineTooltip = class {
 			constructor(ctx, view, config) {
 				this.ctx = ctx;
@@ -193081,9 +194086,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					alt = true;
 					break;
 				case "shift":
-				case "s":
-					shift = true;
-					break;
+				case "s": shift = true;
 			}
 			const key = normalizeKey(rawKey);
 			return {
@@ -193276,7 +194279,11 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$2 = (obj, member, getter) => (__accessCheck$2(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$2 = (obj, member, value) => member.has(obj) ? __typeError$2("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$2 = (obj, member, value, setter) => (__accessCheck$2(obj, member, "write to private field"), member.set(obj, value), value);
-		var _tooltipProvider, _content, _app$1, _selection, _show;
+		var _tooltipProvider;
+		var _content;
+		var _app$1;
+		var _selection;
+		var _show;
 		const toolbarTooltip = tooltipFactory("CREPE_TOOLBAR");
 		var ToolbarView = class {
 			constructor(ctx, view, config) {
@@ -193685,7 +194692,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet$1 = (obj, member, getter) => (__accessCheck$1(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd$1 = (obj, member, value) => member.has(obj) ? __typeError$1("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet$1 = (obj, member, value, setter) => (__accessCheck$1(obj, member, "write to private field"), member.set(obj, value), value);
-		var _container, _app, _version;
+		var _container;
+		var _app;
+		var _version;
 		const topBarPluginKey = new PluginKey("CREPE_TOP_BAR");
 		var TopBarView = class {
 			constructor(ctx, view, config) {
@@ -193724,9 +194733,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 			destroy: () => {}
 		}) }, "topBarConfig");
 		const topBarPlugin = $prose((ctx) => {
+			const config = ctx.get(topBarSlice.key);
 			return new Plugin({
 				key: topBarPluginKey,
-				view: ctx.get(topBarSlice.key).view
+				view: config.view
 			});
 		});
 		const topBar = (editor, config) => {
@@ -193757,7 +194767,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 		var __privateGet = (obj, member, getter) => (__accessCheck(obj, member, "read from private field"), getter ? getter.call(obj) : member.get(obj));
 		var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
 		var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), member.set(obj, value), value);
-		var _editor, _rootElement, _editable;
+		var _editor;
+		var _rootElement;
+		var _editable;
 		var CrepeBuilder = class {
 			constructor({ root, defaultValue = "" } = {}) {
 				__privateAdd(this, _editor);
@@ -194195,9 +195207,11 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const colLeft = colMovable && colIndex - 1 >= 0;
 			const colRight = colMovable && colIndex + 1 <= map.width - 1;
 			let blockedKey = null;
-			if (!rowUp && !rowDown && !colLeft && !colRight) if (merged || !singleRow || !singleCol) blockedKey = "tableMoveSpan";
-			else if (rowIndex < headerRows) blockedKey = "tableMoveHeader";
-			else blockedKey = "tableMoveEdge";
+			if (!rowUp && !rowDown && !colLeft && !colRight) {
+				if (merged || !singleRow || !singleCol) blockedKey = "tableMoveSpan";
+				else if (rowIndex < headerRows) blockedKey = "tableMoveHeader";
+				else blockedKey = "tableMoveEdge";
+			}
 			return {
 				rowUp,
 				rowDown,
@@ -194337,7 +195351,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				const maxRight = Math.max(inset, container.right - visibleLeft - width - inset);
 				/** 让入口**右边**贴着 `edge`（视口坐标 ✓），并保证整块可见 ✓ */
 				const rightFor = (edge) => Math.min(Math.max(container.right - edge + inset, inset), maxRight);
-				if (cell.right - visibleLeft >= width + inset * 2) for (const wantedTop of [cell.top - size - gap, bandTop - size - gap]) {
+				if (cell.right - visibleLeft >= width + 4) for (const wantedTop of [cell.top - size - gap, bandTop - size - gap]) {
 					if (wantedTop < viewTop) continue;
 					return {
 						top: Math.max(0, Math.round(wantedTop - viewTop + scrollTop)),
@@ -194979,7 +195993,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 		}
 		/** 两次的"禁用原因"是否一样 ✓（一样就复用对象、不重渲染 ✓） */
 		function sameReasons(a, b) {
-			const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+			const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
 			for (const key of keys) if (a[key] !== b[key]) return false;
 			return true;
 		}
@@ -195232,13 +196246,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 				const cell = selectionBlock === null ? null : activeCellRect(view);
 				const entry = tableEntryPosition(visible, containerRect, container.scrollTop, previousBottom, void 0, void 0, void 0, cell);
 				if (entry === null) {
+					const viewport = {
+						top: containerRect.top,
+						bottom: containerRect.bottom
+					};
 					hideEntry(tableEntryHideReason({
 						candidates,
 						visible,
-						viewport: {
-							top: containerRect.top,
-							bottom: containerRect.bottom
-						}
+						viewport
 					}) ?? "no-visible-band");
 					return;
 				}
@@ -198233,6 +199248,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 							className: "graph",
 							ref: graphHostRef,
 							onContextMenuCapture: (event) => {
+								const target = event.target;
+								if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) return;
 								requestCanvasMenu(event.clientX, event.clientY);
 								event.preventDefault();
 							},

@@ -798,21 +798,32 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(stateSource.includes("textWithoutBreaks"), "检测器要按同一份「安全能力范围」摘掉 br ✓");
   });
 
-  it("**布局改版**：编辑器**铺满整个图谱区**，图谱层完全让位（看不见也不穿透）✓", () => {
-    /* ① 编辑器铺满（用户实测要求：不要再"左边一条图谱 + 右边一条编辑栏"✗） */
-    assert.ok(/\.kn-editor \{[^}]*inset: 0/s.test(css), "编辑器要四边贴满图谱区 ✓");
-    assert.ok(!/\.kn-editor \{[^}]*width: min\(440px/s.test(css), "不许再有 440px 侧栏宽度 ✗");
-    assert.ok(!css.includes("padding-right: 440px"), "图谱舞台不必再让位 ✗（它已经被完全盖住 ✓）");
-    /* ② 编辑器层级高过上游 HUD（z-index 6）✓ */
-    assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-editor"), "编辑器要整体抬高 ✓");
-    assert.ok(/z-index: 12/.test(css), "要真正高过 HUD 的 6 ✓");
-    /* ③ 被盖住的图谱层：**不显示**、也不接受指针 ✓（不然 3D 节点会从边缘透出来 ✗） */
-    const hideBlock = /\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage,[\s\S]{0,240}?visibility: hidden;[\s\S]{0,80}?pointer-events: none;/;
-    assert.ok(hideBlock.test(css), "图谱舞台 / 小地图 / HUD 要一起隐藏并不接受指针 ✓");
+  it("**布局**：编辑器占据整块图谱区（当前形态=带边距的浮层卡片 ✓）", () => {
+    /*
+     * 用户实测要求过"完全占据原来的图谱界面" ✗（不许"左边一条图谱 + 右边一条 440px 编辑栏"✓）；
+     * 之后的实现把它做成**带小边距的圆角浮层卡片** ✓（`inset: clamp(12px, 3cqw, 32px)` ✓，
+     * 窄面板降到 10px ✓）——仍然是"占满图谱区" ✓，只是不再四边顶死 ✓。
+     * 这里按**当前形态**钉住三件事：占满（不是侧栏 ✗）、层级够高 ✓、关掉即恢复 ✓。
+     */
+    const editorBlock = /\.kn-editor \{([^}]*)\}/.exec(css);
+    assert.notEqual(editorBlock, null, "要有 .kn-editor 规则 ✓");
+    const body = editorBlock[1] ?? "";
+    assert.ok(/inset:\s*(0|clamp\()/.test(body), "要占满图谱区（inset ✓，不是靠 width 卡一条侧栏 ✗）");
+    if (body.includes("clamp(")) {
+      const max = /clamp\([^)]*?(\d+)px\s*\)/.exec(body);
+      assert.notEqual(max, null, "clamp 要有上限 ✓");
+      assert.ok(Number(max[1]) <= 48, `边距上限要小（实际 ${max?.[1]}px ✓）——否则就成了"又变回侧栏"✗`);
+    }
+    assert.ok(!/width: min\(440px/.test(css), "不许再有 440px 侧栏宽度 ✗");
+    assert.ok(!css.includes("padding-right: 440px"), "图谱舞台不必再让位 ✗（它已经不参与布局 ✓）");
+    /* 层级：编辑器 12 > 图谱遮罩 11 > 上游 HUD 的 6 ✓（菜单/按钮永远不会被盖住 ✓） */
+    assert.ok(/\.kn-editor \{[\s\S]{0,200}?z-index:\s*12/.test(css), "编辑器要抬到 HUD 之上 ✓");
+    assert.ok(/\.kn-graph:has\(\.kn-editor\)::after \{[\s\S]{0,200}?z-index:\s*11/.test(css), "图谱遮罩在编辑器之下 ✓");
+    /* 被盖住的图谱层**不接受指针** ✓（不许点到看不见的控件 ✓） */
+    const noPointer = /\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage,[\s\S]{0,240}?pointer-events: none;/;
+    assert.ok(noPointer.test(css), "舞台 / 小地图 / HUD 一起不接受指针 ✓");
     assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-minimap"), "右下小地图点名列出 ✓");
-    /* ④ 用 `visibility` 而不是 `display`（画布尺寸不变 ⇒ 关掉编辑器回来不用重新测量 ✓） */
-    assert.ok(!/\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage \{[^}]*display: none/s.test(css), "别用 display:none 拆画布 ✗");
-    /* ⑤ 关掉编辑器后规则自动失效（不再依赖任何持久状态）✓ */
+    /* 关掉编辑器后规则自动失效（不再依赖任何持久状态）✓ */
     assert.ok(css.includes(":has(.kn-editor)"), "用 :has 跟随编辑器存在与否 ⇒ 关闭即恢复 ✓");
     assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-sel"), "选中信息条也要让位 ✓");
   });

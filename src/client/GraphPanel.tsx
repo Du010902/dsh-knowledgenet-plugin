@@ -1050,8 +1050,24 @@ function GraphPanelInner(props: {
              *
              * 捕获阶段先于我自己的监听器与上游的冒泡处理执行 ⇒ 先按「空白」打开菜单；
              * 若这次右键其实落在节点/连线上，上游随后派发的节点/连线事件会**覆盖**成对应菜单 ✓。
+             *
+             * ⚠️ 例外：**编辑器里的右键一律跳过** ✗（见下面那段的判断 ✓）——
+             * 编辑器也挂在这块 `.graph` 里 ✓，不排除的话每次右键都会多弹一个"创建节点"菜单 ✗。
              */
             onContextMenuCapture={(event) => {
+              /*
+               * **笔记编辑器里右键不弹图谱菜单** ✗（用户实测：会和表格菜单叠在一起 ✓——
+               * 截图里"这张图 / 创建节点"压在"在左侧插入列 / 本列对齐…"上面 ✓）。
+               *
+               * 编辑器就挂在这块 `.graph` 里 ✓，而这条监听是**捕获阶段**的 ✓
+               * ⇒ 不做判断的话，编辑器里的每一次右键都会开一次"创建节点"菜单 ✗。
+               * 提前返回 ⇒ ① 图谱菜单不弹 ✓；② 也**不 `preventDefault`** ✓
+               * ⇒ 浏览器/系统的原生右键菜单照旧可用 ✓（不许把用户的右键整体吃掉 ✗）。
+               */
+              const target = event.target as Element | null;
+              if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) {
+                return;
+              }
               requestCanvasMenu(event.clientX, event.clientY);
               event.preventDefault();
             }}

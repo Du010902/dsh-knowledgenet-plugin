@@ -105,4 +105,34 @@ describe("客户端类名必须都有样式定义（防「删了样式表、控�
     const backdrop = zOf("kn-modal-backdrop");
     assert.ok(menu > backdrop, `菜单层级(${menu})必须高于遮罩(${backdrop})，否则点击会被遮罩吃掉`);
   });
+
+  /*
+   * 回归（用户实测）：在**笔记编辑器**里右键，会同时弹出图谱的"这张图 / 创建节点"菜单 ✗
+   * —— 截图里它正压在表格菜单上方 ✓。
+   *
+   * 原因：编辑器挂在那块带 `onContextMenuCapture` 的 `.graph` 里 ✓，
+   * 而那条监听是**捕获阶段**的 ✗ ⇒ 不做判断就把每次右键都当"画布空白右键"✓。
+   * 修法：目标在 `.kn-editor` 里就直接返回 ✓（图谱菜单不弹 ✓、
+   * 而且**不 preventDefault** ✓ ⇒ 原生右键菜单照旧 ✓）。
+   */
+  it("编辑器里右键不许弹图谱菜单（回归：会与表格菜单叠在一起）", async () => {
+    const files = await readClientFiles();
+    const graph = files.find((f) => f.name === "GraphPanel.tsx");
+    assert.notEqual(graph, undefined, "要能读到 GraphPanel.tsx");
+    const at = graph.code.indexOf("onContextMenuCapture");
+    assert.notEqual(at, -1, "画布上应有捕获阶段的右键处理");
+    const body = graph.code.slice(at, at + 900);
+    assert.ok(body.includes('target.closest(".kn-editor")'), "必须先判定「是不是编辑器里」");
+    assert.ok(
+      /closest\("\.kn-editor"\)\s*!==\s*null\)\s*\{\s*return;/.test(body),
+      "命中编辑器要**提前返回**（不弹图谱菜单 ✓）",
+    );
+    const guardAt = body.indexOf('closest(".kn-editor")');
+    const canvasAt = body.indexOf("requestCanvasMenu");
+    assert.ok(canvasAt > guardAt, "先判断编辑器、再决定要不要开画布菜单 ✓");
+    assert.ok(
+      body.slice(guardAt, body.indexOf("requestCanvasMenu")).includes("return"),
+      "编辑器那一支不许走到 requestCanvasMenu ✗",
+    );
+  });
 });
