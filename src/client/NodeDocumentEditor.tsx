@@ -733,6 +733,7 @@ export function NodeDocumentEditor(props: {
   return (
     <aside
       className="kn-editor"
+      role="dialog"
       aria-label={t("notePanelTitle")}
       data-dirty={dirty ? "true" : "false"}
       data-phase={state.phase}
