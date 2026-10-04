@@ -29,11 +29,14 @@ import {
   TABLE_LITERAL,
   TABLE_MENU_ITEMS,
   TABLE_POPOVER_HEIGHT,
+  TABLE_CELL_MIN_EM,
+  TABLE_CELL_PADDING_PX,
   movePayload,
   pathHitsNodes,
   pickBodyTable,
   resolveTableTarget,
   tableEntryHideReason,
+  tableMinWidth,
   readTableContext,
   readTableMoveState,
   tableEntryPosition,
@@ -872,5 +875,45 @@ describe("菜单接线：命令、定位、不抢焦点", () => {
       /catch \(error\) \{[\s\S]{0,240}table-action-failed/.test(richSource),
       "命令抛错要自己收住 + 上报诊断 ✗（ErrorBoundary 只接渲染错误 ✓）",
     );
+  });
+
+  /*
+   * 用户实测（第四次）：列一多，`width: 100%` 就把每列压成「一个字一行」✗ ——
+   * 要求「列数过多时，以原来那种下方出现横条的方式让用户查看完整表格」✓。
+   * 单靠 CSS 做不到 ✗（单元格上的 `min-width` 会被自动布局忽略 ✗；
+   * `min-width: max-content` 又会让正文型表格永不换行 ✗）⇒ 按列数算一个**下限** ✓。
+   */
+  it("**表格最小宽度按列数算** ✓：列少铺满、列多出下方横条", () => {
+    const perColumn = TABLE_CELL_MIN_EM * 15 + TABLE_CELL_PADDING_PX; /* 15px 正文那档 ✓ */
+    assert.equal(tableMinWidth(3, 15), 3 * perColumn, "三列 = 三份 ✓");
+    assert.equal(tableMinWidth(1, 15), perColumn, "一列也要有下限 ✓（不然被压成一条 ✗）");
+    /* 阅读栏是 860px（`@container (min-width: 720px)` ✓）⇒ 用它当「可用宽度」分档 ✓ */
+    const column = 860;
+    assert.ok(tableMinWidth(3, 15) < column, "三列的下限要**低于**阅读栏 ⇒ `width: 100%` 生效 ⇒ 铺满 ✓");
+    assert.ok(tableMinWidth(13, 15) > column, "十三列的下限要**高于**阅读栏 ⇒ 溢出 ⇒ 出横条 ✓（截图那一幕 ✓）");
+    /* 字号跟着正文走 ✓（换主题/缩放时下限同步 ✓） */
+    assert.ok(tableMinWidth(3, 20) > tableMinWidth(3, 15), "字号大 ⇒ 下限也要跟着大 ✓");
+    /* 脏输入不许算出 NaN ✗（会写成 `min-width: NaNpx` ✓） */
+    for (const [columns, font] of [[0, 15], [-3, 15], [Number.NaN, 15], [3, Number.NaN], [3, 0]]) {
+      const value = tableMinWidth(columns, font);
+      assert.ok(Number.isFinite(value) && value >= 0, `脏输入要安全：(${columns}, ${font}) ⇒ ${value} ✓`);
+    }
+    assert.equal(tableMinWidth(0, 15), 0, "没有列 ⇒ 0（调用方清掉 min-width ✓）");
+    assert.equal(tableMinWidth(3, Number.NaN), 3 * perColumn, "字号读不出来 ⇒ 回落 15px ✓（不是 0 ✗）");
+  });
+
+  it("表格宽度下限的**接线** ✓（幂等、只在值变时写、清得掉）", () => {
+    assert.ok(richSource.includes("applyTableMinWidths(host)"), "要在编辑器里真的跑一遍 ✓");
+    assert.ok(richSource.includes('table.querySelector("tr")?.children.length ?? 0'), "列数取第一行 ✓");
+    assert.ok(richSource.includes("window.getComputedStyle(table).fontSize"), "字号按**实际计算值**读 ✓");
+    assert.ok(
+      richSource.includes("if (table.style.minWidth !== next) table.style.minWidth = next;"),
+      "值没变就不写 ✓（改 style 也会触发 DOM 变化 ⇒ 不比较就会自激 ✗）",
+    );
+    assert.ok(richSource.includes('const next = wanted > 0 ? `${wanted}px` : "";'), "列数为 0 时要能**清掉**下限 ✓");
+    /* 溢出要真的能滚 ✓（这一条是"下方横条"的落点 ✓） */
+    const overrides = readFileSync(path.join(CLIENT, "editor-overrides.css"), "utf8");
+    assert.ok(/table-wrapper \{[^}]*overflow-x: auto/s.test(overrides), "外层必须能横向滚动 ✓");
+    assert.ok(/milkdown table \{[^}]*width: 100%/s.test(overrides), "常态仍然是「铺满」✓");
   });
 });

@@ -172,10 +172,24 @@ describe("主题 token", () => {
     );
     assert.ok(!/\.kn-editor-rich \.milkdown table \{[^}]*overflow-x/s.test(overrides), "table 本体自己不该横滚 ✓");
     /*
-     * **横向居中** ✓（用户实测：表格原来贴着阅读栏左边缘 ✗，要求"优先居中显示"✓）：
+     * **默认占满阅读栏宽度** ✓（用户第三次实测：列少时也要「占满编辑界面的宽度」✓）：
+     * 原来是 `width: auto`（shrink-to-fit ✓）⇒ 三列表格缩在中间一小块 ✗（截图 ✓）；
+     * 现在 `width: 100%` + `table-layout: auto` ✓ ⇒ 列按内容比例分掉整条阅读栏 ✓。
+     * 溢出仍然安全 ✓：列内容（`min-width: 6em` ✓）撑不下时实际宽度超过容器 ✓，
+     * 此时 auto 外边距按 0 处理 ⇒ 从左边开始、由 `.table-wrapper` 横滚 ✓。
+     */
+    assert.ok(
+      /\.kn-editor-rich \.milkdown table \{[^}]*width: 100%/s.test(overrides),
+      "表格默认要占满编辑区宽度 ✓（不许再 shrink-to-fit ✗）",
+    );
+    assert.ok(
+      !/\.kn-editor-rich \.milkdown table \{[^}]*width: auto/s.test(overrides),
+      "不许退回 `width: auto` ✗（那就是「列少时缩在中间」的成因 ✓）",
+    );
+    /*
+     * **横向居中** ✓（用户第二次实测：表格原来贴着阅读栏左边缘 ✗，要求"优先居中显示"✓）：
      * 用 `margin-inline: auto` 而不是给外层加 flex 居中 ✓ ——
-     * `display: table` 是 shrink-to-fit ✓，有地方就居中 ✓；
-     * 表格比可视宽度还宽时 auto 外边距按 0 处理 ✓ ⇒ 仍从左开始、由 `.table-wrapper` 横滚 ✓
+     * 撑不下时 auto 外边距按 0 处理 ✓ ⇒ 仍从左开始、由 `.table-wrapper` 横滚 ✓
      * （flex `justify-content: center` 会把溢出内容的左边那截滚不到 ✗）。
      */
     assert.ok(

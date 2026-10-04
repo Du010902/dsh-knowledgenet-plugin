@@ -104,15 +104,25 @@
  * `.table-wrapper` ✓），本体老老实实做表格 ✓；列宽不够时**只有表格外层**横滚 ✓，
  * 编辑器整页不跟着横滚 ✓。
  *
- * **横向居中** ✓（用户实测：表格原来贴着正文左边缘 ✓，希望"优先居中显示"✓）：
- * `display: table` 的元素是 shrink-to-fit ✓ ⇒ `margin-inline: auto` 就能在阅读栏里居中 ✓；
- * 更妙的是——表格**比可视宽度还宽**时，auto 外边距按 0 处理 ✓
- * ⇒ 它仍然从左边开始、由 `.table-wrapper` 横滚 ✓（不会把左边那截滚不到 ✗ ——
- * 那正是用 flex `justify-content: center` 居中溢出内容时的经典毛病 ✓）。
+ * **默认占满阅读栏宽度** ✓（用户第三次实测：列少时也"要占满编辑界面的宽度"✓）：
+ * 原来是 `width: auto`（shrink-to-fit ✓ + `margin-inline: auto` 居中 ✓）——
+ * 三列表格只有 ~540px，看着像"缩在中间的一小块"✗（截图 ✓）。
+ * 现在 `width: 100%` + `table-layout: auto` ✓：列按内容比例分掉整条阅读栏 ✓，
+ * 空表格也能一眼看出是"三列一行"的骨架 ✓。
+ *
+ * ⚠️ **列多的时候必须有下限** ✗（用户第四次实测：13 列被压成"一个字一行"✗ ⇒
+ * "以原来那种下方出现横条的方式，让用户查看完整的表格"✓）：
+ * 单元格上的 `min-width` 会被 `width: 100%` 的自动布局忽略 ✗，
+ * 而 `min-width: max-content` 又会让表格**永不换行** ✗（正文型表格会被拉成几千像素 ✗）。
+ * ⇒ 由**脚本按列数**给表格设 `min-width`（`MarkdownRichEditor` 的 `applyTableMinWidths` ✓，
+ * 纯计算是 `table-menu.ts` 里的 `tableMinWidth()` ✓）：
+ * 列少 ⇒ 下限低于可用宽度 ⇒ `width: 100%` 生效 ⇒ **铺满** ✓；
+ * 列多 ⇒ 下限高于可用宽度 ⇒ 表格溢出 ⇒ 外层 `.table-wrapper` 出**下方横条** ✓。
+ * 这一段 CSS 只保证"溢出时仍然安全"✓（见下 ✓）。
  */
 .kn-root .kn-editor-rich .milkdown table {
   display: table;
-  width: auto;
+  width: 100%;
   max-width: none;
   border-collapse: collapse;
   margin-inline: auto;
@@ -123,7 +133,7 @@
   overflow-x: auto;
 }
 
-/* 短表格用自然宽度 ✓（不机械填满 ✓）；单元格留出**文字**空间 ✓ */
+/* 单元格留出**文字**空间 ✓（这一条同时是"列宽下限"✓：列多到撑不下就转成横滚 ✓） */
 .kn-root .kn-editor-rich .milkdown th,
 .kn-root .kn-editor-rich .milkdown td,
 .kn-root .kn-editor-rich .milkdown .milkdown-table-block th,

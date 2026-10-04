@@ -127,18 +127,31 @@ function ensureStyle(): void {
     ".kn-sel-mask {",
     "  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
     "  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
+    /*
+     * **浮条与笔记编辑器里的「＋ 添加前置节点」用同一套外观** ✓
+     * （用户实测要求："添加节点（浮条）的 UI 风格，修改成与文档编辑中添加前置节点一致"✓）。
+     *
+     * 参照物 = 编辑区里那颗浮在选区上方的按钮 ✓
+     * （`NoteRelations` 的 `.kn-note-selection` ✓，样式在 `panel.css` 的
+     * `.kn-note-relations button` / `.kn-note-relations .kn-note-selection` ✓）：
+     * 圆角**矩形**（不是 999px 胶囊 ✗）、`bg-layer-1` 底、`border-l2` 细边、
+     * 更柔的投影（`0 3px 12px 12%` ✗ 不是 `0 6px 20px 28%`）、12px 字、`5px 8px` 内边距 ✓。
+     * 数值两边保持一致 ✓（`tests/selection-action-style.test.mjs` 会逐项比对 ✗ 防止再次跑偏 ✓）。
+     */
     ".kn-sel-bar {",
     "  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
-    "  padding: 4px 6px; border-radius: 999px;",
-    "  border: 0.5px solid var(--dsw-alias-border-l2);",
-    "  background: var(--dsw-alias-bg-layer-2);",
+    "  padding: 3px; border-radius: 8px;",
+    "  border: 1px solid var(--dsw-alias-border-l2);",
+    "  background: var(--dsw-alias-bg-layer-1);",
     "  color: var(--dsw-alias-label-primary);",
-    "  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); font-size: 12px; }",
+    "  box-shadow: 0 3px 12px rgb(0 0 0 / 12%); font-size: 12px; }",
     ".kn-sel-bar button {",
-    "  border: 0; border-radius: 999px; background: transparent; color: inherit;",
-    "  font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; }",
-    ".kn-sel-bar button:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); }",
-    ".kn-sel-bar .kn-sel-primary { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); font-weight: 600; }",
+    "  border: 0; border-radius: 6px; background: transparent; color: inherit;",
+    "  font: inherit; font-size: 12px; padding: 5px 8px; cursor: pointer; }",
+    ".kn-sel-bar button:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
+    /* 主按钮**不再自己铺一层底** ✗：参照物在常态下就是透明底 ✓（悬停/键盘聚焦才给反馈 ✓） */
+    ".kn-sel-bar .kn-sel-primary { background: transparent; font-weight: 600; }",
+    ".kn-sel-bar .kn-sel-primary:hover, .kn-sel-bar .kn-sel-primary:focus-visible { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
     /*
      * 「收集知识点」弹窗的标签组（形态照设计稿 `knowledgenet-multiselect-design.html`）：
      * 一个 chip = 一个待建的知识点，chip 内可改名、× 可删；末尾一个输入框负责新增 ✓。

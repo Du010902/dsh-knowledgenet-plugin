@@ -269,6 +269,36 @@ export const TABLE_ENTRY_GAP = 4;
 export const TABLE_POPOVER_HEIGHT = 264;
 
 /**
+ * 单元格的**最小文字宽度**（em ✓，与 `editor-overrides.css` 里 `th/td { min-width: 6em }` 同一档 ✓）。
+ *
+ * 为什么要按 em 记 ✗：字号是正文那档（15px ✓）算出来的宽度才跟得上主题/缩放 ✓
+ * —— 写死 px 的话换主题就偏 ✓。
+ */
+export const TABLE_CELL_MIN_EM = 6;
+/** 单元格左右内边距之和（px ✓，与 CSS 的 `padding: 8px 12px` 对应 ✓） */
+export const TABLE_CELL_PADDING_PX = 24;
+
+/**
+ * **表格的最小宽度** = 列数 × (每列最小文字宽 + 单元格内边距) ✓
+ * （用户实测 ✓：13 列时"一个字一行"✗ ⇒ 要"列多就横向滚动看完整表格"✓）。
+ *
+ * 为什么必须**按列数算** ✗：
+ * - 只写 `width: 100%` ⇒ 列多时浏览器把每列压到极窄 ✗（单元格上的 `min-width` 会被忽略 ✗）；
+ * - 只写 `min-width: max-content` ⇒ 表格**永不换行** ✗（正文型表格会拉成几千像素 ✗）；
+ * - 按列数给一个**下限** ✓ ⇒ 列少时下限 < 可用宽度 ⇒ `width: 100%` 生效（铺满 ✓）✓；
+ *   列多时下限 > 可用宽度 ⇒ 表格溢出 ✓ ⇒ 交给 `.table-wrapper` 出**下方横条** ✓✓。
+ *
+ * @param columns - 表格的列数（取第一行 `children.length` ✓）。
+ * @param fontPx - 表格当前的 `font-size`（px ✓）。
+ * @returns 最小宽度（px ✓）；列数不合法时返回 0（调用方清掉 `min-width` ✓）。
+ */
+export function tableMinWidth(columns: number, fontPx: number): number {
+  if (!Number.isFinite(columns) || columns <= 0) return 0;
+  const font = Number.isFinite(fontPx) && fontPx > 0 ? fontPx : 15;
+  return Math.round(columns * (TABLE_CELL_MIN_EM * font + TABLE_CELL_PADDING_PX));
+}
+
+/**
  * **一个 table 候选**（DOM 层负责收集 ✓，这里只做判定 ✓ ⇒ 可离线单测 ✓）。
  *
  * 为什么需要它（`design/table-entry-hidden-preview-table-analysis.md` ✓）：

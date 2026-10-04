@@ -39,6 +39,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
+import { tableMinWidth } from "./table-menu.ts";
 import {
   KN_CODE_BLOCK_MIME,
   codeBlockHtml,
@@ -183,8 +184,30 @@ async function writeCodeBlockClipboard(payload: { language: string; code: string
   await clipboard?.writeText?.(plain);
 }
 
-/** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */
-function currentBlockName(view: ProseMirrorView): string | undefined {
+/**
+ * **给每张表格算一个"最小宽度"** ✓（用户实测 ✓）。
+ *
+ * 只靠 CSS 做不到 ✗：`width: 100%` 会让自动布局把列压到极窄（单元格上的 `min-width` 被忽略 ✗，
+ * 13 列就变成"一个字一行"✗）；而 `min-width: max-content` 又会让表格**永不换行** ✗。
+ * 所以按**列数**算下限 ✓：
+ * - 列少 ⇒ 下限 < 可用宽度 ⇒ `width: 100%` 生效 ⇒ **铺满编辑区** ✓（上一次的要求 ✓）；
+ * - 列多 ⇒ 下限 > 可用宽度 ⇒ 表格溢出 ⇒ `.table-wrapper` 出**下方横条** ✓（这一次的要求 ✓）。
+ *
+ * 幂等 ✓：值没变就不写（也就不会自激 ✓ —— 改 `style` 本身也会触发 DOM 变化 ✓）。
+ *
+ * @param root - 编辑器根节点 ✓（只看它里面的表格 ✓）。
+ */
+function applyTableMinWidths(root: HTMLElement): void {
+  for (const table of root.querySelectorAll<HTMLTableElement>(".milkdown-table-block table, table")) {
+    const columns = table.querySelector("tr")?.children.length ?? 0;
+    const fontPx = Number.parseFloat(window.getComputedStyle(table).fontSize);
+    const wanted = tableMinWidth(columns, fontPx);
+    const next = wanted > 0 ? `${wanted}px` : "";
+    if (table.style.minWidth !== next) table.style.minWidth = next;
+  }
+}
+
+/** 当前选区**最内层的块节点名** ✓（用来判断"在不在代码块里"✓） */function currentBlockName(view: ProseMirrorView): string | undefined {
   try {
     const $from = view.state.selection.$from;
     for (let depth = $from.depth; depth > 0; depth -= 1) {
@@ -505,6 +528,12 @@ export function MarkdownRichEditor(props: {
       hideEntry("no-block");
       return;
     }
+    /*
+     * **表格宽度下限**先算好 ✓（用户实测：13 列被压成"一个字一行"✗ ⇒ 列多要出下方横条 ✓）。
+     * 放在 `syncMenu` 里是因为它已经按帧跑在"内容/结构变了"之后 ✓（派发、滚动都触发 ✓），
+     * 不必再加一个观察器 ✗；函数自己带值比较 ⇒ 不会自激 ✓。
+     */
+    applyTableMinWidths(host);
     const context = readTableContext(view.state);
     /*
      * **锚在哪张表格** ✓（复查"多表格切换"那条 ✓）：
