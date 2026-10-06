@@ -10,10 +10,11 @@
  *   外加**搜索**（走宿主 `POST {kind:'search-nodes'}`，与模型看到的同一套检索）。
  * - 每一步都上报（`chat-selection/…`），出问题可从 `kn_status` 自证。
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
+import { makeTranslator } from "./card-model.ts";
 import { pickWorkspacePath } from "./workspace-path.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import {
@@ -104,6 +105,8 @@ export interface ChatSelectionBarProps {
   };
   /** 逐步上报 */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
+  /** 宿主 / 插件的翻译函数 ✓（缺 `copy` 的字段时用它补 ✓） */
+  t?: unknown;
   /** 标准 props：工作区快照选择器（判断当前工作区是不是知识库） */
   useWorkspaces?: (selector: (snapshot: unknown) => unknown) => unknown;
   /** 标准 props：当前会话 id */
@@ -352,12 +355,69 @@ function domSessionOf(): string | null {
   }
 }
 
+/*
+ * **划词浮条 / 收集弹窗的默认文案** ✓（用户实测：英文界面下这里还是中文 ✗）。
+ *
+ * 这些文案本来由卡片 `copy` 配置提供 ✓（宿主给什么用什么 ✓）；宿主**没给**的那几条
+ * 以前直接写中文默认值 ✗ ⇒ 英文界面下漏出来 ✓。
+ * 现在：`copy` 里缺哪条就补哪条 ✓（宿主给了的**原样保留** ✗），补的值先走 `t` ✓，
+ * 键的英文值在中英词典里 ✓；下面这份只是最后的字面兜底 ✓。
+ */
+/** 字段名 → 词典键：只有撞车的才需要 ✓ */
+const COPY_KEY_ALIAS: Record<string, string> = { searchPlaceholder: "chatSearchPlaceholder" };
+
+const CHAT_LITERAL: Record<string, string> = {
+  addNode: "添加节点",
+  nothingSelected: "没有选中文字",
+  noWorkspace: "找不到当前工作区，无法创建",
+  createLibraryFailed: "创建知识库失败",
+  createNodeFailed: "创建节点失败",
+  createNodeDone: "已创建",
+  multiLabel: "被添加的知识点",
+  multiDetails: "继续在对话中划词会自动追加",
+  multiAsPrereq: "是否添加为前置",
+  addStandalone: "创建独立节点",
+  targetSection: "添加为谁的前置",
+  chatSearchPlaceholder: "输入名称搜索",
+  resultsLabel: "搜索结果",
+  loadingNodes: "正在读取当前知识库…",
+  noRecommend: "这个库里还没有可推荐的最近节点，直接搜索吧",
+  noResult: "没有匹配的知识点",
+  selectMark: "选择",
+  statusPick: "请选择要添加到的知识点",
+  addPrereq: "添加为前置…",
+  multiDragHint: "按住拖动可以把它挪开，方便继续在对话里选文字",
+  multiPlaceholder: "在对话中划词，选中的文字会出现在这里",
+  bulkCreateFailed: "创建失败：{done}/{total} 个成功",
+  chipNameLabel: "第 {index} 个知识点名称",
+  chipRemoveLabel: "移除 {name}",
+  statusSelected: "添加为「{title}」的前置",
+  chipsCount: "{count} 个知识点",
+  needOneChip: "先添加至少一个知识点",
+  libraryEmpty: "这个知识库还没有任何节点：请先创建独立节点",
+};
+
 /**
  * 划词浮条 + 片段收集 + 目标选择。
  * @param props - 文案与上报回调。
  * @returns portal 出去的小条与弹窗（没有划词时什么都不渲染）。
  */
 export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
+  const tr = useMemo(() => makeTranslator(props.t, CHAT_LITERAL), [props.t]);
+  /**
+   * **补齐 `copy`** ✓：宿主给了的照用 ✗，没给的用 `tr("键")` ✓（英文界面下就是英文 ✓）。
+   * 只补字符串字段 ✓（`multiCount` 那种函数型字段原样保留 ✓）。
+   */
+  const copy = useMemo(() => {
+    /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- 见下：字段名撞车时换键 ✓ */
+    const out: Record<string, unknown> = { ...props.copy };
+    for (const key of Object.keys(CHAT_LITERAL)) {
+      const value = out[key];
+      /* 字段名与词典里别的键同名时（`searchPlaceholder` ✓）用带前缀的键 ✗，别串词 ✓ */
+      if (typeof value !== "string" || value.trim() === "") out[key] = tr(COPY_KEY_ALIAS[key] ?? key);
+    }
+    return out as typeof props.copy;
+  }, [props.copy, tr]);
   const [bar, setBar] = useState<{ x: number; y: number; text: string } | null>(null);
   /**
    * 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
@@ -735,7 +795,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const createStandalone = async (text: string): Promise<boolean> => {
     const title = text.trim();
     if (title === "") {
-      setNote(props.copy.nothingSelected ?? "没有选中文字");
+      setNote(copy.nothingSelected);
       return false;
     }
     try {
@@ -750,7 +810,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         const target = await resolveWriteTarget();
         root = target.root !== "" ? target.root : target.createPath;
         if (root === "") {
-          setNote(props.copy.noWorkspace ?? "找不到当前工作区，无法创建");
+          setNote(copy.noWorkspace);
           report("standalone-create", "no-workspace");
           return false;
         }
@@ -768,7 +828,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           | null;
         if (outcome?.ok !== true) {
           const code = outcome?.error?.code ?? "unknown";
-          setNote(`${props.copy.createLibraryFailed ?? "创建知识库失败"}：[${code}] ${outcome?.error?.message ?? ""}`);
+          setNote(`${copy.createLibraryFailed}：[${code}] ${outcome?.error?.message ?? ""}`);
           report("standalone-create", `library-failed:${code}`);
           return false;
         }
@@ -786,15 +846,15 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         | null;
       if (body?.ok !== true) {
         const code = body?.error?.code ?? "unknown";
-        setNote(`${props.copy.createNodeFailed ?? "创建节点失败"}：[${code}] ${body?.error?.message ?? ""}`);
+        setNote(`${copy.createNodeFailed}：[${code}] ${body?.error?.message ?? ""}`);
         report("standalone-create", `node-failed:${code}`);
         return false;
       }
-      setNote(`${props.copy.createNodeDone ?? "已创建"}：${body.node?.title ?? title}`);
+      setNote(`${copy.createNodeDone}：${body.node?.title ?? title}`);
       report("standalone-create", "ok");
       return true;
     } catch (cause) {
-      setNote(`${props.copy.createNodeFailed ?? "创建节点失败"}：${cause instanceof Error ? cause.message : String(cause)}`);
+      setNote(`${copy.createNodeFailed}：${cause instanceof Error ? cause.message : String(cause)}`);
       report("standalone-create", `threw:${cause instanceof Error ? cause.message : String(cause)}`.slice(0, 120));
       return false;
     }
@@ -1471,7 +1531,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         notifyLibraryChanged();
         closeMulti();
       } else {
-        setNote(`创建失败：0/${list.length} 个成功`);
+        setNote(tr("bulkCreateFailed", { done: 0, total: list.length }));
       }
       report("standalone-create", `multi:${ok}/${list.length}`);
     })();
@@ -1512,7 +1572,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
               report("open-dialog", { chars: text.length });
             }}
           >
-            {props.copy.addNode ?? "添加节点"}
+            {copy.addNode}
           </button>
         </div>,
         document.body,
@@ -1533,14 +1593,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
              * 标题已按用户要求去掉 ⇒ 不能再写 `aria-labelledby`（那个 id 已经不存在，
              * 悬空引用会让读屏念不出弹窗名字 ✗）。
              */
-            aria-label={props.copy.multiLabel ?? "被添加的知识点"}
+            aria-label={copy.multiLabel}
             style={multiPos === null ? undefined : { position: "fixed", left: multiPos.x, top: multiPos.y, margin: 0 }}
           >
             <div
               className="kn-pick-head"
               style={{ cursor: "move", userSelect: "none" }}
               onMouseDown={startDragMulti}
-              title="按住拖动可以把它挪开，方便继续在对话里选文字"
+              title={tr("multiDragHint")}
             >
               {/*
                 * 用户要求去掉「收集知识点」这个标题 ✓。
@@ -1552,7 +1612,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
             <div className="kn-pick-content">
               <div className="kn-ms-label-row">
-                <span className="kn-pick-label">{props.copy.multiLabel ?? "被添加的知识点"}</span>
+                <span className="kn-pick-label">{copy.multiLabel}</span>
                 {/* 右侧那行「点击标签可修改名称」用户要求删掉 ✓（标签本身看得出能改，不必写一行说明） */}
               </div>
 
@@ -1565,7 +1625,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   <span className="kn-ms-chip" key={index}>
                     <input
                       value={name}
-                      aria-label={`第 ${index + 1} 个知识点名称`}
+                      aria-label={tr("chipNameLabel", { index: index + 1 })}
                       /* 宽度跟着内容走（设计稿的做法 ✓），长标题最多 300px */
                       style={{ width: Math.min(300, Math.max(24, name.length * 14 + 8)) }}
                       onChange={(event) => {
@@ -1576,7 +1636,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     <button
                       type="button"
                       className="kn-ms-remove"
-                      aria-label={`移除 ${name}`}
+                      aria-label={tr("chipRemoveLabel", { name })}
                       /* 按下别动选区/焦点，免得删一个标签就把对话里的选区弄没 ✓ */
                       onMouseDown={(event) => { event.preventDefault(); }}
                       onClick={() => { setChips((current) => current.filter((_, i) => i !== index)); }}
@@ -1593,7 +1653,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   * 标签本身仍然可以就地改名 ✓（见上面的 chip 输入框）—— 用户要求保留这一条。
                   */}
                 {chips.length === 0 ? (
-                  <span className="kn-ms-placeholder">在对话中划词，选中的文字会出现在这里</span>
+                  <span className="kn-ms-placeholder">{tr("multiPlaceholder")}</span>
                 ) : null}
               </div>
 
@@ -1602,7 +1662,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 * 位置在框外：不再暗示"可以在这里输入"，只说明划词会自动追加 ✓。
                 */}
               <div className="kn-ms-details">
-                {props.copy.multiDetails ?? "继续在对话中划词会自动追加"}
+                {copy.multiDetails}
               </div>
 
               {/*
@@ -1612,7 +1672,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 * （建独立节点 ↔ 加为前置），radio 的语义比"勾选/不勾选"更准 ✓；
                 * 而且原生 radio 自动带方向键与 Space 操作，键盘可达性不用自己补 ✓。
                 */}
-              <div className="kn-ms-mode" role="radiogroup" aria-label={props.copy.multiAsPrereq ?? "是否添加为前置"}>
+              <div className="kn-ms-mode" role="radiogroup" aria-label={copy.multiAsPrereq}>
                 <label className="kn-ms-radio">
                   <input
                     type="radio"
@@ -1620,7 +1680,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     checked={!asPrereq}
                     onChange={chooseStandaloneMode}
                   />
-                  <span>{props.copy.addStandalone ?? "创建独立节点"}</span>
+                  <span>{copy.addStandalone}</span>
                 </label>
                 <label className="kn-ms-radio">
                   <input
@@ -1629,7 +1689,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     checked={asPrereq}
                     onChange={choosePrereqMode}
                   />
-                  <span>{props.copy.multiAsPrereq ?? "添加为另一个知识点的前置"}</span>
+                  <span>{copy.multiAsPrereq}</span>
                 </label>
               </div>
               {note === null ? null : <div className="kn-ms-note" style={{ opacity: 1 }}>{note}</div>}
@@ -1641,7 +1701,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                 */}
               {asPrereq ? (
                 <div className="kn-pick-target">
-                  <div className="kn-pick-section">{props.copy.targetSection ?? "添加为谁的前置"}</div>
+                  <div className="kn-pick-section">{copy.targetSection}</div>
 
                   {/*
                    * 搜索框上方原本还有一行「搜索知识点」文字，用户要求删掉 ✓。
@@ -1684,7 +1744,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                       className="kn-search-input"
                       type="search"
                       value={query}
-                      placeholder={props.copy.searchPlaceholder ?? "输入名称搜索"}
+                      placeholder={copy.searchPlaceholder}
                       /* 可见标签删掉后，名字改由 aria-label 给（读屏仍能念出"搜索知识点"）✓ */
                       aria-label={props.copy.searchLabel ?? props.copy.searchHint}
                       /* 输入框自己不画框（框在外层），也不依赖任何外部样式表 ✓ */
@@ -1708,7 +1768,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
                   {/* 有输入 → 「搜索结果」；没输入 → 「推荐」（与设计稿一致） */}
                   <div className="kn-pick-group">
-                    {query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}
+                    {query.trim() === "" ? props.copy.recommended : (copy.resultsLabel)}
                   </div>
 
                   {/*
@@ -1716,7 +1776,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     * 免得把别的库残留的 id 当成"本库的推荐" ✗（用户实测过 ✓）。
                     */}
                   {query.trim() === "" && libraryTitles === null ? (
-                    <p className="kn-pick-empty">{props.copy.loadingNodes ?? "正在读取当前知识库…"}</p>
+                    <p className="kn-pick-empty">{copy.loadingNodes}</p>
                   ) : null}
 
                   {searching ? <p className="kn-pick-empty">{props.copy.searching}</p> : null}
@@ -1724,13 +1784,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   {pickRows.length === 0 && !searching && !(query.trim() === "" && libraryTitles === null) ? (
                     <p className="kn-pick-empty">
                       {query.trim() === ""
-                        ? (props.copy.noRecommend ?? "这个库里还没有可推荐的最近节点，直接搜索吧")
-                        : (props.copy.noResult ?? "没有匹配的知识点")}
+                        ? (copy.noRecommend)
+                        : (copy.noResult)}
                     </p>
                   ) : null}
 
                   {pickRows.length === 0 ? null : (
-                    <div className="kn-pick-results" aria-label={query.trim() === "" ? props.copy.recommended : (props.copy.resultsLabel ?? "搜索结果")}>
+                    <div className="kn-pick-results" aria-label={query.trim() === "" ? props.copy.recommended : (copy.resultsLabel)}>
                       {pickRows.map((row) => {
                         const active = selectedTarget?.id === row.id;
                         return (
@@ -1742,7 +1802,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                             onClick={() => { setSelectedTarget({ id: row.id, title: row.title }); }}
                           >
                             <span className="kn-pick-row-name">{row.title}</span>
-                            <span className="kn-pick-row-mark">{active ? "✓" : (props.copy.selectMark ?? "选择")}</span>
+                            <span className="kn-pick-row-mark">{active ? "✓" : (copy.selectMark)}</span>
                           </button>
                         );
                       })}
@@ -1761,9 +1821,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                   */}
                 {asPrereq
                   ? (selectedTarget === null
-                    ? (props.copy.statusPick ?? "请选择要添加到的知识点")
-                    : (props.copy.statusSelected?.(selectedTarget.title) ?? `添加为「${selectedTarget.title}」的前置`))
-                  : (props.copy.multiCount ? props.copy.multiCount(chips.length) : `${chips.length} 个知识点`)}
+                    ? (copy.statusPick)
+                    : (props.copy.statusSelected?.(selectedTarget.title) ?? tr("statusSelected", { title: selectedTarget.title })))
+                  : (props.copy.multiCount ? props.copy.multiCount(chips.length) : tr("chipsCount", { count: chips.length }))}
               </div>
               <div className="kn-pick-actions">
                 <button
@@ -1785,9 +1845,9 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                    */
                   disabled={chips.length === 0 || (asPrereq && selectedTarget === null)}
                   title={
-                    chips.length === 0 ? "先添加至少一个知识点"
+                    chips.length === 0 ? tr("needOneChip")
                       : asPrereq && libraryTitles !== null && Object.keys(libraryTitles).length === 0
-                        ? "这个知识库还没有任何节点：请先创建独立节点"
+                        ? tr("libraryEmpty")
                         : undefined
                   }
                   onClick={() => {
@@ -1800,7 +1860,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
                     else createStandaloneAll();
                   }}
                 >
-                  {asPrereq ? (props.copy.addPrereq ?? "添加为前置…") : (props.copy.addStandalone ?? "创建独立节点")}
+                  {asPrereq ? (copy.addPrereq) : (copy.addStandalone)}
                 </button>
               </div>
             </div>

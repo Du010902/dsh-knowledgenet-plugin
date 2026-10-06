@@ -1,3 +1,5 @@
+import { pluginTranslate } from "./plugin-locale.ts";
+
 /**
  * 工具卡片的**纯数据模型**（无 JSX、无 React）。
  *
@@ -168,14 +170,31 @@ export function makeTranslator(
   const bind = typeof t === "function" ? (t as (key: string) => unknown) : null;
   return (key, values) => {
     let template = dict[key] ?? key;
-    if (bind !== null) {
+    /*
+     * **三级取词** ✓（用户实测：英文界面下插件满屏中文 ✗）：
+     * ① 宿主注入的 `t` ✓；② **插件自己 bind 的翻译函数** ✓（`plugin-locale.ts` ✓）；
+     * ③ 组件内字面文案 ✓。实测英文界面里 ① 没能解析出我们的命名空间 ✗ ⇒ 只靠 ① 会一直中文 ✓。
+     */
+    const fromHost = (): string | null => {
+      if (bind === null) return null;
       try {
         const text = bind(key);
-        if (typeof text === "string" && text !== "" && text !== key) template = text;
+        return typeof text === "string" && text !== "" && text !== key ? text : null;
       } catch {
         // 宿主 locale 服务行为变化时静默回落
+        return null;
       }
-    }
+    };
+    const fromPlugin = (): string | null => {
+      try {
+        const text = pluginTranslate()?.(key);
+        return typeof text === "string" && text !== "" && text !== key ? text : null;
+      } catch {
+        return null;
+      }
+    };
+    const text = fromHost() ?? fromPlugin();
+    if (text !== null) template = text;
     if (values === undefined) return template;
     return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? ""));
   };

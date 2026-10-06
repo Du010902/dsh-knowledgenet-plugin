@@ -54,6 +54,9 @@ export interface TableMenuItem {
 /** 菜单文案（宿主 locale 缺席时的回落；正式文案在中英词典里 ✓） */
 export const TABLE_LITERAL: Record<string, string> = {
   tableMenuLabel: "表格操作",
+  /* 公式 / 代码块那两颗按钮 ✓（原来硬编码中文 ✗ ⇒ 英文界面下也是中文 ✓） */
+  editorEditSource: "编辑源码",
+  editorResultOnly: "只看结果",
   tableRowBefore: "在上方插入行",
   tableRowAfter: "在下方插入行",
   tableColBefore: "在左侧插入列",
@@ -71,6 +74,12 @@ export const TABLE_LITERAL: Record<string, string> = {
   /* 动不了时给出**为什么** ✓（复查要求"边界时禁用对应方向"✓） */
   tableMoveEdge: "已经在边界上，这个方向移不动",
   tableMoveHeader: "表头行不参与移动",
+  /*
+   * **表头行上方不能再插行** ✓（用户实测两轮后的最终口径 ✓）：
+   * Markdown 表格里第一行**就是表头** ✓ ⇒ 它上面没有可插入的位置 ✓
+   * （硬插会把整张表拆成两张 ✗）。
+   */
+  tableRowBeforeHeader: "第一行是表头，上面没有位置可插入（Markdown 表格的第一行就是表头）",
   tableMoveSpan: "选中的是多行 / 多列，或表里有合并单元格 ⇒ 先只选中一行或一列",
   tableMoveUnavailable: "这份表格暂时不能移动行列",
   /* 只读 / 保存中：入口还在，但禁用并说明状态 ✓ */

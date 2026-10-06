@@ -149,10 +149,24 @@
   overflow-wrap: break-word;
 }
 
-/* 表头：浅底 + 加粗 ⇒ 和正文段落一眼区分 ✓ */
+/*
+ * 表头：**必须一眼看出来** ✓（用户实测：亮色主题下几乎分不出第一行是表头 ✗）。
+ *
+ * 之前只用 `--dsw-alias-bg-layer-2` ✗ —— 亮色主题里它和页面底色几乎一样 ✓
+ * ⇒ 等于没有底色 ✓（截图里第一行和正文行长得一模一样 ✓）。
+ * 现在给**三重信号** ✓，而且不写死颜色 ✓（两个主题都成立 ✓）：
+ * ① 底色 = 在表格底色上叠一层**主文字色的 8%** ✓
+ *    （亮色 ⇒ 淡灰 ✓；暗色 ⇒ 淡亮 ✓）；
+ * ② 字重 600 ✓（只有底色、没有字重时，浅色下仍然容易糊 ✗）。
+ *
+ * ⚠️ **表头下边框不加粗** ✗（用户实测："这条线太突兀了，和表格中的其它线条保持一致"✓）：
+ * 之前给它叠了一条 32% 的深色下边框 ✗ —— 底色 + 字重其实已经够区分了 ✓，
+ * 多出来的那条重线反而像表格外面套了个框 ✓。现在表头**不再覆盖任何边框** ✓，
+ * 用的就是单元格那条 `1px solid var(--dsw-alias-border-l2)` ✓，与表格里其它线完全一致 ✓。
+ */
 .kn-root .kn-editor-rich .milkdown th,
 .kn-root .kn-editor-rich .milkdown .milkdown-table-block th {
-  background: var(--dsw-alias-bg-layer-2);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, var(--dsw-alias-bg-layer-1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }

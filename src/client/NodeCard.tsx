@@ -9,6 +9,7 @@ import { makeTranslator, nodeCardModel, parseToolResult, type NodeRef } from "./
 import { ShadowPanel } from "./shadow.tsx";
 
 const LITERAL: Record<string, string> = {
+  hasEvidence: "有出处",
   loading: "正在读取知识点…",
   unreadable: "这条工具结果不是可读的知识点数据。",
   failed: "读取知识点失败",
@@ -69,7 +70,7 @@ export function NodeCard(props: { phase?: string; block?: Parameters<typeof pars
                 <li key={`${relation.title}-${relation.description}`}>
                   <span className="kn-arrow">→</span> {relation.title}
                   {relation.description === "" ? null : <span className="kn-dim">：{relation.description}</span>}
-                  {relation.hasEvidence ? <span className="kn-tag">有出处</span> : null}
+                  {relation.hasEvidence ? <span className="kn-tag">{t("hasEvidence")}</span> : null}
                 </li>
               ))}
             </ul>

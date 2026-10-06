@@ -14,6 +14,7 @@ import { registerChatSelectionBar, type ChatSelectionCopy } from "./badges.ts";
 import { NodeCard } from "./NodeCard.tsx";
 import { PrereqCard } from "./PrereqCard.tsx";
 import { readZh, type LocaleServiceLike } from "./locale-choice.ts";
+import { attachPluginLocale, pluginTranslate, type PluginLocaleService } from "./plugin-locale.ts";
 import { prefersEnglish } from "./tab-definition.ts";
 import { registerGraphTab } from "./tab.ts";
 
@@ -88,6 +89,99 @@ const DICT_ZH: Record<string, string> = {
   /* 动不了时说明为什么 ✓；只读 / 保存中：入口还在但禁用 ✓ */
   tableMoveEdge: "已经在边界上，这个方向移不动",
   tableMoveHeader: "表头行不参与移动",
+  /* 表头行上方没有可插入的位置 ✓（用户实测 ✓） */
+  tableRowBeforeHeader: "第一行是表头，上面没有位置可插入（Markdown 表格的第一行就是表头）",
+  /* 关系面板（`NoteRelations` ✓）—— 之前是硬编码中文 ✗，英文界面下不会跟着变 ✓ */
+  relPre: "前置 {count}",
+  relDepend: "被依赖 {count}",
+  relAdd: "＋ 添加前置",
+  relAddFromSelection: "＋ 添加前置节点",
+  relAddTitle: "添加前置",
+  relPreTitle: "前置知识",
+  relDependTitle: "依赖此节点",
+  relEmpty: "暂无关系",
+  relSearchPlaceholder: "搜索已有节点，或输入新节点名称",
+  relSearchLabel: "前置节点名称",
+  relCreate: "新建「{title}」并设为前置",
+  relAdding: "添加中…",
+  relFailed: "添加失败，请重试",
+  relClose: "关闭关系面板",
+  relOpen: "打开「{title}」",
+  /* 公式 / 代码块的预览开关 ✓ */
+  editorEditSource: "编辑源码",
+  editorResultOnly: "只看结果",
+  /* 划词浮条 / 收集弹窗（`ChatSelectionBar` ✓）—— 之前是硬编码中文默认值 ✗ */
+  addNode: "添加节点",
+  nothingSelected: "没有选中文字",
+  noWorkspace: "找不到当前工作区，无法创建",
+  createLibraryFailed: "创建知识库失败",
+  createNodeFailed: "创建节点失败",
+  createNodeDone: "已创建",
+  multiLabel: "被添加的知识点",
+  multiDetails: "继续在对话中划词会自动追加",
+  multiAsPrereq: "是否添加为前置",
+  addStandalone: "创建独立节点",
+  targetSection: "添加为谁的前置",
+  chatSearchPlaceholder: "输入名称搜索",
+  resultsLabel: "搜索结果",
+  loadingNodes: "正在读取当前知识库…",
+  noRecommend: "这个库里还没有可推荐的最近节点，直接搜索吧",
+  noResult: "没有匹配的知识点",
+  selectMark: "选择",
+  statusPick: "请选择要添加到的知识点",
+  addPrereq: "添加为前置…",
+  multiDragHint: "按住拖动可以把它挪开，方便继续在对话里选文字",
+  multiPlaceholder: "在对话中划词，选中的文字会出现在这里",
+  bulkCreateFailed: "创建失败：{done}/{total} 个成功",
+  chipNameLabel: "第 {index} 个知识点名称",
+  chipRemoveLabel: "移除 {name}",
+  statusSelected: "添加为「{title}」的前置",
+  createNodeTitle: "创建知识点",
+  hasEvidence: "有出处",
+  /* 图谱面板 / 编辑器里那些**只有字面兜底、词典里缺**的键 ✓（用户实测：英文界面下仍是中文 ✗） */
+  refreshHint: "重新从磁盘读取知识库（绕过宿主的库缓存）",
+  relayoutHint: "重排布局，并把旋转中心复位到整张图",
+  emptyHint: "在空白处右键即可新建节点",
+  nodeMenuTitle: "这个知识点",
+  addPrerequisite: "添加前置节点…",
+  edgeMenuTitle: "这条依赖",
+  removeRelation: "删除这条依赖",
+  removeNode: "删除当前节点",
+  removeNodeConfirmTitle: "删除这个节点？",
+  removeNodeConfirmMessage: "要删除的知识点",
+  removeNodeDone: "已删除",
+  autoCreateFailed: "自动创建知识库失败",
+  promptTitle: "添加前置节点",
+  promptHint: "输入前置知识点的名称",
+  confirmCreate: "添加",
+  removeConfirmTitle: "删除依赖",
+  removeConfirmMessage: "确认删除这条前置关系吗？",
+  menuFailed: "操作失败",
+  focusNow: "当前知识点",
+  dependentsEmpty: "没有其它知识点依赖它",
+  prerequisitesEmpty: "它没有前置知识",
+  statusDone: "已完成",
+  statusLearning: "学习中",
+  statusTodo: "未开始",
+  notKnowledgeBase: "当前工作区不是知识库（没有通过「添加知识库」按钮登记过）。用左侧栏「工作区」表头上的知识库按钮把它加进来即可。",
+  panelCrashed: "面板渲染出错：请刷新页面；若持续出现，请把控制台里的报错发给我。",
+  retryLoad: "重试读取",
+  retrySave: "重试保存",
+  missingFingerprint: "这份文档没有可用的版本指纹，出于安全不能编辑",
+  emptyDocument: "（这个节点还没有正文，直接写就行）",
+  cancel: "取消",
+  candidatesTitle: "已经有相近的知识点",
+  candidatesMessage: "库里已有相近节点，建议复用而不是新建",
+  reuse: "复用",
+  createAnyway: "仍然新建",
+  chipsCount: "{count} 个知识点",
+  needOneChip: "先添加至少一个知识点",
+  libraryEmpty: "这个知识库还没有任何节点：请先创建独立节点",
+  canvasMenuTitle: "这张图",
+  createNode: "创建节点",
+  createNodeHint: "输入知识点名称（会作为它的文件名）",
+  removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
+  removeNodePurge: "删除",
   tableMoveSpan: "选中的是多行 / 多列，或表里有合并单元格 ⇒ 先只选中一行或一列",
   tableMoveUnavailable: "这份表格暂时不能移动行列",
   tableEntryDisabled: "编辑器暂时不能改表格（正在保存或只读）",
@@ -205,6 +299,98 @@ const DICT_EN: Record<string, string> = {
   /* Why a move is unavailable; and the disabled entry state ✓ */
   tableMoveEdge: "Already at the edge — cannot move further that way",
   tableMoveHeader: "The header row does not move",
+  /* There is no position above the header row ✓ */
+  tableRowBeforeHeader: "The first row is the header — Markdown has no position above it",
+  /* Relations panel ✓ */
+  relPre: "Prerequisites {count}",
+  relDepend: "Dependents {count}",
+  relAdd: "+ Add prerequisite",
+  relAddFromSelection: "+ Add prerequisite node",
+  relAddTitle: "Add prerequisite",
+  relPreTitle: "Prerequisites",
+  relDependTitle: "Depends on this node",
+  relEmpty: "No relations yet",
+  relSearchPlaceholder: "Search existing nodes, or type a new name",
+  relSearchLabel: "Prerequisite node name",
+  relCreate: "Create “{title}” as a prerequisite",
+  relAdding: "Adding…",
+  relFailed: "Could not add — please retry",
+  relClose: "Close the relations panel",
+  relOpen: "Open “{title}”",
+  editorEditSource: "Edit source",
+  editorResultOnly: "Result only",
+  /* Chat selection bar / collection dialog ✓ */
+  addNode: "Add node",
+  nothingSelected: "Nothing selected",
+  noWorkspace: "No current workspace — cannot create",
+  createLibraryFailed: "Could not create the library",
+  createNodeFailed: "Could not create the node",
+  createNodeDone: "Created",
+  multiLabel: "Selected knowledge points",
+  multiDetails: "Keep selecting in the conversation to append more",
+  multiAsPrereq: "Add as a prerequisite?",
+  addStandalone: "Create a standalone node",
+  targetSection: "Prerequisite of",
+  chatSearchPlaceholder: "Type a name to search",
+  resultsLabel: "Results",
+  loadingNodes: "Reading the knowledge library…",
+  noRecommend: "No recent nodes to recommend yet — just search",
+  noResult: "No matching knowledge point",
+  selectMark: "Select",
+  statusPick: "Pick the knowledge point to add to",
+  addPrereq: "Add as prerequisite…",
+  multiDragHint: "Drag to move it aside so you can keep selecting text in the conversation",
+  multiPlaceholder: "Select text in the conversation and it appears here",
+  bulkCreateFailed: "Failed: {done}/{total} created",
+  chipNameLabel: "Knowledge point {index} name",
+  chipRemoveLabel: "Remove {name}",
+  statusSelected: "Make it a prerequisite of “{title}”",
+  createNodeTitle: "Create knowledge point",
+  hasEvidence: "Has source",
+  /* Panel / editor keys that previously only had literal fallbacks ✓ */
+  refreshHint: "Re-read the library from disk (bypass the host's cache)",
+  relayoutHint: "Re-layout and reset the rotation center to the whole graph",
+  emptyHint: "Right-click empty space to create a node",
+  nodeMenuTitle: "This knowledge point",
+  addPrerequisite: "Add prerequisite…",
+  edgeMenuTitle: "This dependency",
+  removeRelation: "Delete this dependency",
+  removeNode: "Delete this node",
+  removeNodeConfirmTitle: "Delete this node?",
+  removeNodeConfirmMessage: "Knowledge point to delete",
+  removeNodeDone: "Deleted",
+  autoCreateFailed: "Could not create the library automatically",
+  promptTitle: "Add a prerequisite node",
+  promptHint: "Type the prerequisite's name",
+  confirmCreate: "Add",
+  removeConfirmTitle: "Delete dependency",
+  removeConfirmMessage: "Delete this prerequisite relation?",
+  menuFailed: "Action failed",
+  focusNow: "Current knowledge point",
+  dependentsEmpty: "Nothing depends on it",
+  prerequisitesEmpty: "It has no prerequisites",
+  statusDone: "Done",
+  statusLearning: "Learning",
+  statusTodo: "Not started",
+  notKnowledgeBase: "This workspace is not a knowledge library (it was never registered with “Add knowledge library”). Use the knowledge-library button on the Workspaces header in the left sidebar.",
+  panelCrashed: "The panel failed to render. Refresh the page; if it keeps happening, send me the console error.",
+  retryLoad: "Retry loading",
+  retrySave: "Retry saving",
+  missingFingerprint: "This document has no usable revision fingerprint, so it cannot be edited safely",
+  emptyDocument: "(This node has no body yet — just start typing)",
+  cancel: "Cancel",
+  candidatesTitle: "Similar knowledge points already exist",
+  candidatesMessage: "The library already has similar nodes — reuse one instead of creating a new one",
+  reuse: "Reuse",
+  createAnyway: "Create anyway",
+  chipsCount: "{count} selected",
+  needOneChip: "Add at least one knowledge point first",
+  libraryEmpty: "This library has no nodes yet — create a standalone node first",
+  canvasMenuTitle: "This graph",
+  createNode: "Create node",
+  createNodeHint: "Type the knowledge point's name (it becomes the file name)",
+  removeNodeHint: "Deleting removes that markdown file for good.",
+  removeNodePurge: "Delete",
   tableMoveSpan: "Multiple rows/columns are selected, or the table has merged cells — select a single row or column first",
   tableMoveUnavailable: "This table cannot move rows or columns right now",
   tableEntryDisabled: "The table cannot be edited right now (saving or read-only)",
@@ -274,19 +460,29 @@ interface MinimalClientContext {
   };
 }
 
-/** 注册 locale 字典；宿主 locale 服务不在（或 API 变了）时静默回落到组件内字面文案 */
+/**
+ * 注册 locale 字典 ✓（**交给 `plugin-locale.ts` 做** ✓）。
+ *
+ * 旧实现一次失败就 `return undefined` ✗ —— 而插件**可能先于** locale 服务 apply ✓
+ * （`ctx.get("locale")` 那一刻还是 undefined ✓）⇒ 字典永远没注册上 ✓
+ * ⇒ 英文界面里满屏中文 ✓（用户实测："当前插件的语言似乎没有跟随系统变化"✓）。
+ * 现在 `attachPluginLocale` 只登记"现读服务的函数"✓，**每次取用都会补试注册** ✓，
+ * 而且会按宿主已声明的语言 id（`en-US` / `zh-CN` ✓）各注册一份 ✓。
+ */
 function registerLocale(ctx: MinimalClientContext): string | undefined {
-  const locale = (ctx.get?.("locale") ?? undefined) as
-    | { register?(ns: string, language: string, dict: Record<string, string>): unknown }
-    | undefined;
-  if (locale?.register === undefined) return undefined;
+  attachPluginLocale(
+    () => (ctx.get?.("locale") ?? undefined) as PluginLocaleService | undefined,
+    NS,
+    DICT_ZH,
+    DICT_EN,
+  );
+  /* 立刻试一次（能把失败挡在最前面 ✓）；失败也没关系 ✓ —— 取用时还会再试 ✓ */
   try {
-    locale.register(NS, "zh", DICT_ZH);
-    locale.register(NS, "en", DICT_EN);
-    return NS;
+    pluginTranslate();
   } catch {
-    return undefined;
+    /* 忽略：真正的兜底是"取用时再试" ✓ */
   }
+  return NS;
 }
 
 export function apply(ctx: MinimalClientContext): void {  const ns = registerLocale(ctx);

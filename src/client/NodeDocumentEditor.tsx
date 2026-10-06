@@ -777,7 +777,7 @@ export function NodeDocumentEditor(props: {
             </sup>
           ) : null}
         </h2>
-        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} selection={noteSelection} />
+        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>

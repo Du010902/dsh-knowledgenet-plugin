@@ -126,9 +126,36 @@ describe("主题 token", () => {
       /border: 1px solid var\(--dsw-alias-border-l2\)/.test(overrides),
       "单元格边框要用**不透明**的主题 token ✓（用户截图里表格完全看不出格子 ✗）",
     );
+    /*
+     * **表头必须一眼看出来** ✓（用户实测：亮色主题下几乎分不出第一行是表头 ✗）。
+     * 原来只用 `--dsw-alias-bg-layer-2` ✗ —— 亮色里它和页面底色几乎一样 ✓ ⇒ 等于没底色 ✓。
+     * 现在要求**三重信号**：叠在表格底色上的 `color-mix` 底色 ✓ + 字重 600 ✓ + 加深的下边框 ✓，
+     * 而且不许写死颜色 ✗（两个主题都要成立 ✓）。
+     */
     assert.ok(
-      /th \{[^}]*background: var\(--dsw-alias-bg-layer-2\)/s.test(overrides),
-      "表头要有浅底 ✓",
+      /th \{[^}]*background: color-mix\(in srgb, var\(--dsw-alias-label-primary\)/s.test(overrides),
+      "表头底色要按主题色**算出来**（亮 / 暗都看得出来 ✓）",
+    );
+    assert.ok(/th \{[^}]*font-weight: 600/s.test(overrides), "表头还要加粗 ✓（只靠浅底，浅色下仍然容易糊 ✗）");
+    /*
+     * ⚠️ **表头不许覆盖边框** ✗（用户实测："这条线太突兀了，和表格中的其它线条保持一致"✓）：
+     * 底色 + 字重已经够区分了 ✓；再叠一条深色下边框就会像"表格外面套了个框"✓。
+     * ⇒ 表头块里**不许出现任何 border / border-*-color** ✓，
+     * 于是它用的就是单元格那条 `1px solid var(--dsw-alias-border-l2)` ✓。
+     */
+    const thBlock = /th \{[^}]*\}/s.exec(overrides)?.[0] ?? "";
+    assert.ok(thBlock !== "", "要能读到表头规则的正文 ✓");
+    assert.ok(
+      !/border(?:-[a-z]+)?\s*:/.test(thBlock),
+      `表头不许覆盖边框 ✗（要和表格里其它线一致 ✓）：${thBlock.replace(/\s+/g, " ").slice(0, 120)}`,
+    );
+    assert.ok(
+      /td[^{]*\{[^}]*border: 1px solid var\(--dsw-alias-border-l2\)/s.test(overrides),
+      "单元格那条边框仍然是统一的那一条 ✓",
+    );
+    assert.ok(
+      !/th \{[^}]*background: var\(--dsw-alias-bg-layer-2\)/s.test(overrides),
+      "不许退回 `bg-layer-2` ✗（那正是亮色下看不出来的写法 ✓）",
     );
     assert.ok(overrides.includes(".selectedCell::after"), "选中区域要有可见高亮 ✓");
     assert.ok(overrides.includes(".column-resize-handle"), "列宽手柄要看得见 ✓");

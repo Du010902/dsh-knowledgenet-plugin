@@ -144,7 +144,7 @@ describe("划词添加前置：三条回归的守门", () => {
     const untilFootEnd = actionButton.slice(0, 1800);
     assert.ok(untilFootEnd.includes("disabled={chips.length === 0"), "动作按钮要按标签数置灰");
     assert.ok(
-      /asPrereq \? \(props\.copy\.addPrereq[\s\S]{0,120}props\.copy\.addStandalone/.test(untilFootEnd),
+      /asPrereq \? \(copy\.addPrereq[\s\S]{0,120}copy\.addStandalone/.test(untilFootEnd),
       "按钮文字要随开关在「添加为前置」/「创建独立节点」之间切换",
     );
     assert.ok(untilFootEnd.includes("if (asPrereq) confirmPrereq();"), "勾了前置时按钮走 confirmPrereq");
@@ -301,7 +301,7 @@ describe("划词添加前置：三条回归的守门", () => {
     assert.ok(composerEnd > 0 && detailsAt > composerEnd, "说明行要在「被添加的知识点」框下面");
     assert.ok(modeAt > detailsAt, "开关要排在说明行之后（说明属于标签框，不属于开关）");
     assert.ok(
-      code.includes('{props.copy.multiDetails ?? "继续在对话中划词会自动追加"}'),
+      code.includes('{copy.multiDetails}'),
       "说明文案要简化成一句",
     );
     /* 仍可就地改名：chip 里那个受控 input 必须是可写的 */

@@ -25,12 +25,14 @@ import {
   codeBlockHtml,
   encodeCodeBlockPayload,
   escapeHtml,
+  formulaFromPlainText,
   insideCodeBlock,
   parseCodeBlockPayload,
   safeLanguage,
   unescapeHtml,
 } from "../src/client/code-block-clipboard.ts";
 import { EDITOR_LITERAL } from "../src/client/node-document-state.ts";
+import { TABLE_LITERAL } from "../src/client/table-menu.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, "..", "src", "client");
@@ -127,25 +129,86 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
     assert.equal(unescapeHtml("&amp;&lt;&gt;&quot;&#39;"), "&<>\"'");
   });
 
+  it("**纯文本 `$$…$$` 就是公式块** ✓（用户实测：复制公式块再粘贴变成 Text ✗）", () => {
+    /*
+     * 复制公式块时我们写了三种格式 ✓，但自定义格式/记忆判断都可能失效 ✓
+     * （剪贴板常把 `\n` 换成 `\r\n` ⇒ 严格相等匹配不上 ✓）
+     * ⇒ 这条兜底只看文本本身：**整段就是一块 `$$…$$`** ⇒ 就是公式块 ✓，语言写 `LaTeX` ✓。
+     */
+    const parsed = formulaFromPlainText("$$\n\\frac{h_t}{x_t} = z^x\n$$");
+    assert.deepEqual(parsed, { language: "LaTeX", code: "\\frac{h_t}{x_t} = z^x" }, "标准写法 ✓");
+    /* CRLF / 前后空白 / 单行写法都要认 ✓ */
+    assert.equal(
+      formulaFromPlainText("  $$\r\n\\frac{a}{b}\r\n$$\r\n")?.code,
+      "\\frac{a}{b}",
+      "CRLF 与前后空白要归一化 ✓（这正是之前失效的那种 ✓）",
+    );
+    assert.equal(formulaFromPlainText("$$x^2$$")?.language, "LaTeX", "单行 `$$x^2$$` 也认 ✓");
+    /* 不是"整块公式"就放行 ✓（交给原有粘贴 ✓） */
+    assert.equal(formulaFromPlainText("普通文本"), null);
+    assert.equal(formulaFromPlainText("$$只有开头"), null);
+    assert.equal(formulaFromPlainText("$$\n\n$$"), null, "空的公式不算 ✓");
+    assert.equal(formulaFromPlainText("前 $$x$$ 后"), null, "夹在文本里不算整块 ✓");
+    assert.equal(formulaFromPlainText(""), null);
+    assert.equal(formulaFromPlainText(undefined), null);
+  });
+
+  it("**复制成功要给对勾反馈** ✓（用户要求：点完变对勾、再变回来）", () => {
+    assert.ok(richSource.includes("function flashCopied(button: HTMLElement): void"), "要有这个反馈 ✓");
+    const at = richSource.indexOf("function flashCopied");
+    const block = richSource.slice(at, at + 700);
+    assert.ok(block.includes("const original = button.innerHTML;"), "要记住原来的内容 ✓（图标 + 「复制」✓）");
+    assert.ok(block.includes("button.innerHTML = COPIED_CHECK;"), "换成对勾 ✓");
+    /*
+     * **对勾必须是纯线条** ✓（用户实测：上一版被 CSS 的 `fill` 盖成实心一坨 ✗）。
+     * ⇒ 关键样式写成**内联** ✓（属性会被 CSS 盖掉 ✗），线宽收细 ✓。
+     */
+    assert.ok(
+      /style="fill:none;stroke:currentColor;stroke-width:1\.6/.test(richSource),
+      "对勾的填充/线宽要用内联样式写 ✓（写成属性会被 Crepe 的图标 CSS 盖成实心 ✗）",
+    );
+    assert.ok(
+      !/stroke-width="2\.4"/.test(richSource),
+      "不许再用偏粗的线宽 ✗",
+    );
+    assert.ok(/window\.setTimeout\(\(\) => \{[\s\S]{0,200}?button\.innerHTML = original;/.test(block), "**要变回来** ✓");
+    assert.ok(block.includes('button.dataset.knCopied === "true"'), "连点不叠加计时器 ✓");
+    assert.ok(
+      /\.then\(\(\) => \{[\s\S]{0,300}?flashCopied\(button\);/.test(richSource),
+      "只在**写成功之后**给对勾 ✓（失败不许假装已复制 ✗）",
+    );
+  });
   it("**回落字典必须齐全** ✗：截图里提示条显示成字面键名 `unsupportedNoticeRich` ✓", () => {
     /*
-     * `NodeDocumentEditor` 的 `t` 是 `makeTranslator(props.t, EDITOR_LITERAL)` ✓ ——
-     * 宿主 locale 缺席（或键没注册上）时就落回这份字典 ✓，找不到**直接回键名** ✗。
-     * 所以：编辑器里用到的每个键都必须在这份字典里 ✓（这条测试就是为那次翻车加的 ✓）。
+     * 两个组件用的是**两份**回落字典 ✓（别再混着扫 ✗）：
+     * - `NodeDocumentEditor` ⇒ `makeTranslator(props.t, EDITOR_LITERAL)` ✓；
+     * - `MarkdownRichEditor` ⇒ `makeTranslator(props.t, TABLE_LITERAL)` ✓。
+     * 宿主 locale 缺席（或键没注册上）时就落回字典 ✓，找不到**直接回键名** ✗。
      */
-    const used = new Set();
-    for (const call of richSource.concat(editorSource).matchAll(/\bt\(([^)]*)\)/g)) {
-      for (const literal of (call[1] ?? "").matchAll(/"([A-Za-z0-9_]+)"/g)) used.add(literal[1]);
-    }
-    assert.ok(used.size > 10, `要能扫到一批键（实际 ${used.size} 个 ✓）`);
+    const keysOf = (source) => {
+      const used = new Set();
+      for (const call of source.matchAll(/\bt\(([^)]*)\)/g)) {
+        for (const literal of (call[1] ?? "").matchAll(/"([A-Za-z0-9_]+)"/g)) used.add(literal[1]);
+      }
+      return used;
+    };
     /* `t(tab === "source" ? …)` 里的 `source` / `rich` 是**模式名** ✗，不是词典键 ✓ */
     const modeNames = new Set(["source", "rich"]);
-    const missing = [...used].filter((key) => !modeNames.has(key) && !(key in EDITOR_LITERAL));
-    assert.deepEqual(missing, [], `这些键没有回落文案 ✗（界面会显示键名 ✓）：${missing.join(", ")}`);
+    const editorUsed = keysOf(editorSource);
+    assert.ok(editorUsed.size > 10, `编辑器要能扫到一批键（实际 ${editorUsed.size} 个 ✓）`);
+    const editorMissing = [...editorUsed].filter((key) => !modeNames.has(key) && !(key in EDITOR_LITERAL));
+    assert.deepEqual(editorMissing, [], `NodeDocumentEditor 缺回落文案 ✗：${editorMissing.join(", ")}`);
+    const richUsed = keysOf(richSource);
+    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL));
+    assert.deepEqual(richMissing, [], `MarkdownRichEditor 缺回落文案 ✗：${richMissing.join(", ")}`);
     assert.ok("unsupportedNoticeRich" in EDITOR_LITERAL, "正文模式那句必须在这份字典里 ✓");
     assert.ok(
       "tableMenuLabel" in EDITOR_LITERAL && "tableEntryDisabled" in EDITOR_LITERAL,
       "表格入口那两条也走这个 t ✓ ⇒ 同样要有回落 ✓",
+    );
+    assert.ok(
+      "editorEditSource" in TABLE_LITERAL && "editorResultOnly" in TABLE_LITERAL,
+      "公式 / 代码块的预览开关也走这个 t ✓ ⇒ 同样要有回落 ✓",
     );
   });
 });

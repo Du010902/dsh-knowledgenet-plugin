@@ -869,6 +869,70 @@ describe("菜单接线：命令、定位、不抢焦点", () => {
     );
   });
 
+  it("**代码块不许被语言列表变成公式块** ✓（公式块与代码块是同一个节点 ✓）", () => {
+    /*
+     * 用户实测："将 code 块中的语言选择为 Latex，这个 code 块就变成了一个公式块"✗
+     * ⇒ "代码块就是代码块，公式块就是公式块"✓。
+     * 根因：这套 schema 里公式块与代码块**同一个节点** ✓（`code_block` + `language: "LaTeX"` ✓，
+     * `$$` 的输入规则写的正是它 ✓），Crepe 见到这个语言就渲染成公式 ✓。
+     * ⇒ 把语言列表里那一行藏掉 ✓；公式块由 `$$` 创建 ✓，不经列表 ✓。
+     */
+    assert.ok(
+      richSource.includes('root.querySelector(".language-picker") === null'),
+      "只在真的出现语言列表时才扫 ✓（别在每次输入时白扫 ✓）",
+    );
+    assert.ok(
+      richSource.includes('querySelectorAll<HTMLElement>(".language-list-item")'),
+      "按列表行来找 ✓",
+    );
+    assert.ok(
+      /LANGUAGE_LABELS_TO_HIDE = new Set\(\["latex", "la tex", "tex"\]\)/.test(richSource),
+      "要认 latex / tex 这些写法 ✓",
+    );
+    assert.ok(
+      richSource.includes('item.style.display = "none";'),
+      "必须用**内联**样式藏 ✗（列表行自带 `display: flex`，class 盖不住 ✓）",
+    );
+    assert.ok(
+      richSource.includes("languageObserver?.disconnect();"),
+      "卸载要断开观察器 ✓",
+    );
+    /* 公式那条路不许被碰 ✓：`$$` 输入规则与 `renderLatex` 都不该出现在我们的改动里 ✗ */
+    assert.ok(
+      !richSource.includes("mathBlockInputRule"),
+      "不许去动 `$$` 的输入规则 ✗（公式块必须照旧 ✓）",
+    );
+  });
+  it("**语言选择器的搜索框点不掉弹窗** ✓（Shadow DOM 重定向那一类 ✓）", () => {
+    /*
+     * 用户实测："只要我鼠标左键点击搜索框，这个弹窗就会消失"✗。
+     * 根因：Crepe 在 `window` 上用 `picker.contains(e.target)` 判"点到外面"✓，
+     * 而面板在 shadow root 里 ⇒ 到 window 时 `e.target` 已被**重定向成 host** ✗ ⇒ 永远判成外面 ✓。
+     * 修法：在自己的根上截住这类点击的**冒泡** ✓（冒泡阶段 shadow root 先于 window ✓），
+     * 且**不许 preventDefault** ✗（输入框要照常获得焦点 ✓）。
+     */
+    assert.ok(richSource.includes("const onClickInsideLanguagePicker = (event: Event): void => {"), "要有这个拦截 ✓");
+    assert.ok(
+      richSource.includes('target.closest(".language-picker, .search-box, .language-list")'),
+      "只拦选择器框里的点击 ✓（面板别处的点击不许动 ✗）",
+    );
+    const at = richSource.indexOf("const onClickInsideLanguagePicker");
+    const block = richSource.slice(at, at + 600);
+    assert.ok(block.includes("event.stopPropagation();"), "要截住冒泡 ✓（window 上的监听就看不到这次点击 ✓）");
+    assert.ok(!block.includes("preventDefault"), "**不许** preventDefault ✗（输入框得能获得焦点 ✓）");
+    assert.ok(
+      richSource.includes('root.addEventListener("click", onClickInsideLanguagePicker);'),
+      "监听要挂在**非捕获**阶段 ✓（冒泡阶段 shadow root 才会先于 window ✓）",
+    );
+    assert.ok(
+      richSource.includes('root.removeEventListener("click", onClickInsideLanguagePicker);'),
+      "卸载要摘掉 ✓",
+    );
+    assert.ok(
+      /composedPath|重定向成 host/.test(richSource),
+      "注释里要写清楚为什么（重定向 ✓ ⇒ 下一个改这块的人不会再踩 ✓）",
+    );
+  });
   it("命令执行前再确认一次「光标还在表格里」，异常不许抛进事件处理器 ✓", () => {
     assert.ok(richSource.includes("!readTableContext(view.state).inTable"), "下命令前再查一次 ✓");
     assert.ok(

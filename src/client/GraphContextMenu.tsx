@@ -11,8 +11,9 @@
  * - 输入标题（加前置）；
  * - 相近节点确认（复用已有 / 仍然新建），**不擅自建重复节点**。
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { makeTranslator } from "./card-model.ts";
 
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
@@ -200,6 +201,8 @@ export interface GraphContextMenuProps {
   onEditNote?: ((nodeId: string) => void) | undefined;
   /** 逐步上报（诊断） */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
+  /** 宿主 / 插件的翻译函数 ✓ */
+  t?: unknown;
   /** 文案 */
   copy: {
     nodeMenuTitle: string;
@@ -241,7 +244,25 @@ export interface GraphContextMenuProps {
  * @param props - 当前图数据、库绑定、回调与文案。
  * @returns 菜单/弹窗（没有右键时什么都不渲染）。
  */
+/** 右键菜单的字面兜底 ✓（放在模块级：组件里的 `useMemo` 引用它不会踩"先用后声明"那条测试 ✓） */
+const MENU_LITERAL: Record<string, string> = {
+  canvasMenuTitle: "这张图",
+  createNode: "创建节点",
+  createNodeTitle: "创建知识点",
+  createNodeHint: "输入知识点名称（会作为它的文件名）",
+  editNote: "编辑笔记",
+  removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
+  removeNodePurge: "删除",
+  removeRelation: "删除这条依赖",
+  nodeMenuTitle: "这个知识点",
+  edgeMenuTitle: "这条依赖",
+  createNodeDone: "已创建",
+  menuFailed: "操作失败",
+};
+
 export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
+  /* 缺 `copy` 的字段时用它补 ✓（英文界面下不许漏出中文 ✗） */
+  const tr = useMemo(() => makeTranslator(props.t, MENU_LITERAL), [props.t]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [prompt, setPrompt] = useState<{ fromId: string; x: number; y: number } | null>(null);
   const [pendingNew, setPendingNew] = useState<{ fromId: string; typed: string; candidates: string[] } | null>(null);
@@ -446,7 +467,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
           <div className="kn-menu" style={{ left: menu.x, top: menu.y }} role="menu">
             <div className="kn-menu-title">
               {menu.kind === "canvas"
-                ? (props.copy.canvasMenuTitle ?? "这张图")
+                ? (props.copy.canvasMenuTitle ?? tr("canvasMenuTitle"))
                 : menu.kind === "node"
                   ? titleOf(menu.id)
                   : edgeLabel(menu.id)}
@@ -461,7 +482,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
                   report("canvas-menu-create", {});
                 }}
               >
-                {props.copy.createNode ?? "创建节点"}
+                {props.copy.createNode ?? tr("createNode")}
               </button>
             ) : menu.kind === "node" ? (
               <>
@@ -478,7 +499,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
                     props.onEditNote?.(nodeId);
                   }}
                 >
-                  {props.copy.editNote ?? "编辑笔记"}
+                  {props.copy.editNote ?? tr("editNote")}
                 </button>
                 <button
                   type="button"
@@ -553,9 +574,9 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
         */}
       {createNodeAt === null ? null : (
         <PromptDialog
-          title={props.copy.createNodeTitle ?? "创建知识点"}
-          hint={props.copy.createNodeHint ?? "输入知识点名称（会作为它的文件名）"}
-          confirmLabel={props.copy.createNode ?? "创建节点"}
+          title={props.copy.createNodeTitle ?? tr("createNodeTitle")}
+          hint={props.copy.createNodeHint ?? tr("createNodeHint")}
+          confirmLabel={props.copy.createNode ?? tr("createNode")}
           cancelLabel={props.copy.cancel}
           initial=""
           onCancel={() => { setCreateNodeAt(null); }}
@@ -627,7 +648,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
               {`${props.copy.removeNodeConfirmMessage}：${confirmRemoveNode.label}`}
             </div>
             <div className="kn-modal-hint">
-              {props.copy.removeNodeHint ?? "删除会直接删掉那个 markdown 文件，不可恢复。"}
+              {props.copy.removeNodeHint ?? tr("removeNodeHint")}
             </div>
             <div className="kn-modal-actions">
               <button type="button" className="kn-modal-btn" onClick={() => { setConfirmRemoveNode(null); }}>
@@ -642,7 +663,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
                   void removeNode(nodeId);
                 }}
               >
-                {props.copy.removeNodePurge ?? "删除"}
+                {props.copy.removeNodePurge ?? tr("removeNodePurge")}
               </button>
             </div>
           </div>

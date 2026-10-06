@@ -7,6 +7,7 @@
  * 写错这里不会崩，只会“什么都没出现”——所以单独抽出来并由测试钉住形状。
  */
 import { PANEL_ID } from "../shared/routes.ts";
+import { pluginIsZh } from "./plugin-locale.ts";
 
 /** `openTab(kind)` 用它点名；也是「开始」页卡片打开的那个页面 */
 export const GRAPH_TAB_KIND = PANEL_ID;
@@ -69,6 +70,14 @@ export interface GraphTabDefinition {
 
 /** 是否偏好英文（跟随宿主设置的语言） */
 export function prefersEnglish(): boolean {
+  /*
+   * **先问宿主 locale 服务** ✓（`plugin-locale.ts` 的 `pluginIsZh` ✓）——
+   * 实测：`document.documentElement.lang` 在插件 apply 时不可靠 ✗
+   * ⇒ 英文界面里标签芯片 / 引导卡仍是中文 ✓（用户实测："插件语言没有跟随系统"✓）。
+   * 拿不到服务时才退回原来那套兜底 ✓（不许直接猜成英文 ✗）。
+   */
+  const zh = pluginIsZh();
+  if (zh !== undefined) return !zh;
   try {
     const lang = typeof document === "undefined" ? "" : document.documentElement.lang ?? "";
     return lang.toLowerCase().startsWith("en");

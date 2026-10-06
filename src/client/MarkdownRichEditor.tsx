@@ -40,11 +40,13 @@ import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
 import { tableMinWidth } from "./table-menu.ts";
+import { inFirstTableRow, tableRowTypes } from "./table-header-row.ts";
 import {
   KN_CODE_BLOCK_MIME,
   codeBlockHtml,
   encodeCodeBlockPayload,
   codeBlockFromClipboardHtml,
+  formulaFromPlainText,
   insideCodeBlock,
   parseCodeBlockPayload,
 } from "./code-block-clipboard.ts";
@@ -123,6 +125,43 @@ function activeCellTable(view: ProseMirrorView): HTMLTableElement | null {
  * 为什么以**节点**为准 ✗：CodeMirror 的 DOM 里可能是折叠 / 高亮后的视图文本 ✓，
  * 而我们要写进剪贴板的是**原文** ✓ ⇒ 从 `view.posAtDOM` 找到节点、取 `textContent` ✓。
  */
+/**
+ * **复制成功后的对勾反馈** ✓
+ * （用户要求："点击复制之后，他变成一个对勾，之后再变回来"✓）。
+ *
+ * Crepe 的复制按钮是 Vue 渲染的 ✓，我们只在**捕获阶段**接住它的点击（所以由我们写剪贴板 ✓）；
+ * 反馈就直接改这个按钮本身 ✓：
+ * - 记下原来的内容 ✓（图标 + 「复制」两个字 ✓），换成对勾 ✓，加一个类名 ✓；
+ * - **1.2 秒后原样还回来** ✓；
+ * - 连点不叠加 ✓（同一个计时器走完再说 ✓）；
+ * - 按钮的渲染输出是静态的 ✓（`copyText` / `copyIcon` 都不变 ✓）⇒ 不会被 Vue 覆盖回去 ✓。
+ */
+const COPY_FEEDBACK_MS = 1200;
+/*
+ * **纯线条的对勾** ✓（用户实测："这个对勾好丑，就放一个纯线条的对勾就行"✗）。
+ *
+ * 上一版把 `fill="none"` 写成**属性** ✗ ⇒ 任何一条 CSS 的 `fill`（Crepe 的图标样式就有 ✓）
+ * 都能盖掉它 ✓ ⇒ 路径被**填实**成一坨 ✓（截图里那个实心三角 ✓）。
+ * 现在把这些都写成**内联样式** ✓（内联优先级高于任何 CSS 规则 ✓，除非人家写了 `!important` ✗），
+ * 并且线宽收细到 1.6 ✓ ⇒ 就是一条干脆的对勾线 ✓。
+ */
+const COPIED_CHECK =
+  '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" '
+  + 'style="fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round">'
+  + '<path d="M20 6 9 17l-5-5"/></svg>';
+
+function flashCopied(button: HTMLElement): void {
+  if (button.dataset.knCopied === "true") return;
+  const original = button.innerHTML;
+  button.dataset.knCopied = "true";
+  button.classList.add("is-copied");
+  button.innerHTML = COPIED_CHECK;
+  window.setTimeout(() => {
+    button.innerHTML = original;
+    button.classList.remove("is-copied");
+    delete button.dataset.knCopied;
+  }, COPY_FEEDBACK_MS);
+}
 function codeBlockAt(view: ProseMirrorView, host: HTMLElement): { language: string; code: string } | null {
   try {
     const pos = view.posAtDOM(host, 0);
@@ -617,6 +656,20 @@ export function MarkdownRichEditor(props: {
               : move.colRight;
       if (!allowed) disabledActions[item.id] = moveReason(move, item.id);
     }
+    /*
+     * **表头行上方不能再插行** ✓（用户两轮实测后的最终口径 ✓）：
+     * Markdown / GFM 里**第一行就是表头** ✓ ⇒ "在它上面再插一行"这套结构根本表达不出来 ✗
+     * （硬插普通行 ⇒ 文档不合法 ⇒ 事务的 `Fitter` 把表格**拆成两张** ✗ —— 用户第一张截图 ✓；
+     * 中间试过的"新行当表头、旧表头降级"也被否决 ✗：第一行常常就是**段名** ✓，
+     * 让它悄悄变成第二行同样很怪 ✓）。
+     * ⇒ 与"表头行不参与移动"（`tableMoveHeader` ✓）同一套口径：**禁用 + 说明原因** ✓。
+     */
+    if (selectionInTarget) {
+      const rowTypes = tableRowTypes(view.state.schema);
+      if (rowTypes !== null && inFirstTableRow(view.state, rowTypes)) {
+        disabledActions["row-before"] = "tableRowBeforeHeader";
+      }
+    }
     const busy = readOnlyRef.current;
     /* 位置与高亮都没变就**复用原对象** ⇒ React 不重渲染 ✓（选区一直在变 ✓） */
     setMenu((current: TableMenuAnchor | null) => {
@@ -778,7 +831,26 @@ export function MarkdownRichEditor(props: {
       crepe.editor.action((ctx: Ctx) => {
         const commands = ctx.get(commandsCtx);
         switch (action) {
-          case "row-before": commands.call(addRowBeforeCommand.key); break;
+          case "row-before": {
+            /*
+             * **表头行上方插行 = 禁用** ✓（用户两轮实测之后的最终口径 ✓）。
+             *
+             * 为什么不能插：GFM 的内容模型是 `table_header_row table_row+` ✓ ⇒
+             * 把普通行插到表头前面**不合法** ✓ ⇒ 事务的 `Fitter` 会把表格**拆成两张** ✗（第一张截图 ✓）。
+             * 中间试过"新行当表头、旧表头降级"✓，用户实测后否决 ✗：
+             * 第一行常常就是**段名** ✓ ⇒ 让它悄悄变成第二行同样很怪 ✓。
+             *
+             * 菜单里这一项在表头行上已经**禁用并说明原因** ✓（下面 `disabledActions` ✓）；
+             * 这里再挡一次是**防御** ✓ —— 别让键盘 / 程序路径绕过菜单派发一份不合法的事务 ✗。
+             */
+            const rowTypes = tableRowTypes(view.state.schema);
+            if (rowTypes !== null && inFirstTableRow(view.state, rowTypes)) {
+              reportRef.current?.("table-action-blocked", { action, reason: "header-row" });
+              break;
+            }
+            commands.call(addRowBeforeCommand.key);
+            break;
+          }
           case "row-after": commands.call(addRowAfterCommand.key); break;
           case "col-before": commands.call(addColBeforeCommand.key); break;
           case "col-after": commands.call(addColAfterCommand.key); break;
@@ -858,13 +930,13 @@ export function MarkdownRichEditor(props: {
           copyText: "复制",
           /* 「PREVIEW」大写标签 → 轻量的「结果」✓（不常驻大写标签 ✓） */
           previewLabel: "结果",
-          previewToggleButton: (previewOnlyMode: boolean) => (previewOnlyMode ? "编辑源码" : "只看结果"),
+          previewToggleButton: (previewOnlyMode: boolean) => (previewOnlyMode ? t("editorEditSource") : t("editorResultOnly")),
           /*
            * ⚠️ Crepe 的 code-mirror 特性用的是 **`previewToggleText`** ✗（不是基类的
            * `previewToggleButton` ✓）—— 只配后者的话按钮上仍是英文 "Hide" ✓（截图实测 ✓）。
            * 两个都配上 ✓，谁生效都对 ✓。
            */
-          previewToggleText: (previewOnlyMode: boolean) => (previewOnlyMode ? "编辑源码" : "只看结果"),
+          previewToggleText: (previewOnlyMode: boolean) => (previewOnlyMode ? t("editorEditSource") : t("editorResultOnly")),
           previewLoading: "渲染中…",
           previewOnlyByDefault: true,
           /* 代码/公式源码**成套**的编辑主题 ✓（见 KN_CODE_THEME ✓） */
@@ -1038,10 +1110,39 @@ export function MarkdownRichEditor(props: {
       event.stopPropagation();
       event.preventDefault();
       void writeCodeBlockClipboard(payload)
-        .then(() => { lastCopiedBlock = { ...payload }; reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length }); })
+        .then(() => {
+          lastCopiedBlock = { ...payload };
+          /* **成功**才给对勾 ✓（写失败时不能显示"已复制" ✗） */
+          flashCopied(button);
+          reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length });
+        })
         .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
     };
     root.addEventListener("click", onCopyClick, true);
+
+    /*
+     * **点语言选择器里的搜索框，不许把弹窗关掉** ✓
+     * （用户实测："只要我鼠标左键点击搜索框，这个弹窗就会消失"✗）。
+     *
+     * 根因是 **Shadow DOM 的事件重定向** ✗ —— Crepe 的选择器在 `window` 上挂了一个
+     * "点到外面就关"的监听 ✓，判据是 `picker.contains(e.target)` ✓；
+     * 而我们整个面板在 **shadow root** 里 ✓ ⇒ 事件到 `window` 时
+     * `e.target` 已经被**重定向成 host 元素** ✗ ⇒ 永远判成"点在外面" ✓ ⇒ 一点就关 ✓。
+     * （`composedPath()` 才拿得到真实目标 ✓，但那段逻辑在 Crepe 里 ✗，我们改不了它 ✓。）
+     *
+     * 修法：在**自己的根**上把这类点击的冒泡**截住** ✓ ——
+     * 冒泡阶段里 shadow root 一定先于 `window` ✓，所以 window 上那个监听根本看不到这次点击 ✓，
+     * 弹窗自然不关 ✓。**不 `preventDefault`** ✗：输入框照常获得焦点、照常打字 ✓。
+     * 只拦"选择器框里"的点击 ✓，面板别处的点击一概不动 ✓
+     * （宿主/插件自己的"点外面关掉"逻辑还要正常工作 ✓）。
+     */
+    const onClickInsideLanguagePicker = (event: Event): void => {
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      if (target.closest(".language-picker, .search-box, .language-list") === null) return;
+      event.stopPropagation();
+    };
+    root.addEventListener("click", onClickInsideLanguagePicker);
 
     /*
      * **粘贴本插件的代码块载荷** ⇒ 直接用事务插入完整 `code_block` ✓
@@ -1069,7 +1170,13 @@ export function MarkdownRichEditor(props: {
           && plain === "$$\n" + lastCopiedBlock.code + "\n$$")) ? lastCopiedBlock : null;
       const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
         ?? remembered
-        ?? codeBlockFromClipboardHtml(clip.getData("text/html"));
+        ?? codeBlockFromClipboardHtml(clip.getData("text/html"))
+        /*
+         * **最后一道**：剪贴板文本本身就是一整块 `$$…$$` ✓ ⇒ 它就是个公式块 ✓
+         * （用户实测：这个兜底之前没有 ⇒ 语言一丢就变成 `Text` 代码块 ✗）。
+         * 不依赖"记住上次复制的块" ✗ —— 那个判断会被剪贴板把 `\n` 换成 `\r\n` 打掉 ✓。
+         */
+        ?? formulaFromPlainText(plain);
       if (payload === null) {
         /* 没命中载荷 ⇒ **不拦** ✓，只把纯文本记下来（万一被 Markdown 拆散，提示条上还能一键补救 ✓） */
         const plain = clip.getData("text/plain");
@@ -1133,6 +1240,37 @@ export function MarkdownRichEditor(props: {
       resizeObserver?.observe(container);
       container.addEventListener("scroll", onSelectionChanged, true);
     }
+
+    /*
+     * **代码块的语言列表里不再出现 LaTeX** ✓
+     * （用户实测："将 code 块中的语言选择为 Latex，这个 code 块就变成了一个公式块"✗，
+     * "代码块就是代码块，公式块就是公式块"✓）。
+     *
+     * 为什么它会变 ✗：在这套 schema 里**公式块和代码块是同一个节点** ✓ ——
+     * 都是 `code_block` + `language: "LaTeX"` ✓（`$$` 的输入规则写的正是 `{ language: "LaTeX" }` ✓），
+     * 而 Crepe 的 latex 特性只要看到这个语言就调 `renderLatex` ✓ ⇒ 列表里一选 LaTeX 就"变成公式"✓。
+     *
+     * ⇒ 把语言列表里**那一行**藏掉 ✓：用户再也点不到它 ✓，
+     * 而**公式块照旧** ✓ —— 它们由 `$$` 输入规则创建 ✓，从不经过这个列表 ✓
+     * （已存在的 `$$…$$` 笔记重新解析出来仍是 `language: "LaTeX"` ✓，照样渲染成公式 ✓）。
+     *
+     * 做法用一个**范围极小的观察器** ✓：只有当编辑器里真的出现了语言列表时才扫一遍 ✓，
+     * 命中 `.language-list-item` 且文字是 LaTeX / latex / tex 的那一行 ⇒ 直接 `display: none` ✓
+     * （列表行的样式里有 `display: flex` ✗，所以必须用内联样式盖掉 ✓）。
+     */
+    const LANGUAGE_LABELS_TO_HIDE = new Set(["latex", "la tex", "tex"]);
+    const hideLatexLanguageItem = (): void => {
+      if (root.querySelector(".language-picker") === null) return;
+      for (const item of root.querySelectorAll<HTMLElement>(".language-list-item")) {
+        if (item.style.display === "none") continue;
+        const label = item.textContent?.trim().toLowerCase() ?? "";
+        if (LANGUAGE_LABELS_TO_HIDE.has(label)) item.style.display = "none";
+      }
+    };
+    const languageObserver = typeof MutationObserver === "function"
+      ? new MutationObserver(() => { hideLatexLanguageItem(); })
+      : null;
+    languageObserver?.observe(root, { childList: true, subtree: true });
 
     syncingRef.current = true;
     void crepe.create().then(
@@ -1263,6 +1401,7 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
       root.removeEventListener("click", onCopyClick, true);
+      root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);
       root.removeEventListener("contextmenu", onTableContext, true);
       root.removeEventListener("pointerup", onTextSelection);
@@ -1271,6 +1410,7 @@ export function MarkdownRichEditor(props: {
       shadowRoot?.removeEventListener("selectionchange", onSelectionChanged);
       window.removeEventListener("resize", onSelectionChanged);
       resizeObserver?.disconnect();
+      languageObserver?.disconnect();
       container?.removeEventListener("scroll", onSelectionChanged, true);
       void crepe.destroy();
     };

@@ -168,3 +168,31 @@ export function codeBlockFromClipboardHtml(html: unknown): CodeBlockPayload | nu
   if (code.length > KN_CODE_BLOCK_MAX_CHARS) return null;
   return { language: safeLanguage(languageMatch?.[2] ?? ""), code };
 }
+
+/**
+ * **从纯文本里认出"这本来是一个公式块"** ✓
+ * （用户实测：点公式块的复制、再粘回文档 ⇒ 变成了语言为 Text 的代码块 ✗，期望它仍是公式块 ✓）。
+ *
+ * 为什么需要它 ✗：公式块的复制路径会写三种格式 ✓，但**自定义格式不是所有环境都留得住** ✗，
+ * 而且"记住了上次复制的块"这种判断会被**换行符差异**打掉 ✗
+ * （剪贴板常常把 `\n` 变成 `\r\n` ✓ ⇒ 严格相等就匹配不上 ✓ ⇒ 一路退化到纯文本 / HTML ✓，
+ * 语言信息一丢就变成 `Text` 代码块 ✓ —— 正是用户截图 ✓）。
+ *
+ * 于是这里不依赖任何记忆 ✓，只看剪贴板文本本身：
+ * **整段就是一个 `$$…$$`** ⇒ 它就是一个公式块 ✓（公式块在 Markdown 里正是这个形状 ✓）。
+ * CRLF / 前后空白都先归一化 ✓；不是整块（例如只有半截）⇒ 返回 `null` ✓ ⇒ 交给原有粘贴 ✓。
+ *
+ * @param text - 剪贴板里的 `text/plain` ✓。
+ * @returns 一个 `language: "LaTeX"` 的载荷 ✓；认不出 ⇒ `null` ✓。
+ */
+export function formulaFromPlainText(text: unknown): CodeBlockPayload | null {
+  if (typeof text !== "string" || text.trim() === "") return null;
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  const match = /^\$\$\s*\n?([\s\S]*?)\n?\$\$$/.exec(normalized);
+  if (match === null) return null;
+  const code = (match[1] ?? "").replace(/^\n+|\n+$/g, "");
+  if (code.trim() === "") return null;
+  if (code.length > KN_CODE_BLOCK_MAX_CHARS) return null;
+  /* 公式块在 Markdown 里的语言就是 `LaTeX` ✓（`$$` 输入规则写的也是它 ✓） */
+  return { language: "LaTeX", code };
+}

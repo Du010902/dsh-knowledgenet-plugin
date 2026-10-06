@@ -19,6 +19,7 @@ import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 import { GraphUniverse } from "../vendor/upstream/components/GraphUniverse.tsx";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { makeTranslator } from "./card-model.ts";
+import { pluginTranslate } from "./plugin-locale.ts";
 import { GraphContextMenu, requestCanvasMenu } from "./GraphContextMenu.tsx";
 import { reportDiag, reportDiagOnce } from "./diag.ts";
 import { rememberFocusNode } from "./ChatSelectionBar.tsx";
@@ -152,6 +153,7 @@ const LITERAL: Record<string, string> = {
   routeNotReady:
     "面板数据路由未就绪：宿主半只有在重启 DSH 之后才会注册它（刷新页面只更新客户端半）。"
     + "重启后若仍是这样，请在会话里调用 kn_status，把它给出的诊断发出来。",
+  panelCrashed: "面板渲染出错：请刷新页面；若持续出现，请把控制台里的报错发给我。",
 };
 
 /** 面板跟随当前工作区：解析出的目标（工作区路径优先，其次会话 id） */
@@ -168,11 +170,13 @@ type PanelTarget = { kind: "root" | "session"; value: string } | undefined;
  * @returns 出错时给提示，正常时原样渲染。
  */
 export function GraphPanel(props: Parameters<typeof GraphPanelInner>[0]): ReactNode {
+  /* 出错兜底也要跟随语言 ✓（用插件自己的绑定 ✓：这里不能用 `useMemo` + `makeTranslator(props.t…)` ✗ ——
+   * 那条"不许先用后声明"的测试会把 `props.t` 看成后面才声明的 `t` ✓（真事 ✓）） */
   return (
     <ErrorBoundary
       fallback={
         <div className="kn-msg">
-          面板渲染出错：请刷新页面；若持续出现，请把控制台里的报错发给我。
+          {pluginTranslate()?.("panelCrashed") ?? LITERAL.panelCrashed}
         </div>
       }
     >
@@ -1264,6 +1268,7 @@ function GraphPanelInner(props: {
             ) : null}
             {/* 右键菜单：节点加前置 / 连线删依赖（上游两种视图都会派发 window 事件） */}
             <GraphContextMenu
+              t={t}
               nodes={graph.nodes}
               edges={graph.edges}
               root={target !== undefined && target.kind === "root" ? target.value : undefined}
