@@ -955,6 +955,8 @@ export function NodeDocumentEditor(props: {
                */
               <MarkdownRichEditor
                 markdown={state.draft}
+                /* 图片要落到**同一个库**里 ✓（笔记读写用哪个 target，图片就用哪个 ✓） */
+                target={props.target}
                 syncToken={richSyncToken}
                 readOnly={state.saving || state.frozen || state.phase !== "ready"}
                 handleRef={richRef}

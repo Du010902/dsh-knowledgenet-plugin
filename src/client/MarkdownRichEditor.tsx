@@ -40,6 +40,8 @@ import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
 import { tableMinWidth } from "./table-menu.ts";
+import { imageDisplayUrl, isLibraryRelativeImageSrc, withExplicitImageTitles } from "../shared/note-images.ts";
+import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { inFirstTableRow, tableRowTypes } from "./table-header-row.ts";
 import {
   KN_CODE_BLOCK_MIME,
@@ -161,6 +163,120 @@ function flashCopied(button: HTMLElement): void {
     button.classList.remove("is-copied");
     delete button.dataset.knCopied;
   }, COPY_FEEDBACK_MS);
+}
+/**
+ * **把插入的图片真的写到磁盘上** ✓
+ * （用户实测："我不知道图片插入到了当前PC中的什么位置"✗ —— 因为 Crepe 默认给的是 `blob:` URL ✗，
+ * 只在内存里，刷新即失效 ✓，磁盘上什么都没写 ✓）。
+ *
+ * 走宿主路由 ✓（`kind:'image-save'` ✓）：宿主把它写进 `<库根>/<imageDir>/` ✓，
+ * 默认就是用户要的 `.dsh_knowledge/image/` ✓（`imageDir` 可配置 ✓，见 `cordis.patch.yml` ✓）。
+ *
+ * @param file - 用户选/拖进来的文件 ✓。
+ * @param target - 当前库目标（与笔记读写用同一个 ✓，别让图片跑到别的库去 ✗）。
+ * @returns **库内相对路径** ✓（`image/xxx.png` ✓）—— 这一串会被写进 Markdown ✓
+ *   （显示时再由 `applyImageSources` 换成同源 URL ✓ ⇒ 笔记挪到别的编辑器也读得懂 ✓）。
+ */
+async function uploadNoteImage(file: File, target: Record<string, unknown> | undefined): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { resolve(typeof reader.result === "string" ? reader.result : ""); };
+    reader.onerror = () => { reject(new Error("read-failed")); };
+    reader.readAsDataURL(file);
+  });
+  const response = await fetch(GRAPH_API_ROUTE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "image-save", name: file.name, dataUrl, ...(target ?? {}) }),
+  });
+  const body = await response.json() as { ok?: unknown; path?: unknown; error?: { message?: unknown } };
+  if (response.ok !== true || body.ok !== true || typeof body.path !== "string") {
+    throw new Error(typeof body.error?.message === "string" ? body.error.message : "image-save-failed");
+  }
+  return body.path;
+}
+
+/**
+ * **把库内相对路径的图片换成同源 URL 来显示** ✓
+ * （Markdown 里存的仍是相对路径 ✓；这里只改 DOM 的 `src` 用于渲染 ✓）。
+ *
+ * @param root - 编辑器根 ✓。
+ */
+/**
+ * **把库里的图片取回来、显示出来** ✓（用户实测两轮：磁盘上有图、笔记里看不到 ✗）。
+ *
+ * 关键认识（第三轮的真正原因 ✓）：**`<img src>` 带不了认证** ✗。
+ * 宿主那条取图路由和别的接口一样要过 DSH 的连接鉴权 ✓ ——
+ * 我们的 `fetch(...)` 能过（客户端半走的是同源/桥 ✓），而浏览器为 `<img>` 发的裸 GET
+ * **拿不到那份凭据** ✓ ⇒ 401 ⇒ 图裂 ✓（我先前手工 curl 也是 401 ✓，同一个原因 ✓）。
+ *
+ * ⇒ 显示这条路改成：**用 `fetch` 把字节取回来**（它过得了鉴权 ✓），
+ * 再 `URL.createObjectURL(blob)` 交给 `<img>` ✓。这样：
+ * - `<img>` 只看 blob ✓，不需要任何凭据 ✓；
+ * - Markdown 里仍然是**库内相对路径** ✓（可移植 ✓）；
+ * - 同一条相对路径**只取一次** ✓（缓存在这张 map 里 ✓，卸载时统一 revoke ✓）。
+ *
+ * 另外：Crepe 的 image-block 会按节点属性重渲染 ✓ 把 `src` 写回相对路径 ✗
+ * ⇒ 由 `MutationObserver` 盯着 `src` 变化再断言一次 ✓（见 `observeImages` ✓）。
+ *
+ * @param image - 目标 `<img>` ✓。
+ * @param raw - 它的库内相对路径（`data-kn-raw-src` ✓）。
+ * @param target - 当前库目标 ✓。
+ * @param cache - 本编辑器实例的 blob 缓存 ✓（卸载时 revoke ✓）。
+ * @param inflight - 正在取的 key ✓（防并发重复取 ✓）。
+ * @param report - 诊断上报 ✓。
+ */
+function ensureImageDisplay(
+  image: HTMLImageElement,
+  raw: string,
+  target: Record<string, unknown> | undefined,
+  cache: Map<string, string>,
+  inflight: Set<string>,
+  report: ((step: string, detail?: unknown) => void) | undefined,
+): void {
+  const key = `${raw}\u0000${String(target?.root ?? target?.sessionId ?? "")}`;
+  const cached = cache.get(key);
+  if (cached !== undefined) {
+    if (image.getAttribute("src") !== cached) image.setAttribute("src", cached);
+    return;
+  }
+  if (inflight.has(key)) return;
+  inflight.add(key);
+  const wanted = imageDisplayUrl(GRAPH_API_ROUTE, raw, target);
+  void fetch(wanted)
+    .then(async (response) => {
+      if (response.ok !== true) throw new Error(`image-http-${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      cache.set(key, url);
+      if (image.isConnected) image.setAttribute("src", url);
+      report?.("image-src-ready", { path: raw, bytes: blob.size });
+    })
+    .catch((error: unknown) => {
+      report?.("image-load-failed", { path: raw, error: String(error), url: wanted });
+    })
+    .finally(() => { inflight.delete(key); });
+}
+
+/**
+ * 遍历编辑器里的图片，把库内相对路径的都换成 blob URL ✓。
+ *
+ * @param root - 编辑器根 ✓。
+ * @param target - 当前库目标 ✓。
+ */
+function applyImageSources(
+  root: HTMLElement,
+  target: Record<string, unknown> | undefined,
+  cache: Map<string, string>,
+  inflight: Set<string>,
+  report: ((step: string, detail?: unknown) => void) | undefined,
+): void {
+  for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
+    const raw = image.getAttribute("data-kn-raw-src") ?? image.getAttribute("src");
+    if (raw === null || !isLibraryRelativeImageSrc(raw)) continue;
+    image.setAttribute("data-kn-raw-src", raw);
+    ensureImageDisplay(image, raw, target, cache, inflight, report);
+  }
 }
 function codeBlockAt(view: ProseMirrorView, host: HTMLElement): { language: string; code: string } | null {
   try {
@@ -434,6 +550,8 @@ export function MarkdownRichEditor(props: {
   onSelectionText?: (selection: { text: string; top: number; left: number } | null) => void;
   onPasteText?: ((text: string) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
+  /** 当前库目标 ✓（图片落盘要和笔记读写用同一个库 ✗） */
+  target?: unknown;
   t?: unknown;
 }): ReactNode {
   const t = useMemo(() => makeTranslator(props.t, TABLE_LITERAL), [props.t]);
@@ -441,6 +559,12 @@ export function MarkdownRichEditor(props: {
   const crepeRef = useRef<Crepe | null>(null);
   /** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
   const viewRef = useRef<ProseMirrorView | null>(null);
+  /** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
+  const baselineRef = useRef<((markdown: string) => void) | null>(null);
+  /** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
+  const imageCacheRef = useRef<Map<string, string>>(new Map());
+  /** 正在取图的 key ✓（防并发重复取 ✓） */
+  const imageInflightRef = useRef<Set<string>>(new Set());
   /**
    * 表格入口当前该在哪（`null` = 不显示 ✓）。
    * 只由**编辑器 selection** 决定 ✓（不靠鼠标悬停推断 ✗）。
@@ -535,8 +659,10 @@ export function MarkdownRichEditor(props: {
   const reportBaseline = (ingested: string): void => {
     const crepe = crepeRef.current;
     if (crepe === null) return;
-    onBaselineRef.current?.(ingested, crepe.getMarkdown());
+    onBaselineRef.current?.(ingested, withExplicitImageTitles(crepe.getMarkdown()));
   };
+  /* 规范化图注之后要"重报基线" ✓ —— 经 ref 给 `syncMenu` 用 ✓（它声明在前面 ✓） */
+  baselineRef.current = (markdown: string): void => { reportBaseline(markdown); };
 
   const emitStatus = (): void => {
     onStatusRef.current?.({
@@ -573,6 +699,14 @@ export function MarkdownRichEditor(props: {
      * 不必再加一个观察器 ✗；函数自己带值比较 ⇒ 不会自激 ✓。
      */
     applyTableMinWidths(host);
+    applyImageSources(
+      host,
+      props.target as Record<string, unknown> | undefined,
+      imageCacheRef.current,
+      imageInflightRef.current,
+      (step, detail) => { reportRef.current?.(step, detail); },
+    );
+
     const context = readTableContext(view.state);
     /*
      * **锚在哪张表格** ✓（复查"多表格切换"那条 ✓）：
@@ -909,11 +1043,19 @@ export function MarkdownRichEditor(props: {
 
     const crepe = new Crepe({
       root,
-      defaultValue: initialRef.current,
-      /* 只启用在文档里明确列出的能力 ✓；AI / 图片上传不启用 ✗ */
+      /* **进来时补显式空标题** ✓：`![](...)` ⇒ `![](... "")` ✓（见 `withExplicitImageTitles` ✓） */
+      defaultValue: withExplicitImageTitles(initialRef.current),
+      /*
+       * 只启用在文档里明确列出的能力 ✓。
+       *
+       * **图片块现在启用了** ✓（用户实测要求："图片插到哪去了"✗）：
+       * 不是让 Crepe 用它默认的 `blob:` URL ✗，而是配上我们自己的 `onUpload` ✓ ——
+       * 真的写进 `<库根>/<imageDir>/` ✓（默认 `.dsh_knowledge/image/` ✓，可配置 ✓），
+       * Markdown 里落的也是**库内相对路径** ✓（笔记挪到别的编辑器也读得懂 ✓）。
+       * AI 仍然关闭 ✗。
+       */
       features: {
         [CrepeFeature.AI]: false,
-        [CrepeFeature.ImageBlock]: false,
       },
       /*
        * **文案与行为配置**（`design/math-editor-ui-design.md` ✓）。
@@ -962,6 +1104,38 @@ export function MarkdownRichEditor(props: {
         [CrepeFeature.Cursor]: {
           virtual: false,
         },
+        /*
+         * **图片：存到库里，而不是内存里** ✓。
+         * `onUpload` 的返回值会被写成图片的 `src` ✓ ⇒ 这里回**库内相对路径** ✓
+         * （显示时由 `applyImageSources` 换成同源 URL ✓）。
+         */
+        [CrepeFeature.ImageBlock]: {
+          /*
+           * ⚠️ Crepe 的**类型**与**运行期**在这两个键上不一致 ✗（老毛病 ✓，
+           * 跟当年 `previewToggleText` / `previewToggleButton` 那次一样 ✓）：
+           * 运行期读的是 `uploadButton` ✓，而 `Partial<ImageBlockConfig>` 里没声明它 ✗。
+           * ⇒ 两个都写上（谁生效都对 ✓），并显式断言类型 ✓ —— 别为了过类型把运行期那句删掉 ✗。
+           */
+          uploadButton: t("imageUploadButton"),
+          /* 那两个提示原来跟的是 Crepe 的英文默认值 ✗（截图里 "Write Image Caption" ✓） */
+          uploadPlaceholderText: t("imageUploadPlaceholder"),
+          captionPlaceholderText: t("imageCaptionPlaceholder"),
+          confirmButton: t("imageConfirm"),
+          onUpload: (file: File) => uploadNoteImage(file, props.target as Record<string, unknown> | undefined),
+          /*
+           * ⚠️ Crepe 的图片有**两套键名** ✗（`*` 与 `block*` ✓，实测产物里两套都有人读 ✓）：
+           * 块级图片读的是 `block*` 那套 ✓ —— 只配一套的话，
+           * 上传/文案会掉回它的默认值 ✓（用户截图里那句英文 "Write Image Caption" 就是这么来的 ✓）。
+           * ⇒ 两套都写上 ✓，谁生效都对 ✓。
+           */
+          blockUploadButton: t("imageUploadButton"),
+          blockUploadPlaceholderText: t("imageUploadPlaceholder"),
+          blockCaptionPlaceholderText: t("imageCaptionPlaceholder"),
+          blockConfirmButton: t("imageConfirm"),
+          blockOnUpload: (file: File) => uploadNoteImage(file, props.target as Record<string, unknown> | undefined),
+          /* 万一还有别的加载失败原因 ✓，留一条证据 ✓（`kn_status` 里看得到 ✓） */
+          onImageLoadError: (src: string) => { reportRef.current?.("image-load-error", { src }); },
+        } as never,
       },
     });
     crepe.on((listener) => {
@@ -1271,6 +1445,24 @@ export function MarkdownRichEditor(props: {
       ? new MutationObserver(() => { hideLatexLanguageItem(); })
       : null;
     languageObserver?.observe(root, { childList: true, subtree: true });
+    /*
+     * **盯着 `<img src>` 的变化** ✓：Crepe 的 image-block 重渲染时会把 `src` 写回相对路径 ✗
+     * ⇒ 这里立刻再断言一次（改成 blob URL ✓）。只处理属性变化 ✓，代价极低 ✓。
+     */
+    const imageObserver = typeof MutationObserver === "function"
+      ? new MutationObserver((records) => {
+        const touched = records.some((record) => record.type === "attributes" && (record.target as Element).tagName === "IMG");
+        if (!touched) return;
+        applyImageSources(
+          root,
+          props.target as Record<string, unknown> | undefined,
+          imageCacheRef.current,
+          imageInflightRef.current,
+          (step, detail) => { reportRef.current?.(step, detail); },
+        );
+      })
+      : null;
+    imageObserver?.observe(root, { subtree: true, attributes: true, attributeFilter: ["src"] });
 
     syncingRef.current = true;
     void crepe.create().then(
@@ -1411,6 +1603,10 @@ export function MarkdownRichEditor(props: {
       window.removeEventListener("resize", onSelectionChanged);
       resizeObserver?.disconnect();
       languageObserver?.disconnect();
+      imageObserver?.disconnect();
+      for (const url of imageCacheRef.current.values()) URL.revokeObjectURL(url);
+      imageCacheRef.current.clear();
+      imageInflightRef.current.clear();
       container?.removeEventListener("scroll", onSelectionChanged, true);
       void crepe.destroy();
     };
@@ -1479,7 +1675,7 @@ export function MarkdownRichEditor(props: {
       /* 未就绪 / 失败 / 组合中 ⇒ **null** ✗：调用方不许拿旧正文代替 ✓（P1-1/P2-6/P2-7） */
       if (crepe === null || !readyRef.current || failedRef.current) return null;
       if (composingRef.current) return null;
-      return crepe.getMarkdown();
+      return withExplicitImageTitles(crepe.getMarkdown());
     },
     replaceMarkdown: (markdown: string) => {
       const crepe = crepeRef.current;
@@ -1490,7 +1686,7 @@ export function MarkdownRichEditor(props: {
       if (markdown === crepe.getMarkdown()) return;
       syncingRef.current = true;
       echoRef.current = markdown;
-      crepe.editor.action(replaceAll(markdown));
+      crepe.editor.action(replaceAll(withExplicitImageTitles(markdown)));
       syncingRef.current = false;
       pendingRef.current = null;
       /* 外部整篇替换 ⇒ **重报基线** ✓（编辑器渲染出来的写法可能与喂进去的不同 ✓） */

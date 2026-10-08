@@ -41,6 +41,13 @@ import { runtimeStatus } from "./status.ts";
 export interface KnowledgeNetConfig {
   /** 留空则按会话 cwd 向上找最近的 library.json */
   libraryRoot?: string | null;
+  /**
+   * 笔记里插入的图片存到哪个目录 ✓（默认 `image` ⇒ `<库根>/image/` ✓，
+   * 也就是用户说的 `.dsh_knowledge/image/` ✓）。
+   * 支持库内相对目录 ✓（`image` / `assets/img` ✓）；写成绝对路径则按绝对路径 ✓。
+   * 用户在这里改 ✓ —— 客户端插入图片时把这个路径交给宿主 ✓。
+   */
+  imageDir?: string | null;
   /** 返回给模型的节点上限（默认 400） */
   maxNodes?: number | null;
 }

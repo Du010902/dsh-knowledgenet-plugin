@@ -109,6 +109,11 @@ const DICT_ZH: Record<string, string> = {
   relOpen: "打开「{title}」",
   /* 公式 / 代码块的预览开关 ✓ */
   editorEditSource: "编辑源码",
+  /* 图片块 ✓ */
+  imageUploadButton: "插入图片",
+  imageUploadPlaceholder: "或者粘贴图片链接…",
+  imageCaptionPlaceholder: "写一段图注",
+  imageConfirm: "确定 ⏎",
   editorResultOnly: "只看结果",
   /* 划词浮条 / 收集弹窗（`ChatSelectionBar` ✓）—— 之前是硬编码中文默认值 ✗ */
   addNode: "添加节点",
@@ -318,6 +323,10 @@ const DICT_EN: Record<string, string> = {
   relClose: "Close the relations panel",
   relOpen: "Open “{title}”",
   editorEditSource: "Edit source",
+  imageUploadButton: "Insert image",
+  imageUploadPlaceholder: "or paste an image link…",
+  imageCaptionPlaceholder: "Write a caption",
+  imageConfirm: "Confirm ⏎",
   editorResultOnly: "Result only",
   /* Chat selection bar / collection dialog ✓ */
   addNode: "Add node",

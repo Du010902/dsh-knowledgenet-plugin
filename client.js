@@ -195088,6 +195088,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 		const TABLE_LITERAL = {
 			tableMenuLabel: "表格操作",
 			editorEditSource: "编辑源码",
+			imageUploadButton: "插入图片",
+			imageUploadPlaceholder: "或者粘贴图片链接…",
+			imageCaptionPlaceholder: "写一段图注",
+			imageConfirm: "确定 ⏎",
 			editorResultOnly: "只看结果",
 			tableRowBefore: "在上方插入行",
 			tableRowAfter: "在下方插入行",
@@ -195503,6 +195507,89 @@ Expected function or array of functions, received type ${typeof value}.`);
 				top: Math.round(top),
 				right: Math.round(Math.min(Math.max(0, entry.right), maxRight))
 			};
+		}
+		//#endregion
+		//#region src/shared/note-images.ts
+		/**
+		* 这个 `src` 是不是"库内相对路径" ✓（决定要不要换成宿主路由来显示 ✓）。
+		*
+		* 排除：`http(s):` / `data:` / `blob:` / `file:` / `//host` / 以 `/` 开头的绝对路径 ✓
+		* —— 那些交给浏览器自己处理 ✗（我们不猜别人的 URL ✓）。
+		*
+		* @param src - `<img src>` 的原值 ✓。
+		* @returns 需要改写 ⇒ `true` ✓。
+		*/
+		function isLibraryRelativeImageSrc(src) {
+			if (typeof src !== "string") return false;
+			const value = src.trim();
+			if (value === "") return false;
+			if (value.startsWith("/") || value.startsWith("//")) return false;
+			if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+			return true;
+		}
+		/**
+		* 库内相对路径 ⇒ **宿主路由 URL** ✓（只用于显示 ✓，不进 Markdown ✗）。
+		*
+		* @param route - 宿主路由（`GRAPH_API_ROUTE` ✓）。
+		* @param relativePath - 库内相对路径 ✓。
+		* @returns 同源 URL ✓（浏览器/Electron IPC 桥都能取 ✓）。
+		*/
+		function imageDisplayUrl(route, relativePath, target) {
+			const params = new URLSearchParams({
+				kind: "image",
+				path: relativePath
+			});
+			const root = target?.root;
+			const sessionId = target?.sessionId;
+			if (typeof root === "string" && root.trim() !== "") params.set("root", root.trim());
+			else if (typeof sessionId === "string" && sessionId.trim() !== "") params.set("sessionId", sessionId.trim());
+			return `${route}?${params.toString()}`;
+		}
+		/**
+		* **给图片补一个"显式的空标题"** ✓ —— 让"图注为空"成为一件**合法且可往返**的事 ✓
+		* （用户追问："为什么不能允许图注为空"✓ —— 确实应该允许 ✓，问题不在"空" ✗，在**往返** ✓）。
+		*
+		* 上游的毛病（产物里读到的 ✓）：`image-block` 的
+		* ```
+		* attrs: { caption: { default: "", validate: "string" } }        // 必须是字符串 ✗
+		* parseMarkdown: runner(state, node) { const caption = node.title; … }   // 图注取自 title ✓
+		* ```
+		* ⇒ 图注为空时序列化出来是 `![](url)`（**没有 title** ✗）⇒ 再解析回来 `caption` 是 `undefined` ✗
+		* ⇒ 校验抛 `RangeError` ✗ ⇒ 图片块报废 ✓（"保存重开后图片消失"✓）。
+		*
+		* ⇒ 修法不是"给图注编个名字" ✗，而是**让 Markdown 明确写出空标题** ✓：
+		* ```
+		* ![](image/foo.png)      ⇒      ![](image/foo.png "")
+		* ```
+		* 这样 `title` 是**空字符串**而不是 `undefined` ✓ ⇒ 解析安全 ✓、图注仍然是空的 ✓✓。
+		*
+		* 两个方向都过一遍这个函数 ✓（进编辑器时 ✓ + 出编辑器保存时 ✓）⇒ 磁盘上与编辑器里**同一形状** ✓、
+		* 幂等 ✓（已经有 title 的一律不动 ✓）。
+		*
+		* ⚠️ 只认**整行就是一张图片**的那种写法 ✓；**代码围栏里的示例一律不动** ✗
+		* （文档里写 `![](a.png)` 的教学文本不该被改 ✓）。
+		*
+		* @param markdown - 原始 Markdown ✓。
+		* @returns 补过空标题的 Markdown ✓。
+		*/
+		function withExplicitImageTitles(markdown) {
+			if (typeof markdown !== "string" || markdown === "") return markdown;
+			const lines = markdown.split("\n");
+			let fenced = false;
+			let changed = false;
+			const out = lines.map((line) => {
+				const trimmed = line.trimStart();
+				if (/^(```|~~~)/.test(trimmed)) {
+					fenced = !fenced;
+					return line;
+				}
+				if (fenced) return line;
+				const match = /^(\s*!\[[^\]]*\]\(\s*[^\s)]+)(\s*\)\s*)$/.exec(line);
+				if (match === null) return line;
+				changed = true;
+				return `${match[1]} ""${match[2]}`;
+			});
+			return changed ? out.join("\n") : markdown;
 		}
 		//#endregion
 		//#region src/client/table-header-row.ts
@@ -196236,6 +196323,118 @@ Expected function or array of functions, received type ${typeof value}.`);
 				delete button.dataset.knCopied;
 			}, COPY_FEEDBACK_MS);
 		}
+		/**
+		* **把插入的图片真的写到磁盘上** ✓
+		* （用户实测："我不知道图片插入到了当前PC中的什么位置"✗ —— 因为 Crepe 默认给的是 `blob:` URL ✗，
+		* 只在内存里，刷新即失效 ✓，磁盘上什么都没写 ✓）。
+		*
+		* 走宿主路由 ✓（`kind:'image-save'` ✓）：宿主把它写进 `<库根>/<imageDir>/` ✓，
+		* 默认就是用户要的 `.dsh_knowledge/image/` ✓（`imageDir` 可配置 ✓，见 `cordis.patch.yml` ✓）。
+		*
+		* @param file - 用户选/拖进来的文件 ✓。
+		* @param target - 当前库目标（与笔记读写用同一个 ✓，别让图片跑到别的库去 ✗）。
+		* @returns **库内相对路径** ✓（`image/xxx.png` ✓）—— 这一串会被写进 Markdown ✓
+		*   （显示时再由 `applyImageSources` 换成同源 URL ✓ ⇒ 笔记挪到别的编辑器也读得懂 ✓）。
+		*/
+		async function uploadNoteImage(file, target) {
+			const dataUrl = await new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => {
+					resolve(typeof reader.result === "string" ? reader.result : "");
+				};
+				reader.onerror = () => {
+					reject(/* @__PURE__ */ new Error("read-failed"));
+				};
+				reader.readAsDataURL(file);
+			});
+			const response = await fetch(GRAPH_API_ROUTE, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "image-save",
+					name: file.name,
+					dataUrl,
+					...target ?? {}
+				})
+			});
+			const body = await response.json();
+			if (response.ok !== true || body.ok !== true || typeof body.path !== "string") throw new Error(typeof body.error?.message === "string" ? body.error.message : "image-save-failed");
+			return body.path;
+		}
+		/**
+		* **把库内相对路径的图片换成同源 URL 来显示** ✓
+		* （Markdown 里存的仍是相对路径 ✓；这里只改 DOM 的 `src` 用于渲染 ✓）。
+		*
+		* @param root - 编辑器根 ✓。
+		*/
+		/**
+		* **把库里的图片取回来、显示出来** ✓（用户实测两轮：磁盘上有图、笔记里看不到 ✗）。
+		*
+		* 关键认识（第三轮的真正原因 ✓）：**`<img src>` 带不了认证** ✗。
+		* 宿主那条取图路由和别的接口一样要过 DSH 的连接鉴权 ✓ ——
+		* 我们的 `fetch(...)` 能过（客户端半走的是同源/桥 ✓），而浏览器为 `<img>` 发的裸 GET
+		* **拿不到那份凭据** ✓ ⇒ 401 ⇒ 图裂 ✓（我先前手工 curl 也是 401 ✓，同一个原因 ✓）。
+		*
+		* ⇒ 显示这条路改成：**用 `fetch` 把字节取回来**（它过得了鉴权 ✓），
+		* 再 `URL.createObjectURL(blob)` 交给 `<img>` ✓。这样：
+		* - `<img>` 只看 blob ✓，不需要任何凭据 ✓；
+		* - Markdown 里仍然是**库内相对路径** ✓（可移植 ✓）；
+		* - 同一条相对路径**只取一次** ✓（缓存在这张 map 里 ✓，卸载时统一 revoke ✓）。
+		*
+		* 另外：Crepe 的 image-block 会按节点属性重渲染 ✓ 把 `src` 写回相对路径 ✗
+		* ⇒ 由 `MutationObserver` 盯着 `src` 变化再断言一次 ✓（见 `observeImages` ✓）。
+		*
+		* @param image - 目标 `<img>` ✓。
+		* @param raw - 它的库内相对路径（`data-kn-raw-src` ✓）。
+		* @param target - 当前库目标 ✓。
+		* @param cache - 本编辑器实例的 blob 缓存 ✓（卸载时 revoke ✓）。
+		* @param inflight - 正在取的 key ✓（防并发重复取 ✓）。
+		* @param report - 诊断上报 ✓。
+		*/
+		function ensureImageDisplay(image, raw, target, cache, inflight, report) {
+			const key = `${raw}\u0000${String(target?.root ?? target?.sessionId ?? "")}`;
+			const cached = cache.get(key);
+			if (cached !== void 0) {
+				if (image.getAttribute("src") !== cached) image.setAttribute("src", cached);
+				return;
+			}
+			if (inflight.has(key)) return;
+			inflight.add(key);
+			const wanted = imageDisplayUrl(GRAPH_API_ROUTE, raw, target);
+			fetch(wanted).then(async (response) => {
+				if (response.ok !== true) throw new Error(`image-http-${response.status}`);
+				const blob = await response.blob();
+				const url = URL.createObjectURL(blob);
+				cache.set(key, url);
+				if (image.isConnected) image.setAttribute("src", url);
+				report?.("image-src-ready", {
+					path: raw,
+					bytes: blob.size
+				});
+			}).catch((error) => {
+				report?.("image-load-failed", {
+					path: raw,
+					error: String(error),
+					url: wanted
+				});
+			}).finally(() => {
+				inflight.delete(key);
+			});
+		}
+		/**
+		* 遍历编辑器里的图片，把库内相对路径的都换成 blob URL ✓。
+		*
+		* @param root - 编辑器根 ✓。
+		* @param target - 当前库目标 ✓。
+		*/
+		function applyImageSources(root, target, cache, inflight, report) {
+			for (const image of root.querySelectorAll("img")) {
+				const raw = image.getAttribute("data-kn-raw-src") ?? image.getAttribute("src");
+				if (raw === null || !isLibraryRelativeImageSrc(raw)) continue;
+				image.setAttribute("data-kn-raw-src", raw);
+				ensureImageDisplay(image, raw, target, cache, inflight, report);
+			}
+		}
 		function codeBlockAt(view, host) {
 			try {
 				const pos = view.posAtDOM(host, 0);
@@ -196466,6 +196665,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const crepeRef = (0, react.useRef)(null);
 			/** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
 			const viewRef = (0, react.useRef)(null);
+			/** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
+			const baselineRef = (0, react.useRef)(null);
+			/** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
+			const imageCacheRef = (0, react.useRef)(/* @__PURE__ */ new Map());
+			/** 正在取图的 key ✓（防并发重复取 ✓） */
+			const imageInflightRef = (0, react.useRef)(/* @__PURE__ */ new Set());
 			/**
 			* 表格入口当前该在哪（`null` = 不显示 ✓）。
 			* 只由**编辑器 selection** 决定 ✓（不靠鼠标悬停推断 ✗）。
@@ -196557,7 +196762,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const reportBaseline = (ingested) => {
 				const crepe = crepeRef.current;
 				if (crepe === null) return;
-				onBaselineRef.current?.(ingested, crepe.getMarkdown());
+				onBaselineRef.current?.(ingested, withExplicitImageTitles(crepe.getMarkdown()));
+			};
+			baselineRef.current = (markdown) => {
+				reportBaseline(markdown);
 			};
 			const emitStatus = () => {
 				onStatusRef.current?.({
@@ -196588,6 +196796,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 					return;
 				}
 				applyTableMinWidths(host);
+				applyImageSources(host, props.target, imageCacheRef.current, imageInflightRef.current, (step, detail) => {
+					reportRef.current?.(step, detail);
+				});
 				const context = readTableContext(view.state);
 				const selectionBlock = context.inTable ? selectionTableBlock(view) : null;
 				const block = resolveTableTarget({
@@ -196842,11 +197053,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				failedRef.current = false;
 				const crepe = new Crepe({
 					root,
-					defaultValue: initialRef.current,
-					features: {
-						[CrepeFeature.AI]: false,
-						[CrepeFeature.ImageBlock]: false
-					},
+					defaultValue: withExplicitImageTitles(initialRef.current),
+					features: { [CrepeFeature.AI]: false },
 					featureConfigs: {
 						[CrepeFeature.CodeMirror]: {
 							searchPlaceholder: "搜索语言…",
@@ -196861,7 +197069,22 @@ Expected function or array of functions, received type ${typeof value}.`);
 							extensions: [syntaxHighlighting(KN_CODE_HIGHLIGHT)]
 						},
 						[CrepeFeature.Latex]: { inlineEditConfirm: "完成" },
-						[CrepeFeature.Cursor]: { virtual: false }
+						[CrepeFeature.Cursor]: { virtual: false },
+						[CrepeFeature.ImageBlock]: {
+							uploadButton: t("imageUploadButton"),
+							uploadPlaceholderText: t("imageUploadPlaceholder"),
+							captionPlaceholderText: t("imageCaptionPlaceholder"),
+							confirmButton: t("imageConfirm"),
+							onUpload: (file) => uploadNoteImage(file, props.target),
+							blockUploadButton: t("imageUploadButton"),
+							blockUploadPlaceholderText: t("imageUploadPlaceholder"),
+							blockCaptionPlaceholderText: t("imageCaptionPlaceholder"),
+							blockConfirmButton: t("imageConfirm"),
+							blockOnUpload: (file) => uploadNoteImage(file, props.target),
+							onImageLoadError: (src) => {
+								reportRef.current?.("image-load-error", { src });
+							}
+						}
 					}
 				});
 				crepe.on((listener) => {
@@ -197093,6 +197316,17 @@ Expected function or array of functions, received type ${typeof value}.`);
 					childList: true,
 					subtree: true
 				});
+				const imageObserver = typeof MutationObserver === "function" ? new MutationObserver((records) => {
+					if (!records.some((record) => record.type === "attributes" && record.target.tagName === "IMG")) return;
+					applyImageSources(root, props.target, imageCacheRef.current, imageInflightRef.current, (step, detail) => {
+						reportRef.current?.(step, detail);
+					});
+				}) : null;
+				imageObserver?.observe(root, {
+					subtree: true,
+					attributes: true,
+					attributeFilter: ["src"]
+				});
 				syncingRef.current = true;
 				crepe.create().then(() => {
 					if (cancelled || disposedRef.current) {
@@ -197192,6 +197426,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 					window.removeEventListener("resize", onSelectionChanged);
 					resizeObserver?.disconnect();
 					languageObserver?.disconnect();
+					imageObserver?.disconnect();
+					for (const url of imageCacheRef.current.values()) URL.revokeObjectURL(url);
+					imageCacheRef.current.clear();
+					imageInflightRef.current.clear();
 					container?.removeEventListener("scroll", onSelectionChanged, true);
 					crepe.destroy();
 				};
@@ -197234,7 +197472,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					const crepe = crepeRef.current;
 					if (crepe === null || !readyRef.current || failedRef.current) return null;
 					if (composingRef.current) return null;
-					return crepe.getMarkdown();
+					return withExplicitImageTitles(crepe.getMarkdown());
 				},
 				replaceMarkdown: (markdown) => {
 					const crepe = crepeRef.current;
@@ -197245,7 +197483,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					if (markdown === crepe.getMarkdown()) return;
 					syncingRef.current = true;
 					echoRef.current = markdown;
-					crepe.editor.action(replaceAll$1(markdown));
+					crepe.editor.action(replaceAll$1(withExplicitImageTitles(markdown)));
 					syncingRef.current = false;
 					pendingRef.current = null;
 					reportBaseline(markdown);
@@ -198685,6 +198923,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 							}) : null,
 							tab === "rich" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MarkdownRichEditor, {
 								markdown: state.draft,
+								target: props.target,
 								syncToken: richSyncToken,
 								readOnly: state.saving || state.frozen || state.phase !== "ready",
 								handleRef: richRef,
@@ -200018,6 +200257,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 			relClose: "关闭关系面板",
 			relOpen: "打开「{title}」",
 			editorEditSource: "编辑源码",
+			imageUploadButton: "插入图片",
+			imageUploadPlaceholder: "或者粘贴图片链接…",
+			imageCaptionPlaceholder: "写一段图注",
+			imageConfirm: "确定 ⏎",
 			editorResultOnly: "只看结果",
 			addNode: "添加节点",
 			nothingSelected: "没有选中文字",
@@ -200213,6 +200456,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 			relClose: "Close the relations panel",
 			relOpen: "Open “{title}”",
 			editorEditSource: "Edit source",
+			imageUploadButton: "Insert image",
+			imageUploadPlaceholder: "or paste an image link…",
+			imageCaptionPlaceholder: "Write a caption",
+			imageConfirm: "Confirm ⏎",
 			editorResultOnly: "Result only",
 			addNode: "Add node",
 			nothingSelected: "Nothing selected",

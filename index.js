@@ -1,5 +1,5 @@
 import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import path, { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import path, { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 //#region src/vendor/upstream/data/errors.ts
@@ -5175,6 +5175,232 @@ function registerPrompts(ctx, config) {
 	};
 }
 //#endregion
+//#region src/shared/note-images.ts
+/**
+* **笔记里的图片存哪、怎么显示** ✓
+* （用户实测："我不知道图片插入到了当前PC中的什么位置"✗；
+* 要求"默认插入到 `.dsh_knowledge/image` 文件夹下，并且用户可以自己修改该路径"✓）。
+*
+* ## 为什么之前"看不到图片存在哪"
+*
+* Crepe 的 image-block 默认钩子是
+* `onUpload: (file) => Promise.resolve(URL.createObjectURL(file))` ✓ ——
+* 它给的是**内存里的 blob: URL** ✗：当时能看见 ✓，刷新/重开笔记就没了 ✓，
+* 磁盘上**什么都没写** ✓（所以"找不到在哪"✓）。
+*
+* ## 这里的口径
+*
+* ① Markdown 里写的是**库内相对路径** ✓（`image/xxx.png` ✓）——
+*    这样笔记挪到别的编辑器（Typora / VS Code ✓）里也读得懂 ✓，
+*    不会写进"只有本机这个 DSH 实例认得"的 URL ✗；
+* ② 显示时由编辑器把它换成宿主路由 URL ✓（`api/knowledgenet.graph?kind=image&path=…` ✓），
+*    于是浏览器能按同源取到字节 ✓；
+* ③ 目录默认 `image`（即库根下的 `<library>/image/` ✓ = 用户说的 `.dsh_knowledge/image/` ✓），
+*    可以在插件配置 `imageDir` 里改 ✓ —— 支持**库内相对目录** ✓，
+*    写成绝对路径则按绝对路径处理 ✓（守卫见宿主侧 `resolveImageTarget` ✓）。
+*
+* 本文件只有**纯字符串/字节逻辑** ✓（不 import Node 内建 ✓）⇒ 客户端与宿主都能用、也能单测 ✓。
+*/
+/** 默认图片目录（相对库根 ✓）：用户要的就是 `<library>/image/` ✓ */
+const DEFAULT_IMAGE_DIR = "image";
+/** 认得出的图片扩展名 ✓（其余一律当 `bin` ✗，但仍然允许存 ✓） */
+const IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"avif",
+	"bmp",
+	"svg",
+	"ico"
+]);
+/**
+* 规范化**图片目录** ✓（`imageDir` 配置 / 默认值都过这里 ✓）。
+*
+* - 空 / 非字符串 ⇒ 默认 `image` ✓；
+* - 去掉首尾空白与斜杠 ✓、把 `\` 统一成 `/` ✓；
+* - 含 `..` 的段 ⇒ 判为不可用 ⇒ 回默认 ✓（穿越守卫的第一道 ✓）。
+*
+* @param value - 配置里的 `imageDir` ✓。
+* @returns 可以安全拼接的目录（相对或绝对 ✓，`/` 分隔 ✓）。
+*/
+function normalizeImageDir(value) {
+	if (typeof value !== "string") return DEFAULT_IMAGE_DIR;
+	const cleaned = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+	if (cleaned === "") return DEFAULT_IMAGE_DIR;
+	if (cleaned.split("/").some((part) => part === ".." || part === "")) return DEFAULT_IMAGE_DIR;
+	return cleaned;
+}
+/**
+* 规范化**文件名** ✓：只保留"字母/数字/`-` `_` `.`/中文"✓，
+* 其余（空格、引号、斜杠、`..` ✓）一律换成 `-` ✓ —— 既防穿越 ✓，也防 HTML/Markdown 注入 ✓。
+*
+* @param value - 原始文件名（例如 `屏幕截图 2026-10-07.png` ✓）。
+* @param fallbackExt - 没有扩展名时补的扩展名（例如从 mime 推出来的 `png` ✓）。
+* @returns 安全文件名 ✓（一定非空 ✓）。
+*/
+function sanitizeImageName(value, fallbackExt = "png") {
+	const base = (typeof value === "string" ? value : "").replace(/\\/g, "/").split("/").pop() ?? "";
+	const dotted = base.includes(".") ? base : `${base === "" ? "image" : base}.${fallbackExt}`;
+	const lastDot = dotted.lastIndexOf(".");
+	const stem = dotted.slice(0, lastDot);
+	const ext = dotted.slice(lastDot + 1).toLowerCase();
+	const safeStem = stem.replace(/[^0-9A-Za-z\u4e00-\u9fa5._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 60);
+	const safeExt = /^[a-z0-9]{1,8}$/.test(ext) ? ext : "png";
+	return `${safeStem === "" ? "image" : safeStem}.${IMAGE_EXTENSIONS.has(safeExt) ? safeExt : safeExt === "jpeg" ? "jpg" : safeExt}`;
+}
+/** mime ⇒ 扩展名 ✓（`parseDataUrl` 拿不到文件名时用它 ✓） */
+function extensionFromMime(mime) {
+	if (typeof mime !== "string") return "png";
+	const value = mime.toLowerCase();
+	if (value.includes("jpeg") || value.includes("jpg")) return "jpg";
+	if (value.includes("svg")) return "svg";
+	if (value.includes("webp")) return "webp";
+	if (value.includes("gif")) return "gif";
+	if (value.includes("avif")) return "avif";
+	if (value.includes("bmp")) return "bmp";
+	if (value.includes("ico")) return "ico";
+	return "png";
+}
+/**
+* 拼出**库内相对路径** ✓（Markdown 里就写这个 ✓）。
+*
+* @param dir - 图片目录（会过 `normalizeImageDir` ✓）。
+* @param name - 文件名（会过 `sanitizeImageName` ✓）。
+* @returns `image/xxx.png` 这样的相对路径 ✓（一律 `/` 分隔 ✓）。
+*/
+function imageRelativePath(dir, name) {
+	return `${normalizeImageDir(dir)}/${sanitizeImageName(name)}`;
+}
+/**
+* 库内相对路径 ⇒ **宿主路由 URL** ✓（只用于显示 ✓，不进 Markdown ✗）。
+*
+* @param route - 宿主路由（`GRAPH_API_ROUTE` ✓）。
+* @param relativePath - 库内相对路径 ✓。
+* @returns 同源 URL ✓（浏览器/Electron IPC 桥都能取 ✓）。
+*/
+function imageDisplayUrl(route, relativePath, target) {
+	const params = new URLSearchParams({
+		kind: "image",
+		path: relativePath
+	});
+	const root = target?.root;
+	const sessionId = target?.sessionId;
+	if (typeof root === "string" && root.trim() !== "") params.set("root", root.trim());
+	else if (typeof sessionId === "string" && sessionId.trim() !== "") params.set("sessionId", sessionId.trim());
+	return `${route}?${params.toString()}`;
+}
+/**
+* 解析 `data:` URL ✓（客户端把 `File` 读成 data URL 后传过来 ✓）。
+*
+* @param value - `data:image/png;base64,AAAA…` ✓。
+* @returns mime + 字节 ✓；不是 data URL / 超限 / base64 坏掉 ⇒ `null` ✓。
+*/
+function parseDataUrl(value) {
+	if (typeof value !== "string") return null;
+	const match = /^data:([^;,]*)(;[^,]*)?,(.*)$/s.exec(value);
+	if (match === null) return null;
+	const mime = (match[1] ?? "").trim().toLowerCase() || "image/png";
+	const meta = match[2] ?? "";
+	const payload = match[3] ?? "";
+	if (payload.length > Math.ceil(16777216) + 16) return null;
+	if (!meta.includes("base64")) try {
+		const text = decodeURIComponent(payload);
+		const bytes = new TextEncoder().encode(text);
+		if (bytes.byteLength > 12582912) return null;
+		return {
+			mime,
+			bytes
+		};
+	} catch {
+		return null;
+	}
+	let bytes;
+	try {
+		const binary = atob(payload.replace(/\s+/g, ""));
+		bytes = new Uint8Array(binary.length);
+		for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+	} catch {
+		return null;
+	}
+	if (bytes.byteLength === 0 || bytes.byteLength > 12582912) return null;
+	return {
+		mime,
+		bytes
+	};
+}
+/** mime ⇒ 响应用 `content-type` ✓（只允许图片类 ✓，别的当二进制流 ✓） */
+function contentTypeForImage(mime, name) {
+	const lower = typeof mime === "string" ? mime.toLowerCase() : "";
+	if (lower.startsWith("image/")) return lower;
+	const ext = (name.split(".").pop() ?? "").toLowerCase();
+	if (ext === "svg") return "image/svg+xml";
+	if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+	if (IMAGE_EXTENSIONS.has(ext)) return `image/${ext}`;
+	return "application/octet-stream";
+}
+//#endregion
+//#region src/host/note-images-host.ts
+/**
+* **图片目录的落盘位置**（宿主侧 ✓）—— 与 `src/shared/note-images.ts` 的纯字符串逻辑配套。
+*
+* 单独的模块是为了能**直接单测** ✓（只 import `node:path` 与那个共享文件 ✓，
+* 没有 Node 参数属性 ⇒ `node --test` 能 import ✓）。
+*
+* 安全口径（这是本文件唯一的重点 ✓）：
+* 用户可以通过插件配置 `imageDir` 指定目录 ✓ —— 但**取图**那条路（GET 带 `path=` ✓）
+* 的输入来自 URL ✓ ⇒ 必须保证最终解析出来的文件**落在图片目录里** ✗，
+* 绝不能靠 `..` 走出去 ✓（所以这里做"前缀 + 分隔符"判断 ✓，
+* 而不是只看 `startsWith(base)` ✗ —— 那样 `image-evil/` 也会被放行 ✓）。
+*/
+/**
+* 图片目录的**绝对路径** ✓：相对目录按库根解析 ✓，绝对目录原样用 ✓。
+*
+* @param root - 库根（绝对路径 ✓）。
+* @param imageDir - 配置里的 `imageDir`（可空 ⇒ 默认 `image` ✓）。
+* @returns 绝对目录 ✓。
+*/
+function imageDirAbsolute(root, imageDir) {
+	const dir = normalizeImageDir(imageDir);
+	return isAbsolute(dir) ? resolve(dir) : resolve(root, dir);
+}
+/**
+* 把**库内相对路径**解析成绝对文件路径 ✓，并保证它在图片目录内 ✗。
+*
+* @param root - 库根 ✓。
+* @param imageDir - 配置里的 `imageDir` ✓。
+* @param relativePath - 例如 `image/xxx.png` ✓（可以带子目录 ✓）。
+* @returns 绝对路径 ✓；越界 / 空 / 含 `..` ⇒ `null` ✓。
+*/
+function resolveImageTarget(root, imageDir, relativePath) {
+	if (typeof relativePath !== "string") return null;
+	const cleaned = relativePath.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+	if (cleaned === "") return null;
+	const parts = cleaned.split("/");
+	if (parts.some((part) => part === "" || part === "." || part === "..")) return null;
+	const base = imageDirAbsolute(root, imageDir);
+	const safeParts = parts.map((part, index) => index === parts.length - 1 ? sanitizeImageName(part) : sanitizeImageName(part, "dir").replace(/\.[a-z0-9]{1,8}$/i, ""));
+	const asLibraryRelative = resolve(root, ...safeParts);
+	if (asLibraryRelative === base || asLibraryRelative.startsWith(base + sep)) return asLibraryRelative;
+	const asImageDirRelative = resolve(base, ...safeParts);
+	if (asImageDirRelative === base || asImageDirRelative.startsWith(base + sep)) return asImageDirRelative;
+	return null;
+}
+/**
+* 重名时给个短后缀 ✓（`a.png` → `a-3f2c.png` ✓）。
+*
+* @param name - 已经清洗过的文件名 ✓。
+* @param suffix - 4 位左右的随机串 ✓。
+* @returns 带后缀的文件名 ✓（扩展名留在最后 ✓）。
+*/
+function withNameSuffix(name, suffix) {
+	const dot = name.lastIndexOf(".");
+	const stem = dot > 0 ? name.slice(0, dot) : name;
+	const ext = dot > 0 ? name.slice(dot) : "";
+	return `${stem}-${suffix.replace(/[^0-9a-z]/gi, "").slice(0, 8) || "copy"}${ext}`;
+}
+//#endregion
 //#region src/host/create-dir.ts
 /**
 * 在指定位置下新建一个文件夹（「创建知识库」的第一步）。
@@ -5772,12 +5998,143 @@ async function graphApiPayload(ctx, config, request) {
 *
 * 抽成独立函数是为了能直接单测——不必真的起 HTTP。
 */
+/**
+* **取图**（GET/HEAD ✓）：把库内相对路径解析成图片目录里的文件 ✓，越界一律拒 ✗。
+*/
+async function imageBytesResponse(ctx, config, options) {
+	const root = (await resolveRequestedRoot(ctx, config, {
+		root: typeof options.root === "string" ? options.root : "",
+		sessionId: typeof options.sessionId === "string" ? options.sessionId : ""
+	}).catch(() => null))?.root ?? null;
+	if (root === null) return {
+		status: 404,
+		body: {
+			ok: false,
+			error: {
+				code: "library_missing",
+				message: PANEL_HINT
+			}
+		}
+	};
+	const absolute = resolveImageTarget(root, config.imageDir, options.path);
+	if (absolute === null) return {
+		status: 400,
+		body: {
+			ok: false,
+			error: {
+				code: "invalid_path",
+				message: "图片路径不合法"
+			}
+		}
+	};
+	try {
+		const bytes = await readFile(absolute);
+		const name = absolute.split(/[\\/]/).pop() ?? "image.png";
+		return {
+			status: 200,
+			body: {},
+			raw: new Response(options.head ? null : bytes, {
+				status: 200,
+				headers: {
+					"content-type": contentTypeForImage("", name),
+					"cache-control": "no-cache"
+				}
+			})
+		};
+	} catch {
+		return {
+			status: 404,
+			body: {
+				ok: false,
+				error: {
+					code: "image_missing",
+					message: "找不到这张图片"
+				}
+			}
+		};
+	}
+}
+/**
+* **存图**（POST `{kind:'image-save', name, dataUrl, root?, sessionId?}` ✓）。
+*
+* 落盘位置 = `imageDirAbsolute(库根, config.imageDir)` ✓ ⇒ 默认就是 `<库根>/image/` ✓
+* （用户要的 `.dsh_knowledge/image/` ✓；`imageDir` 可配置 ✓）。
+* 重名**不覆盖** ✓：加 4 位随机后缀 ✓。
+* 返回值给的是**库内相对路径** ✓（客户端把这一串写进 Markdown ✓）。
+*/
+async function saveImageRequest(ctx, config, options) {
+	const parsed = parseDataUrl(options.dataUrl);
+	if (parsed === null) return {
+		status: 200,
+		body: {
+			ok: false,
+			error: {
+				code: "bad_image",
+				message: "图片数据不合法或超过 12 MiB"
+			}
+		}
+	};
+	const root = (await resolveRequestedRoot(ctx, config, {
+		root: typeof options.root === "string" ? options.root : "",
+		sessionId: typeof options.sessionId === "string" ? options.sessionId : ""
+	}).catch(() => null))?.root ?? null;
+	if (root === null) return {
+		status: 200,
+		body: {
+			ok: false,
+			error: {
+				code: "library_missing",
+				message: PANEL_HINT
+			}
+		}
+	};
+	const extension = extensionFromMime(parsed.mime);
+	const wanted = sanitizeImageName(options.name, extension);
+	const directory = imageDirAbsolute(root, config.imageDir);
+	await mkdir(directory, { recursive: true });
+	let target = resolveImageTarget(root, config.imageDir, wanted);
+	if (target === null) return {
+		status: 200,
+		body: {
+			ok: false,
+			error: {
+				code: "invalid_name",
+				message: "文件名不合法"
+			}
+		}
+	};
+	try {
+		await readFile(target);
+		const renamed = sanitizeImageName(withNameSuffix(wanted, randomBytes(2).toString("hex")), extension);
+		target = resolveImageTarget(root, config.imageDir, renamed) ?? target;
+	} catch {}
+	await writeFile(target, parsed.bytes);
+	const fileName = target.split(/[\\/]/).pop() ?? wanted;
+	return {
+		status: 200,
+		body: {
+			ok: true,
+			path: imageRelativePath(config.imageDir, fileName),
+			bytes: parsed.bytes.byteLength,
+			url: imageDisplayUrl(GRAPH_API_ROUTE, imageRelativePath(config.imageDir, fileName))
+		}
+	};
+}
 async function handleApiRequest(ctx, config, request) {
 	const method = (request.method ?? "GET").toUpperCase();
-	if (method !== "POST") return await graphApiPayload(ctx, config, {
-		url: request.url,
-		method
-	});
+	if (method === "GET" || method === "HEAD") {
+		const imageRequest = new URL(request.url).searchParams;
+		if (imageRequest.get("kind") === "image") return await imageBytesResponse(ctx, config, {
+			path: imageRequest.get("path"),
+			root: imageRequest.get("root"),
+			sessionId: imageRequest.get("sessionId"),
+			head: method === "HEAD"
+		});
+		return await graphApiPayload(ctx, config, {
+			url: request.url,
+			method
+		});
+	}
 	let payload;
 	try {
 		payload = await request.json?.();
@@ -5804,6 +6161,12 @@ async function handleApiRequest(ctx, config, request) {
 			}
 		}
 	};
+	if (record.kind === "image-save") return await saveImageRequest(ctx, config, {
+		name: record.name,
+		dataUrl: record.dataUrl,
+		root: record.root,
+		sessionId: record.sessionId
+	});
 	if (record.kind === "create-library") {
 		const root = typeof record.root === "string" ? record.root : "";
 		const title = typeof record.title === "string" ? record.title : void 0;
@@ -6330,11 +6693,12 @@ function registerApi(ctx, config) {
 	};
 	const handler = async (request) => {
 		const head = request.method === "HEAD";
-		const { status, body } = await handleApiRequest(registrar, config, {
+		const { status, body, raw } = await handleApiRequest(registrar, config, {
 			url: request.url,
 			method: request.method,
 			json: () => request.json()
 		});
+		if (raw !== void 0) return raw;
 		return jsonResponse(body, status, head);
 	};
 	try {

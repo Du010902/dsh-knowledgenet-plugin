@@ -56,6 +56,11 @@ export const TABLE_LITERAL: Record<string, string> = {
   tableMenuLabel: "表格操作",
   /* 公式 / 代码块那两颗按钮 ✓（原来硬编码中文 ✗ ⇒ 英文界面下也是中文 ✓） */
   editorEditSource: "编辑源码",
+  /* 图片块的上传按钮 ✓（图片会存进库里的 imageDir ✓） */
+  imageUploadButton: "插入图片",
+  imageUploadPlaceholder: "或者粘贴图片链接…",
+  imageCaptionPlaceholder: "写一段图注",
+  imageConfirm: "确定 ⏎",
   editorResultOnly: "只看结果",
   tableRowBefore: "在上方插入行",
   tableRowAfter: "在下方插入行",

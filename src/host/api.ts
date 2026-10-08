@@ -13,7 +13,17 @@ import { RepositoryError } from "../vendor/upstream/data/errors.ts";
 import { GRAPH_API_PATH, GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { createLibrary, describeFolder, isLibraryRoot, invalidateLibrary, lastLibraryRoot, loadLibrary, resolveLibraryRoot } from "./library.ts";
 import { addPrerequisiteFromUi, applyPlanFromUi, removeNodeFromUi, removePrerequisiteFromUi, searchTargets, undoPlanFromUi } from "./graph-edit.ts";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { imageDirAbsolute, resolveImageTarget, withNameSuffix } from "./note-images-host.ts";
+import {
+  contentTypeForImage,
+  extensionFromMime,
+  imageDisplayUrl,
+  imageRelativePath,
+  parseDataUrl,
+  sanitizeImageName,
+} from "../shared/note-images.ts";
 import { createSubdirectory } from "./create-dir.ts";
 import { createNodeFromUi } from "./mutate.ts";
 import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
@@ -201,6 +211,7 @@ export async function graphApiPayload(
     return { status: 200, body: { ok: false, error: { code: "invalid_url", message: String(request.url) } } };
   }
 
+  
   const askedSession = url.searchParams.get("sessionId");
   const askedRoot = url.searchParams.get("root");
 
@@ -289,13 +300,121 @@ export async function graphApiPayload(
  *
  * 抽成独立函数是为了能直接单测——不必真的起 HTTP。
  */
+/**
+ * **取图**（GET/HEAD ✓）：把库内相对路径解析成图片目录里的文件 ✓，越界一律拒 ✗。
+ */
+async function imageBytesResponse(
+  ctx: ConnectionRegistrar,
+  config: KnowledgeNetConfig,
+  options: { path: unknown; root: unknown; sessionId: unknown; head: boolean },
+): Promise<{ status: number; body: Record<string, unknown>; raw?: Response }> {
+  const resolution = await resolveRequestedRoot(ctx, config, {
+    root: typeof options.root === "string" ? options.root : "",
+    sessionId: typeof options.sessionId === "string" ? options.sessionId : "",
+  }).catch(() => null);
+  const root = resolution?.root ?? null;
+  if (root === null) {
+    return { status: 404, body: { ok: false, error: { code: "library_missing", message: PANEL_HINT } } };
+  }
+  const absolute = resolveImageTarget(root, config.imageDir, options.path);
+  if (absolute === null) {
+    return { status: 400, body: { ok: false, error: { code: "invalid_path", message: "图片路径不合法" } } };
+  }
+  try {
+    const bytes = await readFile(absolute);
+    const name = absolute.split(/[\\/]/).pop() ?? "image.png";
+    return {
+      status: 200,
+      body: {},
+      raw: new Response(options.head ? null : bytes, {
+        status: 200,
+        headers: { "content-type": contentTypeForImage("", name), "cache-control": "no-cache" },
+      }),
+    };
+  } catch {
+    return { status: 404, body: { ok: false, error: { code: "image_missing", message: "找不到这张图片" } } };
+  }
+}
+
+/**
+ * **存图**（POST `{kind:'image-save', name, dataUrl, root?, sessionId?}` ✓）。
+ *
+ * 落盘位置 = `imageDirAbsolute(库根, config.imageDir)` ✓ ⇒ 默认就是 `<库根>/image/` ✓
+ * （用户要的 `.dsh_knowledge/image/` ✓；`imageDir` 可配置 ✓）。
+ * 重名**不覆盖** ✓：加 4 位随机后缀 ✓。
+ * 返回值给的是**库内相对路径** ✓（客户端把这一串写进 Markdown ✓）。
+ */
+async function saveImageRequest(
+  ctx: ConnectionRegistrar,
+  config: KnowledgeNetConfig,
+  options: { name: unknown; dataUrl: unknown; root: unknown; sessionId: unknown },
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const parsed = parseDataUrl(options.dataUrl);
+  if (parsed === null) {
+    return {
+      status: 200,
+      body: { ok: false, error: { code: "bad_image", message: "图片数据不合法或超过 12 MiB" } },
+    };
+  }
+  const resolution = await resolveRequestedRoot(ctx, config, {
+    root: typeof options.root === "string" ? options.root : "",
+    sessionId: typeof options.sessionId === "string" ? options.sessionId : "",
+  }).catch(() => null);
+  const root = resolution?.root ?? null;
+  if (root === null) {
+    return { status: 200, body: { ok: false, error: { code: "library_missing", message: PANEL_HINT } } };
+  }
+  const extension = extensionFromMime(parsed.mime);
+  const wanted = sanitizeImageName(options.name, extension);
+  const directory = imageDirAbsolute(root, config.imageDir);
+  await mkdir(directory, { recursive: true });
+  let target = resolveImageTarget(root, config.imageDir, wanted);
+  if (target === null) {
+    return { status: 200, body: { ok: false, error: { code: "invalid_name", message: "文件名不合法" } } };
+  }
+  /* 已有同名文件 ⇒ 加短后缀 ✓（绝不覆盖 ✓） */
+  try {
+    await readFile(target);
+    const renamed = sanitizeImageName(withNameSuffix(wanted, randomBytes(2).toString("hex")), extension);
+    target = resolveImageTarget(root, config.imageDir, renamed) ?? target;
+  } catch {
+    /* 不存在 ⇒ 直接用 ✓ */
+  }
+  await writeFile(target, parsed.bytes);
+  const fileName = target.split(/[\\/]/).pop() ?? wanted;
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      path: imageRelativePath(config.imageDir, fileName),
+      bytes: parsed.bytes.byteLength,
+      /* 顺手给一条可显示的 URL ✓（客户端也可以自己拼 ✓，两边用同一个函数 ✓） */
+      url: imageDisplayUrl(GRAPH_API_ROUTE, imageRelativePath(config.imageDir, fileName)),
+    },
+  };
+}
 export async function handleApiRequest(
   ctx: ConnectionRegistrar,
   config: KnowledgeNetConfig,
   request: { url: string; method?: string; json?: () => Promise<unknown> },
-): Promise<{ status: number; body: Record<string, unknown> }> {
+): Promise<{ status: number; body: Record<string, unknown>; raw?: Response }> {
   const method = (request.method ?? "GET").toUpperCase();
-  if (method !== "POST") {
+  /*
+   * **取图**（GET ✓）：`?kind=image&path=image/xxx.png` ⇒ 直接回字节 ✓。
+   * —— 笔记的 Markdown 里存的是**库内相对路径** ✓，显示时由编辑器换成这条同源 URL ✓
+   * （用户要求"图片默认存到 `.dsh_knowledge/image/`，路径可配置"✓；见 `src/shared/note-images.ts` ✓）。
+   * 这条必须在下面那句"非 POST ⇒ 当图谱载荷"**之前** ✓。
+   */
+  if (method === "GET" || method === "HEAD") {
+    const imageRequest = new URL(request.url).searchParams;
+    if (imageRequest.get("kind") === "image") {
+      return await imageBytesResponse(ctx, config, {
+        path: imageRequest.get("path"),
+        root: imageRequest.get("root"),
+        sessionId: imageRequest.get("sessionId"),
+        head: method === "HEAD",
+      });
+    }
     return await graphApiPayload(ctx, config, { url: request.url, method });
   }
 
@@ -307,6 +426,8 @@ export async function handleApiRequest(
   }
   const record = payload as {
     kind?: unknown;
+    name?: unknown;
+    dataUrl?: unknown;
     area?: unknown;
     outcome?: unknown;
     root?: unknown;
@@ -333,6 +454,19 @@ export async function handleApiRequest(
     return { status: 200, body: { ok: false, error: { code: "bad_body", message: "请求体必须是对象" } } };
   }
 
+  /*
+   * **插入图片**（POST `{kind:'image-save', name, dataUrl, root?, sessionId?}` ✓）：
+   * 落盘到 `<库根>/<imageDir>/` ✓（默认 `image` ⇒ 用户要的 `.dsh_knowledge/image/` ✓），
+   * 回的是**库内相对路径** ✓ ⇒ 客户端把这一串写进 Markdown ✓（显示时再换成同源 URL ✓）。
+   */
+  if (record.kind === "image-save") {
+    return await saveImageRequest(ctx, config, {
+      name: record.name,
+      dataUrl: record.dataUrl,
+      root: record.root,
+      sessionId: record.sessionId,
+    });
+  }
   // 「创建新知识库」：唯一的写入口，且只在目录里**没有** library.json 时才会写
   if (record.kind === "create-library") {
     const root = typeof record.root === "string" ? record.root : "";
@@ -769,11 +903,13 @@ export function registerApi(ctx: unknown, config: KnowledgeNetConfig): ApiRegist
 
   const handler = async (request: Request): Promise<Response> => {
     const head = request.method === "HEAD";
-    const { status, body } = await handleApiRequest(registrar, config, {
+    const { status, body, raw } = await handleApiRequest(registrar, config, {
       url: request.url,
       method: request.method,
       json: () => request.json() as Promise<unknown>,
     });
+    /* 取图那条路直接回字节 ✓（JSON 包装会把图片编码坏 ✗） */
+    if (raw !== undefined) return raw;
     return jsonResponse(body, status, head);
   };
 
