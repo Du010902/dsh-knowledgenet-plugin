@@ -1,5 +1,5 @@
 import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import path, { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import path, { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 //#region src/vendor/upstream/data/errors.ts
@@ -1177,6 +1177,56 @@ function neighborhood(snapshot, nodeId) {
 	};
 }
 //#endregion
+//#region src/host/node-conversation-file.ts
+/** Read the complete plugin-owned index, refusing damaged records. */
+async function readConversationIndex(root) {
+	let text;
+	try {
+		text = await readFile(join(root, "node-conversations.json"), "utf8");
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return Object.create(null);
+		throw error;
+	}
+	const data = JSON.parse(text);
+	if (!data || typeof data !== "object" || !("version" in data) || data.version !== 1 || !("nodes" in data) || !data.nodes || typeof data.nodes !== "object" || Array.isArray(data.nodes)) throw new Error("Invalid node conversation index");
+	const nodes = Object.create(null);
+	for (const [id, entries] of Object.entries(data.nodes)) {
+		if (!Array.isArray(entries)) throw new Error("Invalid node conversation records");
+		nodes[id] = entries.map((entry) => {
+			if (!entry || typeof entry !== "object" || !("sessionId" in entry) || typeof entry.sessionId !== "string" || !entry.sessionId.trim() || !("createdAt" in entry) || typeof entry.createdAt !== "number" || !Number.isFinite(entry.createdAt) || entry.createdAt < 0) throw new Error("Invalid node conversation record");
+			return {
+				sessionId: entry.sessionId,
+				createdAt: entry.createdAt
+			};
+		});
+	}
+	return nodes;
+}
+/** Caller owns the library write queue; replace the index atomically. */
+async function writeConversationIndex(root, nodes) {
+	const target = join(root, "node-conversations.json");
+	const temp = `${target}.${randomUUID()}.tmp`;
+	await writeFile(temp, JSON.stringify({
+		version: 1,
+		nodes
+	}, null, 2) + "\n", { flag: "wx" });
+	try {
+		await rename(temp, target);
+	} catch (error) {
+		await unlink(temp).catch((cleanupError) => {});
+		throw error;
+	}
+}
+/** Copy navigation history before an ordinary Markdown node adopts its permanent ID. */
+async function copyConversationIdentity(root, from, to) {
+	const nodes = await readConversationIndex(root);
+	if (!Object.hasOwn(nodes, from)) return;
+	const byId = new Map((nodes[to] ?? []).map((entry) => [entry.sessionId, entry]));
+	for (const entry of nodes[from]) if (!byId.has(entry.sessionId)) byId.set(entry.sessionId, entry);
+	nodes[to] = [...byId.values()];
+	await writeConversationIndex(root, nodes);
+}
+//#endregion
 //#region src/host/v3/frontmatter.ts
 /**
 * 节点 markdown 的 **front-matter**（v3 存储的核心约定）。
@@ -2070,7 +2120,10 @@ async function writeNoteLocked(base, input, now) {
 		rev: (parsed.meta.rev || 0) + 1
 	};
 	const text = composeDocument(meta, input.text);
-	if (id !== node.id) await copyUnderstandingIdentity(base, node.id, id);
+	if (id !== node.id) {
+		await copyUnderstandingIdentity(base, node.id, id);
+		await copyConversationIdentity(base, node.id, id);
+	}
 	await writeAtomic(abs, text);
 	const normalizedBody = parseDocument(text).body;
 	updateNodeIndexEntry(base, {
@@ -5218,6 +5271,29 @@ function registerPrompts(ctx, config) {
 	};
 }
 //#endregion
+//#region src/host/node-conversations.ts
+/** Read one node's navigation history without reading or changing Session files. */
+async function listNodeConversations(root, nodeId) {
+	if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
+	return ((await readConversationIndex(root))[nodeId] ?? []).slice().sort((a, b) => b.createdAt - a.createdAt);
+}
+/** Record a successfully created Session once, serializing concurrent library changes. */
+async function recordNodeConversation(root, nodeId, sessionId) {
+	return withLibraryWrite(root, async () => {
+		if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
+		const nodes = await readConversationIndex(root);
+		const entries = nodes[nodeId] ?? [];
+		if (!entries.some((entry) => entry.sessionId === sessionId)) {
+			nodes[nodeId] = [...entries, {
+				sessionId,
+				createdAt: Date.now()
+			}];
+			await writeConversationIndex(root, nodes);
+		}
+		return (nodes[nodeId] ?? []).slice().sort((a, b) => b.createdAt - a.createdAt);
+	});
+}
+//#endregion
 //#region src/host/understanding.ts
 /** Serialize each library's marks without changing note contents or conflict fingerprints. */
 async function setUnderstanding(root, id, understood) {
@@ -6220,6 +6296,56 @@ async function handleApiRequest(ctx, config, request) {
 			}
 		}
 	};
+	if (record.kind === "node-conversations" || record.kind === "record-node-conversation") {
+		if (typeof record.nodeId !== "string" || !record.nodeId.trim() || record.kind === "record-node-conversation" && (typeof record.conversationId !== "string" || !record.conversationId.trim() || record.conversationId.length > 300)) return {
+			status: 400,
+			body: {
+				ok: false,
+				error: {
+					code: "bad_body",
+					message: "对话记录不合法"
+				}
+			}
+		};
+		const resolved = await resolveRequestedRoot(ctx, config, {
+			root: typeof record.root === "string" ? record.root : void 0,
+			sessionId: typeof record.sessionId === "string" ? record.sessionId : void 0
+		});
+		if (!resolved.root) return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "library_unavailable",
+					message: "找不到知识库"
+				}
+			}
+		};
+		try {
+			const conversations = record.kind === "node-conversations" ? await listNodeConversations(resolved.root, record.nodeId) : await recordNodeConversation(resolved.root, record.nodeId, record.conversationId);
+			const cwd = basename(resolved.root) === ".dsh_knowledge" ? dirname(resolved.root) : resolved.root;
+			return {
+				status: 200,
+				body: {
+					ok: true,
+					root: resolved.root,
+					cwd,
+					conversations
+				}
+			};
+		} catch (error) {
+			return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "conversation_index_failed",
+						message: error instanceof Error ? error.message : String(error)
+					}
+				}
+			};
+		}
+	}
 	if (record.kind === "set-understanding") {
 		if (typeof record.nodeId !== "string" || typeof record.understood !== "boolean") return {
 			status: 400,

@@ -1,3 +1,4 @@
+import { NodeConversations } from "./NodeConversations.tsx";
 import { UnderstandingButton } from "./UnderstandingButton.tsx";
 import { NoteRelations } from "./NoteRelations.tsx";
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
@@ -69,11 +70,12 @@ export function NodeDocumentEditor(props: {
   onRelationsChanged?: () => void;
   understood?: boolean;
   onUnderstandingSaved?: (states: Record<string, boolean>) => void;
+  onOpenConversation?: (sessionId: string, dirty: boolean) => void;
   nodeId: string;
   libraryKey?: string | undefined;
   target?: DocumentTarget | undefined;
   draftKey?: string | undefined;
-  onClose: () => void;
+  onClose: (dirty?: boolean) => void;
   /**
    * **点前置 / 被依赖列表里的节点 ⇒ 跳到那个节点的编辑界面** ✓（用户实测要求 ✓）。
    * 只传 **node id** ✓；切不切得动由父面板决定 ✓（它有"未保存改动"的三选一 ✓）。
@@ -159,7 +161,8 @@ export function NodeDocumentEditor(props: {
    * 组合结束补跑时**必须重走同一条"取快照 → 再执行"的流程** ✓
    * （第三次复查 P2-1：直接跑原始闭包会跳过快照，等于拿旧正文离开 ✗）。
    */
-  const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | null>(null);
+  const pendingConversationRef = useRef<string | null>(null);
+  const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | { kind: "conversation" } | null>(null);
   /**
    * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 自动改用纯文本兜底 ✓。
    * 必须跟着 draft 走 ✗：只看载入基线的话，用户在纯文本里新加 HTML/脚注/指令后
@@ -671,18 +674,19 @@ export function NodeDocumentEditor(props: {
    * 宿主保存时会去掉末尾空白/换行，而编辑器输出会补回末尾换行 ⇒ 拿磁盘正文比的话，
    * **刚保存成功**再点叉号就又会被判成"有未保存修改"、弹窗又冒出来 ✓（用户实测 ✓）。
    */
-  const leaveRich = useCallback((kind: "source" | "close"): void => {
+  const leaveRich = useCallback((kind: "source" | "close" | "conversation"): void => {
     /**
      * 真正执行"离开正文"。
      * @param dirty - **刚刚算出来的**未保存状态（不依赖 React state 的旧值 ✓）。
      */
     const act = (dirty: boolean): void => {
       if (kind === "source") setTab("source");
+      else if (kind === "conversation" && pendingConversationRef.current) props.onOpenConversation?.(pendingConversationRef.current, dirty);
       else props.onClose(dirty);
     };
     /* 纯文本兜底：草稿本身就是权威，直接执行 ✓ */
     if (tab === "source") {
-      if (kind === "close") act(state.draft !== state.snapshot);
+      if (kind !== "source") act(state.draft !== state.snapshot);
       return;
     }
     const rich = richRef.current;
@@ -705,7 +709,7 @@ export function NodeDocumentEditor(props: {
     const live = snapshotDraft();
     if (live === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
     act(live !== state.snapshot);
-  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.snapshot, props.onClose]);
+  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.snapshot, props.onClose, props.onOpenConversation]);
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
@@ -781,6 +785,7 @@ export function NodeDocumentEditor(props: {
           ) : null}
         </h2>
         {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
+        {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
         <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×

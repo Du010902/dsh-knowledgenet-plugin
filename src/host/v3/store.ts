@@ -1,3 +1,4 @@
+import { copyConversationIdentity } from "../node-conversation-file.ts";
 /**
  * **v3 存储层**：一节点 = 一个 markdown，身份 = front-matter 里的 ULID（与标题/文件名无关）。
  *
@@ -858,7 +859,10 @@ async function writeNoteLocked(
     rev: (parsed.meta.rev || 0) + 1,
   };
   const text = composeDocument(meta, input.text);
-  if (id !== node.id) await copyUnderstandingIdentity(base, node.id, id);
+  if (id !== node.id) {
+    await copyUnderstandingIdentity(base, node.id, id);
+    await copyConversationIdentity(base, node.id, id);
+  }
   await writeAtomic(abs, text);
   /*
    * 返回的正文用**磁盘上那份**（= 规范化后的正文 ✓），不是原始 `input.text` ✗：

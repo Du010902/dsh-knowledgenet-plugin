@@ -215,3 +215,7 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 图片 API 集成验证：`node --experimental-transform-types --test tests/note-images-api.integration.mjs`（需要支持该选项的 Node）。它验证同名并发上传、磁盘字节和取图接口；常规状态与图片辅助逻辑测试为 `tests/understanding.test.mjs` 和 `tests/note-images.test.mjs`。
 
 图片编辑器样式随插件完整打包，图注与缩放控件按需显示。图片缩放高度转换为等比例宽度，让窄窗口按正文宽度收缩；保存仍使用 Markdown 的比例值与库内相对路径。普通 Markdown 节点首次保存时固化正式 ID，其理解标记同时保留。
+
+## 节点对话
+
+右键节点选择“打开新对话”，或在笔记标题栏展开“对话 N”创建和选择历史对话。关联只保存在知识库的 `node-conversations.json`，对话本身不记录节点绑定信息。切换前会检查未保存的笔记。详见 [节点对话说明](design/node-conversations.md)。

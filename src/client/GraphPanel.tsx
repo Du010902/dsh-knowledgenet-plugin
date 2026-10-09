@@ -1,3 +1,4 @@
+import { nodeConversations } from "./node-conversations.ts";
 /**
  * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
  *
@@ -39,6 +40,8 @@ import { ShadowPanel } from "./shadow.tsx";
 import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
 /** 相机命令类型取自上游（`focusNode` / `fitAll` 都在里面），别在本地再写一份窄的 */
 import type { CameraCommand } from "../vendor/upstream/graph3d/types.ts";
+
+type EditAction = { kind: "open"; nodeId: string } | { kind: "close" } | { kind: "conversation"; sessionId: string };
 
 interface PanelPayload {
   understanding?: Record<string, boolean>;
@@ -231,8 +234,8 @@ function GraphPanelInner(props: {
   /** 编辑器现在能不能保存（没有指纹/载入失败时提前禁用「保存并继续」✓ —— 复查 P2-2 ✓） */
   const [editorSaveable, setEditorSaveable] = useState(true);
   /** 待办：保存成功后要执行的切节点/关闭动作 ✓ */
-  const pendingEditRef = useRef<{ kind: "open"; nodeId: string } | { kind: "close" } | null>(null);
-  const [leaveDialog, setLeaveDialog] = useState<{ kind: "open"; nodeId: string } | { kind: "close" } | null>(null);
+  const pendingEditRef = useRef<EditAction | null>(null);
+  const [leaveDialog, setLeaveDialog] = useState<EditAction | null>(null);
 
   /**
    * 请求进入某个节点的编辑器（或关闭）。
@@ -248,13 +251,14 @@ function GraphPanelInner(props: {
    * 两处**同时**改 ⇒ `effectiveFocus === editingNodeId` ✓，那条 effect 自然不动 ✓，
    * 而且图谱高亮也跟着跳到被打开的那个节点 ✓（正是"跳转到对应节点"该有的样子 ✓）。
    */
-  const applyEdit = useCallback((next: { kind: "open"; nodeId: string } | { kind: "close" }): void => {
+  const applyEdit = useCallback((next: EditAction): void => {
+    if (next.kind === "conversation") { nodeConversations.open(next.sessionId); setEditingNodeId(null); return; }
     if (next.kind === "open") setFocusId(next.nodeId);
     setEditingNodeId(next.kind === "open" ? next.nodeId : null);
   }, []);
 
   const requestEdit = useCallback((
-    next: { kind: "open"; nodeId: string } | { kind: "close" },
+    next: EditAction,
     /*
      * **来得更新鲜的 dirty** ✗（第三次复查 P2-1）：编辑器刚在组合结束后取过快照，
      * 那一刻的"有没有未保存内容"比 React state 更准 ⇒ 一律以传入值为准 ✓，
@@ -310,7 +314,7 @@ function GraphPanelInner(props: {
    */
   const leaveCopy = leaveDialog === null
     ? null
-    : leaveLabels(leaveDialog.kind, t, { saving: editorSaving, saveable: editorSaveable });
+    : leaveLabels(leaveDialog.kind === "conversation" ? "close" : leaveDialog.kind, t, { saving: editorSaving, saveable: editorSaveable });
   /** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
   const [searchQuery, setSearchQuery] = useState("");
   /**
@@ -1200,6 +1204,7 @@ function GraphPanelInner(props: {
                 graph={graph ?? undefined}
                 onRelationsChanged={() => { void load({ refresh: true }); }}
                 understood={payload?.understanding?.[editingNodeId] === true}
+                onOpenConversation={(sessionId, dirty) => requestEdit({ kind: "conversation", sessionId }, dirty)}
                 onUnderstandingSaved={updateUnderstanding}
                 target={editingTarget}
                 t={props.t}
@@ -1242,7 +1247,8 @@ function GraphPanelInner(props: {
                      * —— 就是"点前置抖一下、还停在原来那篇"的同一个坑 ✓。
                      */
                     if (!(adopted && next === document.nodeId)) {
-                      if (next === null) applyEdit({ kind: "close" });
+                      if (pending.kind === "conversation") applyEdit(pending);
+                      else if (next === null) applyEdit({ kind: "close" });
                       else applyEdit({ kind: "open", nodeId: next });
                     }
                   }
@@ -1281,6 +1287,7 @@ function GraphPanelInner(props: {
               root={target !== undefined && target.kind === "root" ? target.value : undefined}
               sessionId={target !== undefined && target.kind === "session" ? target.value : props.sessionId}
               onChanged={() => { void load({ refresh: true }); }}
+              onCreateConversation={async (nodeId) => { const sessionId = await nodeConversations.create(nodeId, editingTarget); requestEdit({ kind: "conversation", sessionId }); }}
               onEditNote={(nodeId) => {
               /*
                * 聚焦不再**提前**改 ✓：`applyEdit` 会在"真正落地"时把编辑目标与聚焦一起改 ✓。

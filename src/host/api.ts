@@ -1,3 +1,5 @@
+import { listNodeConversations, recordNodeConversation } from "./node-conversations.ts";
+import { dirname, basename } from "node:path";
 import { readUnderstanding, setUnderstanding } from "./understanding.ts";
 /**
  * 宿主侧 HTTP（Fetch）路由：给**常驻面板**取数据用。
@@ -444,6 +446,7 @@ export async function handleApiRequest(
     description?: unknown;
     snippet?: unknown;
     nodeId?: unknown;
+    conversationId?: unknown;
     question?: unknown;
     query?: unknown;
     /** 节点正文编辑：完整正文与读取时的整文件指纹 ✓ */
@@ -464,6 +467,18 @@ export async function handleApiRequest(
    * 落盘到 `<库根>/<imageDir>/` ✓（默认 `image` ⇒ 用户要的 `.dsh_knowledge/image/` ✓），
    * 回的是**库内相对路径** ✓ ⇒ 客户端把这一串写进 Markdown ✓（显示时再换成同源 URL ✓）。
    */
+  if (record.kind === "node-conversations" || record.kind === "record-node-conversation") {
+    if (typeof record.nodeId !== "string" || !record.nodeId.trim() || (record.kind === "record-node-conversation" && (typeof record.conversationId !== "string" || !record.conversationId.trim() || record.conversationId.length > 300))) return { status: 400, body: { ok: false, error: { code: "bad_body", message: "对话记录不合法" } } };
+    const resolved = await resolveRequestedRoot(ctx, config, { root: typeof record.root === "string" ? record.root : undefined, sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined });
+    if (!resolved.root) return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: "找不到知识库" } } };
+    try {
+      const conversations = record.kind === "node-conversations"
+        ? await listNodeConversations(resolved.root, record.nodeId)
+        : await recordNodeConversation(resolved.root, record.nodeId, record.conversationId as string);
+      const cwd = basename(resolved.root) === ".dsh_knowledge" ? dirname(resolved.root) : resolved.root;
+      return { status: 200, body: { ok: true, root: resolved.root, cwd, conversations } };
+    } catch (error) { return { status: 200, body: { ok: false, error: { code: "conversation_index_failed", message: error instanceof Error ? error.message : String(error) } } }; }
+  }
   if (record.kind === "set-understanding") {
     if (typeof record.nodeId !== "string" || typeof record.understood !== "boolean") return { status: 400, body: { ok: false, error: { code: "bad_body", message: "理解状态不合法" } } };
     const resolved = await resolveRequestedRoot(ctx, config, { root: typeof record.root === "string" ? record.root : undefined, sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined });

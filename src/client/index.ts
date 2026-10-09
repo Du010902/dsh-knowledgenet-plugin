@@ -1,3 +1,4 @@
+import { attachConversationServices, type ConversationServices } from "./node-conversations.ts";
 /**
  * 插件 Client 半入口。
  *
@@ -31,6 +32,7 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
+  nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话",
   understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
 
   // 面板
@@ -254,6 +256,7 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
+  nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node",
   understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
 
   panel: "Knowledge graph",
@@ -466,6 +469,7 @@ const DICT_EN: Record<string, string> = {
 };
 
 interface MinimalClientContext {
+  effect?(effect: () => (() => void), label?: string): unknown;
   get?(name: string): unknown;
   slots: {
     inject(key: string, callback: () => unknown): unknown;
@@ -499,6 +503,13 @@ function registerLocale(ctx: MinimalClientContext): string | undefined {
 }
 
 export function apply(ctx: MinimalClientContext): void {  const ns = registerLocale(ctx);
+  const attach = () => attachConversationServices(() => {
+    const sessions = ctx.get?.("sessions") as ConversationServices["sessions"] | undefined;
+    const uiWorkspace = ctx.get?.("uiWorkspace") as ConversationServices["uiWorkspace"] | undefined;
+    return sessions && uiWorkspace ? { sessions, uiWorkspace } : undefined;
+  });
+  if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");
+  else attach();
   const withLocale = (options: Record<string, unknown>): Record<string, unknown> =>
     ns === undefined ? options : { ...options, locale: ns };
 

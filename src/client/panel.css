@@ -1667,3 +1667,7 @@
 .kn-note-relations .kn-note-selection { border-radius: 8px; padding: 7px 10px; color: var(--dsw-alias-label-primary); }
 
 .kn-understanding-button[aria-pressed="true"] { color: #167346; }
+
+.kn-node-conversations .kn-note-relation-item { display: flex; flex-direction: column; gap: 3px; }
+.kn-node-conversations small, .kn-node-chat-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.kn-node-conversations .kn-note-relations-popover { max-height: min(360px, 60vh); overflow-y: auto; }
