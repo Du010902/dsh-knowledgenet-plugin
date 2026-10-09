@@ -936,6 +936,12 @@ function freeRotationPatchPlugin() {
     transform(code, id) {
       const clean = String(id).split("?")[0].replaceAll("\\", "/");
       if (clean.endsWith("/vendor/upstream/graph3d/engine.ts")) {
+        // Keep global theme colors while reading node statuses from this graph instance.
+        if (code.split("this.palette = readPalette();").length !== 3) throw new Error("Space palette call sites changed");
+        code = code.replaceAll("this.palette = readPalette();", 'this.palette = { ...readPalette(), statusRgb: readPalette(this.options.host.closest<HTMLElement>(".kn-graph")).statusRgb };');
+        const statusSync = "    if (this.disposed) return;\n    const graph = buildSpaceGraph";
+        if (!code.includes(statusSync)) throw new Error("Space graph sync call site changed");
+        code = code.replace(statusSync, "    if (this.disposed) return;\n    this.handleThemeChange();\n    const graph = buildSpaceGraph");
         /* 换导航实现 + 显式库身份 + 分区缓存 + 取景原因 ✓ */
         for (const [needle, what] of [
           [NAV_IMPORT_NEEDLE, "导航导入"],
@@ -1487,6 +1493,7 @@ async function readEditorCss() {
     "block-edit",
     "code-mirror",
     "cursor",
+    "image-block",
     "latex",
     "link-tooltip",
     "list-item",

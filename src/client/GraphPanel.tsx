@@ -1,3 +1,4 @@
+import { UnderstandingButton } from "./UnderstandingButton.tsx";
 /**
  * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
  *
@@ -41,6 +42,7 @@ import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
 import type { CameraCommand } from "../vendor/upstream/graph3d/types.ts";
 
 interface PanelPayload {
+  understanding?: Record<string, boolean>;
   ok?: boolean;
   /**
    * 知识库身份。
@@ -108,6 +110,8 @@ const LITERAL: Record<string, string> = {
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   nodeMenuTitle: "这个知识点",
   editNote: "编辑笔记",
+  understandingMode: "理解状态",
+  understandingModeHint: "按理解状态着色：已理解为绿色，未理解为灰色",
   addPrerequisite: "添加前置节点…",
   /* 节点笔记编辑器（`design/node-note-editor.html` ✓）；正式文案同时进中英词典 ✓ */
   leaveTitle: "有尚未保存的笔记",
@@ -209,6 +213,7 @@ function GraphPanelInner(props: {
   /** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
   const [refreshing, setRefreshing] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [understandingMode, setUnderstandingMode] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [relayoutToken, setRelayoutToken] = useState(0);
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -678,6 +683,7 @@ function GraphPanelInner(props: {
     return () => { window.removeEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged); };
   }, [load, fitWholeGraph]);
 
+  const updateUnderstanding = useCallback((states: Record<string, boolean>) => { setPayload(current => current ? { ...current, understanding: states } : current); }, []);
   const graph = useMemo<GraphSnapshot | null>(() => {
     if (payload === null) return null;
     return {
@@ -688,6 +694,8 @@ function GraphPanelInner(props: {
       session: null,
     };
   }, [payload]);
+  const coloredGraph = useMemo<GraphSnapshot | null>(() => graph && understandingMode ? { ...graph, nodes: graph.nodes.map(node => ({ ...node, status: payload?.understanding?.[node.id] === true ? "done" : "todo" })) } : graph, [graph, understandingMode, payload?.understanding]);
+
 
   /**
    * 三维**场景标识**：库身份 + 节点集合。
@@ -927,6 +935,7 @@ function GraphPanelInner(props: {
           * 文字改由 `aria-label` 承担：可见文字去掉后，读屏仍念得出"刷新" ✓；
           * `title` 上的说明（重新从磁盘读取知识库）保持不变 ✓。
           */}
+        <button type="button" className="kn-btn kn-understanding-toggle" aria-pressed={understandingMode} title={t("understandingModeHint")} onClick={() => setUnderstandingMode(value => !value)}>{t("understandingMode")}</button>
         <button
           type="button"
           className="kn-btn kn-icon-btn"
@@ -1054,7 +1063,7 @@ function GraphPanelInner(props: {
         report={(step, detail) => { void reportDiagOnce("plan-review", step, step, detail ?? null); }}
       />
 
-      <div className="kn-graph">
+      <div className="kn-graph" data-understanding={understandingMode ? "true" : "false"}>
         {error !== null ? (
           <div className="kn-msg kn-body">
             <div className="kn-error">{t("failed")} — {error}</div>
@@ -1134,7 +1143,7 @@ function GraphPanelInner(props: {
                    * 不带库根就会出现"切到另一个库后沿用上一个库的视角"（位置不对）✓。
                    */
                   key={sceneKey}
-                  graph={graph}
+                  graph={coloredGraph ?? graph}
                   rootId={payload?.focusId ?? null}
                   focusId={effectiveFocus}
                   labelDensity="smart"
@@ -1187,6 +1196,7 @@ function GraphPanelInner(props: {
              * 宽面板并排、窄侧栏覆盖在图谱上（CSS 容器查询 ✓）；关闭后图谱视角原样保留 ✓。
              * `key={editingNodeId}` ⇒ 换节点即重挂 ⇒ 草稿不会串到别的节点 ✗。
              */}
+            {selectedNode ? <div className="kn-graph-understanding"><UnderstandingButton nodeId={selectedNode.id} understood={payload?.understanding?.[selectedNode.id] === true} target={editingTarget} t={props.t} onSaved={updateUnderstanding} /></div> : null}
             {editingNodeId !== null ? (
               <NodeDocumentEditor
                 key={`${libraryKey}::${editingNodeId}`}
@@ -1194,6 +1204,8 @@ function GraphPanelInner(props: {
                 libraryKey={libraryKey}
                 graph={graph ?? undefined}
                 onRelationsChanged={() => { void load({ refresh: true }); }}
+                understood={payload?.understanding?.[editingNodeId] === true}
+                onUnderstandingSaved={updateUnderstanding}
                 target={editingTarget}
                 t={props.t}
                 saveNonce={editorSaveNonce}

@@ -1652,3 +1652,19 @@
 .kn-note-relations .kn-note-relation-item:disabled { cursor: default; opacity: 1; }
 .kn-note-relations .kn-note-selection { position: fixed; z-index: 40; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 @container (max-width: 480px) { .kn-note-relations { gap: 0; } .kn-note-relations button { padding: 5px; font-size: 11px; } }
+
+.kn-understanding-control { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.kn-understanding-button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px; padding: 4px 9px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.kn-understanding-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-idle-primary); }
+.kn-understanding-button[aria-pressed="true"] .kn-understanding-dot { background: #36a269; }
+.kn-understanding-button:disabled { opacity: .6; cursor: wait; }
+.kn-understanding-toggle[aria-pressed="true"] { background: color-mix(in srgb, #36a269 12%, transparent); }
+.kn-graph[data-understanding="true"] { --todo: #8b9398; --success: #36a269; }
+.kn-graph-understanding { position: absolute; left: 12px; bottom: 30px; z-index: 7; padding: 5px; border-radius: 18px; background: var(--dsw-alias-bg-layer-1); }
+.kn-graph:has(.kn-editor) .kn-graph-understanding { visibility: hidden; }
+
+/* Keep note actions compact and context commands within the editor. */
+.kn-note-relations { flex-shrink: 0; }
+.kn-note-relations > button { white-space: nowrap; }
+.kn-table-menu { box-sizing: border-box; max-width: calc(100% - 16px); max-height: min(264px, calc(100% - 16px)); }
+.kn-note-relations .kn-note-selection { border-radius: 8px; padding: 7px 10px; color: var(--dsw-alias-label-primary); }

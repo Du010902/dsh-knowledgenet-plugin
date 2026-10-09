@@ -23,6 +23,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { composeDocument, contentHash, emptyMeta, fileNameFromTitle, parseDocument, type FrontMatter } from "./frontmatter.ts";
 import { isUlid, ulid } from "./ulid.ts";
+import { copyUnderstandingIdentity } from "../understanding-file.ts";
 
 export const V3_FORMAT_VERSION = 3;
 export const V3_LIBRARY_FILE = "library.json";
@@ -857,6 +858,7 @@ async function writeNoteLocked(
     rev: (parsed.meta.rev || 0) + 1,
   };
   const text = composeDocument(meta, input.text);
+  if (id !== node.id) await copyUnderstandingIdentity(base, node.id, id);
   await writeAtomic(abs, text);
   /*
    * 返回的正文用**磁盘上那份**（= 规范化后的正文 ✓），不是原始 `input.text` ✗：

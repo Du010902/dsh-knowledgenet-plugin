@@ -823,3 +823,9 @@
 @media (prefers-reduced-motion: reduce) {
   .kn-root .kn-editor * { transition: none; }
 }
+
+/* 图片适应笔记宽度，保持原始比例；图注与正文保持轻量层次。 */
+.kn-root .kn-editor-rich .milkdown img { max-width: 100%; height: auto; object-fit: contain; }
+.kn-root .kn-editor-rich .milkdown .milkdown-image-block { margin: 1em 0; }
+.kn-root .kn-editor-rich .milkdown .milkdown-image-block img { border-radius: 8px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-image-block .caption-input { color: var(--dsw-alias-label-secondary); font-size: .875em; text-align: center; line-height: 1.5; }

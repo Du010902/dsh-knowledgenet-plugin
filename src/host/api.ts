@@ -1,3 +1,4 @@
+import { readUnderstanding, setUnderstanding } from "./understanding.ts";
 /**
  * 宿主侧 HTTP（Fetch）路由：给**常驻面板**取数据用。
  *
@@ -286,7 +287,7 @@ export async function graphApiPayload(
         maxNodes: Number.isFinite(maxNodes as number) ? (maxNodes as number) : undefined,
       },
     );
-    return answer({ ok: true, ...payload });
+    return answer({ ok: true, ...payload, understanding: await readUnderstanding(root) });
   } catch (error) {
     return answer({ ok: false, error: errorBody(error) });
   }
@@ -372,15 +373,19 @@ async function saveImageRequest(
   if (target === null) {
     return { status: 200, body: { ok: false, error: { code: "invalid_name", message: "文件名不合法" } } };
   }
-  /* 已有同名文件 ⇒ 加短后缀 ✓（绝不覆盖 ✓） */
-  try {
-    await readFile(target);
-    const renamed = sanitizeImageName(withNameSuffix(wanted, randomBytes(2).toString("hex")), extension);
-    target = resolveImageTarget(root, config.imageDir, renamed) ?? target;
-  } catch {
-    /* 不存在 ⇒ 直接用 ✓ */
+  // 独占创建避免同时插图时覆盖已有文件；只对文件名碰撞重试。
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await writeFile(target, parsed.bytes, { flag: "wx" });
+      break;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST" || attempt >= 5) throw error;
+      const renamed = sanitizeImageName(withNameSuffix(wanted, randomBytes(8).toString("hex")), extension);
+      const next = resolveImageTarget(root, config.imageDir, renamed);
+      if (next === null) throw new Error("Invalid image destination");
+      target = next;
+    }
   }
-  await writeFile(target, parsed.bytes);
   const fileName = target.split(/[\\/]/).pop() ?? wanted;
   return {
     status: 200,
@@ -459,6 +464,13 @@ export async function handleApiRequest(
    * 落盘到 `<库根>/<imageDir>/` ✓（默认 `image` ⇒ 用户要的 `.dsh_knowledge/image/` ✓），
    * 回的是**库内相对路径** ✓ ⇒ 客户端把这一串写进 Markdown ✓（显示时再换成同源 URL ✓）。
    */
+  if (record.kind === "set-understanding") {
+    if (typeof record.nodeId !== "string" || typeof record.understood !== "boolean") return { status: 400, body: { ok: false, error: { code: "bad_body", message: "理解状态不合法" } } };
+    const resolved = await resolveRequestedRoot(ctx, config, { root: typeof record.root === "string" ? record.root : undefined, sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined });
+    if (!resolved.root) return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: "找不到知识库" } } };
+    try { const understanding = await setUnderstanding(resolved.root, record.nodeId, record.understood); return { status: 200, body: { ok: true, understanding } }; }
+    catch (error) { return { status: 200, body: { ok: false, error: { code: "state_write_failed", message: error instanceof Error ? error.message : String(error) } } }; }
+  }
   if (record.kind === "image-save") {
     return await saveImageRequest(ctx, config, {
       name: record.name,

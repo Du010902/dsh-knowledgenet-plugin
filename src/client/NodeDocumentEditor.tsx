@@ -1,3 +1,4 @@
+import { UnderstandingButton } from "./UnderstandingButton.tsx";
 import { NoteRelations } from "./NoteRelations.tsx";
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 /**
@@ -66,6 +67,8 @@ import {
 export function NodeDocumentEditor(props: {
   graph?: GraphSnapshot;
   onRelationsChanged?: () => void;
+  understood?: boolean;
+  onUnderstandingSaved?: (states: Record<string, boolean>) => void;
   nodeId: string;
   libraryKey?: string | undefined;
   target?: DocumentTarget | undefined;
@@ -777,6 +780,7 @@ export function NodeDocumentEditor(props: {
             </sup>
           ) : null}
         </h2>
+        {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
         <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×

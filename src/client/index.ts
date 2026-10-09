@@ -31,6 +31,8 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
+  understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试", understandingMode: "理解状态", understandingModeHint: "绿色：已理解 · 灰色：未理解",
+
   // 面板
   panel: "知识库图谱",
   /* 标签芯片上的短名（芯片窄，用全名会把别的标签挤掉）✓ */
@@ -252,6 +254,8 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
+  understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again", understandingMode: "Understanding", understandingModeHint: "Green: understood · Gray: not understood",
+
   panel: "Knowledge graph",
   tabShort: "Graph",
   focus: "Focus",

@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
+import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
 import type { Ctx } from "@milkdown/kit/ctx";
 import {
@@ -40,7 +41,7 @@ import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
 import { tableMinWidth } from "./table-menu.ts";
-import { imageDisplayUrl, isLibraryRelativeImageSrc, withExplicitImageTitles } from "../shared/note-images.ts";
+import { MAX_IMAGE_BYTES, contentTypeForImage, imageDisplayUrl, isLibraryRelativeImageSrc, withExplicitImageTitles } from "../shared/note-images.ts";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { inFirstTableRow, tableRowTypes } from "./table-header-row.ts";
 import {
@@ -178,11 +179,14 @@ function flashCopied(button: HTMLElement): void {
  *   （显示时再由 `applyImageSources` 换成同源 URL ✓ ⇒ 笔记挪到别的编辑器也读得懂 ✓）。
  */
 async function uploadNoteImage(file: File, target: Record<string, unknown> | undefined): Promise<string> {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("图片超过 12 MiB，请缩小后再插入");
+  const mime = file.type || contentTypeForImage("", file.name);
+  if (!mime.startsWith("image/")) throw new Error("请选择图片文件");
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => { resolve(typeof reader.result === "string" ? reader.result : ""); };
     reader.onerror = () => { reject(new Error("read-failed")); };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(file.type === "" ? file.slice(0, file.size, mime) : file);
   });
   const response = await fetch(GRAPH_API_ROUTE, {
     method: "POST",
@@ -247,6 +251,7 @@ function ensureImageDisplay(
     .then(async (response) => {
       if (response.ok !== true) throw new Error(`image-http-${response.status}`);
       const blob = await response.blob();
+      if (!image.isConnected) return;
       const url = URL.createObjectURL(blob);
       cache.set(key, url);
       if (image.isConnected) image.setAttribute("src", url);
@@ -264,6 +269,24 @@ function ensureImageDisplay(
  * @param root - 编辑器根 ✓。
  * @param target - 当前库目标 ✓。
  */
+const imageLoadListeners = new WeakSet<HTMLImageElement>();
+
+/** Convert Crepe's saved height to a width so narrow containers preserve the image ratio. */
+function fitNoteImage(image: HTMLImageElement): void {
+  const fit = (): void => {
+    const height = Number.parseFloat(image.style.height);
+    if (image.naturalWidth <= 0 || image.naturalHeight <= 0 || !Number.isFinite(height) || height <= 0) return;
+    const width = height * image.naturalWidth / image.naturalHeight;
+    image.style.width = width + "px";
+    image.style.height = "auto";
+  };
+  fit();
+  if (!imageLoadListeners.has(image)) {
+    imageLoadListeners.add(image);
+    image.addEventListener("load", fit);
+  }
+}
+
 function applyImageSources(
   root: HTMLElement,
   target: Record<string, unknown> | undefined,
@@ -272,6 +295,7 @@ function applyImageSources(
   report: ((step: string, detail?: unknown) => void) | undefined,
 ): void {
   for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
+    fitNoteImage(image);
     const raw = image.getAttribute("data-kn-raw-src") ?? image.getAttribute("src");
     if (raw === null || !isLibraryRelativeImageSrc(raw)) continue;
     image.setAttribute("data-kn-raw-src", raw);
@@ -1138,6 +1162,19 @@ export function MarkdownRichEditor(props: {
         } as never,
       },
     });
+    // Markdown parsers return null for an empty title; the image schema requires a string.
+    crepe.editor.config((ctx) => {
+      ctx.update(imageBlockSchema.key, (previous) => (inner) => {
+        const schema = previous(inner);
+        return {
+          ...schema,
+          parseMarkdown: {
+            ...schema.parseMarkdown,
+            runner: (state, node, type) => schema.parseMarkdown.runner(state, { ...node, title: typeof node.title === "string" ? node.title : "" }, type),
+          },
+        };
+      });
+    });
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, previous) => {
         /*
@@ -1371,12 +1408,13 @@ export function MarkdownRichEditor(props: {
       if (!cell || !view || readOnlyRef.current) return;
       event.preventDefault(); event.stopPropagation();
       menuBlockRef.current = cell.closest<HTMLElement>(".milkdown-table-block");
-      const pos = view.posAtDOM(cell, 0);
+      const hit = view.posAtCoords({ left: mouse.clientX, top: mouse.clientY });
+      const pos = hit?.pos ?? view.posAtDOM(cell, 0);
       view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))));
       const body = root.closest<HTMLElement>(".kn-editor-body");
       if (!body) return;
       const rect = body.getBoundingClientRect();
-      contextPointRef.current = { top: Math.max(0, Math.min(mouse.clientY - rect.top, rect.height - 180)) + body.scrollTop, right: Math.max(8, rect.right - Math.min(mouse.clientX + 220, rect.right - 8)) };
+      contextPointRef.current = { top: Math.max(0, Math.min(mouse.clientY - rect.top, rect.height - 282)) + body.scrollTop, right: Math.max(8, rect.right - Math.min(mouse.clientX + 220, rect.right - 8)) };
       syncMenuRef.current(); setMenuOpen(true);
     };
     const readTextSelection = (): void => {
@@ -1400,6 +1438,9 @@ export function MarkdownRichEditor(props: {
     };
     const onTextSelection = (): void => { requestAnimationFrame(readTextSelection); };
     root.addEventListener("contextmenu", onTableContext, true);
+    const clearTextSelection = (): void => { props.onSelectionText?.(null); };
+    root.closest(".kn-editor-body")?.addEventListener("scroll", clearTextSelection, true);
+    window.addEventListener("resize", clearTextSelection);
     root.addEventListener("pointerup", onTextSelection);
     root.addEventListener("keyup", onTextSelection);
 
@@ -1462,7 +1503,7 @@ export function MarkdownRichEditor(props: {
         );
       })
       : null;
-    imageObserver?.observe(root, { subtree: true, attributes: true, attributeFilter: ["src"] });
+    imageObserver?.observe(root, { subtree: true, attributes: true, attributeFilter: ["src", "style"] });
 
     syncingRef.current = true;
     void crepe.create().then(
@@ -1596,6 +1637,8 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);
       root.removeEventListener("contextmenu", onTableContext, true);
+      root.closest(".kn-editor-body")?.removeEventListener("scroll", clearTextSelection, true);
+      window.removeEventListener("resize", clearTextSelection);
       root.removeEventListener("pointerup", onTextSelection);
       root.removeEventListener("keyup", onTextSelection);
       document.removeEventListener("selectionchange", onSelectionChanged);
