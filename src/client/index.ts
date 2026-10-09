@@ -31,7 +31,7 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
-  understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试", understandingMode: "理解状态", understandingModeHint: "绿色：已理解 · 灰色：未理解",
+  understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
 
   // 面板
   panel: "知识库图谱",
@@ -254,7 +254,7 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
-  understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again", understandingMode: "Understanding", understandingModeHint: "Green: understood · Gray: not understood",
+  understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
 
   panel: "Knowledge graph",
   tabShort: "Graph",

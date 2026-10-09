@@ -1,4 +1,3 @@
-import { UnderstandingButton } from "./UnderstandingButton.tsx";
 /**
  * 空间/聚焦视图里的**右键菜单**（节点：加前置；连线：删依赖）。
  *
@@ -91,12 +90,6 @@ export function graphMenuCss(): string {
     "  border: 0; border-radius: 6px; background: transparent; color: inherit;",
     "  font: inherit; cursor: pointer; }",
     ".kn-menu-item:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)); }",
-    ".kn-menu .kn-understanding-control { display: block; }",
-    ".kn-menu .kn-understanding-button { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; border-radius: 6px; padding: 6px 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }",
-    ".kn-menu .kn-understanding-button:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #111) 8%, transparent); }",
-    ".kn-menu .kn-understanding-dot { width: 7px; height: 7px; border-radius: 50%; background: #92989d; }",
-    ".kn-menu .kn-understanding-button[aria-pressed=\"true\"] .kn-understanding-dot { background: #16bd68; }",
-    ".kn-menu .kn-editor-error { display: block; max-width: 260px; padding: 6px 10px; color: var(--dsw-alias-state-error-primary, #c44); font-size: 12px; }",
     ".kn-menu-item.is-danger { color: var(--dsw-alias-state-error-primary); }",
     ".kn-modal-input {",
     "  box-sizing: border-box; width: 100%; margin-top: 10px; padding: 6px 9px;",
@@ -197,8 +190,6 @@ function PromptDialog(props: {
 }
 
 export interface GraphContextMenuProps {
-  understanding?: Record<string, boolean>;
-  onUnderstandingSaved?: (states: Record<string, boolean>) => void;
   nodes: readonly MenuNode[];
   edges: readonly MenuEdge[];
   /** 当前库的绑定：与 GET 用同一套（显式 root 优先，否则 sessionId） */
@@ -495,7 +486,6 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
               </button>
             ) : menu.kind === "node" ? (
               <>
-                <UnderstandingButton nodeId={menu.id} understood={props.understanding?.[menu.id] === true} target={{ root: props.root, sessionId: props.sessionId }} t={props.t} onSaved={(states) => { props.onUnderstandingSaved?.(states); setMenu(null); }} />
                 {/*
                  * 「编辑笔记」：与选中区那颗按钮同一条路 ✓（`design/node-note-editor-plan.md`
                  * 要求"选中节点信息区 + 右键菜单"两个入口 ✓）。

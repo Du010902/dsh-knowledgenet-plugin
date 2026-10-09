@@ -109,8 +109,6 @@ const LITERAL: Record<string, string> = {
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   nodeMenuTitle: "这个知识点",
   editNote: "编辑笔记",
-  understandingMode: "理解状态",
-  understandingModeHint: "按理解状态着色：已理解为绿色，未理解为灰色",
   addPrerequisite: "添加前置节点…",
   /* 节点笔记编辑器（`design/node-note-editor.html` ✓）；正式文案同时进中英词典 ✓ */
   leaveTitle: "有尚未保存的笔记",
@@ -212,7 +210,6 @@ function GraphPanelInner(props: {
   /** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
   const [refreshing, setRefreshing] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
-  const [understandingMode, setUnderstandingMode] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [relayoutToken, setRelayoutToken] = useState(0);
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -693,7 +690,7 @@ function GraphPanelInner(props: {
       session: null,
     };
   }, [payload]);
-  const coloredGraph = useMemo<GraphSnapshot | null>(() => graph && understandingMode ? { ...graph, nodes: graph.nodes.map(node => ({ ...node, status: payload?.understanding?.[node.id] === true ? "done" : "todo" })) } : graph, [graph, understandingMode, payload?.understanding]);
+  const coloredGraph = useMemo<GraphSnapshot | null>(() => graph ? { ...graph, nodes: graph.nodes.map(node => ({ ...node, status: payload?.understanding?.[node.id] === true ? "done" : "todo" })) } : graph, [graph, payload?.understanding]);
 
 
   /**
@@ -1062,7 +1059,7 @@ function GraphPanelInner(props: {
         report={(step, detail) => { void reportDiagOnce("plan-review", step, step, detail ?? null); }}
       />
 
-      <div className="kn-graph" data-understanding={understandingMode ? "true" : "false"}>
+      <div className="kn-graph" data-understanding="true">
         {error !== null ? (
           <div className="kn-msg kn-body">
             <div className="kn-error">{t("failed")} — {error}</div>
@@ -1195,7 +1192,6 @@ function GraphPanelInner(props: {
              * 宽面板并排、窄侧栏覆盖在图谱上（CSS 容器查询 ✓）；关闭后图谱视角原样保留 ✓。
              * `key={editingNodeId}` ⇒ 换节点即重挂 ⇒ 草稿不会串到别的节点 ✗。
              */}
-            <div className="kn-graph-understanding"><button type="button" className="kn-btn kn-understanding-toggle" aria-pressed={understandingMode} title={t("understandingModeHint")} onClick={() => setUnderstandingMode(value => !value)}>{t("understandingMode")}</button></div>
             {editingNodeId !== null ? (
               <NodeDocumentEditor
                 key={`${libraryKey}::${editingNodeId}`}
@@ -1280,8 +1276,6 @@ function GraphPanelInner(props: {
             {/* 右键菜单：节点加前置 / 连线删依赖（上游两种视图都会派发 window 事件） */}
             <GraphContextMenu
               t={t}
-              understanding={payload?.understanding ?? {}}
-              onUnderstandingSaved={updateUnderstanding}
               nodes={graph.nodes}
               edges={graph.edges}
               root={target !== undefined && target.kind === "root" ? target.value : undefined}

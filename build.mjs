@@ -180,13 +180,13 @@ const ARROW_REFRESH_PATCHED = "    this.arrowMaterial.color.copy(toColor(this.pa
 const DUST_NEEDLE = "const DUST_COUNT = 95;";
 const DUST_PATCHED = "const DUST_COUNT = 0;";
 const ACTIVE_WIDTH_NEEDLE = "const ACTIVE_LINE_WIDTH = 2;";
-const ACTIVE_WIDTH_PATCHED = "const ACTIVE_LINE_WIDTH = 1.6;";
+const ACTIVE_WIDTH_PATCHED = "const ACTIVE_LINE_WIDTH = 1.2;";
 
 /*
  * 节点大小（用户要求）：
  * - **统一尺寸**：原来按连接数加权（hub ≤ 1.5×）且根节点 ×1.22 ⇒ 大小不一致；
  *   普通节点一律等大，选中节点略微放大，并由既有光圈区分；
- * - **整体调小**：屏幕半径上限 22px 太大（直径 44px）⇒ 绘制固定为 5px，选中时 5.6px。
+ * - **整体调小**：屏幕半径上限 22px 太大（直径 44px）⇒ 绘制固定为 6px，选中时 6.72px。
  */
 const NODE_SIZE_NEEDLE = [
   "    const hub = 1 + Math.min(0.5, 0.055 * Math.log2(1 + degree));",
@@ -240,7 +240,7 @@ const NODE_SCREEN_RADIUS_NEEDLE = [
 const NODE_SCREEN_RADIUS_PATCHED = [
   "    // 与绘制层一致的固定屏幕半径",
   "    const radius = projected",
-  "      ? 5",
+  "      ? 6",
   "      : 0;",
 ].join("\n");
 

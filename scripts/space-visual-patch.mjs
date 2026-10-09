@@ -16,11 +16,11 @@ export function patchSpaceVisuals(source) {
   replace('  uniform vec3 uRim;', '  varying vec2 vNodePoint;\n  varying float vDistance;\n  uniform vec3 uRim;');
   replace('    vec3 n = normalize(vViewNormal);\n    vec2 p = vec2(n.x, n.y);\n    float s = length(p);', '    vec2 p = vNodePoint;\n    float s = length(p);\n    float softness = mix(0.025, 0.23, vDistance);\n    float coverage = 1.0 - smoothstep(1.0 - softness, 1.0 + softness, s);\n    if (coverage < 0.015) discard;');
   replace('    col = mix(col, strokeColor, stroke * mix(0.65, 0.18, vDim));', '    col = mix(col, strokeColor, stroke * mix(0.4, 0.12, vDim) * (1.0 - vDistance));');
-  replace('    gl_FragColor = vec4(col, mix(1.0, uDimAlpha, vDim));', '    col = mix(col, vTint, 0.25);\n    gl_FragColor = vec4(col, coverage * mix(1.0, 0.45, vDistance) * mix(1.0, 0.82, vDim));');
+  replace('    gl_FragColor = vec4(col, mix(1.0, uDimAlpha, vDim));', '    col = mix(col, vTint, 0.65);\n    gl_FragColor = vec4(col, coverage * mix(1.0, 0.45, vDistance) * mix(1.0, 0.82, vDim));');
   replace(`        const basePixels = Math.max(
           NODE_MIN_PIXELS,
           Math.min(NODE_MAX_PIXELS, (graph.radius[i] ?? 4) / worldPerPixel),
-        );`, '        const basePixels = 5;');
+        );`, '        const basePixels = 6;');
   replace('        this.dummy.scale.setScalar(pixels * worldPerPixel);', `        this.dummy.quaternion.copy(camera.quaternion);
         this.dummy.scale.setScalar(pixels * worldPerPixel);
         const range = Math.max(40, bounds.radius * 2.8);
@@ -31,7 +31,7 @@ export function patchSpaceVisuals(source) {
   replace(`    this.arrowGeometry = new ConeGeometry(0.58, 2.2, 10);
     this.arrowGeometry.translate(0, -1.1, 0); // 尖端落在原点：定位时只算一个点`, `    this.arrowGeometry = new BufferGeometry();
     this.arrowGeometry.setAttribute("position", new BufferAttribute(new Float32Array([
-      0, 0, 0, -4, -7, 0, -2.6, -7, 0, 0, -2.3, 0, 2.6, -7, 0, 4, -7, 0,
+      0, 0, 0, -2.5, -4.5, 0, -1.6, -4.5, 0, 0, -1.5, 0, 1.6, -4.5, 0, 2.5, -4.5, 0,
     ]), 3));
     this.arrowGeometry.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]);`);
   replace('this.arrowMaterial = new MeshBasicMaterial({ color: toColor(palette.edgeActiveRgb) });', 'this.arrowMaterial = new MeshBasicMaterial({ color: toColor(palette.edgeActiveRgb), side: DoubleSide, depthWrite: false });');
@@ -58,7 +58,7 @@ export function patchSpaceVisuals(source) {
       const length = Math.hypot(dx, dy);
       if (a.depth <= NEAR_PLANE || b.depth <= NEAR_PLANE || length < 24) { arrow.visible = false; return; }
       const worldPerPixel = b.depth / (focal * halfHeight);
-      const gap = (5 * (to === this.selected ? SELECTED_SCALE : 1) + 3) * worldPerPixel;
+      const gap = (6 * (to === this.selected ? SELECTED_SCALE : 1) + 3) * worldPerPixel;
       const ux = dx / length;
       const uy = dy / length;
       arrow.position.set(
