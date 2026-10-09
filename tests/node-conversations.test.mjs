@@ -77,35 +77,24 @@ test('新对话优先走宿主自己的工作区新会话（复用空白 ⇒ 不
  assert.equal(await actions.create('node'),'reused');
  assert.deepEqual(calls,[['connect','w1']],'只调 connectWorkspace，不再自己建会话 ✓');
 });
-test('空白会话先不记账；等它开始第一轮再写索引（侧栏看不见的对话不该进节点历史）',async()=>{
- let snapshot={phase:'ready',byId:{'blank-1':{blank:true}}};
- const listeners=new Set();const records=[];
+test('空白会话立即保存关联；首次消息通知更新显示，重挂载仍能取得历史',async()=>{
+ let snapshot={phase:'ready',byId:{'blank-1':{blank:true}}};const listeners=new Set();const records=[];const events=[];
  const services={sessions:{create:async()=>'blank-1',list:{getSnapshot:()=>snapshot,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}}},uiWorkspace:{openSession:()=>{}}};
- const fetcher=async(url,opts)=>{const b=JSON.parse(opts.body);if(b.kind==='record-node-conversation')records.push(b.conversationId);return{ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/workspace',conversations:[]})};};
- const actions=makeConversationActions(()=>services,fetcher);
- assert.equal(await actions.create('node'),'blank-1');
- assert.deepEqual(records,[],'一句话都没聊 ⇒ 不记账 ✓');
- assert.equal(actions.hasContent('blank-1'),false,'已知空白 ⇒ 节点历史里隐藏 ✓');
- snapshot={phase:'ready',byId:{'blank-1':{blank:false,title:'第一轮'}}};
- for(const fn of [...listeners]) fn();
- await new Promise(r=>setTimeout(r,5));
- assert.deepEqual(records,['blank-1'],'开始第一轮后补记 ✓');
- assert.equal(actions.hasContent('blank-1'),true,'有内容 ⇒ 历史里显示 ✓');
- assert.equal(listeners.size,0,'记完就退订，不留观察者 ✓');
+ const fetcher=async(url,opts)=>{const body=JSON.parse(opts.body);if(body.kind==='record-node-conversation')records.push({sessionId:body.conversationId,createdAt:1});return{ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/workspace',conversations:records})};};
+ const actions=makeConversationActions(()=>services,fetcher);const stop=actions.subscribe(changed=>events.push(changed));
+ await actions.create('node');assert.equal(records.length,1);assert.deepEqual(events,[true]);assert.equal(actions.hasContent('blank-1'),false);
+ stop();assert.equal(listeners.size,0);
+ const second=makeConversationActions(()=>services,fetcher);const stopSecond=second.subscribe(changed=>events.push(changed));
+ assert.equal((await second.list('node')).conversations.length,1);
+ snapshot={phase:'ready',byId:{'blank-1':{blank:false,title:'第一轮'}}};for(const fn of [...listeners])fn();
+ assert.equal(second.hasContent('blank-1'),true);assert.equal(second.title('blank-1'),'第一轮');assert.equal(events.at(-1),false);assert.equal(records.length,1);
+ stopSecond();assert.equal(listeners.size,0);
 });
 test('列表还没就绪 / 会话不在列表里时按「有内容」处理（绝不把真对话藏起来）',()=>{
  const services={sessions:{create:async()=>'x',list:{getSnapshot:()=>({phase:'pending',byId:{}})}},uiWorkspace:{openSession:()=>{}}};
  const actions=makeConversationActions(()=>services,async()=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/cwd',conversations:[]})}));
  assert.equal(actions.hasContent('unknown-session'),true);
  assert.equal(makeConversationActions(()=>undefined,async()=>({ok:true,json:async()=>({})})).hasContent('x'),true,'没有服务时也不隐藏 ✓');
-});
-test('打开对话时把图谱那一栏跟到新会话里（右侧栏是每会话一份，不补开就塌了）',async()=>{
- const opened=[];const tabs=[];
- const services={sessions:{create:async()=>'x'},uiWorkspace:{openSession:id=>opened.push(id)},sidebarRight:{openTabIn:(sessionId,kind)=>tabs.push([sessionId,kind]),mounted:{getSnapshot:()=>'chat-9'}}};
- const actions=makeConversationActions(()=>services,async()=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/cwd',conversations:[]})}));
- actions.open('chat-9');
- assert.deepEqual(opened,['chat-9']);
- assert.deepEqual(tabs,[['chat-9','knowledgenet']],'席位挂上这个会话后补开图谱标签 ✓');
 });
 test('节点历史列表按 recordState 过滤（空白 + 归档筛选都由它决定 ✓）',async()=>{
  const source=await readFile(new URL('../src/client/NodeConversations.tsx',import.meta.url),'utf8');
@@ -116,4 +105,44 @@ test('节点历史列表按 recordState 过滤（空白 + 归档筛选都由它�
  assert.ok(!/const rows = useMemo/.test(source),'列表每轮现算，不做记忆化（否则重新打开弹窗会先显示旧值 ✗）');
  assert.match(source,/disabled=\{busy \|\| archived\}/,'已归档的那条要禁掉（点不开的东西不许看着能点 ✗）');
  assert.match(source,/nodeChatArchived/,'已归档要标出来 ✓');
+});
+
+function sidebarFixture(){
+ let mounted='old';let expanded=true;const listeners=new Set();const opened=[];const focused=[];
+ const source=[{id:'graph',kind:'knowledgenet',contentId:'sidebar://knowledgenet'},{id:'web',kind:'browser',contentId:'sidebar://browser/original'},{id:'file',kind:'document',contentId:'dsh-resource://file/report.md'}];
+ const surfaces=new Map([['old',source]]);
+ const sidebar={mounted:{getSnapshot:()=>mounted,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}},tabsIn:id=>surfaces.get(id)??[],active:()=>({id:'graph'}),isExpanded:()=>expanded,toggleExpanded:()=>{expanded=!expanded;},focus:id=>focused.push(id),tabDomain:{occurrence:(session,tab)=>({navigation:{getSnapshot:()=>({params:{owner:tab.id}})}})},openTab:(kind,options)=>{opened.push([mounted,kind,options]);const list=surfaces.get(mounted)??[];list.push({id:'new-'+kind,kind,contentId:'sidebar://'+kind});surfaces.set(mounted,list);expanded=true;},openResource:(address,options)=>{opened.push([mounted,address,options]);const list=surfaces.get(mounted)??[];list.push({id:'new-file',kind:options.kind,contentId:address});surfaces.set(mounted,list);expanded=true;}};
+ return {sidebar,opened,focused,listeners,surfaces,setMounted(id){mounted=id;for(const fn of [...listeners])fn();},setExpanded(v){expanded=v;}};
+}
+test('延迟挂载后恢复图谱、浏览器和文件标签及参数，一次恢复且保留原会话',()=>{
+ const fixture=sidebarFixture();const services={sessions:{create:async()=>'x'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:()=>fixture.setMounted(undefined)}};
+ const actions=makeConversationActions(()=>services,async()=>{});actions.open('new');assert.equal(fixture.opened.length,0);assert.equal(fixture.listeners.size,1);
+ fixture.setMounted('new');assert.equal(fixture.opened.length,3);assert.deepEqual(fixture.opened.map(entry=>entry[1]),['knowledgenet','browser','dsh-resource://file/report.md']);assert.deepEqual(fixture.opened[1][2],{params:{owner:'web'}});assert.equal(fixture.surfaces.get('old').length,3);assert.deepEqual(fixture.focused,['new-knowledgenet']);assert.equal(fixture.listeners.size,0);
+ fixture.setMounted('new');assert.equal(fixture.opened.length,3);
+});
+test('已有目标标签保留且不改写参数；折叠状态恢复；同会话不会重开标签',()=>{
+ const fixture=sidebarFixture();fixture.setExpanded(false);fixture.surfaces.set('new',[{id:'existing-file',kind:'document',contentId:'dsh-resource://file/report.md'}]);
+ const actions=makeConversationActions(()=>({sessions:{create:async()=>'x'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});
+ actions.open('new');assert.equal(fixture.opened.length,2);assert.equal(fixture.sidebar.isExpanded(),false);assert.equal(fixture.surfaces.get('new')[0].id,'existing-file');actions.open('new');assert.equal(fixture.opened.length,2);
+});
+test('快速改换目标、用户另行导航、插件释放均取消旧恢复任务',()=>{
+ const fixture=sidebarFixture();const actions=makeConversationActions(()=>({sessions:{create:async()=>'x'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:()=>{}}}),async()=>{});
+ actions.open('first');actions.open('second');assert.equal(fixture.listeners.size,1);fixture.setMounted('first');assert.equal(fixture.opened.length,0);assert.equal(fixture.listeners.size,0);
+ fixture.setMounted('old');actions.open('third');actions.dispose();assert.equal(fixture.listeners.size,0);fixture.setMounted('third');assert.equal(fixture.opened.length,0);
+});
+test('会话与工作区变化主动通知，服务替换重新订阅，解绑后不残留监听',()=>{
+ const first=new Set();const second=new Set();const workspaces=new Set();const watch=set=>({subscribe:fn=>{set.add(fn);return()=>set.delete(fn);},getSnapshot:()=>({byId:{}})});
+ let services={sessions:{create:async()=>'',list:watch(first)},uiWorkspace:{openSession:()=>{}},workspaces:{list:watch(workspaces)}};
+ const actions=makeConversationActions(()=>services,async()=>{});const events=[];const stop=actions.subscribe(v=>events.push(v));for(const fn of first)fn();for(const fn of workspaces)fn();assert.deepEqual(events,[false,false]);
+ services={...services,sessions:{...services.sessions,list:watch(second)}};actions.servicesChanged();assert.equal(first.size,0);assert.equal(second.size,1);assert.equal(events.at(-1),true);stop();assert.equal(second.size,0);assert.equal(workspaces.size,0);
+});
+
+test('确定已删除的会话隐藏，目录尚未就绪及已归档会话保留适当显示',()=>{
+ let catalog={phase:'pending',byId:{}};let archivedSessionIds=[];
+ const services={sessions:{create:async()=>'',list:{getSnapshot:()=>catalog}},workspaces:{list:{getSnapshot:()=>({archivedSessionIds})}},uiWorkspace:{openSession:()=>{}}};
+ const actions=makeConversationActions(()=>services,async()=>{});assert.equal(actions.recordState('gone','show'),'show');catalog={phase:'ready',byId:{}};assert.equal(actions.recordState('gone','show'),'hide');archivedSessionIds=['gone'];assert.equal(actions.recordState('gone','show'),'archived');
+});
+test('同一个资源的两个来源标签分别恢复，目标既有标签只匹配其中一个',()=>{
+ const fixture=sidebarFixture();fixture.surfaces.get('old').push({id:'second-file',kind:'document',contentId:'dsh-resource://file/report.md'});fixture.surfaces.set('new',[{id:'existing-file',kind:'document',contentId:'dsh-resource://file/report.md'}]);
+ const actions=makeConversationActions(()=>({sessions:{create:async()=>'x'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});actions.open('new');assert.equal(fixture.surfaces.get('new').filter(tab=>tab.kind==='document').length,2);assert.equal(fixture.opened.find(item=>item[1].startsWith('dsh-resource://'))[2].revealIfOpened,false);
 });

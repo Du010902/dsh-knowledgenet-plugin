@@ -31,12 +31,27 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
   const identity = JSON.stringify([root, sessionId, props.nodeId]);
   const current = useRef(identity); current.current = identity;
   const holder = useRef<HTMLDivElement>(null);
-  const pending = useRef(false);
+  const pending = useRef<string | null>(null);
   useEffect(() => {
+    current.current = identity;
+    setBusy(false);
     let active = true;
+    let generation = 0;
     setItems([]); setLoading(true); setError(""); setOpen(false);
-    void nodeConversations.list(props.nodeId, { root, sessionId }).then(data => { if (active) setItems(data.conversations); }).catch((e: Error) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    const reload = async () => {
+      const request = ++generation;
+      try { const data = await nodeConversations.list(props.nodeId, { root, sessionId }); if (active && request === generation) { setItems(data.conversations); setError(""); } }
+      catch (e) { if (active && request === generation) setError(e instanceof Error ? e.message : t("nodeChatFailed")); }
+      finally { if (active && request === generation) setLoading(false); }
+    };
+    const unsubscribe = nodeConversations.subscribe(recordsChanged => {
+      if (recordsChanged) void reload();
+      else if (active) setFilterRevision(value => value + 1);
+    });
+    const refresh = () => { void reload(); };
+    window.addEventListener("focus", refresh);
+    void reload();
+    return () => { active = false; if (current.current === identity) current.current = ""; unsubscribe(); window.removeEventListener("focus", refresh); };
   }, [props.nodeId, root, sessionId]);
   useEffect(() => {
     if (!open) return;
@@ -51,15 +66,15 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     return () => clearInterval(timer);
   }, []);
   const create = async () => {
-    if (pending.current) return;
-    pending.current = true; setBusy(true); setError("");
+    if (pending.current === identity) return;
+    pending.current = identity; setBusy(true); setError("");
     try {
       const id = await nodeConversations.create(props.nodeId, props.target);
-      const data = await nodeConversations.list(props.nodeId, props.target).catch(() => null);
+
       if (current.current !== identity) return;
-      setItems(data?.conversations ?? [...items.filter(item => item.sessionId !== id), { sessionId: id, createdAt: Date.now() }]); setOpen(false); props.onOpen(id);
+      setOpen(false); props.onOpen(id);
     } catch (e) { if (current.current === identity) setError(e instanceof Error ? e.message : t("nodeChatFailed")); }
-    finally { pending.current = false; if (current.current === identity) setBusy(false); }
+    finally { if (pending.current === identity) pending.current = null; if (current.current === identity) setBusy(false); }
   };
   /**
    * 哪些记录该出现、以什么形态出现 —— 全部交给 `recordState`（那里对齐侧栏的归档筛选 ✓）：

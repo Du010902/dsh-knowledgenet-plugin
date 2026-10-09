@@ -40,6 +40,57 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let react_dom = require("react-dom");
 		let react_jsx_runtime = require("react/jsx-runtime");
+		//#region src/client/conversation-sidebar.ts
+		/** Capture before navigation; restore after the destination seat binds, without closing its tabs. */
+		function carryConversationSidebar(sidebar, target) {
+			const source = sidebar?.mounted?.getSnapshot();
+			const expanded = sidebar?.isExpanded?.() ?? true;
+			const active = sidebar?.active?.()?.id;
+			const tabs = source ? (sidebar?.tabsIn?.(source) ?? []).map((tab) => ({
+				...tab,
+				params: sidebar?.tabDomain?.occurrence(source, tab).navigation.getSnapshot().params
+			})) : [];
+			let cancelled = false;
+			let finished = false;
+			return {
+				watch(listener) {
+					return sidebar?.mounted?.subscribe?.(listener) ?? (() => {});
+				},
+				cancel() {
+					cancelled = true;
+				},
+				restore() {
+					if (cancelled || finished || !sidebar) return true;
+					const mounted = sidebar.mounted?.getSnapshot();
+					if (mounted !== target) return mounted !== void 0 && mounted !== source;
+					finished = true;
+					if (source === target) return true;
+					const available = [...sidebar.tabsIn?.(target) ?? []];
+					const restoredIds = /* @__PURE__ */ new Map();
+					for (const tab of tabs) {
+						const match = available.findIndex((item) => item.kind === tab.kind && item.contentId === tab.contentId);
+						if (match >= 0) {
+							restoredIds.set(tab.id, available.splice(match, 1)[0].id);
+							continue;
+						}
+						const before = new Set((sidebar.tabsIn?.(target) ?? []).map((item) => item.id));
+						if (tab.contentId.startsWith("dsh-resource://")) sidebar.openResource?.(tab.contentId, {
+							kind: tab.kind,
+							params: tab.params,
+							revealIfOpened: false
+						});
+						else if (sidebar.openTab) sidebar.openTab(tab.kind, { params: tab.params });
+						else sidebar.openTabIn?.(target, tab.kind, { params: tab.params });
+						const restored = sidebar.tabsIn?.(target).find((item) => !before.has(item.id) && item.kind === tab.kind);
+						if (restored) restoredIds.set(tab.id, restored.id);
+					}
+					const focused = active && restoredIds.get(active);
+					if (focused) sidebar.focus?.(focused);
+					if (sidebar.isExpanded && sidebar.isExpanded() !== expanded) sidebar.toggleExpanded?.();
+					return true;
+				}
+			};
+		}
 		/** 浏览器侧使用的 document-relative 形式（走 Connection 的 HTTP 载体） */
 		const GRAPH_API_ROUTE = "/api/knowledgenet.graph".slice(1);
 		/**
@@ -151,7 +202,7 @@ window.__ModuleLoader__.load({
 			}
 			if (!("root" in data) || typeof data.root !== "string" || !("cwd" in data) || typeof data.cwd !== "string" || !("conversations" in data) || !Array.isArray(data.conversations)) throw new Error("Invalid conversation response");
 			const conversations = data.conversations.map((entry) => {
-				if (!entry || typeof entry !== "object" || !("sessionId" in entry) || typeof entry.sessionId !== "string" || !("createdAt" in entry) || typeof entry.createdAt !== "number") throw new Error("Invalid conversation record");
+				if (!entry || typeof entry !== "object" || !("sessionId" in entry) || typeof entry.sessionId !== "string" || !entry.sessionId.trim() || !("createdAt" in entry) || typeof entry.createdAt !== "number" || !Number.isFinite(entry.createdAt) || entry.createdAt < 0) throw new Error("Invalid conversation record");
 				return {
 					sessionId: entry.sessionId,
 					createdAt: entry.createdAt
@@ -163,122 +214,54 @@ window.__ModuleLoader__.load({
 				conversations
 			};
 		}
-		/**
-		* 节点对话的工作流。
-		*
-		* 三条用户实测出来的规则（都写在这里，别在别处重造）：
-		* 1. **新对话必须挂在"这个节点所在的工作区"**：只传 `cwd` 建出来的会话不在任何工作区的
-		*    `sessionIds` 里 ⇒ 侧栏归到「未分组」✗。所以能解析出 `workspaceId` 就只传它。
-		* 2. **新对话要走宿主自己的"工作区新会话"**（`connectWorkspace`：复用该工作区已有的空白会话，
-		*    没有才新建）。自己 `sessions.create` 每次都造一个新的空白会话 ⇒ 用户点「打开新对话」
-		*    就被切到一个新会话上：右侧栏塌掉、已开标签清空（每会话一份停靠面）；
-		*    而侧栏「+ 新会话」因为复用了当前那个空白会话、**根本没换会话**，所以看起来一切照旧 ✓。
-		* 3. **没有内容的会话不记账**：宿主把"还没开始第一轮"的会话标成 `blank`，侧栏只显示当前那一个 ✓
-		*    ⇒ 记进节点索引就会留下一条"侧栏里找不到、节点里却有"的对话 ✗。
-		*    所以空白会话先挂起，等它真的开始第一轮（列表快照里 `blank === false`）再写索引 ✓。
-		*
-		* 另外：索引写入失败时，同一次运行内重试复用**同一个**已建会话（不重复造空白会话 ✓）。
-		*/
+		/** Node-owned history persists before navigation, including sessions awaiting their first message. */
 		function makeConversationActions(getServices, fetcher) {
 			const pending = /* @__PURE__ */ new Map();
 			const running = /* @__PURE__ */ new Map();
+			const listeners = /* @__PURE__ */ new Set();
+			let unwatch = [];
+			let cancelNavigation = () => {};
+			const notify = (recordsChanged) => {
+				for (const listener of [...listeners]) listener(recordsChanged);
+			};
 			const list = (nodeId, target) => request(fetcher, {
 				kind: "node-conversations",
 				...target,
 				nodeId
 			});
-			/** 已经建好、但还没写进索引的会话（键 = `[库根, 节点]`）⇒ 重试不重复建 ✓ */
-			const record = (root, nodeId, conversationId) => request(fetcher, {
-				kind: "record-node-conversation",
-				root,
-				nodeId,
-				conversationId
-			});
-			/** 等内容的待办：会话 → 它该记给谁 ✓ */
-			const deferred = /* @__PURE__ */ new Map();
-			/** 曾经在列表里见过、后来消失的会话（用来判断"被删了"，避免把晚到的会话误判成不存在 ✓） */
-			const seen = /* @__PURE__ */ new Set();
-			/** 正在写索引的会话（避免同一会话并发写两次） */
-			const writing = /* @__PURE__ */ new Set();
-			let unwatch;
-			/** 这个会话**已知**"还没开始第一轮"吗？（拿不到列表/字段时一律说"不知道"，宁可记也别丢 ✓） */
-			const knownBlank = (services, sessionId) => services.sessions.list?.getSnapshot?.().byId?.[sessionId]?.blank === true;
-			/** 这个会话**已被归档**吗？（归档集合由工作区控制器权威给出 ✓） */
+			const knownBlank = (services, sessionId) => services.sessions.list?.getSnapshot().byId[sessionId]?.blank === true;
 			const knownArchived = (services, sessionId) => {
-				const ids = (services.workspaces?.list?.getSnapshot?.())?.archivedSessionIds;
-				return Array.isArray(ids) && ids.some((id) => id === sessionId);
+				const snapshot = services.workspaces?.list?.getSnapshot?.();
+				return Array.isArray(snapshot?.archivedSessionIds) && snapshot.archivedSessionIds.includes(sessionId);
 			};
-			/** 挂起/继续/收尾：把已经"开始过"的会话写进索引 ✓ */
-			const flushDeferred = () => {
+			const disposeWatchers = () => {
+				for (const stop of unwatch) stop();
+				unwatch = [];
+			};
+			const bindWatchers = () => {
+				disposeWatchers();
+				if (!listeners.size) return;
 				const services = getServices();
-				if (services === void 0) return;
-				const state = services.sessions.list?.getSnapshot?.();
-				for (const [sessionId, target] of [...deferred]) {
-					const summary = state?.byId?.[sessionId];
-					if (summary === void 0) {
-						if (state?.phase === "ready" && seen.has(sessionId)) deferred.delete(sessionId);
-						continue;
-					}
-					seen.add(sessionId);
-					if (summary.blank === true || writing.has(sessionId)) continue;
-					writing.add(sessionId);
-					record(target.root, target.nodeId, sessionId).then(() => {
-						deferred.delete(sessionId);
-					}).catch(() => {}).finally(() => {
-						writing.delete(sessionId);
-						if (deferred.size === 0 && unwatch !== void 0) {
-							unwatch();
-							unwatch = void 0;
-						}
-					});
-				}
-			};
-			/** 会话是空白时：先挂起，等它开始第一轮再记账 ✓ */
-			const deferRecord = (services, sessionId, target) => {
-				const subscribe = services.sessions.list?.subscribe;
-				if (typeof subscribe !== "function") {
-					record(target.root, target.nodeId, sessionId).catch(() => void 0);
-					return;
-				}
-				deferred.set(sessionId, target);
-				if (unwatch === void 0) unwatch = subscribe(flushDeferred);
-				flushDeferred();
-			};
-			/**
-			* 取一个"该用哪个会话"：优先宿主自己的工作区新会话（复用空白 ⇒ 不换会话 ⇒ 右侧栏不动 ✓）；
-			* 拿不到那个方法（老宿主）才自己 `sessions.create`，再退回只传 cwd 的旧行为 ✓。
-			*/
-			const sessionFor = async (services, info, workspaceId) => {
-				if (workspaceId !== void 0 && typeof services.uiWorkspace.connectWorkspace === "function") return await services.uiWorkspace.connectWorkspace(workspaceId);
-				return await services.sessions.create(workspaceId === void 0 ? { cwd: info.cwd } : { workspaceId });
-			};
-			/**
-			* 把图谱那一栏跟到刚打开的对话里（右侧栏是每会话一份的停靠面，不补开就塌了 ✓）。
-			*
-			* 时序：`openSession` 之后新会话的席位才挂上，`ctx.sidebarRight` 在席位挂上之前
-			* 写不进"没人绘制的面" ⇒ 先等 `mounted` 报告这个会话再开。读数拿不到（老宿主）时
-			* 退化成几十次短延迟重试；都不成就安静放弃（打不开面板不该挡住"打开对话"本身 ✓）。
-			*/
-			const keepPanelOpen = (services, sessionId) => {
-				const navigation = services.sidebarRight;
-				const openTabIn = navigation?.openTabIn;
-				if (navigation === void 0 || typeof openTabIn !== "function") return;
-				const mounted = navigation.mounted;
-				let tries = 0;
-				const step = () => {
-					tries += 1;
-					if (!(mounted === void 0 ? tries >= 3 : mounted.getSnapshot?.() === sessionId)) {
-						if (tries < 30) setTimeout(step, 100);
-						return;
-					}
-					try {
-						openTabIn.call(navigation, sessionId, PANEL_ID);
-					} catch {}
-				};
-				step();
+				for (const source of [services?.sessions.list, services?.workspaces?.list]) if (source?.subscribe) unwatch.push(source.subscribe(() => notify(false)));
 			};
 			return {
 				list,
+				subscribe(listener) {
+					listeners.add(listener);
+					if (listeners.size === 1) bindWatchers();
+					return () => {
+						listeners.delete(listener);
+						if (!listeners.size) disposeWatchers();
+					};
+				},
+				servicesChanged() {
+					bindWatchers();
+					notify(true);
+				},
+				dispose() {
+					disposeWatchers();
+					cancelNavigation();
+				},
 				async create(nodeId, target) {
 					const services = getServices();
 					if (!services) throw new Error("DSH conversation service unavailable");
@@ -289,22 +272,21 @@ window.__ModuleLoader__.load({
 					const work = (async () => {
 						let sessionId = pending.get(key);
 						if (sessionId === void 0) {
-							sessionId = await sessionFor(services, info, pickWorkspaceId(services.workspaces?.list?.getSnapshot?.(), {
+							const workspaceId = pickWorkspaceId(services.workspaces?.list?.getSnapshot?.(), {
 								cwd: info.cwd,
 								sessionId: target?.sessionId
-							}));
+							});
+							sessionId = workspaceId !== void 0 && services.uiWorkspace.connectWorkspace ? await services.uiWorkspace.connectWorkspace(workspaceId) : await services.sessions.create(workspaceId === void 0 ? { cwd: info.cwd } : { workspaceId });
 							pending.set(key, sessionId);
 						}
-						if (knownBlank(services, sessionId)) {
-							pending.delete(key);
-							deferRecord(services, sessionId, {
-								root: info.root,
-								nodeId
-							});
-							return sessionId;
-						}
-						await record(info.root, nodeId, sessionId);
+						await request(fetcher, {
+							kind: "record-node-conversation",
+							root: info.root,
+							nodeId,
+							conversationId: sessionId
+						});
 						pending.delete(key);
+						notify(true);
 						return sessionId;
 					})();
 					running.set(key, work);
@@ -317,8 +299,24 @@ window.__ModuleLoader__.load({
 				open(sessionId) {
 					const services = getServices();
 					if (!services) throw new Error("DSH conversation service unavailable");
-					services.uiWorkspace.openSession(sessionId);
-					keepPanelOpen(services, sessionId);
+					cancelNavigation();
+					const carried = carryConversationSidebar(services.sidebarRight, sessionId);
+					let stop = () => {};
+					const restore = () => {
+						if (carried.restore()) stop();
+					};
+					stop = carried.watch(restore);
+					cancelNavigation = () => {
+						carried.cancel();
+						stop();
+					};
+					try {
+						services.uiWorkspace.openSession(sessionId);
+						restore();
+					} catch (error) {
+						cancelNavigation();
+						throw error;
+					}
 				},
 				title(sessionId) {
 					const entry = getServices()?.sessions.list?.getSnapshot().byId[sessionId];
@@ -359,6 +357,8 @@ window.__ModuleLoader__.load({
 					if (services === void 0) return "show";
 					if (knownBlank(services, sessionId)) return "hide";
 					const archived = knownArchived(services, sessionId);
+					const catalog = services.sessions.list?.getSnapshot();
+					if (!archived && catalog?.phase === "ready" && !Object.hasOwn(catalog.byId, sessionId)) return "hide";
 					if (filter === "only") return archived ? "archived" : "hide";
 					if (filter === "show") return archived ? "archived" : "show";
 					return archived ? "hide" : "show";
@@ -369,8 +369,12 @@ window.__ModuleLoader__.load({
 		/** Attach a lazy, lifetime-owned service lookup from the plugin Client context. */
 		function attachConversationServices(lookup) {
 			getServices = lookup;
+			nodeConversations.servicesChanged();
 			return () => {
-				if (getServices === lookup) getServices = () => void 0;
+				if (getServices === lookup) {
+					nodeConversations.dispose();
+					getServices = () => void 0;
+				}
 			};
 		}
 		const nodeConversations = makeConversationActions(() => getServices(), (url, options) => fetch(url, options));
@@ -42784,25 +42788,47 @@ void main() {
 			const current = (0, react.useRef)(identity);
 			current.current = identity;
 			const holder = (0, react.useRef)(null);
-			const pending = (0, react.useRef)(false);
+			const pending = (0, react.useRef)(null);
 			(0, react.useEffect)(() => {
+				current.current = identity;
+				setBusy(false);
 				let active = true;
+				let generation = 0;
 				setItems([]);
 				setLoading(true);
 				setError("");
 				setOpen(false);
-				nodeConversations.list(props.nodeId, {
-					root,
-					sessionId
-				}).then((data) => {
-					if (active) setItems(data.conversations);
-				}).catch((e) => {
-					if (active) setError(e.message);
-				}).finally(() => {
-					if (active) setLoading(false);
+				const reload = async () => {
+					const request = ++generation;
+					try {
+						const data = await nodeConversations.list(props.nodeId, {
+							root,
+							sessionId
+						});
+						if (active && request === generation) {
+							setItems(data.conversations);
+							setError("");
+						}
+					} catch (e) {
+						if (active && request === generation) setError(e instanceof Error ? e.message : t("nodeChatFailed"));
+					} finally {
+						if (active && request === generation) setLoading(false);
+					}
+				};
+				const unsubscribe = nodeConversations.subscribe((recordsChanged) => {
+					if (recordsChanged) reload();
+					else if (active) setFilterRevision((value) => value + 1);
 				});
+				const refresh = () => {
+					reload();
+				};
+				window.addEventListener("focus", refresh);
+				reload();
 				return () => {
 					active = false;
+					if (current.current === identity) current.current = "";
+					unsubscribe();
+					window.removeEventListener("focus", refresh);
 				};
 			}, [
 				props.nodeId,
@@ -42834,24 +42860,19 @@ void main() {
 				return () => clearInterval(timer);
 			}, []);
 			const create = async () => {
-				if (pending.current) return;
-				pending.current = true;
+				if (pending.current === identity) return;
+				pending.current = identity;
 				setBusy(true);
 				setError("");
 				try {
 					const id = await nodeConversations.create(props.nodeId, props.target);
-					const data = await nodeConversations.list(props.nodeId, props.target).catch(() => null);
 					if (current.current !== identity) return;
-					setItems(data?.conversations ?? [...items.filter((item) => item.sessionId !== id), {
-						sessionId: id,
-						createdAt: Date.now()
-					}]);
 					setOpen(false);
 					props.onOpen(id);
 				} catch (e) {
 					if (current.current === identity) setError(e instanceof Error ? e.message : t("nodeChatFailed"));
 				} finally {
-					pending.current = false;
+					if (pending.current === identity) pending.current = null;
 					if (current.current === identity) setBusy(false);
 				}
 			};
@@ -198035,10 +198056,18 @@ Expected function or array of functions, received type ${typeof value}.`);
 				* 真正执行"离开正文"。
 				* @param dirty - **刚刚算出来的**未保存状态（不依赖 React state 的旧值 ✓）。
 				*/
-				const act = (dirty) => {
+				const act = (dirty, draft = state.draft) => {
 					if (kind === "source") setTab("source");
-					else if (kind === "conversation" && pendingConversationRef.current) props.onOpenConversation?.(pendingConversationRef.current, dirty);
-					else props.onClose(dirty);
+					else if (kind === "conversation" && pendingConversationRef.current) {
+						if (dirty) rememberDraft(cacheKeyRef.current, {
+							draft,
+							base: state.base,
+							hash: state.hash,
+							snapshot: state.snapshot
+						});
+						else forgetDraft(cacheKeyRef.current);
+						props.onOpenConversation?.(pendingConversationRef.current, dirty);
+					} else props.onClose(dirty);
 				};
 				if (tab === "source") {
 					if (kind !== "source") act(state.draft !== state.snapshot);
@@ -198055,12 +198084,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 				}
 				const live = snapshotDraft();
 				if (live === null) return;
-				act(live !== state.snapshot);
+				act(live !== state.snapshot, live);
 			}, [
 				snapshotDraft,
 				tab,
 				richStatus.composing,
 				state.draft,
+				state.base,
+				state.hash,
 				state.snapshot,
 				props.onClose,
 				props.onOpenConversation

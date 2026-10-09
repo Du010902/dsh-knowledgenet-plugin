@@ -512,8 +512,8 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
      */
     const workspaces = ctx.get?.("workspaces") as ConversationServices["workspaces"] | undefined;
     /*
-     * `sidebarRight` 同样只读它两个成员：打开对话后把自己的标签补回新会话里
-     * （右侧栏是每会话一份的停靠面，不补开就"点开对话、面板没了"✗）。可选服务 ✓。
+     * `sidebarRight` 提供来源标签和导航参数，并通知目标席位挂载以恢复标签
+     * 右侧栏按会话保存；服务缺席时仍可使用标准对话导航。
      */
     const sidebarRight = ctx.get?.("sidebarRight") as ConversationServices["sidebarRight"] | undefined;
     return sessions && uiWorkspace

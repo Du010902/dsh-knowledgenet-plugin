@@ -679,9 +679,13 @@ export function NodeDocumentEditor(props: {
      * 真正执行"离开正文"。
      * @param dirty - **刚刚算出来的**未保存状态（不依赖 React state 的旧值 ✓）。
      */
-    const act = (dirty: boolean): void => {
+    const act = (dirty: boolean, draft = state.draft): void => {
       if (kind === "source") setTab("source");
-      else if (kind === "conversation" && pendingConversationRef.current) props.onOpenConversation?.(pendingConversationRef.current, dirty);
+      else if (kind === "conversation" && pendingConversationRef.current) {
+        if (dirty) rememberDraft(cacheKeyRef.current, { draft, base: state.base, hash: state.hash, snapshot: state.snapshot });
+        else forgetDraft(cacheKeyRef.current);
+        props.onOpenConversation?.(pendingConversationRef.current, dirty);
+      }
       else props.onClose(dirty);
     };
     /* 纯文本兜底：草稿本身就是权威，直接执行 ✓ */
@@ -708,8 +712,8 @@ export function NodeDocumentEditor(props: {
     }
     const live = snapshotDraft();
     if (live === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
-    act(live !== state.snapshot);
-  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.snapshot, props.onClose, props.onOpenConversation]);
+    act(live !== state.snapshot, live);
+  }, [snapshotDraft, tab, richStatus.composing, state.draft, state.base, state.hash, state.snapshot, props.onClose, props.onOpenConversation]);
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
