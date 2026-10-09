@@ -28,7 +28,6 @@ import {
   type ApplyOutcome,
   type PlanSummary,
 } from "./plan-view.ts";
-
 /** 提案轮询间隔：agent 交完提案，用户最多等这么久就能看到弹窗 ✓（一次 list-plans 很便宜） */
 const PLAN_POLL_MS = 2000;
 
@@ -43,6 +42,21 @@ const dismissedPlans = new Set<string>();
 
 /** 已经自动弹过一次的提案 id（模块级：同一份提案不反复打扰 ✓） */
 const autoOpenedPlans = new Set<string>();
+
+/**
+ * 落地/撤销的「回执」显示多久。
+ *
+ * 用户要求：这些提示**不许长期占着面板**（实测：落地完那张「已按你的确认落地 / 撤销本次新建」
+ * 会一直挂在那里 ✗）。所以它是一条**短暂回执**：到点自己消失 ✓；想立刻收起就点 × ✓。
+ * 撤销入口只在窗口期内可用；过了之后要撤掉那几个空节点，用图谱的「删除当前节点」即可 ✓。
+ */
+const TRANSIENT_MS = 10_000;
+
+/** 刚落地的提案：id → 回执（撤销入口只在窗口期内渲染 ✓） */
+const freshlyApplied = new Map<string, { at: number; createdCount: number; createdAt: number }>();
+
+/** 操作回执（「新建 2 个 · 复用 1 个」/「已撤销…」）：文本 + 落笔时间 ✓ */
+type Receipt = { text: string; at: number };
 
 export interface PlanReviewProps {
   /** 当前库根（面板已知）；没有就不渲染 */
@@ -111,7 +125,8 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  /** 操作回执（短暂提示：到点自己消失 ✓） */
+  const [note, setNote] = useState<Receipt | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** 弹窗开着吗 ✓ */
   const [dialog, setDialog] = useState(false);
@@ -124,6 +139,8 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
   const [dismissed, setDismissed] = useState<string[]>(() => [...dismissedPlans]);
   /** 轮询计数：让 effect 重新拉一次 list-plans ✓ */
   const [pollTick, setPollTick] = useState(0);
+  /** 回执/撤销窗口的滴答：让"到点自己消失"能真的重渲染一次 ✓ */
+  const [receiptTick, setReceiptTick] = useState(0);
 
   /** 记下"这些提案关掉过了"（同时写进模块级集合，重挂面板也不忘 ✓） */
   const dismissPlans = useCallback((ids: readonly string[]): void => {
@@ -204,8 +221,18 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
     return () => clearInterval(timer);
   }, [props.root]);
 
+  /**
+   * 短暂回执的滴答：让「到点自己消失」真的重渲染一次 ✓。
+   * 只在窗口期内跑（没有回执就不开定时器 ✓）。
+   */
+  useEffect(() => {
+    const alive = note !== null && Date.now() - note.at < TRANSIENT_MS;
+    if (!alive && freshlyApplied.size === 0) return;
+    const timer = setInterval(() => setReceiptTick((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [note, receiptTick]);
+
   const pending = openPlans(plans, dismissed);
-  const undoable = undoablePlans(plans);
   const pendingIds = pending.map((plan) => plan.id).join(",");
 
   /**
@@ -254,11 +281,13 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
         return;
       }
       const text = describeApply(body as ApplyOutcome);
-      setNote(text);
-      report("plan-applied", { created: (body.created as unknown[] | undefined)?.length ?? 0 });
-      /* **落地完成 ⇒ 弹窗立即消失** ✓（用户要求；撤销入口留在面板里 ✓） */
+      const created = (body.created as unknown[] | undefined)?.length ?? 0;
+      setNote({ text, at: Date.now() });
+      report("plan-applied", { created });
+      /* **落地完成 ⇒ 弹窗立即消失** ✓（用户要求）；面板里只留一条**短暂回执**（含撤销 ✓） */
       setDialog(false);
       dismissPlans([plan.id]);
+      if (created > 0) freshlyApplied.set(plan.id, { at: Date.now(), createdCount: created, createdAt: plan.createdAt });
       props.onChanged?.();
       await reload();
     } catch (cause) {
@@ -268,7 +297,7 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
     }
   };
 
-  const undo = async (plan: PlanSummary): Promise<void> => {
+  const undo = async (plan: { id: string }): Promise<void> => {
     setBusy(plan.id);
     setError(null);
     try {
@@ -278,7 +307,9 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
         report("plan-undo-failed", { message: body.error?.message ?? "" });
         return;
       }
-      setNote(copy.undoDone.replace("{n}", String(body.undone ?? 0)));
+      freshlyApplied.delete(plan.id);
+      setReceiptTick((value) => value + 1);
+      setNote({ text: copy.undoDone.replace("{n}", String(body.undone ?? 0)), at: Date.now() });
       report("plan-undone", { undone: Number(body.undone ?? 0) });
       props.onChanged?.();
       await reload();
@@ -301,8 +332,23 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
     });
   };
 
-  /** 面板里的小尾巴：待审入口 / 已落地的撤销 / 结果与错误 ✓ */
-  const tail = pending.length > 0 || undoable.length > 0 || note !== null || error !== null
+  /*
+   * 短暂回执：到点自己消失 ✓（用户实测：落地完那张卡一直挂着 ✗）。
+   * 用滴答重算一次"还在窗口期吗"，窗口过了就把 Map 里的记录也清掉（不留内存渣 ✓）。
+   */
+  const now = Date.now();
+  const liveNote = note !== null && now - note.at < TRANSIENT_MS ? note : null;
+  /* 回执只在**宿主仍报告"已落地且新建过"**时出现（列表刷新前后都不会留一张假卡 ✓） */
+  const appliedNow = new Set(undoablePlans(plans).map((item) => item.id));
+  const undoable = [...freshlyApplied.entries()]
+    .filter(([id, entry]) => now - entry.at < TRANSIENT_MS && appliedNow.has(id))
+    .map(([id, entry]) => ({ id, ...entry }));
+  for (const [id, entry] of [...freshlyApplied]) {
+    if (now - entry.at >= TRANSIENT_MS) freshlyApplied.delete(id);
+  }
+
+  /** 面板里的小尾巴：待审入口 / 落地后的短暂回执（含撤销）/ 错误 ✓ */
+  const tail = pending.length > 0 || undoable.length > 0 || liveNote !== null || error !== null
     ? <section className="kn-plan" data-kn-plan-review="1">
       {pending.length > 0 ? (
         <button type="button" className="kn-btn" onClick={() => { setDialog(true); report("plan-dialog-reopen", { count: pending.length }); }}>
@@ -313,7 +359,19 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
         <div className="kn-plan-card" key={`undo-${plan.id}`}>
           <div className="kn-plan-title">
             {copy.appliedTitle}
-            <span className="kn-plan-meta">{formatPlanTime(plan.createdAt)}</span>
+            <span className="kn-plan-meta">
+              {formatPlanTime(plan.createdAt)}
+              {/* 立刻收起（不想等那 10 秒 ✓） */}
+              <button
+                type="button"
+                className="kn-plan-dismiss"
+                aria-label={copy.close}
+                title={copy.close}
+                onClick={() => { freshlyApplied.delete(plan.id); setReceiptTick((value) => value + 1); }}
+              >
+                ×
+              </button>
+            </span>
           </div>
           <div className="kn-plan-summary">
             {copy.createdCount.replace("{n}", String(plan.createdCount))}
@@ -325,7 +383,7 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
           </div>
         </div>
       ))}
-      {note === null ? null : <div className="kn-plan-note">{note}</div>}
+      {liveNote === null ? null : <div className="kn-plan-note">{liveNote.text}</div>}
       {error === null ? null : <div className="kn-plan-error">{error}</div>}
     </section>
     : null;

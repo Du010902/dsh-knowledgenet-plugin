@@ -159,6 +159,17 @@ describe("提案弹窗的接线（源码契约）", () => {
   it("关掉的提案不丢：面板上留一个小入口可以再打开，撤销卡片也还在", async () => {
     assert.ok(reviewSource.includes("plan-dialog-reopen"), "要有「再打开」的入口 ✓");
     assert.ok(reviewSource.includes("copy.reopen.replace"), "入口文案带条数 ✓");
-    assert.ok(reviewSource.includes("void undo(plan);"), "已落地的撤销入口保留在面板里 ✓");
+    assert.ok(reviewSource.includes("void undo(plan);"), "落地后的撤销入口保留 ✓");
+  });
+
+  it("落地回执**不许长期占着面板**：到点自己消失，也能立刻收起 ✓（用户实测：一直挂着 ✗）", async () => {
+    assert.match(reviewSource, /const TRANSIENT_MS = \d+/, "要有明确的回执时长 ✓");
+    assert.match(reviewSource, /now - entry\.at < TRANSIENT_MS/, "过期就不再渲染那张卡 ✓");
+    assert.match(reviewSource, /const freshlyApplied = new Map/, "回执记在组件外（重挂面板不会又冒出来 ✗）");
+    assert.ok(reviewSource.includes("kn-plan-dismiss"), "要有「立刻收起」的按钮 ✓");
+    assert.ok(
+      !/const undoable = undoablePlans\(plans\)/.test(reviewSource),
+      "不许再「列出所有已落地提案」——那会让回执永远挂在面板上 ✗",
+    );
   });
 });
