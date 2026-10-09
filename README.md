@@ -210,7 +210,7 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 
 笔记图片通过插件保存到知识库的 `image` 目录（可通过 `imageDir` 调整），Markdown 记录相对路径。上传上限为 12 MiB；同名上传独占创建文件并自动加后缀，避免覆盖。空图注在解析时转换为空字符串，图片可以在保存后重新打开；显示时通过插件取图接口读取，再使用临时浏览器 URL，关闭编辑器会释放这些 URL。
 
-笔记标题栏与图谱选中节点均提供“已理解／未理解”按钮，立即保存到库内 `understanding.json`，不改写笔记正文。图谱“理解状态”按钮切换绿／灰着色，节点状态更新保留当前布局与相机。没有标记的节点按未理解处理。
+笔记标题栏和图谱节点右键菜单提供“已理解／未理解”按钮，立即保存到库内 `understanding.json`，不改写笔记正文。图谱左下角的“理解状态”开关切换鲜绿／中性灰配色，节点状态更新保留当前布局与相机。没有标记的节点按未理解处理。普通节点的屏幕半径固定为 5px，仅选中节点放大到 5.6px；远近通过连续的透明度和柔边表达。强调连线宽 1.6px，箭头为始终朝向观察者的二维小箭头。
 
 图片 API 集成验证：`node --experimental-transform-types --test tests/note-images-api.integration.mjs`（需要支持该选项的 Node）。它验证同名并发上传、磁盘字节和取图接口；常规状态与图片辅助逻辑测试为 `tests/understanding.test.mjs` 和 `tests/note-images.test.mjs`。
 

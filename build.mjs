@@ -1,3 +1,4 @@
+import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
 /**
  * 构建两个半：
  * - `index.js`   Host 半（Node ESM；内联 vendor 的 v2 引擎，external 只有宿主包与 Node 内建）
@@ -179,13 +180,13 @@ const ARROW_REFRESH_PATCHED = "    this.arrowMaterial.color.copy(toColor(this.pa
 const DUST_NEEDLE = "const DUST_COUNT = 95;";
 const DUST_PATCHED = "const DUST_COUNT = 0;";
 const ACTIVE_WIDTH_NEEDLE = "const ACTIVE_LINE_WIDTH = 2;";
-const ACTIVE_WIDTH_PATCHED = "const ACTIVE_LINE_WIDTH = 3;";
+const ACTIVE_WIDTH_PATCHED = "const ACTIVE_LINE_WIDTH = 1.6;";
 
 /*
  * 节点大小（用户要求）：
  * - **统一尺寸**：原来按连接数加权（hub ≤ 1.5×）且根节点 ×1.22 ⇒ 大小不一致；
- *   现在一律等大，选中的节点**不再放大**，改用既有的光圈（renderer 的 RING_GLOW）区分；
- * - **整体调小**：屏幕半径上限 22px 太大（直径 44px）⇒ 降到 13px。
+ *   普通节点一律等大，选中节点略微放大，并由既有光圈区分；
+ * - **整体调小**：屏幕半径上限 22px 太大（直径 44px）⇒ 绘制固定为 5px，选中时 5.6px。
  */
 const NODE_SIZE_NEEDLE = [
   "    const hub = 1 + Math.min(0.5, 0.055 * Math.log2(1 + degree));",
@@ -237,9 +238,9 @@ const NODE_SCREEN_RADIUS_NEEDLE = [
   "      : 0;",
 ].join("\n");
 const NODE_SCREEN_RADIUS_PATCHED = [
-  "    // 大小几乎恒定：投影缩放取 0.03 次方 ⇒ 同一跨度下差距约 6%（肉眼等同），但缩放仍有一点点反馈",
+  "    // 与绘制层一致的固定屏幕半径",
   "    const radius = projected",
-  "      ? clamp(7 * Math.pow(projected.scale, 0.03), NODE_MIN_PIXELS, NODE_MAX_PIXELS)",
+  "      ? 5",
   "      : 0;",
 ].join("\n");
 
@@ -276,7 +277,7 @@ const SELECT_SCALE_NEEDLE = [
 ].join("\n");
 const SELECT_SCALE_PATCHED = [
   "const SELECTED_SCALE = 1.12;",
-  "const HOVER_SCALE = 1.06;",
+  "const HOVER_SCALE = 1;",
 ].join("\n");
 
 /** 补丁注入的辅助模块（插件自己的实现，与上游副本无关） */
@@ -1141,7 +1142,7 @@ function freeRotationPatchPlugin() {
         }
         // 这个文件不需要 trackball 的 import
         return {
-          code: code
+          code: patchSpaceVisuals(code
             .replace(EDGE_ALPHA_NEEDLE, EDGE_ALPHA_PATCHED)
             .replace(SELECTION_NEEDLE, SELECTION_PATCHED)
             .replace(ACTIVE_COLOR_KEY_NEEDLE, ACTIVE_COLOR_KEY_PATCHED)
@@ -1150,7 +1151,7 @@ function freeRotationPatchPlugin() {
             .replace(ACTIVE_WIDTH_NEEDLE, ACTIVE_WIDTH_PATCHED)
             .replace(DUST_NEEDLE, DUST_PATCHED)
             .replace(RING_NEEDLE, RING_PATCHED)
-            .replace(SELECT_SCALE_NEEDLE, SELECT_SCALE_PATCHED),
+            .replace(SELECT_SCALE_NEEDLE, SELECT_SCALE_PATCHED)),
           map: null,
         };
       }

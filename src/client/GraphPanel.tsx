@@ -1,4 +1,3 @@
-import { UnderstandingButton } from "./UnderstandingButton.tsx";
 /**
  * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
  *
@@ -935,7 +934,7 @@ function GraphPanelInner(props: {
           * 文字改由 `aria-label` 承担：可见文字去掉后，读屏仍念得出"刷新" ✓；
           * `title` 上的说明（重新从磁盘读取知识库）保持不变 ✓。
           */}
-        <button type="button" className="kn-btn kn-understanding-toggle" aria-pressed={understandingMode} title={t("understandingModeHint")} onClick={() => setUnderstandingMode(value => !value)}>{t("understandingMode")}</button>
+        
         <button
           type="button"
           className="kn-btn kn-icon-btn"
@@ -1196,7 +1195,7 @@ function GraphPanelInner(props: {
              * 宽面板并排、窄侧栏覆盖在图谱上（CSS 容器查询 ✓）；关闭后图谱视角原样保留 ✓。
              * `key={editingNodeId}` ⇒ 换节点即重挂 ⇒ 草稿不会串到别的节点 ✗。
              */}
-            {selectedNode ? <div className="kn-graph-understanding"><UnderstandingButton nodeId={selectedNode.id} understood={payload?.understanding?.[selectedNode.id] === true} target={editingTarget} t={props.t} onSaved={updateUnderstanding} /></div> : null}
+            <div className="kn-graph-understanding"><button type="button" className="kn-btn kn-understanding-toggle" aria-pressed={understandingMode} title={t("understandingModeHint")} onClick={() => setUnderstandingMode(value => !value)}>{t("understandingMode")}</button></div>
             {editingNodeId !== null ? (
               <NodeDocumentEditor
                 key={`${libraryKey}::${editingNodeId}`}
@@ -1281,6 +1280,8 @@ function GraphPanelInner(props: {
             {/* 右键菜单：节点加前置 / 连线删依赖（上游两种视图都会派发 window 事件） */}
             <GraphContextMenu
               t={t}
+              understanding={payload?.understanding ?? {}}
+              onUnderstandingSaved={updateUnderstanding}
               nodes={graph.nodes}
               edges={graph.edges}
               root={target !== undefined && target.kind === "root" ? target.value : undefined}

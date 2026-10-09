@@ -19,7 +19,13 @@ export function UnderstandingButton(props: { nodeId: string; understood: boolean
     setBusy(true); setError("");
     try {
       const response = await fetch(GRAPH_API_ROUTE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "set-understanding", ...props.target, nodeId: props.nodeId, understood: !props.understood }) });
-      const body: unknown = await response.json();
+      const text = await response.text();
+      let body: unknown;
+      try { body = JSON.parse(text); }
+      catch { throw new Error(`${t("understandingFailed")} (HTTP ${response.status})`); }
+      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "message" in body.error && typeof body.error.message === "string") {
+        throw new Error(`${t("understandingFailed")}: ${body.error.message}`);
+      }
       if (!body || typeof body !== "object" || !("ok" in body) || body.ok !== true || !("understanding" in body) || !body.understanding || typeof body.understanding !== "object" || Array.isArray(body.understanding)) throw new Error(t("understandingFailed"));
       const states: Record<string, boolean> = {};
       for (const [id, value] of Object.entries(body.understanding)) {
