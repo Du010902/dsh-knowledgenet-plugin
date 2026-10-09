@@ -41,7 +41,7 @@ window.__ModuleLoader__.load({
 		let react_dom = require("react-dom");
 		let react_jsx_runtime = require("react/jsx-runtime");
 		//#region src/client/conversation-sidebar.ts
-		/** Capture before navigation; restore after the destination seat binds, without closing its tabs. */
+		/** Capture before navigation; restore once the destination sidebar store is usable, without closing its tabs. */
 		function carryConversationSidebar(sidebar, target) {
 			const source = sidebar?.mounted?.getSnapshot();
 			const expanded = sidebar?.isExpanded?.() ?? true;
@@ -52,42 +52,76 @@ window.__ModuleLoader__.load({
 			})) : [];
 			let cancelled = false;
 			let finished = false;
+			let restoring = false;
+			const restoredIds = /* @__PURE__ */ new Map();
 			return {
 				watch(listener) {
-					return sidebar?.mounted?.subscribe?.(listener) ?? (() => {});
+					let disposed = false;
+					let frame;
+					const tick = () => {
+						if (disposed || cancelled || finished) return;
+						listener();
+						if (!disposed && !cancelled && !finished && typeof requestAnimationFrame === "function") schedule();
+					};
+					const schedule = () => {
+						if (frame === void 0) frame = requestAnimationFrame(() => {
+							frame = void 0;
+							tick();
+						});
+					};
+					const stops = [sidebar?.mounted?.subscribe?.(tick), sidebar?.openTabs?.subscribe(tick)];
+					if (!finished && typeof requestAnimationFrame === "function") schedule();
+					return () => {
+						disposed = true;
+						if (frame !== void 0) cancelAnimationFrame(frame);
+						for (const stop of stops) stop?.();
+					};
 				},
 				cancel() {
 					cancelled = true;
 				},
 				restore() {
 					if (cancelled || finished || !sidebar) return true;
+					if (restoring) return false;
 					const mounted = sidebar.mounted?.getSnapshot();
 					if (mounted !== target) return mounted !== void 0 && mounted !== source;
-					finished = true;
-					if (source === target) return true;
-					const available = [...sidebar.tabsIn?.(target) ?? []];
-					const restoredIds = /* @__PURE__ */ new Map();
-					for (const tab of tabs) {
-						const match = available.findIndex((item) => item.kind === tab.kind && item.contentId === tab.contentId);
-						if (match >= 0) {
-							restoredIds.set(tab.id, available.splice(match, 1)[0].id);
-							continue;
-						}
-						const before = new Set((sidebar.tabsIn?.(target) ?? []).map((item) => item.id));
-						if (tab.contentId.startsWith("dsh-resource://")) sidebar.openResource?.(tab.contentId, {
-							kind: tab.kind,
-							params: tab.params,
-							revealIfOpened: false
-						});
-						else if (sidebar.openTab) sidebar.openTab(tab.kind, { params: tab.params });
-						else sidebar.openTabIn?.(target, tab.kind, { params: tab.params });
-						const restored = sidebar.tabsIn?.(target).find((item) => !before.has(item.id) && item.kind === tab.kind);
-						if (restored) restoredIds.set(tab.id, restored.id);
+					if (source === target) {
+						finished = true;
+						return true;
 					}
-					const focused = active && restoredIds.get(active);
-					if (focused) sidebar.focus?.(focused);
-					if (sidebar.isExpanded && sidebar.isExpanded() !== expanded) sidebar.toggleExpanded?.();
-					return true;
+					const restored = new Set(restoredIds.values());
+					const available = (sidebar.tabsIn?.(target) ?? []).filter((tab) => !restored.has(tab.id));
+					restoring = true;
+					try {
+						for (const tab of tabs) {
+							if (restoredIds.has(tab.id)) continue;
+							const match = available.findIndex((item) => item.kind === tab.kind && item.contentId === tab.contentId);
+							if (match >= 0) {
+								restoredIds.set(tab.id, available.splice(match, 1)[0].id);
+								continue;
+							}
+							const before = new Set((sidebar.tabsIn?.(target) ?? []).map((item) => item.id));
+							if (tab.contentId.startsWith("dsh-resource://")) sidebar.openResource?.(tab.contentId, {
+								kind: tab.kind,
+								params: tab.params,
+								revealIfOpened: false
+							});
+							else if (sidebar.openTab) sidebar.openTab(tab.kind, { params: tab.params });
+							else sidebar.openTabIn?.(target, tab.kind, { params: tab.params });
+							const restored = sidebar.tabsIn?.(target).find((item) => !before.has(item.id) && item.kind === tab.kind);
+							if (restored) restoredIds.set(tab.id, restored.id);
+						}
+						const focused = active && restoredIds.get(active);
+						if (focused) sidebar.focus?.(focused);
+						if (sidebar.isExpanded && sidebar.isExpanded() !== expanded) sidebar.toggleExpanded?.();
+						finished = true;
+						return true;
+					} catch (error) {
+						if (error instanceof Error && error.message === "sidebarRight: no session surface is mounted") return false;
+						throw error;
+					} finally {
+						restoring = false;
+					}
 				}
 			};
 		}

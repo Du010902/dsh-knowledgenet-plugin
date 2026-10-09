@@ -226,4 +226,4 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 
 ## 节点对话
 
-笔记标题栏的“对话 N”提供创建和历史选择。关联只保存在知识库的 node-conversations.json，对话本身不记录节点绑定。从节点打开对话会恢复来源侧栏的标签及导航参数，并保留笔记弹窗与最新草稿。创建关联、第一次消息、改名和归档会主动更新历史；已知空白对话隐藏，已归档项目按左侧栏筛选显示，确定已删除的对话隐藏。详见 [节点对话说明](design/node-conversations.md) 和 [修复记录](design/node-conversation-navigation-review.md)。
+笔记标题栏的“对话 N”提供创建和历史选择。关联只保存在知识库的 node-conversations.json，对话本身不记录节点绑定。从节点打开对话会等待目标侧栏存储可用，再恢复来源侧栏的标签及导航参数，并保留笔记弹窗与最新草稿。创建关联、第一次消息、改名和归档会主动更新历史；已知空白对话隐藏，已归档项目按左侧栏筛选显示，确定已删除的对话隐藏。详见 [节点对话说明](design/node-conversations.md) 和 [修复记录](design/node-conversation-navigation-review.md)。

@@ -146,3 +146,21 @@ test('同一个资源的两个来源标签分别恢复，目标既有标签只�
  const fixture=sidebarFixture();fixture.surfaces.get('old').push({id:'second-file',kind:'document',contentId:'dsh-resource://file/report.md'});fixture.surfaces.set('new',[{id:'existing-file',kind:'document',contentId:'dsh-resource://file/report.md'}]);
  const actions=makeConversationActions(()=>({sessions:{create:async()=>'x'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});actions.open('new');assert.equal(fixture.surfaces.get('new').filter(tab=>tab.kind==='document').length,2);assert.equal(fixture.opened.find(item=>item[1].startsWith('dsh-resource://'))[2].revealIfOpened,false);
 });
+
+
+test('安装版先公布目标会话但尚未采用侧栏存储时，恢复等待采用，不丢标签', async()=>{
+ const fixture=sidebarFixture();const events=new Set();let ready=false;
+ fixture.sidebar.openTabs={subscribe:fn=>{events.add(fn);return()=>events.delete(fn);}};
+ const open=fixture.sidebar.openTab;fixture.sidebar.openTab=(...args)=>{if(!ready)throw Error('sidebarRight: no session surface is mounted');open(...args);};
+ const actions=makeConversationActions(()=>({sessions:{create:async()=>'new'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});
+ assert.doesNotThrow(()=>actions.open('new'));assert.equal(fixture.opened.length,0);assert.equal(fixture.listeners.size,1);
+ ready=true;for(const fn of [...events])fn();assert.deepEqual(fixture.opened.map(item=>item[1]),['knowledgenet','browser','dsh-resource://file/report.md']);assert.equal(fixture.sidebar.isExpanded(),true);assert.equal(fixture.listeners.size,0);assert.equal(events.size,0);assert.equal(fixture.surfaces.get('old').length,3);
+});
+
+
+test('恢复标签触发宿主同步通知时不重入，不重复创建',()=>{
+ const fixture=sidebarFixture();const events=new Set();fixture.sidebar.openTabs={subscribe:fn=>{events.add(fn);return()=>events.delete(fn);}};
+ const open=fixture.sidebar.openTab;fixture.sidebar.openTab=(...args)=>{open(...args);for(const fn of [...events])fn();};
+ const actions=makeConversationActions(()=>({sessions:{create:async()=>'new'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});
+ actions.open('new');assert.equal(fixture.opened.length,3);assert.equal(fixture.listeners.size,0);assert.equal(events.size,0);
+});
