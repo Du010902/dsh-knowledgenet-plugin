@@ -32,7 +32,7 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
-  nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话",
+  nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
   understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
 
   // 面板
@@ -256,7 +256,7 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
-  nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node",
+  nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
   understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
 
   panel: "Knowledge graph",
@@ -506,7 +506,19 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
   const attach = () => attachConversationServices(() => {
     const sessions = ctx.get?.("sessions") as ConversationServices["sessions"] | undefined;
     const uiWorkspace = ctx.get?.("uiWorkspace") as ConversationServices["uiWorkspace"] | undefined;
-    return sessions && uiWorkspace ? { sessions, uiWorkspace } : undefined;
+    /*
+     * `workspaces` 只用来读快照：新对话要挂进「当前节点所在的工作区」（否则侧栏归到「未分组」✗）。
+     * 它**不是必需服务**：老宿主/组合里没有它时，创建会退回"只传 cwd"的旧行为 ✓。
+     */
+    const workspaces = ctx.get?.("workspaces") as ConversationServices["workspaces"] | undefined;
+    /*
+     * `sidebarRight` 同样只读它两个成员：打开对话后把自己的标签补回新会话里
+     * （右侧栏是每会话一份的停靠面，不补开就"点开对话、面板没了"✗）。可选服务 ✓。
+     */
+    const sidebarRight = ctx.get?.("sidebarRight") as ConversationServices["sidebarRight"] | undefined;
+    return sessions && uiWorkspace
+      ? { sessions, uiWorkspace, ...(workspaces === undefined ? {} : { workspaces }), ...(sidebarRight === undefined ? {} : { sidebarRight }) }
+      : undefined;
   });
   if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");
   else attach();

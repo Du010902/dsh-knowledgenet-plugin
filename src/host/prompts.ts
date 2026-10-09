@@ -22,15 +22,29 @@ import { findCachedRoot, peekLibrary, sessionCwdOf, type LoadedLibrary } from ".
 import { isLibrarySession } from "./isolation.ts";
 import type { KnowledgeNetConfig } from "./tools.ts";
 
-/** 协议文本刻意写成「行为约定」，不重复工具说明（工具说明在各自的 description 里） */
+/**
+ * 协议文本刻意写成「行为约定」，不重复工具说明（工具说明在各自的 description 里）。
+ *
+ * ⚠️ **「笔记属于用户」那一段是用户明确要求的口径**（2026-10）：
+ * 节点正文是使用者记录自己想法的地方，不是装解释、资料、摘要的框子。
+ * 因此模型**默认不许动笔记**：解释概念、回答问题、顺手"整理一下"都不是写笔记的理由；
+ * 只有用户明确要求、或明确同意某个具体改动时才写，而且写之前要先把"准备写什么"说清楚并等同意。
+ * 改这里之前先读一遍用户原话的要点：AI 不是不能写，而是**非必要不写、写必先问**。
+ */
 export const PROTOCOL_SECTION = [
   "This session can read and extend a local KnowledgeNet library (知识库) — a folder of knowledge nodes.",
   "Direction convention: A → B means \"to understand A you must first understand B\", so B is a prerequisite of A.",
+  "Notes belong to the user (mandatory): a node's main document (笔记) is the user's own notebook — their thoughts, in their words. It is NOT a store for your explanations, summaries, or reference material.",
+  "a. Never write or edit a note on your own initiative. Explaining a concept, answering a question, or \"tidying up\" is not a reason to touch the user's note.",
+  "b. Only call kn_write_note when the user explicitly asked for a specific write, or explicitly agreed to a concrete change you proposed. It refuses without `userConsent: true`, and that flag means exactly that agreement.",
+  "c. Before writing, say in one sentence what you are about to write and into which node, then WAIT for the user's agreement. If they did not ask, do not write — offer it instead.",
+  "d. When you do write, never overwrite text the user wrote: quote the exact region you intend to replace and get agreement first. Prefer adding over rewriting.",
+  "e. Explaining in the conversation is the default; keeping it in the note is the user's decision, not yours.",
   "Learning loop to follow:",
   "1. Before explaining a node, call kn_read_node (or kn_list_graph) so the explanation is grounded in the library, not guessed.",
   "2. When the user meets a concept they do not understand — or explicitly asks to add one — call kn_add_prerequisite with the passage in evidence.snippet. It reuses an existing node when the title matches; when it reports candidates, ask the user to reuse or confirm creating a new node instead of creating duplicates.",
   "3. Use kn_enter_node to descend into a prerequisite and kn_back to return; the current node is remembered from the session log.",
-  "4. Record what was understood with kn_write_note, and never overwrite a note or node metadata that changed on disk (the tools refuse and report the conflict).",
+  "4. Record something in a note only after the user asks for it: kn_write_note takes the whole new body plus `userConsent: true`. Never overwrite a note or node metadata that changed on disk (the tools refuse and report the conflict).",
   "Paths under .knowledgenet/** (inside the library) are machine metadata: read them freely, but do not hand-edit them.",
   "Writing discipline (mandatory — node creation is a real, visible change on the user's disk):",
   "a. Search/read requests are read-only: kn_find_node / kn_list_graph / kn_read_node create nothing. If the user says \"搜索/看看/有哪些\", never call a writing tool.",
@@ -98,6 +112,7 @@ export function currentContextText(
       : "It has no recorded prerequisites yet.",
     dependents.length > 0 ? `Nodes that depend on it: ${titleList(library, dependents)}` : "",
     "Read its note with kn_read_node before answering; add missing prerequisites with kn_add_prerequisite.",
+    "Its note is the user's own text: do not edit it unless the user explicitly asks (kn_write_note needs their consent).",
   ];
   return lines.filter((line) => line !== "").join("\n");
 }

@@ -452,22 +452,47 @@ export function createTools(config: KnowledgeNetConfig = {}): Array<Record<strin
     {
       name: "kn_write_note",
       description:
-        "写当前（或指定）知识点的主文档正文。默认按「刚读过」处理：先取磁盘上的修订号再写，"
+        "写当前（或指定）知识点的主文档正文。**先读这段再用**：节点正文是**用户自己的笔记**——"
+        + "记录他的所思所想，不是装解释/资料/摘要的框子 ⇒ 解释概念、回答问题、顺手整理都**不是**写笔记的理由。"
+        + "只有用户明确要求写、或明确同意某个具体改动时才调用；调用前要先把「准备写什么、写进哪个节点」说清楚并等用户同意。"
+        + "调用必须带 userConsent: true —— 它表示的就是「用户已明确要求 / 已明确同意」；"
+        + "没带（或为 false）会被拒绝，并附上该怎么做。"
+        + "写入按「刚读过」处理：先取磁盘上的修订号再写，"
         + "期间被外部（编辑器/桌面版）改过就拒绝并返回 actualRevision，绝不静默覆盖；"
         + "要强制覆盖请显式带上刚读到的 expectedRevision（仍然会被哈希守卫拦一次）。",
       parameters: {
         type: "object",
         properties: {
           text: { type: "string", description: "新的主文档正文（整体替换）。" },
+          userConsent: {
+            type: "boolean",
+            description:
+              "必须为 true：确认「用户明确要求了这次写入，或明确同意了我提出的这次改动」。"
+              + "用户没提过就**不要**调这个工具，改成在对话里提出建议并等他同意。",
+          },
           id: { type: "string", description: "可选：节点 id；缺省用会话当前学习节点。" },
           path: { type: "string", description: "可选：节点相对路径。" },
           title: { type: "string", description: "可选：节点标题。" },
           expectedRevision: { type: "number", description: "可选：手上那份的文档修订号。" },
         },
-        required: ["text"],
+        required: ["text", "userConsent"],
       },
       output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) => renderJson(value) },
       async execute(args: Record<string, unknown>, exec: unknown) {
+        /*
+         * **同意闸门**（用户要求：AI 不是不能写笔记，但写之前必须显式征求同意 ✓）。
+         *
+         * 这里是**机械**闸门、不靠模型自觉：没带 `userConsent: true` 一律拒绝，
+         * 并把"正确的是什么"写清楚 ⇒ 模型只能回到对话里问用户，用户于是**看得见**这次询问 ✓。
+         */
+        if (args.userConsent !== true) {
+          return fail(
+            "consent_required",
+            "这是用户的个人笔记：没有明确同意就不能改。请先在对话里说明你准备写什么、写进哪个节点，"
+            + "等用户明确同意后再调用本工具并带上 userConsent: true；"
+            + "若用户只是让你解释概念，就在对话里回答，不要写笔记。",
+          );
+        }
         try {
           const context = await openFor(exec, config);
           const session = sessionOf(exec);

@@ -48,7 +48,95 @@ window.__ModuleLoader__.load({
 		*/
 		const PANEL_ID = "knowledgenet";
 		//#endregion
+		//#region src/client/workspace-filter.ts
+		/** 宿主持久化用的键前缀（`<前缀>.v5` 这种） */
+		const KEY_PREFIX = "dsh.workspace.view";
+		/** 递归找字段的最大深度（快照是扁的，给足余量即可 ✓） */
+		const MAX_DEPTH = 4;
+		function coerce(value) {
+			return value === "default" || value === "show" || value === "only" ? value : null;
+		}
+		/** 在 JSON 值里按字段名找 `archivedFilter`（不假设层级 ✓） */
+		function findFilter(value, depth) {
+			if (depth > MAX_DEPTH || value === null || typeof value !== "object") return null;
+			const record = value;
+			const direct = coerce(record.archivedFilter);
+			if (direct !== null) return direct;
+			for (const child of Object.values(record)) {
+				const found = findFilter(child, depth + 1);
+				if (found !== null) return found;
+			}
+			return null;
+		}
+		/**
+		* 读当前选中的归档筛选。
+		* @param storage - 存储对象（默认 `localStorage`；测试可以直接传假的 ✓）。
+		* @returns 三种模式之一；没得读 / 读不懂时返回宿主的默认值 `"default"` ✓。
+		*/
+		function readArchivedFilter(storage) {
+			const store = storage ?? (typeof localStorage === "undefined" ? null : localStorage);
+			if (store === null || store === void 0) return "default";
+			const candidates = [];
+			try {
+				for (let index = 0; index < store.length; index += 1) {
+					const key = store.key(index);
+					if (key === null || !key.startsWith(KEY_PREFIX)) continue;
+					const raw = store.getItem(key);
+					if (raw !== null) candidates.push({
+						key,
+						raw
+					});
+				}
+			} catch {
+				return "default";
+			}
+			candidates.sort((left, right) => left.key.localeCompare(right.key, void 0, { numeric: true }));
+			for (let index = candidates.length - 1; index >= 0; index -= 1) try {
+				const found = findFilter(JSON.parse(candidates[index].raw), 0);
+				if (found !== null) return found;
+			} catch {}
+			return "default";
+		}
+		//#endregion
 		//#region src/client/node-conversations.ts
+		/** 路径归一化：分隔符统一 + 去掉末尾分隔符（Windows 的 `D:\a\` 与 `D:/a` 要能对上） */
+		function normalizePath(value) {
+			return value.trim().replace(/[\\/]+/g, "/").replace(/\/+$/g, "");
+		}
+		/**
+		* 从工作区快照里挑出「这个节点所在的工作区」。
+		*
+		* 顺序（先准后稳）：
+		* 1. **库根所在的工作区目录**（宿主回的 `cwd` = `<工作区>/.dsh_knowledge` 的父目录）——
+		*    它就是"节点所在的库属于哪个工作区"的直接表达 ✓；大小写先精确比、再忽略大小写比
+		*    （Windows 盘符/目录名大小写常不一致，但 Linux 上大小写是不同的路径 ⇒ 精确优先）。
+		* 2. 退回「当前会话归属的工作区」（`sessionIds` 含该会话）——库不在任何工作区下时仍可能对上 ✓。
+		*
+		* @param snapshot - `workspaces.list.getSnapshot()` 的快照（结构识别，不依赖宿主类型）。
+		* @param options - 库根所在的工作区目录 `cwd` 与当前会话 id。
+		* @returns 工作区 id；识别不出来时 undefined（调用方退回只传 `cwd` 的旧行为）。
+		*/
+		function pickWorkspaceId(snapshot, options = {}) {
+			const items = (() => {
+				if (snapshot === null || typeof snapshot !== "object") return [];
+				const list = snapshot.items;
+				return Array.isArray(list) ? list.filter((item) => item !== null && typeof item === "object") : [];
+			})();
+			const idOf = (item) => typeof item.workspaceId === "string" && item.workspaceId !== "" ? item.workspaceId : void 0;
+			const cwd = typeof options.cwd === "string" ? normalizePath(options.cwd) : "";
+			if (cwd !== "") {
+				const pathOf = (item) => typeof item.path === "string" ? normalizePath(item.path) : "";
+				const exact = items.find((item) => pathOf(item) === cwd);
+				if (exact !== void 0) return idOf(exact);
+				const folded = items.find((item) => pathOf(item) !== "" && pathOf(item).toLowerCase() === cwd.toLowerCase());
+				if (folded !== void 0) return idOf(folded);
+			}
+			const sessionId = typeof options.sessionId === "string" ? options.sessionId : "";
+			if (sessionId !== "") {
+				const owner = items.find((item) => Array.isArray(item.sessionIds) && item.sessionIds.some((id) => id === sessionId));
+				if (owner !== void 0) return idOf(owner);
+			}
+		}
 		/** Validate plugin HTTP responses, retaining the Host's error message. */
 		async function request(fetcher, body) {
 			const response = await fetcher(GRAPH_API_ROUTE, {
@@ -75,7 +163,22 @@ window.__ModuleLoader__.load({
 				conversations
 			};
 		}
-		/** Isolated workflow; a failed index write retries the same created Session. */
+		/**
+		* 节点对话的工作流。
+		*
+		* 三条用户实测出来的规则（都写在这里，别在别处重造）：
+		* 1. **新对话必须挂在"这个节点所在的工作区"**：只传 `cwd` 建出来的会话不在任何工作区的
+		*    `sessionIds` 里 ⇒ 侧栏归到「未分组」✗。所以能解析出 `workspaceId` 就只传它。
+		* 2. **新对话要走宿主自己的"工作区新会话"**（`connectWorkspace`：复用该工作区已有的空白会话，
+		*    没有才新建）。自己 `sessions.create` 每次都造一个新的空白会话 ⇒ 用户点「打开新对话」
+		*    就被切到一个新会话上：右侧栏塌掉、已开标签清空（每会话一份停靠面）；
+		*    而侧栏「+ 新会话」因为复用了当前那个空白会话、**根本没换会话**，所以看起来一切照旧 ✓。
+		* 3. **没有内容的会话不记账**：宿主把"还没开始第一轮"的会话标成 `blank`，侧栏只显示当前那一个 ✓
+		*    ⇒ 记进节点索引就会留下一条"侧栏里找不到、节点里却有"的对话 ✗。
+		*    所以空白会话先挂起，等它真的开始第一轮（列表快照里 `blank === false`）再写索引 ✓。
+		*
+		* 另外：索引写入失败时，同一次运行内重试复用**同一个**已建会话（不重复造空白会话 ✓）。
+		*/
 		function makeConversationActions(getServices, fetcher) {
 			const pending = /* @__PURE__ */ new Map();
 			const running = /* @__PURE__ */ new Map();
@@ -84,6 +187,96 @@ window.__ModuleLoader__.load({
 				...target,
 				nodeId
 			});
+			/** 已经建好、但还没写进索引的会话（键 = `[库根, 节点]`）⇒ 重试不重复建 ✓ */
+			const record = (root, nodeId, conversationId) => request(fetcher, {
+				kind: "record-node-conversation",
+				root,
+				nodeId,
+				conversationId
+			});
+			/** 等内容的待办：会话 → 它该记给谁 ✓ */
+			const deferred = /* @__PURE__ */ new Map();
+			/** 曾经在列表里见过、后来消失的会话（用来判断"被删了"，避免把晚到的会话误判成不存在 ✓） */
+			const seen = /* @__PURE__ */ new Set();
+			/** 正在写索引的会话（避免同一会话并发写两次） */
+			const writing = /* @__PURE__ */ new Set();
+			let unwatch;
+			/** 这个会话**已知**"还没开始第一轮"吗？（拿不到列表/字段时一律说"不知道"，宁可记也别丢 ✓） */
+			const knownBlank = (services, sessionId) => services.sessions.list?.getSnapshot?.().byId?.[sessionId]?.blank === true;
+			/** 这个会话**已被归档**吗？（归档集合由工作区控制器权威给出 ✓） */
+			const knownArchived = (services, sessionId) => {
+				const ids = (services.workspaces?.list?.getSnapshot?.())?.archivedSessionIds;
+				return Array.isArray(ids) && ids.some((id) => id === sessionId);
+			};
+			/** 挂起/继续/收尾：把已经"开始过"的会话写进索引 ✓ */
+			const flushDeferred = () => {
+				const services = getServices();
+				if (services === void 0) return;
+				const state = services.sessions.list?.getSnapshot?.();
+				for (const [sessionId, target] of [...deferred]) {
+					const summary = state?.byId?.[sessionId];
+					if (summary === void 0) {
+						if (state?.phase === "ready" && seen.has(sessionId)) deferred.delete(sessionId);
+						continue;
+					}
+					seen.add(sessionId);
+					if (summary.blank === true || writing.has(sessionId)) continue;
+					writing.add(sessionId);
+					record(target.root, target.nodeId, sessionId).then(() => {
+						deferred.delete(sessionId);
+					}).catch(() => {}).finally(() => {
+						writing.delete(sessionId);
+						if (deferred.size === 0 && unwatch !== void 0) {
+							unwatch();
+							unwatch = void 0;
+						}
+					});
+				}
+			};
+			/** 会话是空白时：先挂起，等它开始第一轮再记账 ✓ */
+			const deferRecord = (services, sessionId, target) => {
+				const subscribe = services.sessions.list?.subscribe;
+				if (typeof subscribe !== "function") {
+					record(target.root, target.nodeId, sessionId).catch(() => void 0);
+					return;
+				}
+				deferred.set(sessionId, target);
+				if (unwatch === void 0) unwatch = subscribe(flushDeferred);
+				flushDeferred();
+			};
+			/**
+			* 取一个"该用哪个会话"：优先宿主自己的工作区新会话（复用空白 ⇒ 不换会话 ⇒ 右侧栏不动 ✓）；
+			* 拿不到那个方法（老宿主）才自己 `sessions.create`，再退回只传 cwd 的旧行为 ✓。
+			*/
+			const sessionFor = async (services, info, workspaceId) => {
+				if (workspaceId !== void 0 && typeof services.uiWorkspace.connectWorkspace === "function") return await services.uiWorkspace.connectWorkspace(workspaceId);
+				return await services.sessions.create(workspaceId === void 0 ? { cwd: info.cwd } : { workspaceId });
+			};
+			/**
+			* 把图谱那一栏跟到刚打开的对话里（右侧栏是每会话一份的停靠面，不补开就塌了 ✓）。
+			*
+			* 时序：`openSession` 之后新会话的席位才挂上，`ctx.sidebarRight` 在席位挂上之前
+			* 写不进"没人绘制的面" ⇒ 先等 `mounted` 报告这个会话再开。读数拿不到（老宿主）时
+			* 退化成几十次短延迟重试；都不成就安静放弃（打不开面板不该挡住"打开对话"本身 ✓）。
+			*/
+			const keepPanelOpen = (services, sessionId) => {
+				const navigation = services.sidebarRight;
+				const openTabIn = navigation?.openTabIn;
+				if (navigation === void 0 || typeof openTabIn !== "function") return;
+				const mounted = navigation.mounted;
+				let tries = 0;
+				const step = () => {
+					tries += 1;
+					if (!(mounted === void 0 ? tries >= 3 : mounted.getSnapshot?.() === sessionId)) {
+						if (tries < 30) setTimeout(step, 100);
+						return;
+					}
+					try {
+						openTabIn.call(navigation, sessionId, PANEL_ID);
+					} catch {}
+				};
+				step();
+			};
 			return {
 				list,
 				async create(nodeId, target) {
@@ -95,16 +288,22 @@ window.__ModuleLoader__.load({
 					if (existing) return existing;
 					const work = (async () => {
 						let sessionId = pending.get(key);
-						if (!sessionId) {
-							sessionId = await services.sessions.create({ cwd: info.cwd });
+						if (sessionId === void 0) {
+							sessionId = await sessionFor(services, info, pickWorkspaceId(services.workspaces?.list?.getSnapshot?.(), {
+								cwd: info.cwd,
+								sessionId: target?.sessionId
+							}));
 							pending.set(key, sessionId);
 						}
-						await request(fetcher, {
-							kind: "record-node-conversation",
-							root: info.root,
-							nodeId,
-							conversationId: sessionId
-						});
+						if (knownBlank(services, sessionId)) {
+							pending.delete(key);
+							deferRecord(services, sessionId, {
+								root: info.root,
+								nodeId
+							});
+							return sessionId;
+						}
+						await record(info.root, nodeId, sessionId);
 						pending.delete(key);
 						return sessionId;
 					})();
@@ -119,10 +318,50 @@ window.__ModuleLoader__.load({
 					const services = getServices();
 					if (!services) throw new Error("DSH conversation service unavailable");
 					services.uiWorkspace.openSession(sessionId);
+					keepPanelOpen(services, sessionId);
 				},
 				title(sessionId) {
 					const entry = getServices()?.sessions.list?.getSnapshot().byId[sessionId];
 					return entry?.title ?? entry?.displayTitle ?? sessionId.slice(0, 12);
+				},
+				/**
+				* 这条记录还算不算"一次对话"——**只知道是空白时**才说不算 ✓
+				* （列表还没就绪、或这个会话已经不在列表里时按"算"处理：宁可多显示一条历史，也别把用户的对话藏起来）。
+				* @param sessionId - 索引里记着的会话 id。
+				* @returns false = 已知是空白会话（还没开始第一轮）。
+				*/
+				hasContent(sessionId) {
+					const services = getServices();
+					return services === void 0 ? true : !knownBlank(services, sessionId);
+				},
+				/** 侧栏当前选中的归档筛选（**每轮渲染读一次**即可：那是一次 localStorage 全键扫描 ✓） */
+				archivedFilter() {
+					return readArchivedFilter();
+				},
+				/**
+				* 这条历史记录现在该怎么出现 —— **跟随侧栏「筛选会话」的归档规则** ✓（用户要求）。
+				*
+				* 为什么必须跟：归档的会话宿主不让直接打开（点一下毫无反应 ✗），可它照样列在节点历史里就说不通了。
+				* 规则与侧栏逐条对齐：
+				* - `default`（隐藏已归档，宿主默认）⇒ 已归档的**不显示** ✓；
+				* - `show`（全部对话）⇒ 显示，但标成"已归档"并禁掉（点不开的东西不该看着能点 ✗）；
+				* - `only`（仅显示已归档）⇒ **只**显示已归档的那些 ✓。
+				*
+				* 拿不到工作区快照 / 读不出筛选时按宿主默认处理，但**绝不误伤**：
+				* 只有确知"已归档"才隐藏；确知是空白会话一律不显示（那不是一次对话 ✓）。
+				*
+				* @param sessionId - 索引里记着的会话 id。
+				* @param filter - 侧栏当前的筛选值（缺省现读一次；列表渲染时应**每轮只读一次**再传进来 ✓）。
+				* @returns 该怎么渲染这条记录。
+				*/
+				recordState(sessionId, filter = readArchivedFilter()) {
+					const services = getServices();
+					if (services === void 0) return "show";
+					if (knownBlank(services, sessionId)) return "hide";
+					const archived = knownArchived(services, sessionId);
+					if (filter === "only") return archived ? "archived" : "hide";
+					if (filter === "show") return archived ? "archived" : "show";
+					return archived ? "hide" : "show";
 				}
 			};
 		}
@@ -41428,8 +41667,6 @@ void main() {
 			createNodeTitle: "创建知识点",
 			createNodeHint: "输入知识点名称（会作为它的文件名）",
 			editNote: "编辑笔记",
-			nodeChatNew: "打开新对话",
-			nodeChatCreating: "创建中…",
 			removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
 			removeNodePurge: "删除",
 			removeRelation: "删除这条依赖",
@@ -41440,7 +41677,6 @@ void main() {
 		};
 		function GraphContextMenu(props) {
 			const tr = (0, react.useMemo)(() => makeTranslator(props.t, MENU_LITERAL), [props.t]);
-			const [creatingConversation, setCreatingConversation] = (0, react.useState)(false);
 			const [menu, setMenu] = (0, react.useState)(null);
 			const [prompt, setPrompt] = (0, react.useState)(null);
 			const [pendingNew, setPendingNew] = (0, react.useState)(null);
@@ -41672,18 +41908,6 @@ void main() {
 						},
 						children: props.copy.createNode ?? tr("createNode")
 					}) : menu.kind === "node" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-						props.onCreateConversation ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							className: "kn-menu-item",
-							disabled: creatingConversation,
-							onClick: () => {
-								if (creatingConversation) return;
-								setCreatingConversation(true);
-								setError(null);
-								props.onCreateConversation(menu.id).then(() => setMenu(null)).catch((e) => setError(e.message)).finally(() => setCreatingConversation(false));
-							},
-							children: tr(creatingConversation ? "nodeChatCreating" : "nodeChatNew")
-						}) : null,
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							className: "kn-menu-item",
@@ -42526,8 +42750,12 @@ void main() {
 			nodeChatCreating: "创建中…",
 			nodeChatClose: "关闭对话列表",
 			nodeChatFailed: "操作失败，请重试",
-			nodeChatHint: "只在当前节点记录这些对话"
+			nodeChatHint: "只在当前节点记录这些对话",
+			nodeChatArchived: "已归档",
+			nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档"
 		};
+		/** 侧栏筛选变化后的轮询间隔：筛选值只落在 localStorage 里（宿主没暴露服务），只能这么跟 ✓ */
+		const FILTER_POLL_MS = 500;
 		/** Compact node-owned history picker; navigation is delegated to the editor's leave guard. */
 		function NodeConversations(props) {
 			const t = (0, react.useMemo)(() => makeTranslator(props.t, LITERAL$2), [props.t]);
@@ -42536,6 +42764,16 @@ void main() {
 			const [loading, setLoading] = (0, react.useState)(true);
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)("");
+			/**
+			* 「筛选已归档」的复核计数器。
+			*
+			* 那个筛选值由宿主 ui-workspace 存在**会话作用域的 slot store** 里、只落进 localStorage，
+			* 插件拿不到订阅 ⇒ **只要这块界面还在（笔记编辑器开着）就隔一小会儿复读一次** ✓。
+			*
+			* ⚠️ 不要缩成"弹窗打开时才轮询" ✗：弹窗一被点外面就关了，用户正是在**去侧栏改筛选**的路上
+			* 把它关掉，于是列表与「对话 N」的计数会一直是旧值（用户实测："只有重新打开笔记编辑界面才更新"✗）。
+			*/
+			const [filterRevision, setFilterRevision] = (0, react.useState)(0);
 			const root = props.target?.root;
 			const sessionId = props.target?.sessionId;
 			const identity = JSON.stringify([
@@ -42590,6 +42828,11 @@ void main() {
 					document.removeEventListener("keydown", escape, true);
 				};
 			}, [open]);
+			/** 一直盯着侧栏的「筛选会话」与归档集合（一次 localStorage 读 + 一次快照读，很便宜 ✓） */
+			(0, react.useEffect)(() => {
+				const timer = setInterval(() => setFilterRevision((value) => value + 1), FILTER_POLL_MS);
+				return () => clearInterval(timer);
+			}, []);
 			const create = async () => {
 				if (pending.current) return;
 				pending.current = true;
@@ -42612,6 +42855,14 @@ void main() {
 					if (current.current === identity) setBusy(false);
 				}
 			};
+			const filter = nodeConversations.archivedFilter();
+			const rows = items.flatMap((item) => {
+				const state = nodeConversations.recordState(item.sessionId, filter);
+				return state === "hide" ? [] : [{
+					item,
+					archived: state === "archived"
+				}];
+			});
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "kn-note-relations kn-node-conversations",
 				ref: holder,
@@ -42619,13 +42870,13 @@ void main() {
 					type: "button",
 					"aria-expanded": open,
 					onClick: () => setOpen((value) => !value),
-					children: t("nodeChats", { count: items.length })
+					children: t("nodeChats", { count: rows.length })
 				}), open ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "kn-note-relations-popover",
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "kn-note-relations-head",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: t("nodeChats", { count: items.length }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: t("nodeChats", { count: rows.length }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
 								"aria-label": t("nodeChatClose"),
 								onClick: () => setOpen(false),
@@ -42643,10 +42894,11 @@ void main() {
 						loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "kn-editor-dim",
 							children: t("nodeChatLoading")
-						}) : items.length ? items.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						}) : rows.length ? rows.map(({ item, archived }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 							className: "kn-note-relation-item",
 							type: "button",
-							disabled: busy,
+							disabled: busy || archived,
+							title: archived ? t("nodeChatArchivedHint") : void 0,
 							onClick: () => {
 								try {
 									props.onOpen(item.sessionId);
@@ -42655,7 +42907,7 @@ void main() {
 									setError(e instanceof Error ? e.message : t("nodeChatFailed"));
 								}
 							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: nodeConversations.title(item.sessionId) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("small", { children: new Date(item.createdAt).toLocaleString() })]
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: nodeConversations.title(item.sessionId) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("small", { children: [new Date(item.createdAt).toLocaleString(), archived ? ` · ${t("nodeChatArchived")}` : ""] })]
 						}, item.sessionId)) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "kn-editor-dim",
 							children: t("nodeChatEmpty")
@@ -198168,6 +198420,51 @@ Expected function or array of functions, received type ${typeof value}.`);
 			});
 		}
 		//#endregion
+		//#region src/client/open-editor.ts
+		/**
+		* 「这个知识库现在开着哪篇笔记的编辑器」——按**库身份**记，不是按会话/面板实例记。
+		*
+		* 为什么必须放在组件外（用户实测）：
+		* DSH 的右侧栏（含里面打开的标签）是**每个会话一份**的停靠面，`GraphPanel` 因此也是
+		* "每会话一个实例"。从笔记里点「打开新对话」如果换了会话，旧实例会被整体卸载 ⇒
+		* 组件 state 里那份"编辑器开着哪个节点"带不过去，表现就是
+		* **"侧边栏和标签都还在，编辑笔记的弹窗却没了"** ✗。
+		*
+		* 语义（照用户的要求）：只要用户**没有主动关掉**编辑器、也没有改去编辑另一篇，
+		* 这个库的编辑器就算"还开着"——面板在哪个会话重新挂起来，它就跟着回来 ✓。
+		* 关掉/换一篇由 `GraphPanel` 显式写回这里（见那边的同步 effect ✓）。
+		*
+		* 纯内存、不持久化：刷新页面即忘（与草稿缓存不同——草稿要保命，这个只是"窗口还开着"✓）。
+		*/
+		/** 库身份 → 正在编辑的节点 id */
+		const openEditors = /* @__PURE__ */ new Map();
+		/**
+		* 记下"这个库的编辑器开着哪个节点"。
+		* @param libraryKey - 库身份键（`libraryKeyOf` 的结果，空串表示还没认出库 ⇒ 不记 ✓）。
+		* @param nodeId - 正在编辑的节点 id。
+		*/
+		function rememberOpenEditor(libraryKey, nodeId) {
+			if (libraryKey === "" || nodeId === "") return;
+			openEditors.set(libraryKey, nodeId);
+		}
+		/**
+		* 读"这个库的编辑器开着哪个节点"。
+		* @param libraryKey - 库身份键（空串一律答"没开"✓）。
+		* @returns 节点 id；没开着时 null。
+		*/
+		function openEditorNode(libraryKey) {
+			if (libraryKey === "") return null;
+			return openEditors.get(libraryKey) ?? null;
+		}
+		/**
+		* 忘掉这个库的编辑器（**用户明确关掉时**必须调用 ✗）：
+		* 否则面板会读到"库里还开着"、又把编辑器恢复出来 ✓。
+		* @param libraryKey - 库身份键。
+		*/
+		function forgetOpenEditor(libraryKey) {
+			openEditors.delete(libraryKey);
+		}
+		//#endregion
 		//#region src/client/node-search.ts
 		/** 归一化：小写、去首尾空白、把连续空白压成一个空格 */
 		function normalizeQuery(text) {
@@ -198441,6 +198738,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const pendingEditRef = (0, react.useRef)(null);
 			const [leaveDialog, setLeaveDialog] = (0, react.useState)(null);
 			/**
+			* 渲染期快照的"当前库身份"。
+			*
+			* `applyEdit` 里要用它来清"这个库还开着编辑器"的记忆，但 `libraryKey` 声明在后面
+			* （依赖数组在渲染期求值 ⇒ 写进 `useCallback` 依赖会 TDZ ✗）⇒ 走 ref ✓。
+			*/
+			const libraryKeyRef = (0, react.useRef)("");
+			/**
 			* 请求进入某个节点的编辑器（或关闭）。
 			* 有未保存改动时**不直接切**，先弹三选一 ✓（设计稿要求 ✓）。
 			*/
@@ -198457,13 +198761,17 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const applyEdit = (0, react.useCallback)((next) => {
 				if (next.kind === "conversation") {
 					nodeConversations.open(next.sessionId);
-					setEditingNodeId(null);
 					return;
 				}
+				if (next.kind === "close") forgetOpenEditor(libraryKeyRef.current);
 				if (next.kind === "open") setFocusId(next.nodeId);
 				setEditingNodeId(next.kind === "open" ? next.nodeId : null);
 			}, []);
 			const requestEdit = (0, react.useCallback)((next, freshDirty) => {
+				if (next.kind === "conversation") {
+					applyEdit(next);
+					return;
+				}
 				if (freshDirty ?? editorDirty) {
 					setLeaveDialog(next);
 					return;
@@ -198550,6 +198858,31 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const workspaceSnapshot = props.useWorkspaces === void 0 ? void 0 : props.useWorkspaces(identity);
 			const workspacePath = (0, react.useMemo)(() => pickWorkspacePath(workspaceSnapshot, props.sessionId), [workspaceSnapshot, props.sessionId]);
 			const libraryKey = (0, react.useMemo)(() => libraryKeyOf(payload?.library), [payload?.library]);
+			libraryKeyRef.current = libraryKey;
+			/**
+			* 编辑器的**库级记忆**：同步 + 恢复，一个 effect 搞定。
+			*
+			* - `editingNodeId !== null` ⇒ 记下"这个库开着这篇" ✓；
+			* - `editingNodeId === null` 且记录里有 ⇒ **恢复**（换会话后新面板接管 / 面板重挂 ✓）；
+			* - 两边都空 ⇒ 什么都不用做。
+			*
+			* 为什么恢复时必须**连聚焦一起设**：下面有一条"聚焦变了就切编辑器"的 effect，
+			* 只恢复编辑器的话，`effectiveFocus` 还是宿主给的那一篇 ⇒ 编辑器刚开就被请求切走 ✗。
+			*
+			* 关闭编辑器走 `applyEdit` 的 `close` 分支（先 `forgetOpenEditor` 再置 null ✓），
+			* 所以这里不会出现"关掉又被恢复"的死循环 ✓。
+			*/
+			(0, react.useEffect)(() => {
+				if (libraryKey === "") return;
+				if (editingNodeId !== null) {
+					rememberOpenEditor(libraryKey, editingNodeId);
+					return;
+				}
+				const restored = openEditorNode(libraryKey);
+				if (restored === null) return;
+				setFocusId(restored);
+				setEditingNodeId(restored);
+			}, [libraryKey, editingNodeId]);
 			let overrideRoot;
 			if (props.useTabInfo !== void 0) try {
 				const params = props.useTabInfo()?.tab?.navigation?.params;
@@ -199233,12 +199566,6 @@ Expected function or array of functions, received type ${typeof value}.`);
 									onChanged: () => {
 										load({ refresh: true });
 									},
-									onCreateConversation: async (nodeId) => {
-										requestEdit({
-											kind: "conversation",
-											sessionId: await nodeConversations.create(nodeId, editingTarget)
-										});
-									},
 									onEditNote: (nodeId) => {
 										requestEdit({
 											kind: "open",
@@ -199383,6 +199710,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			nodeChatClose: "关闭对话列表",
 			nodeChatFailed: "操作失败，请重试",
 			nodeChatHint: "只在当前节点记录这些对话",
+			nodeChatArchived: "已归档",
+			nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
 			understood: "已理解",
 			notUnderstood: "未理解",
 			understandingSaving: "保存中…",
@@ -199594,6 +199923,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			nodeChatClose: "Close chat list",
 			nodeChatFailed: "Could not complete. Try again",
 			nodeChatHint: "These chats are recorded only by this node",
+			nodeChatArchived: "Archived",
+			nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
 			understood: "Understood",
 			notUnderstood: "Not understood",
 			understandingSaving: "Saving…",
@@ -199817,9 +200148,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const attach = () => attachConversationServices(() => {
 				const sessions = ctx.get?.("sessions");
 				const uiWorkspace = ctx.get?.("uiWorkspace");
+				const workspaces = ctx.get?.("workspaces");
+				const sidebarRight = ctx.get?.("sidebarRight");
 				return sessions && uiWorkspace ? {
 					sessions,
-					uiWorkspace
+					uiWorkspace,
+					...workspaces === void 0 ? {} : { workspaces },
+					...sidebarRight === void 0 ? {} : { sidebarRight }
 				} : void 0;
 			});
 			if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");

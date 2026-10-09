@@ -879,6 +879,40 @@ describe("与设计稿对应的部件与入口", () => {
     );
   });
 
+  it("**对话入口只在笔记编辑界面**：右键空间视图的节点不再打开对话 ✓", () => {
+    assert.ok(!menuSource.includes("onCreateConversation"), "右键菜单不许再有「打开新对话」✗");
+    assert.ok(!menuSource.includes("nodeChatNew"), "菜单里的对话文案要一起删干净 ✗");
+    assert.ok(!panelSource.includes("onCreateConversation"), "面板不许再给菜单接这条回调 ✗");
+    assert.ok(editorSource.includes("<NodeConversations"), "对话入口留在笔记编辑界面 ✓");
+  });
+
+  it("**打开对话不影响编辑弹窗**：不关编辑器、不弹三选一、换了会话还要能恢复 ✓", () => {
+    assert.ok(
+      !/kind === "conversation"[\s\S]{0,80}setEditingNodeId\(null\)/.test(panelSource),
+      "打开对话时不许关掉编辑器 ✗",
+    );
+    assert.ok(
+      panelSource.includes('if (next.kind === "conversation") { applyEdit(next); return; }'),
+      "打开对话要绕开三选一（它不算「离开编辑器」✓）",
+    );
+    assert.ok(
+      panelSource.includes("rememberOpenEditor(libraryKey, editingNodeId)"),
+      "要记下这个库的编辑器开着哪篇 ✓",
+    );
+    assert.ok(
+      panelSource.includes("const restored = openEditorNode(libraryKey);"),
+      "换成别的会话后，新面板要把它恢复出来 ✓",
+    );
+    assert.ok(
+      panelSource.includes('if (next.kind === "close") forgetOpenEditor(libraryKeyRef.current);'),
+      "用户主动关掉时要忘掉（否则关不掉 ✗）",
+    );
+    assert.ok(
+      panelSource.includes("setFocusId(restored);"),
+      "恢复编辑器必须连聚焦一起设，否则会被「聚焦变了就切编辑器」立刻切走 ✗",
+    );
+  });
+
   it("未保存时切节点/关闭：三选一（继续编辑 / 放弃修改 / 保存并继续 ✓）", () => {
     assert.ok(panelSource.includes("leaveTitle") && panelSource.includes("leaveStay"), "要弹提示 ✓");
     assert.ok(panelSource.includes("extraLabel={t(\"leaveDiscard\")}"), "要有「放弃修改」第三个按钮 ✓");

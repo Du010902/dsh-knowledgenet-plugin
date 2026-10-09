@@ -4420,13 +4420,17 @@ function createTools(config = {}) {
 		},
 		{
 			name: "kn_write_note",
-			description: "写当前（或指定）知识点的主文档正文。默认按「刚读过」处理：先取磁盘上的修订号再写，期间被外部（编辑器/桌面版）改过就拒绝并返回 actualRevision，绝不静默覆盖；要强制覆盖请显式带上刚读到的 expectedRevision（仍然会被哈希守卫拦一次）。",
+			description: "写当前（或指定）知识点的主文档正文。**先读这段再用**：节点正文是**用户自己的笔记**——记录他的所思所想，不是装解释/资料/摘要的框子 ⇒ 解释概念、回答问题、顺手整理都**不是**写笔记的理由。只有用户明确要求写、或明确同意某个具体改动时才调用；调用前要先把「准备写什么、写进哪个节点」说清楚并等用户同意。调用必须带 userConsent: true —— 它表示的就是「用户已明确要求 / 已明确同意」；没带（或为 false）会被拒绝，并附上该怎么做。写入按「刚读过」处理：先取磁盘上的修订号再写，期间被外部（编辑器/桌面版）改过就拒绝并返回 actualRevision，绝不静默覆盖；要强制覆盖请显式带上刚读到的 expectedRevision（仍然会被哈希守卫拦一次）。",
 			parameters: {
 				type: "object",
 				properties: {
 					text: {
 						type: "string",
 						description: "新的主文档正文（整体替换）。"
+					},
+					userConsent: {
+						type: "boolean",
+						description: "必须为 true：确认「用户明确要求了这次写入，或明确同意了我提出的这次改动」。用户没提过就**不要**调这个工具，改成在对话里提出建议并等他同意。"
 					},
 					id: {
 						type: "string",
@@ -4445,13 +4449,14 @@ function createTools(config = {}) {
 						description: "可选：手上那份的文档修订号。"
 					}
 				},
-				required: ["text"]
+				required: ["text", "userConsent"]
 			},
 			output: {
 				schema: { type: "object" },
 				render: (_args, value) => renderJson(value)
 			},
 			async execute(args, exec) {
+				if (args.userConsent !== true) return fail("consent_required", "这是用户的个人笔记：没有明确同意就不能改。请先在对话里说明你准备写什么、写进哪个节点，等用户明确同意后再调用本工具并带上 userConsent: true；若用户只是让你解释概念，就在对话里回答，不要写笔记。");
 				try {
 					const context = await openFor(exec, config);
 					const session = sessionOf(exec);
@@ -5195,15 +5200,29 @@ function isLibrarySession(cwd, probe = {}) {
 * 2. `agent/created` 的监听器**绝不能抛**：它抛了会导致 agent 创建失败、整个会话起不来。
 *    所以整个函数体包在 try/catch 里，任何宿主 API 差异都退化成「不注入」。
 */
-/** 协议文本刻意写成「行为约定」，不重复工具说明（工具说明在各自的 description 里） */
+/**
+* 协议文本刻意写成「行为约定」，不重复工具说明（工具说明在各自的 description 里）。
+*
+* ⚠️ **「笔记属于用户」那一段是用户明确要求的口径**（2026-10）：
+* 节点正文是使用者记录自己想法的地方，不是装解释、资料、摘要的框子。
+* 因此模型**默认不许动笔记**：解释概念、回答问题、顺手"整理一下"都不是写笔记的理由；
+* 只有用户明确要求、或明确同意某个具体改动时才写，而且写之前要先把"准备写什么"说清楚并等同意。
+* 改这里之前先读一遍用户原话的要点：AI 不是不能写，而是**非必要不写、写必先问**。
+*/
 const PROTOCOL_SECTION = [
 	"This session can read and extend a local KnowledgeNet library (知识库) — a folder of knowledge nodes.",
 	"Direction convention: A → B means \"to understand A you must first understand B\", so B is a prerequisite of A.",
+	"Notes belong to the user (mandatory): a node's main document (笔记) is the user's own notebook — their thoughts, in their words. It is NOT a store for your explanations, summaries, or reference material.",
+	"a. Never write or edit a note on your own initiative. Explaining a concept, answering a question, or \"tidying up\" is not a reason to touch the user's note.",
+	"b. Only call kn_write_note when the user explicitly asked for a specific write, or explicitly agreed to a concrete change you proposed. It refuses without `userConsent: true`, and that flag means exactly that agreement.",
+	"c. Before writing, say in one sentence what you are about to write and into which node, then WAIT for the user's agreement. If they did not ask, do not write — offer it instead.",
+	"d. When you do write, never overwrite text the user wrote: quote the exact region you intend to replace and get agreement first. Prefer adding over rewriting.",
+	"e. Explaining in the conversation is the default; keeping it in the note is the user's decision, not yours.",
 	"Learning loop to follow:",
 	"1. Before explaining a node, call kn_read_node (or kn_list_graph) so the explanation is grounded in the library, not guessed.",
 	"2. When the user meets a concept they do not understand — or explicitly asks to add one — call kn_add_prerequisite with the passage in evidence.snippet. It reuses an existing node when the title matches; when it reports candidates, ask the user to reuse or confirm creating a new node instead of creating duplicates.",
 	"3. Use kn_enter_node to descend into a prerequisite and kn_back to return; the current node is remembered from the session log.",
-	"4. Record what was understood with kn_write_note, and never overwrite a note or node metadata that changed on disk (the tools refuse and report the conflict).",
+	"4. Record something in a note only after the user asks for it: kn_write_note takes the whole new body plus `userConsent: true`. Never overwrite a note or node metadata that changed on disk (the tools refuse and report the conflict).",
 	"Paths under .knowledgenet/** (inside the library) are machine metadata: read them freely, but do not hand-edit them.",
 	"Writing discipline (mandatory — node creation is a real, visible change on the user's disk):",
 	"a. Search/read requests are read-only: kn_find_node / kn_list_graph / kn_read_node create nothing. If the user says \"搜索/看看/有哪些\", never call a writing tool.",
@@ -5234,7 +5253,8 @@ function currentContextText(agent, config) {
 		`Current knowledge node: ${node.title}（${node.relativePath}，状态 ${node.status}）`,
 		prerequisites.length > 0 ? `Its prerequisites: ${titleList(library, prerequisites)}` : "It has no recorded prerequisites yet.",
 		dependents.length > 0 ? `Nodes that depend on it: ${titleList(library, dependents)}` : "",
-		"Read its note with kn_read_node before answering; add missing prerequisites with kn_add_prerequisite."
+		"Read its note with kn_read_node before answering; add missing prerequisites with kn_add_prerequisite.",
+		"Its note is the user's own text: do not edit it unless the user explicitly asks (kn_write_note needs their consent)."
 	].filter((line) => line !== "").join("\n");
 }
 /** 注册静态协议 + 每 agent 的动态上下文；任何一步失败都只跳过注入，不影响会话 */

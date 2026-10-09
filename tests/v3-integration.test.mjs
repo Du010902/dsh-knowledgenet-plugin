@@ -108,7 +108,7 @@ describe("v3：工具（写）", () => {
   it("kn_write_note 写正文（front-matter 里 rev 递增，正文整体替换）", async () => {
     const fx = await makeV3Fixture({ nodes: ["写笔记目标"] });
     const result = await toolNamed("kn_write_note").execute(
-      { title: "写笔记目标", text: "这是新的正文" },
+      { title: "写笔记目标", text: "这是新的正文", userConsent: true },
       execAt(fx.workspace),
     );
     assert.equal(result.ok, true, JSON.stringify(result.error ?? {}));
@@ -117,6 +117,22 @@ describe("v3：工具（写）", () => {
     const parsed = parseDocument(text);
     assert.match(parsed.body, /这是新的正文/);
     assert.equal(parsed.meta.rev >= 2, true, "rev 应递增");
+  });
+
+  it("没带 userConsent 一律拒绝，且**文件一字不动**（用户的笔记要先征得同意）", async () => {
+    const fx = await makeV3Fixture({ nodes: ["不许动"] });
+    const path = join(fx.root, "Nodes", "不许动.md");
+    const before = await readFile(path, "utf8");
+    for (const args of [
+      { title: "不许动", text: "AI 自己顺手写的" },
+      { title: "不许动", text: "AI 自己顺手写的", userConsent: false },
+    ]) {
+      const refused = await toolNamed("kn_write_note").execute(args, execAt(fx.workspace));
+      assert.equal(refused.ok, false, "没有同意就不许写 ✓");
+      assert.equal(refused.error.code, "consent_required");
+      assert.equal(await readFile(path, "utf8"), before, "拒绝时文件必须一字不动 ✓");
+    }
+    assert.equal(toolNamed("kn_write_note").parameters.required.includes("userConsent"), true, "schema 里也要显式要求 ✓");
   });
 
   it("删节点：直接删掉那个 md（默认彻底删除），并摘掉它的边", async () => {

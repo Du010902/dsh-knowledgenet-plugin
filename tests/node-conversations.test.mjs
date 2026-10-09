@@ -6,7 +6,7 @@ import { makeV3Fixture, cleanupFixtures } from './support/v3-fixture.mjs';
 import { listNodeConversations, recordNodeConversation } from '../src/host/node-conversations.ts';
 import { readLibrary, writeNote } from '../src/host/v3/store.ts';
 import { handleApiRequest } from '../src/host/api.ts';
-import { makeConversationActions } from '../src/client/node-conversations.ts';
+import { makeConversationActions, pickWorkspaceId } from '../src/client/node-conversations.ts';
 after(cleanupFixtures);
 
 test('节点保存多条对话，重读、去重和并发不会改写笔记或另一节点',async()=>{
@@ -43,4 +43,77 @@ test('标准创建只传 cwd；记录失败重试同一对话，打开历史只�
 test('同一节点并发创建合并为一次，服务缺失时不会创建或记录',async()=>{
  let count=0;const services={sessions:{create:async()=>{count++;return 'chat'}},uiWorkspace:{openSession:()=>{}}};const fetcher=async()=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/cwd',conversations:[]})});
  const actions=makeConversationActions(()=>services,fetcher);assert.deepEqual(await Promise.all([actions.create('node'),actions.create('node')]),['chat','chat']);assert.equal(count,1);await assert.rejects(makeConversationActions(()=>undefined,fetcher).create('node'),/unavailable/);
+});
+test('新建对话挂到节点所在的工作区（只传 workspaceId，不落「未分组」）',async()=>{
+ const created=[];
+ const services={sessions:{create:async opts=>{created.push(opts);return 'chat-1';}},uiWorkspace:{openSession:()=>{}},workspaces:{list:{getSnapshot:()=>({items:[{workspaceId:'w1',path:'D:\\Note\\kb',sessionIds:['other']}]})}}};
+ const fetcher=async()=>({ok:true,json:async()=>({ok:true,root:'D:\\Note\\kb\\.dsh_knowledge',cwd:'D:\\Note\\kb',conversations:[]})});
+ assert.equal(await makeConversationActions(()=>services,fetcher).create('node'),'chat-1');
+ assert.deepEqual(created,[{workspaceId:'w1'}],'只传 workspaceId（传了它宿主就不看 cwd ✓）');
+});
+test('路径对不上工作区时退回当前会话归属的工作区；都认不出才只传 cwd',async()=>{
+ const created=[];
+ const services={sessions:{create:async opts=>{created.push(opts);return 'chat-2';}},uiWorkspace:{openSession:()=>{}},workspaces:{list:{getSnapshot:()=>({items:[{workspaceId:'w9',path:'/elsewhere',sessionIds:['s1']}]})}}};
+ const answer=cwd=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd,conversations:[]})});
+ await makeConversationActions(()=>services,async()=>answer('/nowhere')).create('node',{sessionId:'s1'});
+ await makeConversationActions(()=>services,async()=>answer('/nowhere')).create('other-node');
+ assert.deepEqual(created,[{workspaceId:'w9'},{cwd:'/nowhere'}]);
+});
+test('pickWorkspaceId：路径优先（分隔符/大小写容忍），认不出来返回 undefined',()=>{
+ const snapshot={items:[{workspaceId:'w1',path:'D:\\Note\\kb\\',sessionIds:[]},{workspaceId:'w2',path:'/b',sessionIds:['s1']}]};
+ assert.equal(pickWorkspaceId(snapshot,{cwd:'d:/note/kb'}),'w1','Windows 分隔符与大小写要对得上 ✓');
+ assert.equal(pickWorkspaceId(snapshot,{cwd:'/b',sessionId:'s1'}),'w2');
+ assert.equal(pickWorkspaceId(snapshot,{sessionId:'s1'}),'w2','路径认不出时按会话归属 ✓');
+ assert.equal(pickWorkspaceId(snapshot,{cwd:'/missing'}),undefined);
+ assert.equal(pickWorkspaceId({items:[{path:'/b'}]},{cwd:'/b'}),undefined,'没有 workspaceId 不算命中 ✓');
+ assert.equal(pickWorkspaceId(undefined,{cwd:'/b'}),undefined,'老宿主没有服务时安全退出 ✓');
+ assert.equal(pickWorkspaceId({items:'nope'},{cwd:'/b'}),undefined,'快照形状不对不猜 ✓');
+});
+test('新对话优先走宿主自己的工作区新会话（复用空白 ⇒ 不额外建会话、不换会话）',async()=>{
+ const calls=[];
+ const services={sessions:{create:async opts=>{calls.push(['create',opts]);return 'made';},list:{getSnapshot:()=>({phase:'ready',byId:{}})}},uiWorkspace:{openSession:()=>{},connectWorkspace:async id=>{calls.push(['connect',id]);return 'reused';}},workspaces:{list:{getSnapshot:()=>({items:[{workspaceId:'w1',path:'/workspace',sessionIds:[]}]})}}};
+ const fetcher=async()=>({ok:true,json:async()=>({ok:true,root:'/workspace/.dsh_knowledge',cwd:'/workspace',conversations:[]})});
+ const actions=makeConversationActions(()=>services,fetcher);
+ assert.equal(await actions.create('node'),'reused');
+ assert.deepEqual(calls,[['connect','w1']],'只调 connectWorkspace，不再自己建会话 ✓');
+});
+test('空白会话先不记账；等它开始第一轮再写索引（侧栏看不见的对话不该进节点历史）',async()=>{
+ let snapshot={phase:'ready',byId:{'blank-1':{blank:true}}};
+ const listeners=new Set();const records=[];
+ const services={sessions:{create:async()=>'blank-1',list:{getSnapshot:()=>snapshot,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}}},uiWorkspace:{openSession:()=>{}}};
+ const fetcher=async(url,opts)=>{const b=JSON.parse(opts.body);if(b.kind==='record-node-conversation')records.push(b.conversationId);return{ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/workspace',conversations:[]})};};
+ const actions=makeConversationActions(()=>services,fetcher);
+ assert.equal(await actions.create('node'),'blank-1');
+ assert.deepEqual(records,[],'一句话都没聊 ⇒ 不记账 ✓');
+ assert.equal(actions.hasContent('blank-1'),false,'已知空白 ⇒ 节点历史里隐藏 ✓');
+ snapshot={phase:'ready',byId:{'blank-1':{blank:false,title:'第一轮'}}};
+ for(const fn of [...listeners]) fn();
+ await new Promise(r=>setTimeout(r,5));
+ assert.deepEqual(records,['blank-1'],'开始第一轮后补记 ✓');
+ assert.equal(actions.hasContent('blank-1'),true,'有内容 ⇒ 历史里显示 ✓');
+ assert.equal(listeners.size,0,'记完就退订，不留观察者 ✓');
+});
+test('列表还没就绪 / 会话不在列表里时按「有内容」处理（绝不把真对话藏起来）',()=>{
+ const services={sessions:{create:async()=>'x',list:{getSnapshot:()=>({phase:'pending',byId:{}})}},uiWorkspace:{openSession:()=>{}}};
+ const actions=makeConversationActions(()=>services,async()=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/cwd',conversations:[]})}));
+ assert.equal(actions.hasContent('unknown-session'),true);
+ assert.equal(makeConversationActions(()=>undefined,async()=>({ok:true,json:async()=>({})})).hasContent('x'),true,'没有服务时也不隐藏 ✓');
+});
+test('打开对话时把图谱那一栏跟到新会话里（右侧栏是每会话一份，不补开就塌了）',async()=>{
+ const opened=[];const tabs=[];
+ const services={sessions:{create:async()=>'x'},uiWorkspace:{openSession:id=>opened.push(id)},sidebarRight:{openTabIn:(sessionId,kind)=>tabs.push([sessionId,kind]),mounted:{getSnapshot:()=>'chat-9'}}};
+ const actions=makeConversationActions(()=>services,async()=>({ok:true,json:async()=>({ok:true,root:'/lib',cwd:'/cwd',conversations:[]})}));
+ actions.open('chat-9');
+ assert.deepEqual(opened,['chat-9']);
+ assert.deepEqual(tabs,[['chat-9','knowledgenet']],'席位挂上这个会话后补开图谱标签 ✓');
+});
+test('节点历史列表按 recordState 过滤（空白 + 归档筛选都由它决定 ✓）',async()=>{
+ const source=await readFile(new URL('../src/client/NodeConversations.tsx',import.meta.url),'utf8');
+ assert.match(source,/nodeConversations\.recordState\(item\.sessionId/,'列表要按 recordState 过滤 ✓');
+ assert.match(source,/nodeConversations\.archivedFilter\(\)/,'筛选值每轮只读一次再逐行用 ✓');
+ assert.ok(!/if \(!open\) return;\s*\n\s*const timer = setInterval/.test(source),'复读**不许**只在弹窗打开时进行（去侧栏改筛选会把弹窗关掉 ✗）');
+ assert.match(source,/setInterval\(\(\) => setFilterRevision/,'要一直在后台复读筛选值 ✓');
+ assert.ok(!/const rows = useMemo/.test(source),'列表每轮现算，不做记忆化（否则重新打开弹窗会先显示旧值 ✗）');
+ assert.match(source,/disabled=\{busy \|\| archived\}/,'已归档的那条要禁掉（点不开的东西不许看着能点 ✗）');
+ assert.match(source,/nodeChatArchived/,'已归档要标出来 ✓');
 });

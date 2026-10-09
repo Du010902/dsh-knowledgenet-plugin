@@ -32,6 +32,7 @@ import { InteriorMinimap } from "./InteriorMinimap.tsx";
 import { NodeDocumentEditor } from "./NodeDocumentEditor.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { libraryKeyOf } from "./view-cache.ts";
+import { forgetOpenEditor, openEditorNode, rememberOpenEditor } from "./open-editor.ts";
 import { draftKey, forgetDraft, leaveLabels } from "./node-document-state.ts";
 import { RELAYOUT_EVENT } from "./interior-controller.ts";
 import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
@@ -236,6 +237,13 @@ function GraphPanelInner(props: {
   /** 待办：保存成功后要执行的切节点/关闭动作 ✓ */
   const pendingEditRef = useRef<EditAction | null>(null);
   const [leaveDialog, setLeaveDialog] = useState<EditAction | null>(null);
+  /**
+   * 渲染期快照的"当前库身份"。
+   *
+   * `applyEdit` 里要用它来清"这个库还开着编辑器"的记忆，但 `libraryKey` 声明在后面
+   * （依赖数组在渲染期求值 ⇒ 写进 `useCallback` 依赖会 TDZ ✗）⇒ 走 ref ✓。
+   */
+  const libraryKeyRef = useRef("");
 
   /**
    * 请求进入某个节点的编辑器（或关闭）。
@@ -252,7 +260,19 @@ function GraphPanelInner(props: {
    * 而且图谱高亮也跟着跳到被打开的那个节点 ✓（正是"跳转到对应节点"该有的样子 ✓）。
    */
   const applyEdit = useCallback((next: EditAction): void => {
-    if (next.kind === "conversation") { nodeConversations.open(next.sessionId); setEditingNodeId(null); return; }
+    /*
+     * **打开对话不关编辑器**（用户要求：编辑笔记的弹窗不受"打开新对话"影响 ✓）。
+     *
+     * 编辑器开着哪篇笔记记在**组件外**（`open-editor.ts`，按库身份 ✓）：
+     * 如果这次真的换了会话，本实例会被整体卸载（右侧栏停靠面按会话）⇒
+     * 新面板挂载后会把它恢复出来 ✓（见下面那条同步/恢复 effect）。
+     */
+    if (next.kind === "conversation") { nodeConversations.open(next.sessionId); return; }
+    /*
+     * 关掉编辑器**必须先清掉"这个库还开着编辑器"的记忆** ✗ ——
+     * 否则那条 effect 会看到"记录里有、state 是 null"又把编辑器恢复回来（关不掉 ✓）。
+     */
+    if (next.kind === "close") forgetOpenEditor(libraryKeyRef.current);
     if (next.kind === "open") setFocusId(next.nodeId);
     setEditingNodeId(next.kind === "open" ? next.nodeId : null);
   }, []);
@@ -266,6 +286,11 @@ function GraphPanelInner(props: {
      */
     freshDirty?: boolean | undefined,
   ): void => {
+    /*
+     * **打开对话不算"离开编辑器"** ⇒ 三选一不适用 ✓（用户要求：这个操作不许影响编辑弹窗 ✓）。
+     * 未保存的内容就留在编辑器里，编辑器本身不关、不重挂 ✓。
+     */
+    if (next.kind === "conversation") { applyEdit(next); return; }
     if (freshDirty ?? editorDirty) {
       setLeaveDialog(next);
       return;
@@ -370,6 +395,30 @@ function GraphPanelInner(props: {
    * A 的引擎会绑到 B 的身份上，缓存就此串库 ✗（文档 P1 复查指出的就是这个）。
    */
   const libraryKey = useMemo(() => libraryKeyOf(payload?.library), [payload?.library]);
+  /* `applyEdit` 在回调里读它（那时早已赋值 ✓），用来清"这个库还开着编辑器"的记忆 ✓ */
+  libraryKeyRef.current = libraryKey;
+
+  /**
+   * 编辑器的**库级记忆**：同步 + 恢复，一个 effect 搞定。
+   *
+   * - `editingNodeId !== null` ⇒ 记下"这个库开着这篇" ✓；
+   * - `editingNodeId === null` 且记录里有 ⇒ **恢复**（换会话后新面板接管 / 面板重挂 ✓）；
+   * - 两边都空 ⇒ 什么都不用做。
+   *
+   * 为什么恢复时必须**连聚焦一起设**：下面有一条"聚焦变了就切编辑器"的 effect，
+   * 只恢复编辑器的话，`effectiveFocus` 还是宿主给的那一篇 ⇒ 编辑器刚开就被请求切走 ✗。
+   *
+   * 关闭编辑器走 `applyEdit` 的 `close` 分支（先 `forgetOpenEditor` 再置 null ✓），
+   * 所以这里不会出现"关掉又被恢复"的死循环 ✓。
+   */
+  useEffect(() => {
+    if (libraryKey === "") return;
+    if (editingNodeId !== null) { rememberOpenEditor(libraryKey, editingNodeId); return; }
+    const restored = openEditorNode(libraryKey);
+    if (restored === null) return;
+    setFocusId(restored);
+    setEditingNodeId(restored);
+  }, [libraryKey, editingNodeId]);
 
   /*
    * 标签页 params 里的 root：用户从左侧栏「知识库」区块点了某个库。
@@ -1287,7 +1336,6 @@ function GraphPanelInner(props: {
               root={target !== undefined && target.kind === "root" ? target.value : undefined}
               sessionId={target !== undefined && target.kind === "session" ? target.value : props.sessionId}
               onChanged={() => { void load({ refresh: true }); }}
-              onCreateConversation={async (nodeId) => { const sessionId = await nodeConversations.create(nodeId, editingTarget); requestEdit({ kind: "conversation", sessionId }); }}
               onEditNote={(nodeId) => {
               /*
                * 聚焦不再**提前**改 ✓：`applyEdit` 会在"真正落地"时把编辑目标与聚焦一起改 ✓。

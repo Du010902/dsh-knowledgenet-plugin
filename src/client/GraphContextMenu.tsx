@@ -197,7 +197,6 @@ export interface GraphContextMenuProps {
   sessionId?: string | undefined;
   /** 写完之后的刷新 */
   onChanged: () => void;
-  onCreateConversation?: (nodeId: string) => Promise<void>;
   /** 「编辑笔记」入口（节点菜单 ✓）——面板据此打开正文编辑器 ✓ */
   onEditNote?: ((nodeId: string) => void) | undefined;
   /** 逐步上报（诊断） */
@@ -252,8 +251,6 @@ const MENU_LITERAL: Record<string, string> = {
   createNodeTitle: "创建知识点",
   createNodeHint: "输入知识点名称（会作为它的文件名）",
   editNote: "编辑笔记",
-  nodeChatNew: "打开新对话",
-  nodeChatCreating: "创建中…",
   removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
   removeNodePurge: "删除",
   removeRelation: "删除这条依赖",
@@ -266,7 +263,6 @@ const MENU_LITERAL: Record<string, string> = {
 export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
   /* 缺 `copy` 的字段时用它补 ✓（英文界面下不许漏出中文 ✗） */
   const tr = useMemo(() => makeTranslator(props.t, MENU_LITERAL), [props.t]);
-  const [creatingConversation, setCreatingConversation] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [prompt, setPrompt] = useState<{ fromId: string; x: number; y: number } | null>(null);
   const [pendingNew, setPendingNew] = useState<{ fromId: string; typed: string; candidates: string[] } | null>(null);
@@ -490,8 +486,10 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
               </button>
             ) : menu.kind === "node" ? (
               <>
-                {props.onCreateConversation ? <button type="button" className="kn-menu-item" disabled={creatingConversation} onClick={() => { if (creatingConversation) return; setCreatingConversation(true); setError(null); void props.onCreateConversation!(menu.id).then(() => setMenu(null)).catch((e: Error) => setError(e.message)).finally(() => setCreatingConversation(false)); }}>{tr(creatingConversation ? "nodeChatCreating" : "nodeChatNew")}</button> : null}
                 {/*
+                 * 节点右键里**没有**「打开新对话」：从节点创建对话只从**笔记编辑界面**进
+                 * （用户要求：右键空间视图中的节点不再打开对话 ✓）。
+                 *
                  * 「编辑笔记」：与选中区那颗按钮同一条路 ✓（`design/node-note-editor-plan.md`
                  * 要求"选中节点信息区 + 右键菜单"两个入口 ✓）。
                  */}
