@@ -7,6 +7,9 @@
  * 注意：本文件是 `.mjs`，不能写 TypeScript 类型标注。
  */
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import {
@@ -15,10 +18,15 @@ import {
   describeApply,
   formatPlanTime,
   mergeSelection,
+  openPlans,
   pendingPlans,
   selectionLabel,
   undoablePlans,
 } from "../src/client/plan-view.ts";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const reviewSource = await readFile(path.join(HERE, "..", "src", "client", "PlanReview.tsx"), "utf8");
+const dialogCssSource = await readFile(path.join(HERE, "..", "src", "client", "plan-dialog-css.ts"), "utf8");
 
 const plan = (over) => ({
   id: "p1",
@@ -106,5 +114,51 @@ describe("按钮文案与结果说明", () => {
   it("时间格式化稳定（本地时间、零填充）", () => {
     const text = formatPlanTime(1_700_000_000_000);
     assert.match(text, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  });
+});
+
+describe("提案弹窗：只摆没被关掉过的提案", () => {
+  it("关掉过的不再出现（否则用户取消之后它又自己弹回来 ✗）", () => {
+    const list = [plan({ id: "a" }), plan({ id: "b" }), plan({ id: "c", applied: true })];
+    assert.deepEqual(openPlans(list, []).map((item) => item.id), ["a", "b"]);
+    assert.deepEqual(openPlans(list, ["a"]).map((item) => item.id), ["b"]);
+    assert.deepEqual(openPlans(list, ["a", "b"]), []);
+  });
+});
+
+describe("提案弹窗的接线（源码契约）", () => {
+  it("**及时刷新**：自己按秒轮询 list-plans（agent 提交提案不会改图的 revision ✗）", async () => {
+    assert.match(reviewSource, /const PLAN_POLL_MS = \d+/, "要有一个明确的轮询间隔 ✓");
+    assert.match(reviewSource, /setInterval\(\(\) => setPollTick/, "轮询要真的触发重拉 ✓");
+    assert.match(reviewSource, /\[reload, props\.reloadToken, pollTick\]/, "重拉的依赖里要有轮询滴答 ✓");
+  });
+
+  it("**弹窗悬浮在聊天上**：portal 到 body，且样式自己注入 head（面板的是 shadow 样式 ✗）", async () => {
+    assert.ok(reviewSource.includes("createPortal(") && reviewSource.includes("document.body"), "要 portal 到 body ✓");
+    assert.ok(reviewSource.includes("ensurePlanDialogStyle(document)"), "portal 的样式必须同模块注入 ✓");
+    assert.ok(dialogCssSource.includes(".kn-pdialog-backdrop"), "遮罩样式要有定义 ✓");
+    assert.ok(dialogCssSource.includes(".kn-pdialog {"), "弹窗本体样式要有定义 ✓");
+  });
+
+  it("**落地或取消之后立即消失**，且关掉过的不再自动弹回来", async () => {
+    assert.match(reviewSource, /setDialog\(false\);[\s\S]{0,160}dismissPlans\(\[plan\.id\]\)/, "落地成功要立刻关弹窗并记下已处理 ✓");
+    assert.match(reviewSource, /const dismiss = useCallback[\s\S]{0,240}setDialog\(false\)/, "取消要立刻关弹窗 ✓");
+    assert.match(reviewSource, /autoOpenedPlans\.has\(plan\.id\)/, "每个提案只自动弹一次 ✓");
+    assert.match(reviewSource, /setDialog\(true\)/, "新提案要自动弹出 ✓");
+    assert.ok(
+      /const dismissedPlans = new Set<string>\(\)/.test(reviewSource),
+      "「关掉过」要记在**组件外**：面板重挂之后不许再弹回来 ✗",
+    );
+  });
+
+  it("Esc = 取消；**Enter 不绑**（建节点必须是一次明确的点击 ✗）", async () => {
+    assert.match(reviewSource, /event\.key !== "Escape"/, "Esc 要关掉弹窗 ✓");
+    assert.ok(!/dialogKeyboardIntent/.test(reviewSource), "不许复用「Enter 即确认」那套键盘意图 ✗");
+  });
+
+  it("关掉的提案不丢：面板上留一个小入口可以再打开，撤销卡片也还在", async () => {
+    assert.ok(reviewSource.includes("plan-dialog-reopen"), "要有「再打开」的入口 ✓");
+    assert.ok(reviewSource.includes("copy.reopen.replace"), "入口文案带条数 ✓");
+    assert.ok(reviewSource.includes("void undo(plan);"), "已落地的撤销入口保留在面板里 ✓");
   });
 });

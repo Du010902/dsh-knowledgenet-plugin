@@ -34,6 +34,18 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 const DICT_ZH: Record<string, string> = {
   nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
   understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
+  planPendingTitle: "agent 提交了一份提案",
+  planTagCreate: "新建",
+  planTagReuse: "已存在·复用",
+  planNothingSelected: "未勾选",
+  planLater: "稍后再说",
+  planHint: "只有你点击才会真正建节点",
+  planAppliedTitle: "已按你的确认落地",
+  planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
+  planUndo: "撤销本次新建",
+  planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
+  planReopen: "有 {n} 条提案待审",
+  planClose: "关闭",
 
   // 面板
   panel: "知识库图谱",
@@ -258,6 +270,18 @@ const DICT_ZH: Record<string, string> = {
 const DICT_EN: Record<string, string> = {
   nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
   understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
+  planPendingTitle: "The agent submitted a proposal",
+  planTagCreate: "New",
+  planTagReuse: "Exists · reuse",
+  planNothingSelected: "Nothing selected",
+  planLater: "Later",
+  planHint: "Nodes are created only when you click",
+  planAppliedTitle: "Applied as you confirmed",
+  planCreatedCount: "Created {n} node(s) this time (files kept, undoable)",
+  planUndo: "Undo these creations",
+  planUndoDone: "Undone: {n} node(s) removed (the ones created just now)",
+  planReopen: "{n} proposal(s) awaiting review",
+  planClose: "Close",
 
   panel: "Knowledge graph",
   tabShort: "Graph",

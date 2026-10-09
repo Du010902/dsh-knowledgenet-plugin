@@ -47,6 +47,20 @@ export function undoablePlans(plans: readonly PlanSummary[]): PlanSummary[] {
 }
 
 /**
+ * 该拿出来给用户审阅的提案：**未落地、且没被用户关掉过**。
+ *
+ * 为什么要"关掉过"这一层（用户要求）：提案弹窗在取消/关掉之后必须**立即消失、不再自己弹回来** ✓；
+ * 计划文件仍然留在库里（用户随时能从面板的小入口再打开），所以这里只是**在界面上**过滤掉 ✓。
+ *
+ * @param plans - 提案列表。
+ * @param dismissed - 用户已经关掉过的提案 id。
+ * @returns 仍需展示的提案。
+ */
+export function openPlans(plans: readonly PlanSummary[], dismissed: readonly string[]): PlanSummary[] {
+  return pendingPlans(plans).filter((plan) => !dismissed.includes(plan.id));
+}
+
+/**
  * 一份提案的**默认勾选**：前 `APPLY_DEFAULT_LIMIT` 条。
  * @param plan - 提案。
  * @returns 默认勾选的条目 id。

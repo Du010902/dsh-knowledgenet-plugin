@@ -109,6 +109,19 @@ const LITERAL: Record<string, string> = {
 
   counts: "节点 {n} · 依赖 {e}",
   truncated: "（已截断显示）",
+  /* 提案审阅弹窗（悬浮在聊天上的 portal ✓）：文案同时进中英词典 ✓ */
+  planPendingTitle: "agent 提交了一份提案",
+  planTagCreate: "新建",
+  planTagReuse: "已存在·复用",
+  planNothingSelected: "未勾选",
+  planLater: "稍后再说",
+  planHint: "只有你点击才会真正建节点",
+  planAppliedTitle: "已按你的确认落地",
+  planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
+  planUndo: "撤销本次新建",
+  planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
+  planReopen: "有 {n} 条提案待审",
+  planClose: "关闭",
   spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
   workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
   nodeMenuTitle: "这个知识点",
@@ -1110,6 +1123,24 @@ function GraphPanelInner(props: {
         reloadToken={payload?.revision ?? 0}
         onChanged={() => { void load({ refresh: true }); }}
         report={(step, detail) => { void reportDiagOnce("plan-review", step, step, detail ?? null); }}
+        /*
+         * 文案走 `t`（每次渲染现取 ⇒ 切语言立即生效 ✓）。
+         * 提案弹窗现在是**悬浮在聊天上的 portal**，文案必须跟着宿主语言走 ✓。
+         */
+        copy={{
+          pendingTitle: t("planPendingTitle"),
+          tagCreate: t("planTagCreate"),
+          tagReuse: t("planTagReuse"),
+          nothingSelected: t("planNothingSelected"),
+          later: t("planLater"),
+          hint: t("planHint"),
+          appliedTitle: t("planAppliedTitle"),
+          createdCount: t("planCreatedCount"),
+          undo: t("planUndo"),
+          undoDone: t("planUndoDone"),
+          reopen: t("planReopen"),
+          close: t("planClose"),
+        }}
       />
 
       <div className="kn-graph" data-understanding="true">

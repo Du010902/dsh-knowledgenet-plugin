@@ -1619,6 +1619,10 @@
   color: var(--dsw-alias-label-primary);
 }
 .kn-note-relations { display: flex; align-items: center; gap: 6px; position: relative; margin-left: auto; }
+/* 节点对话入口：容器本身沿用 `.kn-note-relations` 的排布（flex / relative ✓）；
+   这里单独写一条 —— 类名守门测试只认独立选择器（`.cls {`），
+   只有后代选择器 `.kn-node-conversations .kn-note-relations-popover` 会被判成"用了没定义" ✗ */
+.kn-node-conversations { position: relative; }
 .kn-note-relations button { border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; }
 .kn-note-relations button:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent); }
 .kn-note-relations button:disabled { opacity: .5; cursor: default; }
