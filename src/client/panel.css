@@ -1211,9 +1211,21 @@
 /*
  * 左右留白：这里 18px + ProseMirror 6px ≈ **24px** ✓（文档建议 16–24px ✓，两层不重复叠加 ✓）。
  * 纵向滚动**不在这里** ✗（交给 .kn-editor-body ✓）⇒ 不再出现"两个纵向滚动条"✓。
+ *
+ * ⚠️ **必须撑满正文视口的剩余高度** ✗✗（用户实测）：正文比视口短时，下面那段空白原本不属于
+ * 编辑器（点在滚动容器上），于是**点它不落光标、`/` 命令在那儿根本用不了** ✗
+ * ⇒ 想插表格 / 公式只能跑回上面回车 ✓。现在 `.kn-editor-rich` / `.milkdown` / `.ProseMirror`
+ * 三层都用 flex 撑到底 ✓：点在最后一块下方的空白里，`handleClick` 收得到（见
+ * `MarkdownRichEditor.placeTrailingCaret` ✓，那里会落到一个**末尾空段落** ✓）。
+ *
+ * 为什么不是 `height: 100%`：那会和这里的内边距叠加、把内容顶出容器 ⇒ 多出一条滚动条 ✗
+ * （历史注释里记着这个坑 ✓）。flex + `min-height: 0` + `box-sizing: border-box` 没有这个问题 ✓。
  */
 .kn-editor-rich {
-  flex: none;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   min-height: 0;
   padding: 2px 18px 16px;
   overflow: visible;
@@ -1221,16 +1233,24 @@
 }
 
 /*
- * Crepe 容器**自然撑高** ✓（不再 `height:100%` ✗）：
- * 高度 100% 与内边距叠加会把内容顶出容器 ⇒ 在正文视口之外又多出一条滚动 ✓。
- * 纵向滚动统一由 `.kn-editor-body` 承担 ✓。
+ * Crepe 容器**继续自然撑高**（`height: auto` ✓，纵向滚动统一由 `.kn-editor-body` 承担 ✓），
+ * 同时把"剩余高度"这一棒传给 `.ProseMirror` ✓。
  */
 .kn-editor-rich .milkdown {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 0;
   height: auto;
   background: transparent;
 }
 
 .kn-editor-rich .milkdown .ProseMirror {
+  flex: 1 1 auto;
+  /* `border-box` 必须显式写 ✗：`editor-overrides.css` 给了它 8px/28px 的内边距，
+     内容盒再加内边距就会比父容器高出一截 ⇒ 又多一条滚动条（历史注释里记过这个坑 ✓） */
+  box-sizing: border-box;
   min-height: 0;
   padding: 0;
   outline: none;

@@ -61,6 +61,7 @@ import {
   firstCaretInTable,
   isCellTextblockSelection,
   isPlainClick,
+  trailingParagraphTarget,
 } from "./table-caret.ts";
 import {
   TABLE_LITERAL,
@@ -912,6 +913,40 @@ export function MarkdownRichEditor(props: {
   }, [syncMenu]);
 
   /**
+   * **点正文下方那块空白 ⇒ 落到"末尾的空段落"** ✓（用户实测：在最后一个块下面点一下毫无反应，
+   * 于是 `/` 命令在那里根本用不了 ✗ —— 想插表格 / 公式只能先跑回上面回车 ✓）。
+   *
+   * 只认"落点在**最后一个块的下边缘之下**"这一种情况 ✗（正文里的点击一律交给 ProseMirror 原生 ✓）；
+   * 末尾已经是空段落就用它、否则在末尾插一个 ✓（见 `trailingParagraphTarget` ✓）。
+   */
+  const placeTrailingCaret = useCallback((view: ProseMirrorView, event: MouseEvent): boolean => {
+    if (!isPlainClick(event)) return false;
+    /* 一次点击只处理一次 ✓（`handleClick` 主路径处理过之后，root 上的兜底监听不该再来一遍 ✓） */
+    const marked = event as MouseEvent & { knTrailingHandled?: boolean };
+    if (marked.knTrailingHandled === true) return true;
+    const last = view.dom.lastElementChild as HTMLElement | null;
+    const rect = last === null ? null : last.getBoundingClientRect();
+    /* 没有块 / 拿不到矩形 ⇒ 视作"在空白里"（例如空文档 ✓） */
+    if (rect !== null && event.clientY <= rect.bottom) return false;
+    const target = trailingParagraphTarget(view.state);
+    if (target === null) return false;
+    marked.knTrailingHandled = true;
+    const { state } = view;
+    if (target.insert) {
+      const paragraph = state.schema.nodes.paragraph?.createAndFill();
+      if (paragraph === null || paragraph === undefined) return false;
+      const transaction = state.tr.insert(target.pos, paragraph);
+      transaction.setSelection(TextSelection.create(transaction.doc, target.pos + 1));
+      view.dispatch(transaction);
+    } else {
+      view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, target.pos)));
+    }
+    if (!view.hasFocus()) view.focus();
+    reportRef.current?.("editor-blank-click", { insert: target.insert });
+    return true;
+  }, []);
+
+  /**
    * **普通单击 → 直接落下合法文字位置** ✓（`design/table-click-jitter-and-caret-analysis.md` ✓）。
    *
    * 接在 ProseMirror 的 **`handleClick`** 上：它在它默认的 `selectClickedLeaf` **之前**跑 ✓，
@@ -1299,6 +1334,18 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("mouseup", onMouseUpFallback, true);
 
     /*
+     * **正文下方空白的兜底**（用户实测那条 ✗）：主路径挂在 ProseMirror 的 `handleClick` 上，
+     * 它只对**落在可编辑元素里**的点击生效；万一那块空白不在 `.ProseMirror` 内（高度没撑满 / 浏览器差异 ✓），
+     * 这里再兜一次 ✓。`placeTrailingCaret` 自带"一次点击只处理一次"的标记 ⇒ 不会重复落光标 ✓。
+     */
+    const onBlankAreaFallback = (event: MouseEvent): void => {
+      const view = viewRef.current;
+      if (view === null || !readyRef.current || failedRef.current) return;
+      placeTrailingCaret(view, event);
+    };
+    root.addEventListener("click", onBlankAreaFallback);
+
+    /*
      * **代码块"复制"改写成多格式剪贴板** ✓
      * （`design/code-block-copy-paste-analysis.md` ✓）。
      *
@@ -1533,6 +1580,8 @@ export function MarkdownRichEditor(props: {
             if (previousClick !== undefined && previousClick.call(view.props, targetView, targetPos, clickEvent) === true) {
               return true;
             }
+            /* 正文下方那块空白：落到末尾的空段落 ✓（`/` 命令在那儿也能用 ✓） */
+            if (placeTrailingCaret(targetView, clickEvent)) return true;
             return placeTableCaret(targetView, clickEvent);
           },
         });
@@ -1633,6 +1682,7 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("pointerdown", onPointerDownRecord, true);
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
+      root.removeEventListener("click", onBlankAreaFallback);
       root.removeEventListener("click", onCopyClick, true);
       root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);

@@ -32,6 +32,7 @@ import {
   caretTargetForTextblockSelection,
   isCellTextblockSelection,
   isPlainClick,
+  trailingParagraphTarget,
 } from "../src/client/table-caret.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,7 @@ const CLIENT = path.join(HERE, "..", "src", "client");
 const richSource = readFileSync(path.join(CLIENT, "MarkdownRichEditor.tsx"), "utf8");
 const caretSource = readFileSync(path.join(CLIENT, "table-caret.ts"), "utf8");
 const overrides = readFileSync(path.join(CLIENT, "editor-overrides.css"), "utf8");
+const panel = readFileSync(path.join(CLIENT, "panel.css"), "utf8");
 
 /** 最小 schema：段落 / 文本 + 一个真正的原子块（模拟图片 ✓）+ 表格 ✓ */
 const schema = new Schema({
@@ -329,5 +331,79 @@ describe("原生插入光标（不再用虚拟光标 ✓）", () => {
       "万一又开虚拟光标，颜色也要是正文色 ✓（原来是 crepe outline，暗色太淡 ✗）",
     );
     assert.ok(!/caret-color:\s*transparent/.test(overrides), "不许把原生光标设成透明 ✗");
+  });
+});
+
+/*
+ * **正文下方那块空白**（用户实测 2026-10-10）：在最后一个块下面点一下毫无反应 ⇒
+ * `/` 命令在那儿根本用不了（插不了表格 / 公式 ✗），而复制粘贴的表格却显示正常 ✓。
+ * 这里钉住两件事：落点计算（末尾空段落 ✓）与接线（撑满高度 + 点击落到末尾空段落 ✓）。
+ */
+describe("正文下方的空白：点一下要能落光标、`/` 要能弹菜单 ✓", () => {
+  it("末尾已是空段落 ⇒ 直接用它；否则在末尾**插一个空段落**（敲 `/` 是新建块，不是接着改最后一个列表项 ✓）", () => {
+    const onlyText = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.paragraph.create(null, schema.text("列表项"))]),
+    });
+    const tail = trailingParagraphTarget(onlyText);
+    assert.deepEqual(tail, { pos: onlyText.doc.content.size, insert: true }, "末尾不是空段落 ⇒ 插一个 ✓");
+
+    const emptyTail = EditorState.create({
+      doc: schema.nodes.doc.create(null, [
+        schema.nodes.paragraph.create(null, schema.text("列表项")),
+        schema.nodes.paragraph.create(),
+      ]),
+    });
+    const reuse = trailingParagraphTarget(emptyTail);
+    assert.equal(reuse?.insert, false, "末尾已经是空段落 ⇒ 复用它（不无脑加空行 ✓）");
+    assertIsCaret(emptyTail, reuse.pos);
+
+    /* 末尾是**非段落块**（拿原子图片模拟）⇒ 也要插一个空段落 ✓ */
+    const imageTail = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.image.create()]),
+    });
+    assert.equal(trailingParagraphTarget(imageTail)?.insert, true, "末尾是图片 ⇒ 插空段落 ✓");
+  });
+
+  it("插入之后敲字只**新增**内容，不动最后一个块 ✓", () => {
+    const state = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.paragraph.create(null, schema.text("原文"))]),
+    });
+    const target = trailingParagraphTarget(state);
+    const paragraph = schema.nodes.paragraph.createAndFill();
+    const next = state.apply(state.tr.insert(target.pos, paragraph));
+    const caret = TextSelection.create(next.doc, target.pos + 1);
+    const typed = next.apply(next.tr.insertText("/", caret.from));
+    assert.equal(typed.doc.childCount, 2, "多出一个块 ✓");
+    assert.equal(typed.doc.child(0).textContent, "原文", "原块一字不动 ✓");
+    assert.equal(typed.doc.child(1).textContent, "/", "新块里就是刚才敲的 `/` ✓");
+  });
+
+  it("schema 里没有 paragraph ⇒ 返回 null（绝不硬造节点 ✗）", () => {
+    const bare = new Schema({
+      nodes: { doc: { content: "block*" }, image: { group: "block", atom: true, selectable: true }, text: {} },
+      marks: {},
+    });
+    const state = EditorState.create({ doc: bare.nodes.doc.create(null, []) });
+    assert.equal(trailingParagraphTarget(state), null);
+  });
+
+  it("接线：撑满高度 + 只认「最后一个块下边缘之下」的点击 + 主路径与兜底各一条 ✓", () => {
+    assert.ok(
+      /\.kn-editor-rich \{[\s\S]*?flex: 1 1 auto/.test(panel),
+      "正文容器要撑满剩余高度（否则下方空白不属于编辑器，点了没反应 ✗）",
+    );
+    assert.ok(
+      /\.kn-editor-rich \.milkdown \.ProseMirror \{[\s\S]*?flex: 1 1 auto/.test(panel),
+      "可编辑元素要一路撑到底 ✓",
+    );
+    assert.ok(richSource.includes("placeTrailingCaret"), "要有专门的落点逻辑 ✓");
+    assert.ok(richSource.includes("event.clientY <= rect.bottom"), "只接管「落在最后一个块下方」的点击 ✗");
+    assert.ok(richSource.includes("trailingParagraphTarget(view.state)"), "落点交给纯函数算 ✓");
+    assert.ok(richSource.includes('root.addEventListener("click", onBlankAreaFallback)'), "要有一条兜底监听 ✓");
+    assert.ok(richSource.includes("knTrailingHandled"), "一次点击只处理一次（别落两次光标 ✗）");
+    assert.ok(
+      /if \(placeTrailingCaret\(targetView, clickEvent\)\) return true;/.test(richSource),
+      "主路径要挂在 ProseMirror 的 handleClick 上 ✓",
+    );
   });
 });

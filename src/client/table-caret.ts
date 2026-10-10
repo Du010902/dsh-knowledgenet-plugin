@@ -182,6 +182,33 @@ export function caretTargetForSelection(state: EditorState, coords: ClickCoords 
   return caretTargetForTextblockSelection(state.doc, state.selection, coords);
 }
 
+/**
+ * **点正文下方那块空白 ⇒ 光标该落在哪** ✓（用户实测：在最后一个块下面点一下毫无反应，
+ * 于是 `/` 命令在那里根本用不了 ✗ —— 想加表格 / 公式只能先跑到上面去回车 ✓）。
+ *
+ * 规则（与 Typora / Notion 的直觉一致 ✓）：
+ * - 文档末尾**已经是空段落** ⇒ 直接用最后那个空位置 ✓（不无脑再加一个空行 ✗）；
+ * - 否则在**文档末尾插入一个空段落**并把光标放进去 ✓
+ *   ⇒ 接下来敲 `/` 就是"新建一个块"，而不是继续编辑最后一个列表项 / 表格 ✗。
+ *
+ * 纯逻辑：不碰 DOM、不派发事务 ✓（调用方拿着结果去 `dispatch` ✓）。
+ *
+ * @param state - 点击时的编辑器状态 ✓。
+ * @returns `insert: false` 时 `pos` 就是空段落里的文字位置；
+ *          `insert: true` 时先在 `pos`（= 文档末尾）插入一个空段落，光标落在 `pos + 1` ✓；
+ *          schema 里没有 `paragraph` 时返回 `null` ✓（绝不硬造节点 ✗）。
+ */
+export function trailingParagraphTarget(state: EditorState): { pos: number; insert: boolean } | null {
+  const paragraph = state.schema.nodes.paragraph;
+  if (paragraph === undefined) return null;
+  const last = state.doc.lastChild;
+  if (last !== null && last.type === paragraph && last.content.size === 0) {
+    /* 空段落占 [size-2, size] ⇒ 里面的文字位置是 size-1 ✓ */
+    return { pos: state.doc.content.size - 1, insert: false };
+  }
+  return { pos: state.doc.content.size, insert: true };
+}
+
 /** 找到 `pos` 处（或包含它的）那张表格的**第一个单元格范围** ✓ */
 function firstCellRange(state: EditorState, pos: number): { from: number; to: number } | null {
   let table: Node | null = null;
