@@ -168,6 +168,31 @@ export async function readPlan(root: string, id: string): Promise<Plan | null> {
 }
 
 /**
+ * **丢弃**一份提案（用户点了「取消这提案」✓）：把计划文件删掉。
+ *
+ * 为什么是删文件、而不是打个"作废"标记：用户的口径是「要么添加节点，要么取消这提案」——
+ * 取消就是不要它了；留一个作废文件只会让 `kn_plan_status` 继续报告一份"待审提案" ✗。
+ *
+ * **已落地的计划不删** ✗：撤销入口还要靠它记着"这次建了哪些节点"。
+ *
+ * @param root - 库根。
+ * @param id - 计划 id。
+ * @returns 真的删掉了 ⇒ true；已落地 / id 不合法 / 删不掉 ⇒ false（调用方据此提示 ✓）。
+ */
+export async function discardPlan(root: string, id: string): Promise<boolean> {
+  const trimmed = typeof id === "string" ? id.trim() : "";
+  if (trimmed === "") return false;
+  const plan = await readPlan(root, trimmed);
+  if (plan !== null && plan.applied !== undefined && plan.applied !== null) return false;
+  try {
+    await rm(join(root, planRelPath(trimmed)), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 列出库里所有提案（新到旧）。
  * @param root - 库根。
  * @returns 计划列表（读坏的跳过）。

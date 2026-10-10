@@ -34,7 +34,7 @@ import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
 import { checkLibraryFormat } from "./v3/store.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation } from "./isolation-state.ts";
-import { listPlans } from "./plans.ts";
+import { discardPlan, listPlans } from "./plans.ts";
 import { graphPayload } from "./payload.ts";
 import { recordClientDiag, recordNoteApi, recordProbe } from "./status.ts";
 import type { KnowledgeNetConfig } from "./tools.ts";
@@ -593,7 +593,7 @@ export async function handleApiRequest(
    * 注意：**落地只能从这条客户端路由进来**（用户在面板里点击），agent 的工具没有落地能力——
    * 这是"可控"的硬保证，不靠模型自觉。
    */
-  if (record.kind === "list-plans" || record.kind === "apply-plan" || record.kind === "undo-plan") {
+  if (record.kind === "list-plans" || record.kind === "apply-plan" || record.kind === "undo-plan" || record.kind === "discard-plan") {
     const resolved = await resolveRequestedRoot(ctx, config, {
       root: typeof record.root === "string" ? record.root : undefined,
       sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
@@ -628,6 +628,19 @@ export async function handleApiRequest(
         };
       }
       const planId = typeof record.planId === "string" ? record.planId : "";
+      /*
+       * 「取消这提案」= **丢弃**（用户要求：弹窗只有两个出口 —— 添加节点 / 取消 ✓）。
+       * 删的是库自己的计划文件（`<库>/.knowledgenet/plans/<id>.json` ✓），不碰节点与关系 ✓。
+       */
+      if (record.kind === "discard-plan") {
+        const discarded = await discardPlan(resolved.root, planId);
+        return {
+          status: 200,
+          body: discarded
+            ? { ok: true, planId }
+            : { ok: false, error: { code: "discard_failed", message: "这份提案没能丢弃（可能已经落地，或文件不可写）" } },
+        };
+      }
       if (record.kind === "apply-plan") {
         const itemIds = Array.isArray(record.itemIds)
           ? record.itemIds.filter((id): id is string => typeof id === "string")

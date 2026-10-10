@@ -3119,6 +3119,30 @@ async function readPlan(root, id) {
 	}
 }
 /**
+* **丢弃**一份提案（用户点了「取消这提案」✓）：把计划文件删掉。
+*
+* 为什么是删文件、而不是打个"作废"标记：用户的口径是「要么添加节点，要么取消这提案」——
+* 取消就是不要它了；留一个作废文件只会让 `kn_plan_status` 继续报告一份"待审提案" ✗。
+*
+* **已落地的计划不删** ✗：撤销入口还要靠它记着"这次建了哪些节点"。
+*
+* @param root - 库根。
+* @param id - 计划 id。
+* @returns 真的删掉了 ⇒ true；已落地 / id 不合法 / 删不掉 ⇒ false（调用方据此提示 ✓）。
+*/
+async function discardPlan(root, id) {
+	const trimmed = typeof id === "string" ? id.trim() : "";
+	if (trimmed === "") return false;
+	const plan = await readPlan(root, trimmed);
+	if (plan !== null && plan.applied !== void 0 && plan.applied !== null) return false;
+	try {
+		await rm(join(root, planRelPath(trimmed)), { force: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+/**
 * 列出库里所有提案（新到旧）。
 * @param root - 库根。
 * @returns 计划列表（读坏的跳过）。
@@ -6524,7 +6548,7 @@ async function handleApiRequest(ctx, config, request) {
 			};
 		}
 	}
-	if (record.kind === "list-plans" || record.kind === "apply-plan" || record.kind === "undo-plan") {
+	if (record.kind === "list-plans" || record.kind === "apply-plan" || record.kind === "undo-plan" || record.kind === "discard-plan") {
 		const resolved = await resolveRequestedRoot(ctx, config, {
 			root: typeof record.root === "string" ? record.root : void 0,
 			sessionId: typeof record.sessionId === "string" ? record.sessionId : void 0
@@ -6566,6 +6590,19 @@ async function handleApiRequest(ctx, config, request) {
 				}
 			};
 			const planId = typeof record.planId === "string" ? record.planId : "";
+			if (record.kind === "discard-plan") return {
+				status: 200,
+				body: await discardPlan(resolved.root, planId) ? {
+					ok: true,
+					planId
+				} : {
+					ok: false,
+					error: {
+						code: "discard_failed",
+						message: "这份提案没能丢弃（可能已经落地，或文件不可写）"
+					}
+				}
+			};
 			if (record.kind === "apply-plan") {
 				const itemIds = Array.isArray(record.itemIds) ? record.itemIds.filter((id) => typeof id === "string") : void 0;
 				const result = await applyPlanFromUi(context, resolved.root, {

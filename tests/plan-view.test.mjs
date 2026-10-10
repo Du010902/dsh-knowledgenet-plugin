@@ -140,26 +140,31 @@ describe("提案弹窗的接线（源码契约）", () => {
     assert.ok(dialogCssSource.includes(".kn-pdialog {"), "弹窗本体样式要有定义 ✓");
   });
 
-  it("**落地或取消之后立即消失**，且关掉过的不再自动弹回来", async () => {
-    assert.match(reviewSource, /setDialog\(false\);[\s\S]{0,160}dismissPlans\(\[plan\.id\]\)/, "落地成功要立刻关弹窗并记下已处理 ✓");
-    assert.match(reviewSource, /const dismiss = useCallback[\s\S]{0,240}setDialog\(false\)/, "取消要立刻关弹窗 ✓");
-    assert.match(reviewSource, /autoOpenedPlans\.has\(plan\.id\)/, "每个提案只自动弹一次 ✓");
-    assert.match(reviewSource, /setDialog\(true\)/, "新提案要自动弹出 ✓");
+  it("**弹窗只有两个出口**（用户要求：不要「稍后再说」✗）：落地 / 取消这提案，两者都立即关弹窗 ✓", async () => {
+    /* 落地：记一条短暂回执 + 立刻关弹窗 ✓ */
+    assert.match(reviewSource, /setNote\(\{ text, at: Date\.now\(\) \}\);[\s\S]{0,400}setDialog\(false\);/, "落地成功要立刻关弹窗 ✓");
+    /* 取消：关弹窗 + 记进"取消过"（持久 ✓）+ 请宿主删计划文件 ✓ */
+    assert.match(reviewSource, /const discard = useCallback[\s\S]{0,400}setDialog\(false\)/, "取消要立刻关弹窗 ✓");
+    assert.match(reviewSource, /dismissedPlans\.set\(id, props\.root \?\? ""\)/, "取消要立刻记下来（换会话/重启都不再弹 ✓）");
+    assert.match(reviewSource, /kind: "discard-plan"/, "取消要请宿主把计划文件删掉 ✓");
+    assert.ok(!/copy\.later/.test(reviewSource), "不许再有「稍后再说」✗");
     assert.ok(
-      /const dismissedPlans = new Set<string>\(\)/.test(reviewSource),
-      "「关掉过」要记在**组件外**：面板重挂之后不许再弹回来 ✗",
+      !/plan-dialog-reopen/.test(reviewSource) && !/copy\.reopen/.test(reviewSource),
+      "不许再有「待审提案」小入口（那等于稍后再说 ✗）",
     );
   });
 
-  it("Esc = 取消；**Enter 不绑**（建节点必须是一次明确的点击 ✗）", async () => {
-    assert.match(reviewSource, /event\.key !== "Escape"/, "Esc 要关掉弹窗 ✓");
-    assert.ok(!/dialogKeyboardIntent/.test(reviewSource), "不许复用「Enter 即确认」那套键盘意图 ✗");
+  it("取消过的**持久**记在组件外，并且宿主删成功后把本地记录也清掉 ✓", async () => {
+    assert.match(reviewSource, /const dismissedPlans = new Map<string, string>\(readDismissedPlans\(\)/, "启动时读持久记录 ✓");
+    assert.match(reviewSource, /forgetDismissedPlan\(id\)/, "宿主真删掉之后要忘掉本地记录 ✓");
+    assert.match(reviewSource, /const retryDiscarded = useCallback/, "宿主当时删不掉的，下次拉列表时要补删 ✓");
+    assert.match(reviewSource, /if \(pending\.length === 0\) return;\s*\n\s*setDialog\(true\)/, "待审就弹（待审 = 还没决定 ✓）");
   });
 
-  it("关掉的提案不丢：面板上留一个小入口可以再打开，撤销卡片也还在", async () => {
-    assert.ok(reviewSource.includes("plan-dialog-reopen"), "要有「再打开」的入口 ✓");
-    assert.ok(reviewSource.includes("copy.reopen.replace"), "入口文案带条数 ✓");
-    assert.ok(reviewSource.includes("void undo(plan);"), "落地后的撤销入口保留 ✓");
+  it("Esc = 取消这提案；**Enter 不绑**（建节点必须是一次明确的点击 ✗）", async () => {
+    assert.match(reviewSource, /event\.key !== "Escape"/, "Esc 要关掉弹窗 ✓");
+    assert.match(reviewSource, /event\.stopImmediatePropagation\(\);\s*\n\s*discard\(\)/, "Esc 与「取消这提案」同一语义 ✓");
+    assert.ok(!/dialogKeyboardIntent/.test(reviewSource), "不许复用「Enter 即确认」那套键盘意图 ✗");
   });
 
   it("落地回执**不许长期占着面板**：到点自己消失，也能立刻收起 ✓（用户实测：一直挂着 ✗）", async () => {
@@ -167,6 +172,7 @@ describe("提案弹窗的接线（源码契约）", () => {
     assert.match(reviewSource, /now - entry\.at < TRANSIENT_MS/, "过期就不再渲染那张卡 ✓");
     assert.match(reviewSource, /const freshlyApplied = new Map/, "回执记在组件外（重挂面板不会又冒出来 ✗）");
     assert.ok(reviewSource.includes("kn-plan-dismiss"), "要有「立刻收起」的按钮 ✓");
+    assert.ok(reviewSource.includes("void undo(plan);"), "落地后的撤销入口保留 ✓");
     assert.ok(
       !/const undoable = undoablePlans\(plans\)/.test(reviewSource),
       "不许再「列出所有已落地提案」——那会让回执永远挂在面板上 ✗",

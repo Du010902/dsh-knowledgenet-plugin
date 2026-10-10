@@ -2,11 +2,11 @@
  * 「提案审阅」：agent 只能**提案**（写出计划文件，一个节点都不建）；落地与撤销只在这里、由用户点击触发——
  * 这是"agent 建节点可控"的最后一环。
  *
- * 两部分（用户要求，2026-10）：
- * 1. **弹窗**：待审提案做成一个**悬浮在当前聊天窗口上的弹窗**（portal 到 body ✓），
- *    落地完成、或用户取消/关掉之后**立即消失** ✓；关掉过的提案不再自己弹回来
- *    （计划文件仍在库里，面板上留一个小入口可以再打开 ✓）。
- * 2. **面板里的小尾巴**：已落地的「撤销」卡片、结果说明与错误留在这里（它们不抢视线 ✓）。
+ * **弹窗只有两个出口**（用户要求 2026-10-10："不用稍后再说，要么添加节点，要么取消这提案"）：
+ * 1. 「创建选中的 N 条」⇒ 落地，弹窗立即消失 ✓；
+ * 2. 「取消这提案」⇒ **丢弃**：客户端立刻隐藏 + 让宿主删掉计划文件 ✓（宿主还没更新时先本地记住、
+ *    下次拉列表时补删 ✓），弹窗立即消失且**永不再弹** ✓。
+ * 没有"稍后再说"，面板上也没有"待审提案"小入口 ✓ —— 待审就是"还没决定"，那就该弹 ✓。
  *
  * 另外两条实测约定：
  * - **及时刷新**：agent 提交提案只写库里的计划文件，图的 `revision` 不会变 ⇒ 只靠"图数据变了才拉"
@@ -18,6 +18,11 @@ import { createPortal } from "react-dom";
 
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { ensurePlanDialogStyle } from "./plan-dialog-css.ts";
+import {
+  forgetDismissedPlan,
+  markPlanDismissed,
+  readDismissedPlans,
+} from "./plan-dismissed.ts";
 import {
   describeApply,
   formatPlanTime,
@@ -32,16 +37,14 @@ import {
 const PLAN_POLL_MS = 2000;
 
 /**
- * 已经**关掉过**的提案 id（模块级，跨面板重挂保留 ✓）。
+ * 已经**取消过**的提案记录（模块级 + localStorage ✓，见 `plan-dismissed.ts`）。
  *
- * 为什么必须放在组件外：用户取消之后换会话/重开面板，若每个新组件实例都从零开始，
- * 弹窗会**又自己弹回来**（正是用户不要的行为 ✗）。计划文件仍在库里，随时能从面板的小入口再打开 ✓。
- * 纯内存：刷新页面即忘（下一轮提示重新开始，可接受 ✓）。
+ * 两条作用：
+ * 1. 取消之后**立刻生效**，换会话/重开面板/重启 DSH 都不再弹 ✓；
+ * 2. 宿主半是启动时加载的 ⇒ 还没重启时"删计划文件"那条路不存在，这次取消先记在本地 ✓，
+ *    等宿主能删了再补删（`retryDiscarded` ✓）⇒ 磁盘最终干净 ✓。
  */
-const dismissedPlans = new Set<string>();
-
-/** 已经自动弹过一次的提案 id（模块级：同一份提案不反复打扰 ✓） */
-const autoOpenedPlans = new Set<string>();
+const dismissedPlans = new Map<string, string>(readDismissedPlans().map((entry) => [entry.id, entry.root]));
 
 /**
  * 落地/撤销的「回执」显示多久。
@@ -73,15 +76,14 @@ export interface PlanReviewProps {
     tagCreate?: string;
     tagReuse?: string;
     nothingSelected?: string;
-    later?: string;
+    /** 「取消这提案」按钮（点击 = **丢弃**这份提案 ✓） */
+    discard?: string;
     hint?: string;
     appliedTitle?: string;
     createdCount?: string;
     undo?: string;
     undoDone?: string;
-    /** 面板上那个"还有提案待审"小入口；`{n}` 会被替换成条数 ✓ */
-    reopen?: string;
-    /** 关闭弹窗（× / Esc / 点背景）的按钮/提示文案 ✓ */
+    /** 关闭弹窗（× / Esc / 点背景）的提示：与"取消"同一语义（丢弃 ✓） */
     close?: string;
   };
 }
@@ -106,14 +108,13 @@ const LITERAL: Record<string, string> = {
   planTagCreate: "新建",
   planTagReuse: "已存在·复用",
   planNothingSelected: "未勾选",
-  planLater: "稍后再说",
-  planHint: "只有你点击才会真正建节点",
+  planDiscard: "取消这提案",
+  planHint: "只有你点击才会真正建节点；取消会把这份提案丢掉",
   planAppliedTitle: "已按你的确认落地",
   planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
   planUndo: "撤销本次新建",
   planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
-  planReopen: "有 {n} 条提案待审",
-  planClose: "关闭",
+  planClose: "取消这提案（丢弃它）",
 };
 
 /**
@@ -131,35 +132,28 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
   /** 弹窗开着吗 ✓ */
   const [dialog, setDialog] = useState(false);
   /**
-   * 用户已经**关掉过**的提案 id（模块级 `dismissedPlans` 的渲染快照 ✓）。
+   * 用户已经**取消过**的提案 id（模块级 `dismissedPlans` 的渲染快照 ✓）。
    *
-   * 关掉 = 弹窗立即消失、且**不许自己再弹回来** ✓（用户要求）；计划文件仍然留在库里，
-   * 面板上那个小入口随时能把它再摊开 ✓。
+   * 取消 = 弹窗立即消失、且**永不再弹** ✓（用户要求）；同时会请宿主把计划文件删掉 ✓
+   * （宿主还没更新时先本地记住，下次拉列表时补删 ✓）。
    */
-  const [dismissed, setDismissed] = useState<string[]>(() => [...dismissedPlans]);
+  const [dismissed, setDismissed] = useState<string[]>(() => [...dismissedPlans.keys()]);
   /** 轮询计数：让 effect 重新拉一次 list-plans ✓ */
   const [pollTick, setPollTick] = useState(0);
   /** 回执/撤销窗口的滴答：让"到点自己消失"能真的重渲染一次 ✓ */
   const [receiptTick, setReceiptTick] = useState(0);
-
-  /** 记下"这些提案关掉过了"（同时写进模块级集合，重挂面板也不忘 ✓） */
-  const dismissPlans = useCallback((ids: readonly string[]): void => {
-    for (const id of ids) dismissedPlans.add(id);
-    setDismissed([...dismissedPlans]);
-  }, []);
 
   const copy = {
     pendingTitle: props.copy?.pendingTitle ?? LITERAL.planPendingTitle,
     tagCreate: props.copy?.tagCreate ?? LITERAL.planTagCreate,
     tagReuse: props.copy?.tagReuse ?? LITERAL.planTagReuse,
     nothingSelected: props.copy?.nothingSelected ?? LITERAL.planNothingSelected,
-    later: props.copy?.later ?? LITERAL.planLater,
+    discard: props.copy?.discard ?? LITERAL.planDiscard,
     hint: props.copy?.hint ?? LITERAL.planHint,
     appliedTitle: props.copy?.appliedTitle ?? LITERAL.planAppliedTitle,
     createdCount: props.copy?.createdCount ?? LITERAL.planCreatedCount,
     undo: props.copy?.undo ?? LITERAL.planUndo,
     undoDone: props.copy?.undoDone ?? LITERAL.planUndoDone,
-    reopen: props.copy?.reopen ?? LITERAL.planReopen,
     close: props.copy?.close ?? LITERAL.planClose,
   };
 
@@ -187,6 +181,40 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
     return (await response.json()) as PostResult;
   }, []);
 
+  /**
+   * 请宿主**删掉计划文件**（「取消这提案」的正常路径 ✓）。
+   * @param id - 提案 id。
+   * @param root - 库根（补删时用记录里的 root ✓）。
+   * @returns 宿主确认删掉了 ⇒ true ✓。
+   */
+  const discardOnHost = useCallback(async (id: string, root: string | undefined): Promise<boolean> => {
+    if (root === undefined || root.trim() === "") return false;
+    try {
+      const body = await post({ kind: "discard-plan", root, planId: id });
+      return body.ok === true;
+    } catch {
+      return false;
+    }
+  }, [post]);
+
+  /**
+   * **补删**：之前取消过、但宿主当时还不支持删除（宿主半是启动时加载的 ⇒ 刚更新完那条路还不存在 ✓）
+   * 的提案，现在如果能删就删掉，并把本地记录也清掉 ✓。删不掉就留着记录，下次再试 ✓。
+   * @param list - 刚拉到的提案列表（只对**还在列表里**的补删，省得每次都问一遍 ✓）。
+   */
+  const retryDiscarded = useCallback(async (list: readonly PlanSummary[]): Promise<void> => {
+    const present = new Set(list.map((plan) => plan.id));
+    for (const [id, root] of [...dismissedPlans]) {
+      if (!present.has(id)) continue;
+      if (await discardOnHost(id, root)) {
+        dismissedPlans.delete(id);
+        forgetDismissedPlan(id);
+        setDismissed([...dismissedPlans.keys()]);
+        report("plan-discard-retried", { ok: true });
+      }
+    }
+  }, [discardOnHost]);
+
   const reload = useCallback(async (): Promise<void> => {
     if (props.root === undefined || props.root.trim() === "") return;
     try {
@@ -202,10 +230,12 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
        */
       setSelected((prev) => mergeSelection(prev, list));
       report("plan-list", { count: list.length });
+      /* 顺手补删：之前取消过、但当时宿主还删不掉的提案（宿主半更新后这里就清干净了 ✓） */
+      void retryDiscarded(list);
     } catch {
       setPlans([]);
     }
-  }, [post, props.root]);
+  }, [post, props.root, retryDiscarded]);
 
   useEffect(() => {
     void reload();
@@ -236,37 +266,56 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
   const pendingIds = pending.map((plan) => plan.id).join(",");
 
   /**
-   * 有新提案 ⇒ 自动把弹窗摊开（用户要求：及时看见 ✓）。
-   * 每个提案只自动弹一次：关掉过的（dismissed）与已经自动弹过的都不再触发 ✓。
+   * 有待审提案 ⇒ 自动把弹窗摊开（用户要求：及时看见 ✓）。
+   *
+   * 现在**不做"弹过就不再弹"的抑制**了：既然只有两个出口（添加 / 取消），
+   * "待审"就等于"还没决定" ⇒ 该弹就弹 ✓（刷新页面后接着弹也是对的 ✓；
+   * 取消了的那份已经进了 `dismissed`，不会再出现 ✓）。
    */
   useEffect(() => {
-    const fresh = pending.filter((plan) => !autoOpenedPlans.has(plan.id));
-    if (fresh.length === 0) return;
-    for (const plan of fresh) autoOpenedPlans.add(plan.id);
+    if (pending.length === 0) return;
     setDialog(true);
-    report("plan-dialog-open", { count: fresh.length });
+    report("plan-dialog-open", { count: pending.length });
   }, [pendingIds]);
 
-  /** 取消 / 关掉：弹窗立即消失，且这些提案不再自动弹回来 ✓ */
-  const dismiss = useCallback((): void => {
+  /**
+   * **取消这提案 = 丢弃**（用户要求：不要"稍后再说" ✓）：
+   * 弹窗立即消失、界面上立刻不再有它 ✓，并请宿主把计划文件删掉 ✓；
+   * 宿主还删不掉（宿主半没更新）时先本地记住 ⇒ 下次拉列表时补删 ✓，
+   * 用户这边**永远不再被它打扰** ✓。
+   */
+  const discard = useCallback((): void => {
+    const targets = pending.map((plan) => plan.id);
     setDialog(false);
-    if (pending.length === 0) return;
-    dismissPlans(pending.map((plan) => plan.id));
-    report("plan-dialog-dismiss", { count: pending.length });
-  }, [pending, dismissPlans, report]);
+    if (targets.length === 0) return;
+    for (const id of targets) dismissedPlans.set(id, props.root ?? "");
+    setDismissed([...dismissedPlans.keys()]);
+    setPlans((prev) => prev.filter((plan) => !targets.includes(plan.id)));
+    report("plan-discard", { count: targets.length });
+    void (async () => {
+      for (const id of targets) {
+        if (await discardOnHost(id, props.root)) {
+          /* 宿主真的删掉了 ⇒ 本地记录也可以忘掉 ✓ */
+          dismissedPlans.delete(id);
+          forgetDismissedPlan(id);
+          setDismissed([...dismissedPlans.keys()]);
+        }
+      }
+    })();
+  }, [pending, props.root, discardOnHost, report]);
 
-  /** Esc = 取消（Enter 故意不绑：建节点必须是一次**明确的点击** ✗） */
+  /** Esc = 取消这提案（与按钮同一语义 ✓；Enter 故意不绑：建节点必须是一次**明确的点击** ✗） */
   useEffect(() => {
     if (!dialog) return;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      dismiss();
+      discard();
     };
     document.addEventListener("keydown", onKey, true);
     return () => { document.removeEventListener("keydown", onKey, true); };
-  }, [dialog, dismiss]);
+  }, [dialog, discard]);
 
   const apply = async (plan: PlanSummary): Promise<void> => {
     const ids = selected[plan.id] ?? [];
@@ -286,7 +335,6 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
       report("plan-applied", { created });
       /* **落地完成 ⇒ 弹窗立即消失** ✓（用户要求）；面板里只留一条**短暂回执**（含撤销 ✓） */
       setDialog(false);
-      dismissPlans([plan.id]);
       if (created > 0) freshlyApplied.set(plan.id, { at: Date.now(), createdCount: created, createdAt: plan.createdAt });
       props.onChanged?.();
       await reload();
@@ -347,14 +395,14 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
     if (now - entry.at >= TRANSIENT_MS) freshlyApplied.delete(id);
   }
 
-  /** 面板里的小尾巴：待审入口 / 落地后的短暂回执（含撤销）/ 错误 ✓ */
-  const tail = pending.length > 0 || undoable.length > 0 || liveNote !== null || error !== null
+  /**
+   * 面板里的小尾巴：只剩**落地后的短暂回执**（含撤销）与错误 ✓。
+   *
+   * **没有"还有 N 条提案待审"那种入口了**（用户要求：只有"添加节点"或"取消这提案"✓）——
+   * 待审的提案一定会以弹窗出现，取消过的那份不会再回来 ✓。
+   */
+  const tail = undoable.length > 0 || liveNote !== null || error !== null
     ? <section className="kn-plan" data-kn-plan-review="1">
-      {pending.length > 0 ? (
-        <button type="button" className="kn-btn" onClick={() => { setDialog(true); report("plan-dialog-reopen", { count: pending.length }); }}>
-          {copy.reopen.replace("{n}", String(pending.length))}
-        </button>
-      ) : null}
       {undoable.map((plan) => (
         <div className="kn-plan-card" key={`undo-${plan.id}`}>
           <div className="kn-plan-title">
@@ -390,11 +438,12 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
 
   const dialogNode = dialog && pending.length > 0 && typeof document !== "undefined"
     ? createPortal(
-      <div className="kn-pdialog-backdrop" role="presentation" onClick={dismiss}>
+      /* 点背景 / × / Esc 都等于「取消这提案」（丢弃 ✓）——弹窗只有这两个出口 ✓ */
+      <div className="kn-pdialog-backdrop" role="presentation" onClick={discard}>
         <div className="kn-pdialog" role="dialog" aria-modal="true" aria-label={copy.pendingTitle} onClick={(event) => { event.stopPropagation(); }}>
           <div className="kn-pdialog-head">
             <span className="kn-pdialog-title">{copy.pendingTitle}</span>
-            <button type="button" className="kn-pdialog-close" aria-label={copy.close} title={copy.close} onClick={dismiss}>×</button>
+            <button type="button" className="kn-pdialog-close" aria-label={copy.close} title={copy.close} onClick={discard}>×</button>
           </div>
           <div className="kn-pdialog-body">
             {pending.map((plan) => {
@@ -420,7 +469,8 @@ export function PlanReview(props: PlanReviewProps): ReactNode {
                   </div>
                   <div className="kn-pdialog-actions">
                     <span className="kn-pdialog-hint">{copy.hint}</span>
-                    <button type="button" className="kn-pdialog-btn" onClick={dismiss}>{copy.later}</button>
+                    {/* 只有两个出口：取消这提案（= 丢弃） / 创建选中的 N 条 ✓ */}
+                    <button type="button" className="kn-pdialog-btn" onClick={discard}>{copy.discard}</button>
                     <button
                       type="button"
                       className="kn-pdialog-btn is-primary"

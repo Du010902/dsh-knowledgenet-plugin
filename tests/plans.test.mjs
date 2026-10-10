@@ -16,6 +16,7 @@ import { describe, it, beforeEach } from "node:test";
 import {
   MAX_PLAN_ITEMS,
   PLANS_DIR,
+  discardPlan,
   listPlans,
   newPlanId,
   normalizePlanItems,
@@ -128,6 +129,32 @@ describe("提案落盘", () => {
     const b = newPlanId(new Date("2025-01-02T03:04:05Z"), () => 0.25);
     assert.match(a, /^20250102\d{6}-[0-9a-f]{6}$/);
     assert.notEqual(a, b);
+  });
+
+  it("**丢弃**：删掉计划文件，listPlans 里不再有它（用户点「取消这提案」✓）", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kn-plans-"));
+    await savePlan(root, { id: "keep", createdAt: 1, items: [{ id: "i1", fromId: "a", title: "B" }] });
+    await savePlan(root, { id: "drop", createdAt: 2, items: [{ id: "i1", fromId: "a", title: "B" }] });
+
+    assert.equal(await discardPlan(root, "drop"), true);
+    assert.equal(await readPlan(root, "drop"), null, "文件真的没了 ✓");
+    assert.deepEqual((await listPlans(root)).map((item) => item.id), ["keep"], "别的提案不受影响 ✓");
+
+    /* 幂等：再丢一次也答 true（文件本来就不在 ✓） */
+    assert.equal(await discardPlan(root, "drop"), true);
+    assert.equal(await discardPlan(root, ""), false, "空 id 不该动任何东西 ✓");
+  });
+
+  it("**已落地的提案不许丢**（撤销入口还要靠它的落地记录 ✓）", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kn-plans-"));
+    await savePlan(root, {
+      id: "applied",
+      createdAt: 1,
+      items: [{ id: "i1", fromId: "a", title: "B" }],
+      applied: { at: 2, created: [{ itemId: "i1", title: "B" }], reused: [], failed: [] },
+    });
+    assert.equal(await discardPlan(root, "applied"), false);
+    assert.notEqual(await readPlan(root, "applied"), null, "文件还在 ✓");
   });
 });
 

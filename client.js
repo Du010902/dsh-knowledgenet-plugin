@@ -42229,6 +42229,70 @@ void main() {
 			style.textContent = planDialogCss();
 			doc.head.append(style);
 		}
+		//#endregion
+		//#region src/client/plan-dismissed.ts
+		/**
+		* 用户按「取消这提案」丢掉的提案 —— **持久**记录（localStorage，一个浏览器档案一份）。
+		*
+		* 为什么需要它（用户要求 2026-10-10）：提案弹窗只有两个出口 —— **添加节点** 或 **取消这提案**；
+		* 取消就是不要它了，所以它**必须立刻消失、并且永不再弹** ✓（刷新页面 / 重启 DSH 也不行 ✗）。
+		*
+		* 为什么要记 `root`：正常路径下取消是**让宿主删掉计划文件**（`discard-plan` ✓），
+		* 但宿主半是**启动时加载**的 —— 刚更新完还没重启时那条路还不存在 ⇒ 这次取消只能先在本地记住 ✓，
+		* 下次拉提案列表时再**补删**一次（见 PlanReview 的 `retryDiscarded` ✓）⇒ 磁盘最终也会干净 ✓。
+		*
+		* 存不下（私密模式 / 配额满 / 没有 localStorage）时静默降级 ✓：最坏结果是这次取消没被记住，
+		* 下次可能再弹一次 —— 绝不因为它报错而卡住流程 ✓。
+		*/
+		/** 存储键（带前缀与版本 ✓；值是 `{id, root}` 的 JSON 数组 ✓） */
+		const KEY = "knowledgenet.plan-dismissed.v1";
+		/** 取存储：显式传（含 `null` 表示"没有存储"）优先，否则用浏览器 `localStorage` ✓ */
+		function resolveStorage(storage) {
+			if (storage !== void 0) return storage;
+			return typeof localStorage === "undefined" ? null : localStorage;
+		}
+		/**
+		* 读"用户取消过"的提案。
+		* @param storage - 可选：存储面（测试用 ✓）。
+		* @returns 记录列表；读不到 / 值坏了都返回空数组 ✓。
+		*/
+		function readDismissedPlans(storage) {
+			const target = resolveStorage(storage);
+			if (target === null) return [];
+			try {
+				const raw = target.getItem(KEY);
+				if (raw === null) return [];
+				const parsed = JSON.parse(raw);
+				if (!Array.isArray(parsed)) return [];
+				return parsed.flatMap((entry) => {
+					if (entry === null || typeof entry !== "object") return [];
+					const record = entry;
+					const id = typeof record.id === "string" ? record.id : "";
+					if (id === "") return [];
+					return [{
+						id,
+						root: typeof record.root === "string" ? record.root : ""
+					}];
+				});
+			} catch {
+				return [];
+			}
+		}
+		function write(entries, target) {
+			target.setItem(KEY, JSON.stringify(entries.slice(-200)));
+		}
+		/**
+		* 宿主那边已经真的删掉了 ⇒ 把本地记录也删掉 ✓（去掉"补删"的负担 ✓）。
+		* @param id - 提案 id。
+		* @param storage - 可选：存储面（测试用 ✓）。
+		*/
+		function forgetDismissedPlan(id, storage) {
+			const target = resolveStorage(storage);
+			if (target === null) return;
+			try {
+				write(readDismissedPlans(target).filter((item) => item.id !== id), target);
+			} catch {}
+		}
 		/**
 		* 待审阅的提案（未落地）。
 		* @param plans - 提案列表。
@@ -42331,11 +42395,11 @@ void main() {
 		* 「提案审阅」：agent 只能**提案**（写出计划文件，一个节点都不建）；落地与撤销只在这里、由用户点击触发——
 		* 这是"agent 建节点可控"的最后一环。
 		*
-		* 两部分（用户要求，2026-10）：
-		* 1. **弹窗**：待审提案做成一个**悬浮在当前聊天窗口上的弹窗**（portal 到 body ✓），
-		*    落地完成、或用户取消/关掉之后**立即消失** ✓；关掉过的提案不再自己弹回来
-		*    （计划文件仍在库里，面板上留一个小入口可以再打开 ✓）。
-		* 2. **面板里的小尾巴**：已落地的「撤销」卡片、结果说明与错误留在这里（它们不抢视线 ✓）。
+		* **弹窗只有两个出口**（用户要求 2026-10-10："不用稍后再说，要么添加节点，要么取消这提案"）：
+		* 1. 「创建选中的 N 条」⇒ 落地，弹窗立即消失 ✓；
+		* 2. 「取消这提案」⇒ **丢弃**：客户端立刻隐藏 + 让宿主删掉计划文件 ✓（宿主还没更新时先本地记住、
+		*    下次拉列表时补删 ✓），弹窗立即消失且**永不再弹** ✓。
+		* 没有"稍后再说"，面板上也没有"待审提案"小入口 ✓ —— 待审就是"还没决定"，那就该弹 ✓。
 		*
 		* 另外两条实测约定：
 		* - **及时刷新**：agent 提交提案只写库里的计划文件，图的 `revision` 不会变 ⇒ 只靠"图数据变了才拉"
@@ -42345,15 +42409,14 @@ void main() {
 		/** 提案轮询间隔：agent 交完提案，用户最多等这么久就能看到弹窗 ✓（一次 list-plans 很便宜） */
 		const PLAN_POLL_MS = 2e3;
 		/**
-		* 已经**关掉过**的提案 id（模块级，跨面板重挂保留 ✓）。
+		* 已经**取消过**的提案记录（模块级 + localStorage ✓，见 `plan-dismissed.ts`）。
 		*
-		* 为什么必须放在组件外：用户取消之后换会话/重开面板，若每个新组件实例都从零开始，
-		* 弹窗会**又自己弹回来**（正是用户不要的行为 ✗）。计划文件仍在库里，随时能从面板的小入口再打开 ✓。
-		* 纯内存：刷新页面即忘（下一轮提示重新开始，可接受 ✓）。
+		* 两条作用：
+		* 1. 取消之后**立刻生效**，换会话/重开面板/重启 DSH 都不再弹 ✓；
+		* 2. 宿主半是启动时加载的 ⇒ 还没重启时"删计划文件"那条路不存在，这次取消先记在本地 ✓，
+		*    等宿主能删了再补删（`retryDiscarded` ✓）⇒ 磁盘最终干净 ✓。
 		*/
-		const dismissedPlans = /* @__PURE__ */ new Set();
-		/** 已经自动弹过一次的提案 id（模块级：同一份提案不反复打扰 ✓） */
-		const autoOpenedPlans = /* @__PURE__ */ new Set();
+		const dismissedPlans = new Map(readDismissedPlans().map((entry) => [entry.id, entry.root]));
 		/**
 		* 落地/撤销的「回执」显示多久。
 		*
@@ -42375,14 +42438,13 @@ void main() {
 			planTagCreate: "新建",
 			planTagReuse: "已存在·复用",
 			planNothingSelected: "未勾选",
-			planLater: "稍后再说",
-			planHint: "只有你点击才会真正建节点",
+			planDiscard: "取消这提案",
+			planHint: "只有你点击才会真正建节点；取消会把这份提案丢掉",
 			planAppliedTitle: "已按你的确认落地",
 			planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
 			planUndo: "撤销本次新建",
 			planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
-			planReopen: "有 {n} 条提案待审",
-			planClose: "关闭"
+			planClose: "取消这提案（丢弃它）"
 		};
 		/**
 		* 提案审阅区 + 提案弹窗。
@@ -42399,33 +42461,27 @@ void main() {
 			/** 弹窗开着吗 ✓ */
 			const [dialog, setDialog] = (0, react.useState)(false);
 			/**
-			* 用户已经**关掉过**的提案 id（模块级 `dismissedPlans` 的渲染快照 ✓）。
+			* 用户已经**取消过**的提案 id（模块级 `dismissedPlans` 的渲染快照 ✓）。
 			*
-			* 关掉 = 弹窗立即消失、且**不许自己再弹回来** ✓（用户要求）；计划文件仍然留在库里，
-			* 面板上那个小入口随时能把它再摊开 ✓。
+			* 取消 = 弹窗立即消失、且**永不再弹** ✓（用户要求）；同时会请宿主把计划文件删掉 ✓
+			* （宿主还没更新时先本地记住，下次拉列表时补删 ✓）。
 			*/
-			const [dismissed, setDismissed] = (0, react.useState)(() => [...dismissedPlans]);
+			const [dismissed, setDismissed] = (0, react.useState)(() => [...dismissedPlans.keys()]);
 			/** 轮询计数：让 effect 重新拉一次 list-plans ✓ */
 			const [pollTick, setPollTick] = (0, react.useState)(0);
 			/** 回执/撤销窗口的滴答：让"到点自己消失"能真的重渲染一次 ✓ */
 			const [receiptTick, setReceiptTick] = (0, react.useState)(0);
-			/** 记下"这些提案关掉过了"（同时写进模块级集合，重挂面板也不忘 ✓） */
-			const dismissPlans = (0, react.useCallback)((ids) => {
-				for (const id of ids) dismissedPlans.add(id);
-				setDismissed([...dismissedPlans]);
-			}, []);
 			const copy = {
 				pendingTitle: props.copy?.pendingTitle ?? LITERAL$3.planPendingTitle,
 				tagCreate: props.copy?.tagCreate ?? LITERAL$3.planTagCreate,
 				tagReuse: props.copy?.tagReuse ?? LITERAL$3.planTagReuse,
 				nothingSelected: props.copy?.nothingSelected ?? LITERAL$3.planNothingSelected,
-				later: props.copy?.later ?? LITERAL$3.planLater,
+				discard: props.copy?.discard ?? LITERAL$3.planDiscard,
 				hint: props.copy?.hint ?? LITERAL$3.planHint,
 				appliedTitle: props.copy?.appliedTitle ?? LITERAL$3.planAppliedTitle,
 				createdCount: props.copy?.createdCount ?? LITERAL$3.planCreatedCount,
 				undo: props.copy?.undo ?? LITERAL$3.planUndo,
 				undoDone: props.copy?.undoDone ?? LITERAL$3.planUndoDone,
-				reopen: props.copy?.reopen ?? LITERAL$3.planReopen,
 				close: props.copy?.close ?? LITERAL$3.planClose
 			};
 			const report = (step, detail = null) => {
@@ -42449,6 +42505,41 @@ void main() {
 					body: JSON.stringify(body)
 				})).json();
 			}, []);
+			/**
+			* 请宿主**删掉计划文件**（「取消这提案」的正常路径 ✓）。
+			* @param id - 提案 id。
+			* @param root - 库根（补删时用记录里的 root ✓）。
+			* @returns 宿主确认删掉了 ⇒ true ✓。
+			*/
+			const discardOnHost = (0, react.useCallback)(async (id, root) => {
+				if (root === void 0 || root.trim() === "") return false;
+				try {
+					return (await post({
+						kind: "discard-plan",
+						root,
+						planId: id
+					})).ok === true;
+				} catch {
+					return false;
+				}
+			}, [post]);
+			/**
+			* **补删**：之前取消过、但宿主当时还不支持删除（宿主半是启动时加载的 ⇒ 刚更新完那条路还不存在 ✓）
+			* 的提案，现在如果能删就删掉，并把本地记录也清掉 ✓。删不掉就留着记录，下次再试 ✓。
+			* @param list - 刚拉到的提案列表（只对**还在列表里**的补删，省得每次都问一遍 ✓）。
+			*/
+			const retryDiscarded = (0, react.useCallback)(async (list) => {
+				const present = new Set(list.map((plan) => plan.id));
+				for (const [id, root] of [...dismissedPlans]) {
+					if (!present.has(id)) continue;
+					if (await discardOnHost(id, root)) {
+						dismissedPlans.delete(id);
+						forgetDismissedPlan(id);
+						setDismissed([...dismissedPlans.keys()]);
+						report("plan-discard-retried", { ok: true });
+					}
+				}
+			}, [discardOnHost]);
 			const reload = (0, react.useCallback)(async () => {
 				if (props.root === void 0 || props.root.trim() === "") return;
 				try {
@@ -42460,10 +42551,15 @@ void main() {
 					setPlans(list);
 					setSelected((prev) => mergeSelection(prev, list));
 					report("plan-list", { count: list.length });
+					retryDiscarded(list);
 				} catch {
 					setPlans([]);
 				}
-			}, [post, props.root]);
+			}, [
+				post,
+				props.root,
+				retryDiscarded
+			]);
 			(0, react.useEffect)(() => {
 				reload();
 			}, [
@@ -42491,41 +42587,58 @@ void main() {
 			}, [note, receiptTick]);
 			const pending = openPlans(plans, dismissed);
 			/**
-			* 有新提案 ⇒ 自动把弹窗摊开（用户要求：及时看见 ✓）。
-			* 每个提案只自动弹一次：关掉过的（dismissed）与已经自动弹过的都不再触发 ✓。
+			* 有待审提案 ⇒ 自动把弹窗摊开（用户要求：及时看见 ✓）。
+			*
+			* 现在**不做"弹过就不再弹"的抑制**了：既然只有两个出口（添加 / 取消），
+			* "待审"就等于"还没决定" ⇒ 该弹就弹 ✓（刷新页面后接着弹也是对的 ✓；
+			* 取消了的那份已经进了 `dismissed`，不会再出现 ✓）。
 			*/
 			(0, react.useEffect)(() => {
-				const fresh = pending.filter((plan) => !autoOpenedPlans.has(plan.id));
-				if (fresh.length === 0) return;
-				for (const plan of fresh) autoOpenedPlans.add(plan.id);
-				setDialog(true);
-				report("plan-dialog-open", { count: fresh.length });
-			}, [pending.map((plan) => plan.id).join(",")]);
-			/** 取消 / 关掉：弹窗立即消失，且这些提案不再自动弹回来 ✓ */
-			const dismiss = (0, react.useCallback)(() => {
-				setDialog(false);
 				if (pending.length === 0) return;
-				dismissPlans(pending.map((plan) => plan.id));
-				report("plan-dialog-dismiss", { count: pending.length });
+				setDialog(true);
+				report("plan-dialog-open", { count: pending.length });
+			}, [pending.map((plan) => plan.id).join(",")]);
+			/**
+			* **取消这提案 = 丢弃**（用户要求：不要"稍后再说" ✓）：
+			* 弹窗立即消失、界面上立刻不再有它 ✓，并请宿主把计划文件删掉 ✓；
+			* 宿主还删不掉（宿主半没更新）时先本地记住 ⇒ 下次拉列表时补删 ✓，
+			* 用户这边**永远不再被它打扰** ✓。
+			*/
+			const discard = (0, react.useCallback)(() => {
+				const targets = pending.map((plan) => plan.id);
+				setDialog(false);
+				if (targets.length === 0) return;
+				for (const id of targets) dismissedPlans.set(id, props.root ?? "");
+				setDismissed([...dismissedPlans.keys()]);
+				setPlans((prev) => prev.filter((plan) => !targets.includes(plan.id)));
+				report("plan-discard", { count: targets.length });
+				(async () => {
+					for (const id of targets) if (await discardOnHost(id, props.root)) {
+						dismissedPlans.delete(id);
+						forgetDismissedPlan(id);
+						setDismissed([...dismissedPlans.keys()]);
+					}
+				})();
 			}, [
 				pending,
-				dismissPlans,
+				props.root,
+				discardOnHost,
 				report
 			]);
-			/** Esc = 取消（Enter 故意不绑：建节点必须是一次**明确的点击** ✗） */
+			/** Esc = 取消这提案（与按钮同一语义 ✓；Enter 故意不绑：建节点必须是一次**明确的点击** ✗） */
 			(0, react.useEffect)(() => {
 				if (!dialog) return;
 				const onKey = (event) => {
 					if (event.key !== "Escape") return;
 					event.preventDefault();
 					event.stopImmediatePropagation();
-					dismiss();
+					discard();
 				};
 				document.addEventListener("keydown", onKey, true);
 				return () => {
 					document.removeEventListener("keydown", onKey, true);
 				};
-			}, [dialog, dismiss]);
+			}, [dialog, discard]);
 			const apply = async (plan) => {
 				const ids = selected[plan.id] ?? [];
 				if (ids.length === 0) return;
@@ -42551,7 +42664,6 @@ void main() {
 					});
 					report("plan-applied", { created });
 					setDialog(false);
-					dismissPlans([plan.id]);
 					if (created > 0) freshlyApplied.set(plan.id, {
 						at: Date.now(),
 						createdCount: created,
@@ -42617,19 +42729,10 @@ void main() {
 				...entry
 			}));
 			for (const [id, entry] of [...freshlyApplied]) if (now - entry.at >= TRANSIENT_MS) freshlyApplied.delete(id);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [pending.length > 0 || undoable.length > 0 || liveNote !== null || error !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [undoable.length > 0 || liveNote !== null || error !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
 				className: "kn-plan",
 				"data-kn-plan-review": "1",
 				children: [
-					pending.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "kn-btn",
-						onClick: () => {
-							setDialog(true);
-							report("plan-dialog-reopen", { count: pending.length });
-						},
-						children: copy.reopen.replace("{n}", String(pending.length))
-					}) : null,
 					undoable.map((plan) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "kn-plan-card",
 						children: [
@@ -42680,7 +42783,7 @@ void main() {
 			}) : null, dialog && pending.length > 0 && typeof document !== "undefined" ? (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "kn-pdialog-backdrop",
 				role: "presentation",
-				onClick: dismiss,
+				onClick: discard,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "kn-pdialog",
 					role: "dialog",
@@ -42700,7 +42803,7 @@ void main() {
 								className: "kn-pdialog-close",
 								"aria-label": copy.close,
 								title: copy.close,
-								onClick: dismiss,
+								onClick: discard,
 								children: "×"
 							})]
 						}),
@@ -42759,8 +42862,8 @@ void main() {
 												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 													type: "button",
 													className: "kn-pdialog-btn",
-													onClick: dismiss,
-													children: copy.later
+													onClick: discard,
+													children: copy.discard
 												}),
 												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 													type: "button",
@@ -199083,14 +199186,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			planTagCreate: "新建",
 			planTagReuse: "已存在·复用",
 			planNothingSelected: "未勾选",
-			planLater: "稍后再说",
-			planHint: "只有你点击才会真正建节点",
+			planDiscard: "取消这提案",
+			planHint: "只有你点击才会真正建节点；取消会把这份提案丢掉",
 			planAppliedTitle: "已按你的确认落地",
 			planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
 			planUndo: "撤销本次新建",
 			planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
-			planReopen: "有 {n} 条提案待审",
-			planClose: "关闭",
+			planClose: "取消这提案（丢弃它）",
 			spaceFailed: "三维视图不可用；数据本身没问题，点「重试」或刷新面板再试。",
 			workspaceHint: "面板跟随当前工作区：把这个知识库目录作为工作区打开，这里就会直接显示它。",
 			nodeMenuTitle: "这个知识点",
@@ -199856,13 +199958,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 							tagCreate: t("planTagCreate"),
 							tagReuse: t("planTagReuse"),
 							nothingSelected: t("planNothingSelected"),
-							later: t("planLater"),
+							discard: t("planDiscard"),
 							hint: t("planHint"),
 							appliedTitle: t("planAppliedTitle"),
 							createdCount: t("planCreatedCount"),
 							undo: t("planUndo"),
 							undoDone: t("planUndoDone"),
-							reopen: t("planReopen"),
 							close: t("planClose")
 						}
 					}),
@@ -200184,14 +200285,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			planTagCreate: "新建",
 			planTagReuse: "已存在·复用",
 			planNothingSelected: "未勾选",
-			planLater: "稍后再说",
-			planHint: "只有你点击才会真正建节点",
+			planDiscard: "取消这提案",
+			planHint: "只有你点击才会真正建节点；取消会把这份提案丢掉",
 			planAppliedTitle: "已按你的确认落地",
 			planCreatedCount: "本次新建 {n} 个节点（文件保留，可撤销）",
 			planUndo: "撤销本次新建",
 			planUndoDone: "已撤销：{n} 个节点已删除（都是这次落地新建的）",
-			planReopen: "有 {n} 条提案待审",
-			planClose: "关闭",
+			planClose: "取消这提案（丢弃它）",
 			panel: "知识库图谱",
 			tabShort: "图谱",
 			focus: "聚焦",
@@ -200409,14 +200509,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			planTagCreate: "New",
 			planTagReuse: "Exists · reuse",
 			planNothingSelected: "Nothing selected",
-			planLater: "Later",
-			planHint: "Nodes are created only when you click",
+			planDiscard: "Discard this proposal",
+			planHint: "Nodes are created only when you click; discarding throws this proposal away",
 			planAppliedTitle: "Applied as you confirmed",
 			planCreatedCount: "Created {n} node(s) this time (files kept, undoable)",
 			planUndo: "Undo these creations",
 			planUndoDone: "Undone: {n} node(s) removed (the ones created just now)",
-			planReopen: "{n} proposal(s) awaiting review",
-			planClose: "Close",
+			planClose: "Discard this proposal",
 			panel: "Knowledge graph",
 			tabShort: "Graph",
 			focus: "Focus",
