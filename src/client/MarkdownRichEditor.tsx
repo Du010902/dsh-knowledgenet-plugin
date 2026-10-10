@@ -54,6 +54,7 @@ import {
   parseCodeBlockPayload,
 } from "./code-block-clipboard.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
+import { SLASH_MENU_SLICE, readSlashMenuApi, shouldOpenSlashMenu, prepareSlashInsertion, type SlashMenuApi } from "./slash-menu.ts";
 import {
   caretTargetForClick,
   caretTargetForSelection,
@@ -584,6 +585,12 @@ export function MarkdownRichEditor(props: {
   const crepeRef = useRef<Crepe | null>(null);
   /** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
   const viewRef = useRef<ProseMirrorView | null>(null);
+  /**
+   * Crepe 的**块菜单 API**（`/` 菜单 ✓；拿不到就是 `null` ✓，一切照旧 ✓）。
+   * 见 `slash-menu.ts`：它自带的触发条件在我们的布局里没走到，所以我们**显式叫它** ✓。
+   */
+  const slashAnchorRef = useRef<number | null>(null);
+  const slashMenuRef = useRef<SlashMenuApi | null>(null);
   /** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
   const baselineRef = useRef<((markdown: string) => void) | null>(null);
   /** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
@@ -946,6 +953,57 @@ export function MarkdownRichEditor(props: {
     return true;
   }, []);
 
+  /** Open Crepe’s block menu at the current command boundary. */
+  const openSlashMenu = useCallback((pos: number): boolean => {
+    const api = slashMenuRef.current;
+    if (api === null || typeof api.show !== "function") {
+      reportRef.current?.("slash-menu-open", { via: "key", api: "missing" });
+      return false;
+    }
+    try {
+      api.show(pos);
+    } catch {
+      reportRef.current?.("slash-menu-open", { via: "key", api: "threw" });
+      return false;
+    }
+    reportRef.current?.("slash-menu-open", { via: "key", api: "shown" });
+    return true;
+  }, []);
+
+  /**
+   * 叫完菜单之后**采一次现场**（诊断用 ✓）：菜单元素在不在、`data-show` 是什么、落在哪、
+   * 有没有落在正文视口里 ✓（不含任何正文 ✗）。
+   *
+   * 为什么要有：用户报的是"敲 `/` 没反应"，而"没弹出来"可能是**没叫**、也可能是**叫了但
+   * 被裁在视口外**（我们这里是 Shadow DOM + 滚动容器，位置算错的概率不低 ✓）。
+   * 这两种的修法完全不同 ⇒ 先取一次证据 ✓（`kn_status` 的 `clientDiag` 里能看到 ✓）。
+   */
+  const probeSlashMenu = useCallback((view: ProseMirrorView): void => {
+    window.setTimeout(() => {
+      const root = hostRef.current;
+      if (root === null) return;
+      const element = root.querySelector<HTMLElement>(".milkdown-slash-menu");
+      if (element === null) {
+        reportRef.current?.("slash-menu-probe", { found: false });
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const body = root.closest<HTMLElement>(".kn-editor-body") ?? root;
+      const bodyRect = body.getBoundingClientRect();
+      const inView = rect.width > 0 && rect.height > 0
+        && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom
+        && rect.right > bodyRect.left && rect.left < bodyRect.right;
+      reportRef.current?.("slash-menu-probe", {
+        found: true,
+        show: element.dataset.show ?? "",
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+        inView,
+        focused: view.hasFocus(),
+      });
+    }, 250);
+  }, []);
+
   /**
    * **普通单击 → 直接落下合法文字位置** ✓（`design/table-click-jitter-and-caret-analysis.md` ✓）。
    *
@@ -1125,6 +1183,20 @@ export function MarkdownRichEditor(props: {
        * （文档明确要求：能用配置就用配置 ✓）。
        */
       featureConfigs: {
+        [CrepeFeature.BlockEdit]: {
+          buildMenu: (builder) => {
+            for (const group of builder.build()) for (const item of group.items) {
+              const run = item.onRun;
+              if (!run) continue;
+              item.onRun = (ctx) => {
+                const anchor = slashAnchorRef.current;
+                slashAnchorRef.current = null;
+                if (anchor !== null && !prepareSlashInsertion(ctx.get(editorViewCtx), anchor)) return;
+                run(ctx);
+              };
+            }
+          },
+        },
         [CrepeFeature.CodeMirror]: {
           searchPlaceholder: "搜索语言…",
           noResultText: "没有匹配的语言",
@@ -1344,6 +1416,40 @@ export function MarkdownRichEditor(props: {
       placeTrailingCaret(view, event);
     };
     root.addEventListener("click", onBlankAreaFallback);
+
+    /*
+     * **`/` 叫出块菜单**（用户实测那条 ✗）：捕获阶段接住 ⇒ 这个按键不再落进正文 ✓。
+     * 段首和文字分隔处唤起；选择菜单项后才分出插入段落，保留已有文字。
+     */
+    const onSlashKey = (event: KeyboardEvent): void => {
+      if (event.key === "Enter") { slashAnchorRef.current = null; return; }
+      if (event.key === "Escape") { slashAnchorRef.current = null; slashMenuRef.current?.hide?.(); return; }
+      if (event.isComposing || props.readOnly || viewRef.current?.composing) return;
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      const view = viewRef.current;
+      if (view === null || !readyRef.current || failedRef.current || !view.editable || !view.hasFocus()) return;
+      // Capture runs before ProseMirror's key handler flushes the native caret.
+      const domRoot = view.dom.getRootNode() as Document | (ShadowRoot & { getSelection?: () => Selection | null });
+      const native = domRoot.getSelection?.() ?? view.dom.ownerDocument.getSelection();
+      if (native?.anchorNode && native.focusNode && view.dom.contains(native.anchorNode) && view.dom.contains(native.focusNode)) {
+        const from = view.posAtDOM(native.anchorNode, native.anchorOffset);
+        const to = view.posAtDOM(native.focusNode, native.focusOffset);
+        if (from !== view.state.selection.anchor || to !== view.state.selection.head) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)));
+      }
+      const pos = shouldOpenSlashMenu(view.state);
+      if (pos === null) return;
+      if (openSlashMenu(pos)) {
+        slashAnchorRef.current = pos;
+        event.preventDefault();
+        event.stopPropagation();
+        probeSlashMenu(view);
+      }
+    };
+    const dismissSlashAnchor = (event: PointerEvent): void => {
+      if (!(event.target instanceof Element) || !event.target.closest(".milkdown-slash-menu")) slashAnchorRef.current = null;
+    };
+    root.addEventListener("pointerdown", dismissSlashAnchor, true);
+    root.addEventListener("keydown", onSlashKey, true);
 
     /*
      * **代码块"复制"改写成多格式剪贴板** ✓
@@ -1567,6 +1673,12 @@ export function MarkdownRichEditor(props: {
         const view = crepe.editor.action((ctx: Ctx) => ctx.get(editorViewCtx) as ProseMirrorView);
         viewRef.current = view;
         /*
+         * 顺手把 **Crepe 的块菜单 API** 拿在手里 ✓（`/` 要显式叫它，理由见 `slash-menu.ts` ✓）。
+         * 拿不到也不影响别的功能 ✓（只是 `/` 菜单继续弹不出来 ✓），所以这里只留痕、不报错 ✓。
+         */
+        slashMenuRef.current = crepe.editor.action((ctx: Ctx) => readSlashMenuApi(ctx));
+        reportRef.current?.("slash-menu-api", { found: slashMenuRef.current !== null });
+        /*
          * **接在自己的 `handleClick` 上** ✓（`design/table-click-jitter-and-caret-analysis.md`
          * 的建议 1 ✓）：普通单击在 ProseMirror 默认的 `selectClickedLeaf` **之前**就被处理成文字选区 ✓
          * ⇒ 没有"先节点选择、再纠正"的第二次变化（抖动的嫌疑来源 ✓）。
@@ -1683,6 +1795,8 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
       root.removeEventListener("click", onBlankAreaFallback);
+      root.removeEventListener("pointerdown", dismissSlashAnchor, true);
+    root.removeEventListener("keydown", onSlashKey, true);
       root.removeEventListener("click", onCopyClick, true);
       root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);

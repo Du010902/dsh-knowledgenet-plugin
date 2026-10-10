@@ -193416,23 +193416,25 @@ Expected function or array of functions, received type ${typeof value}.`);
 					content: __privateGet$5(this, _content$3),
 					debounce: 20,
 					shouldShow(view2) {
-						if (isInCodeBlock(view2.state.selection) || isInList(view2.state.selection)) return false;
-						const currentText = this.getContent(view2, (node) => ["paragraph", "heading"].includes(node.type.name));
+						if (isInCodeBlock(view2.state.selection)) return false;
+						const caret = view2.state.selection.$from;
+						for (let depth = caret.depth; depth > 0; depth--) if (["table_cell", "table_header"].includes(caret.node(depth).type.name)) return false;
+						const currentText = ["paragraph", "heading"].includes(caret.parent.type.name) ? caret.parent.textContent : null;
 						if (currentText == null) return false;
-						if (!isSelectionAtEndOfNode(view2.state.selection)) return false;
 						const pos = __privateGet$5(self, _programmaticallyPos);
-						filter.value = currentText.startsWith("/") ? currentText.slice(1) : currentText;
 						if (typeof pos === "number") {
-							const maxSize = view2.state.doc.nodeSize - 2;
-							const validPos = Math.min(pos, maxSize);
-							if (view2.state.doc.resolve(validPos).node() !== view2.state.doc.resolve(view2.state.selection.from).node()) {
-								__privateSet$5(self, _programmaticallyPos, null);
+							const selection = view2.state.selection;
+							if (!(selection instanceof TextSelection) || !selection.empty || pos > selection.from || pos < 0 || pos > view2.state.doc.content.size) return false;
+							if (view2.state.doc.resolve(pos).parent !== selection.$from.parent) {
+								self.hide();
 								return false;
 							}
+							filter.value = view2.state.doc.textBetween(pos, selection.from, "", "");
 							return true;
 						}
-						if (!currentText.startsWith("/")) return false;
-						return true;
+						if (isInList(view2.state.selection) || !isSelectionAtEndOfNode(view2.state.selection)) return false;
+						filter.value = currentText.startsWith("/") ? currentText.slice(1) : currentText;
+						return currentText.startsWith("/");
 					},
 					offset: (_b = slashMenuOptions.offset) != null ? _b : 10,
 					middleware: slashMenuOptions.middleware,
@@ -195850,6 +195852,74 @@ Expected function or array of functions, received type ${typeof value}.`);
 			});
 		}
 		//#endregion
+		//#region src/client/slash-menu.ts
+		/** Slash-menu trigger and safe insertion into existing text blocks. */
+		/** Crepe 的块菜单 API 切片名（`utils.$ctx(..., "menuAPICtx")` ✓） */
+		const SLASH_MENU_SLICE = "menuAPICtx";
+		/**
+		* 从编辑器 ctx 上取 Crepe 的块菜单 API ✓。
+		* @param ctx - milkdown 的 ctx（`crepe.editor.action(...)` 给的 ✓）。
+		* @returns API；拿不到（宿主半/版本不对 ✓）返回 `null` ✓ —— 调用方必须容忍它缺席 ✓。
+		*/
+		function readSlashMenuApi(ctx) {
+			if (ctx === null || typeof ctx !== "object") return null;
+			const probe = ctx;
+			if (typeof probe.use !== "function") return null;
+			try {
+				const slice = probe.use(SLASH_MENU_SLICE);
+				const value = typeof slice?.get === "function" ? slice.get() : null;
+				if (value === null || typeof value !== "object") return null;
+				const api = value;
+				return typeof api.show === "function" || typeof api.hide === "function" ? api : null;
+			} catch {
+				return null;
+			}
+		}
+		/** Return the caret at a command boundary, excluding literal-code and table contexts. */
+		function shouldOpenSlashMenu(state) {
+			const { selection } = state;
+			if (!(selection instanceof TextSelection) || !selection.empty) return null;
+			const { $from } = selection;
+			if (!["paragraph", "heading"].includes($from.parent.type.name)) return null;
+			if ($from.marks().some((mark) => mark.type.name === "inlineCode" || mark.type.name === "code" || mark.type.name === "link")) return null;
+			for (let depth = $from.depth; depth > 0; depth -= 1) if ([
+				"code_block",
+				"table_cell",
+				"table_header"
+			].includes($from.node(depth).type.name)) return null;
+			const prefix = $from.parent.textBetween(0, $from.parentOffset, "", "￼");
+			const token = prefix.split(/\s/).at(-1) ?? "";
+			if (/[\\/:]/.test(token)) return null;
+			if (prefix !== "" && !/\s$/.test(prefix) && !/[\u3000-\u9fff]$/.test(prefix)) return null;
+			return selection.from;
+		}
+		/** Isolate the chosen block at the trigger, preserving surrounding text and container structure. */
+		function prepareSlashInsertion(view, anchor) {
+			const { selection, doc, schema } = view.state;
+			if (!(selection instanceof TextSelection) || !selection.empty || anchor < 0 || anchor > selection.from) return false;
+			if (doc.resolve(anchor).parent !== selection.$from.parent) return false;
+			const tr = view.state.tr.delete(anchor, selection.from);
+			const caret = tr.doc.resolve(anchor);
+			if (caret.parent.content.size === 0 && caret.parent.type.name === "paragraph") {
+				view.dispatch(tr);
+				return true;
+			}
+			const before = caret.parent.cut(0, caret.parentOffset);
+			const after = caret.parent.cut(caret.parentOffset);
+			const empty = schema.nodes.paragraph.create();
+			const nodes = [
+				...before.content.size ? [before] : [],
+				empty,
+				...after.content.size ? [after] : []
+			];
+			if (!caret.node(caret.depth - 1).canReplace(caret.index(caret.depth - 1), caret.index(caret.depth - 1) + 1, Fragment$2.fromArray(nodes))) return false;
+			const from = caret.before();
+			tr.replaceWith(from, caret.after(), nodes);
+			tr.setSelection(TextSelection.create(tr.doc, from + (before.content.size ? before.nodeSize : 0) + 1));
+			view.dispatch(tr);
+			return true;
+		}
+		//#endregion
 		//#region src/client/table-caret.ts
 		/**
 		* **表格单元格点击 → 文字插入位置** ✓。
@@ -196519,6 +196589,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const crepeRef = (0, react.useRef)(null);
 			/** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
 			const viewRef = (0, react.useRef)(null);
+			/**
+			* Crepe 的**块菜单 API**（`/` 菜单 ✓；拿不到就是 `null` ✓，一切照旧 ✓）。
+			* 见 `slash-menu.ts`：它自带的触发条件在我们的布局里没走到，所以我们**显式叫它** ✓。
+			*/
+			const slashAnchorRef = (0, react.useRef)(null);
+			const slashMenuRef = (0, react.useRef)(null);
 			/** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
 			const baselineRef = (0, react.useRef)(null);
 			/** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
@@ -196801,6 +196877,61 @@ Expected function or array of functions, received type ${typeof value}.`);
 				reportRef.current?.("editor-blank-click", { insert: target.insert });
 				return true;
 			}, []);
+			/** Open Crepe’s block menu at the current command boundary. */
+			const openSlashMenu = (0, react.useCallback)((pos) => {
+				const api = slashMenuRef.current;
+				if (api === null || typeof api.show !== "function") {
+					reportRef.current?.("slash-menu-open", {
+						via: "key",
+						api: "missing"
+					});
+					return false;
+				}
+				try {
+					api.show(pos);
+				} catch {
+					reportRef.current?.("slash-menu-open", {
+						via: "key",
+						api: "threw"
+					});
+					return false;
+				}
+				reportRef.current?.("slash-menu-open", {
+					via: "key",
+					api: "shown"
+				});
+				return true;
+			}, []);
+			/**
+			* 叫完菜单之后**采一次现场**（诊断用 ✓）：菜单元素在不在、`data-show` 是什么、落在哪、
+			* 有没有落在正文视口里 ✓（不含任何正文 ✗）。
+			*
+			* 为什么要有：用户报的是"敲 `/` 没反应"，而"没弹出来"可能是**没叫**、也可能是**叫了但
+			* 被裁在视口外**（我们这里是 Shadow DOM + 滚动容器，位置算错的概率不低 ✓）。
+			* 这两种的修法完全不同 ⇒ 先取一次证据 ✓（`kn_status` 的 `clientDiag` 里能看到 ✓）。
+			*/
+			const probeSlashMenu = (0, react.useCallback)((view) => {
+				window.setTimeout(() => {
+					const root = hostRef.current;
+					if (root === null) return;
+					const element = root.querySelector(".milkdown-slash-menu");
+					if (element === null) {
+						reportRef.current?.("slash-menu-probe", { found: false });
+						return;
+					}
+					const rect = element.getBoundingClientRect();
+					const bodyRect = (root.closest(".kn-editor-body") ?? root).getBoundingClientRect();
+					const inView = rect.width > 0 && rect.height > 0 && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom && rect.right > bodyRect.left && rect.left < bodyRect.right;
+					reportRef.current?.("slash-menu-probe", {
+						found: true,
+						show: element.dataset.show ?? "",
+						w: Math.round(rect.width),
+						h: Math.round(rect.height),
+						inView,
+						focused: view.hasFocus()
+					});
+				}, 250);
+			}, []);
 			/**
 			* **普通单击 → 直接落下合法文字位置** ✓（`design/table-click-jitter-and-caret-analysis.md` ✓）。
 			*
@@ -196938,6 +197069,18 @@ Expected function or array of functions, received type ${typeof value}.`);
 					defaultValue: withExplicitImageTitles(initialRef.current),
 					features: { [CrepeFeature.AI]: false },
 					featureConfigs: {
+						[CrepeFeature.BlockEdit]: { buildMenu: (builder) => {
+							for (const group of builder.build()) for (const item of group.items) {
+								const run = item.onRun;
+								if (!run) continue;
+								item.onRun = (ctx) => {
+									const anchor = slashAnchorRef.current;
+									slashAnchorRef.current = null;
+									if (anchor !== null && !prepareSlashInsertion(ctx.get(editorViewCtx), anchor)) return;
+									run(ctx);
+								};
+							}
+						} },
 						[CrepeFeature.CodeMirror]: {
 							searchPlaceholder: "搜索语言…",
 							noResultText: "没有匹配的语言",
@@ -197081,6 +197224,40 @@ Expected function or array of functions, received type ${typeof value}.`);
 					placeTrailingCaret(view, event);
 				};
 				root.addEventListener("click", onBlankAreaFallback);
+				const onSlashKey = (event) => {
+					if (event.key === "Enter") {
+						slashAnchorRef.current = null;
+						return;
+					}
+					if (event.key === "Escape") {
+						slashAnchorRef.current = null;
+						slashMenuRef.current?.hide?.();
+						return;
+					}
+					if (event.isComposing || props.readOnly || viewRef.current?.composing) return;
+					if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+					const view = viewRef.current;
+					if (view === null || !readyRef.current || failedRef.current || !view.editable || !view.hasFocus()) return;
+					const native = view.dom.getRootNode().getSelection?.() ?? view.dom.ownerDocument.getSelection();
+					if (native?.anchorNode && native.focusNode && view.dom.contains(native.anchorNode) && view.dom.contains(native.focusNode)) {
+						const from = view.posAtDOM(native.anchorNode, native.anchorOffset);
+						const to = view.posAtDOM(native.focusNode, native.focusOffset);
+						if (from !== view.state.selection.anchor || to !== view.state.selection.head) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)));
+					}
+					const pos = shouldOpenSlashMenu(view.state);
+					if (pos === null) return;
+					if (openSlashMenu(pos)) {
+						slashAnchorRef.current = pos;
+						event.preventDefault();
+						event.stopPropagation();
+						probeSlashMenu(view);
+					}
+				};
+				const dismissSlashAnchor = (event) => {
+					if (!(event.target instanceof Element) || !event.target.closest(".milkdown-slash-menu")) slashAnchorRef.current = null;
+				};
+				root.addEventListener("pointerdown", dismissSlashAnchor, true);
+				root.addEventListener("keydown", onSlashKey, true);
 				const onCopyClick = (event) => {
 					const view = viewRef.current;
 					const target = event.target;
@@ -197249,6 +197426,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 					crepe.setReadonly(readOnlyRef.current);
 					const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
 					viewRef.current = view;
+					slashMenuRef.current = crepe.editor.action((ctx) => readSlashMenuApi(ctx));
+					reportRef.current?.("slash-menu-api", { found: slashMenuRef.current !== null });
 					const previousClick = view.props.handleClick;
 					view.setProps({ handleClick: (targetView, targetPos, clickEvent) => {
 						if (previousClick !== void 0 && previousClick.call(view.props, targetView, targetPos, clickEvent) === true) return true;
@@ -197328,6 +197507,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 					root.removeEventListener("mousedown", onPointerDownRecord, true);
 					root.removeEventListener("mouseup", onMouseUpFallback, true);
 					root.removeEventListener("click", onBlankAreaFallback);
+					root.removeEventListener("pointerdown", dismissSlashAnchor, true);
+					root.removeEventListener("keydown", onSlashKey, true);
 					root.removeEventListener("click", onCopyClick, true);
 					root.removeEventListener("click", onClickInsideLanguagePicker);
 					root.removeEventListener("paste", onPastePayload, true);
