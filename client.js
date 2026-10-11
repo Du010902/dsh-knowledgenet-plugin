@@ -40,7 +40,120 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let react_dom = require("react-dom");
 		let react_jsx_runtime = require("react/jsx-runtime");
+		/** 浏览器侧使用的 document-relative 形式（走 Connection 的 HTTP 载体） */
+		const GRAPH_API_ROUTE = "/api/knowledgenet.graph".slice(1);
+		/**
+		* 右侧栏标签页的标识：既是 tab type 的注册 `id`（`sidebar.right.pane.tab` 的 key），
+		* 也是它的 `kind`（`openTab(kind)` 用它点名）。
+		*/
+		const PANEL_ID = "knowledgenet";
+		//#endregion
+		//#region src/client/diag.ts
+		/**
+		* 客户端半 → 宿主的诊断上报（只发结构指纹/状态：没有文本、没有路径）。
+		*
+		* 为什么需要：客户端半没有日志出口，而「按钮/标签页为什么没出现」这类问题的答案只在浏览器里。
+		* 把它 POST 给宿主（同一路由，该载体的 Fetch 路由支持 GET | HEAD | POST），
+		* 再由 `kn_status` 读出来——定位就不必让人开 DevTools。
+		*/
+		/**
+		* 发送队列：**串行**发出，避免两条 POST 同时占用同一条通道。
+		*
+		* 实测教训：桌面端页面的 `api/` 请求走 IPC 桥；`confirm-clicked` 这条诊断刚发出去，
+		* 紧接着的 `create-library` **写请求**就失败了（而单独发的诊断都成功）。
+		*/
+		let sendQueue = Promise.resolve();
+		/**
+		* 上报一次诊断（fire-and-forget：失败不影响功能，也不抛）。
+		* @param area - 功能标识，例如 `tab-type` / `header-button`。
+		* @param outcome - 结论标识。
+		* @param detail - 附加的标量/数组字段（**不要**放文本或路径）。
+		* @param fetchImpl - 可注入，便于单测。
+		* @returns 是否送达。
+		*/
+		async function reportDiag(area, outcome, detail = null, fetchImpl = fetch) {
+			const send = async () => {
+				try {
+					const body = {
+						kind: "diag",
+						area,
+						outcome
+					};
+					if (typeof detail === "string") body.detail = detail;
+					else if (detail !== null) Object.assign(body, detail);
+					return (await fetchImpl(GRAPH_API_ROUTE, {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							accept: "application/json"
+						},
+						credentials: "same-origin",
+						body: JSON.stringify(body)
+					})).ok === true;
+				} catch {
+					return false;
+				}
+			};
+			const queued = sendQueue.then(send, send);
+			sendQueue = queued.catch(() => false);
+			return await queued;
+		}
+		/**
+		* 去重上报：**内容没变就不发**。
+		*
+		* 为什么必须有：宿主的 `clientDiag` 是 8 条环形缓冲，而取数类上报每次刷新面板都会重发，
+		* 结果把真正想看的那条（例如面板几何）挤出去（实测踩过）。按 key + 内容签名去重即可。
+		*
+		* @param key - 去重键（同一处上报用同一个 key）。
+		* @param area - 功能标识。
+		* @param outcome - 结论标识。
+		* @param detail - 上报内容（用于比对是否变化）。
+		* @param fetchImpl - 可注入，便于单测。
+		* @returns 是否真的发出去了。
+		*/
+		async function reportDiagOnce(key, area, outcome, detail = null, fetchImpl = fetch) {
+			let signature;
+			try {
+				signature = typeof detail === "string" ? detail : JSON.stringify(detail ?? null);
+			} catch {
+				signature = String(Date.now());
+			}
+			if (lastDiagSent.get(key) === signature) return false;
+			lastDiagSent.set(key, signature);
+			return await reportDiag(area, outcome, detail, fetchImpl);
+		}
+		const lastDiagSent = /* @__PURE__ */ new Map();
+		//#endregion
 		//#region src/client/conversation-sidebar.ts
+		/** Read and restore visible sidebar tabs through the host controller. */
+		/**
+		* `dsh-resource://<kind>/session/<会话 id>/…` 里那个**属主会话** ✓；不是这个形状就返回 `undefined` ✓。
+		*
+		* 为什么要认它（用户实测 2026-10-11，最关键的一条证据：**卸掉插件控制台就不再报错** ✓）：
+		* DSH 自己的「修改审阅」标签地址正是 `dsh-resource://changes-review/session/<id>/<seq>/<turn>` ✓，
+		* 它一挂载就去读 `/api/changes.summary?sessionId=<id>&seq=<seq>` ✓；那份摘要是**宿主内存里**的
+		* （会话 dispose、或 DSH 重启就没了 ✓）⇒ 只要把它**重开一次**，就换来一条 `404` 红字 ✗。
+		* 而"换会话时把侧栏标签带过去"偏偏会把它**原样重开**到新会话里 ✗ ⇒ 每次换会话都刷一遍 404 ✓
+		* （卸掉插件就没人重开它 ⇒ 控制台干净 ✓ 完全对得上 ✓）。
+		*
+		* 结论：**属于别的会话的资源标签不跟着走** ✗ —— 那本来就是"那一轮改动"的审阅 ✓，
+		* 它自己的会话里还在，跨会话重开既没意义、又会去要一份宿主已经不再提供的摘要 ✗。
+		*
+		* @param contentId - 标签的内容地址（`tab.contentId` ✓）。
+		* @returns 属主会话 id；不是"会话绑定的资源地址"时 `undefined` ✓（那种照旧带走 ✓）。
+		*/
+		function resourceSessionId(contentId) {
+			if (!contentId.startsWith("dsh-resource://")) return void 0;
+			const parts = contentId.split("/");
+			if (parts[3] !== "session") return void 0;
+			const owner = parts[4];
+			if (owner === void 0 || owner === "") return void 0;
+			try {
+				return decodeURIComponent(owner);
+			} catch {
+				return;
+			}
+		}
 		/** Capture before navigation; restore once the destination sidebar store is usable, without closing its tabs. */
 		function carryConversationSidebar(sidebar, target) {
 			const source = sidebar?.mounted?.getSnapshot();
@@ -54,6 +167,8 @@ window.__ModuleLoader__.load({
 			let finished = false;
 			let restoring = false;
 			const restoredIds = /* @__PURE__ */ new Map();
+			/** 已经报过"跨会话不带走"的标签 id ✓（`restore` 会被 watch 反复调 ⇒ 一条只报一次 ✗） */
+			const skipped = /* @__PURE__ */ new Set();
 			return {
 				watch(listener) {
 					let disposed = false;
@@ -95,6 +210,14 @@ window.__ModuleLoader__.load({
 					try {
 						for (const tab of tabs) {
 							if (restoredIds.has(tab.id)) continue;
+							const owner = resourceSessionId(tab.contentId);
+							if (owner !== void 0 && owner !== target) {
+								if (!skipped.has(tab.id)) {
+									skipped.add(tab.id);
+									reportDiag("sidebar-carry", "skipped-cross-session", { kind: tab.kind });
+								}
+								continue;
+							}
 							const match = available.findIndex((item) => item.kind === tab.kind && item.contentId === tab.contentId);
 							if (match >= 0) {
 								restoredIds.set(tab.id, available.splice(match, 1)[0].id);
@@ -125,13 +248,6 @@ window.__ModuleLoader__.load({
 				}
 			};
 		}
-		/** 浏览器侧使用的 document-relative 形式（走 Connection 的 HTTP 载体） */
-		const GRAPH_API_ROUTE = "/api/knowledgenet.graph".slice(1);
-		/**
-		* 右侧栏标签页的标识：既是 tab type 的注册 `id`（`sidebar.right.pane.tab` 的 key），
-		* 也是它的 `kind`（`openTab(kind)` 用它点名）。
-		*/
-		const PANEL_ID = "knowledgenet";
 		//#endregion
 		//#region src/client/workspace-filter.ts
 		/** 宿主持久化用的键前缀（`<前缀>.v5` 这种） */
@@ -2582,82 +2698,6 @@ window.__ModuleLoader__.load({
 			] });
 		}
 		//#endregion
-		//#region src/client/diag.ts
-		/**
-		* 客户端半 → 宿主的诊断上报（只发结构指纹/状态：没有文本、没有路径）。
-		*
-		* 为什么需要：客户端半没有日志出口，而「按钮/标签页为什么没出现」这类问题的答案只在浏览器里。
-		* 把它 POST 给宿主（同一路由，该载体的 Fetch 路由支持 GET | HEAD | POST），
-		* 再由 `kn_status` 读出来——定位就不必让人开 DevTools。
-		*/
-		/**
-		* 发送队列：**串行**发出，避免两条 POST 同时占用同一条通道。
-		*
-		* 实测教训：桌面端页面的 `api/` 请求走 IPC 桥；`confirm-clicked` 这条诊断刚发出去，
-		* 紧接着的 `create-library` **写请求**就失败了（而单独发的诊断都成功）。
-		*/
-		let sendQueue = Promise.resolve();
-		/**
-		* 上报一次诊断（fire-and-forget：失败不影响功能，也不抛）。
-		* @param area - 功能标识，例如 `tab-type` / `header-button`。
-		* @param outcome - 结论标识。
-		* @param detail - 附加的标量/数组字段（**不要**放文本或路径）。
-		* @param fetchImpl - 可注入，便于单测。
-		* @returns 是否送达。
-		*/
-		async function reportDiag(area, outcome, detail = null, fetchImpl = fetch) {
-			const send = async () => {
-				try {
-					const body = {
-						kind: "diag",
-						area,
-						outcome
-					};
-					if (typeof detail === "string") body.detail = detail;
-					else if (detail !== null) Object.assign(body, detail);
-					return (await fetchImpl(GRAPH_API_ROUTE, {
-						method: "POST",
-						headers: {
-							"content-type": "application/json",
-							accept: "application/json"
-						},
-						credentials: "same-origin",
-						body: JSON.stringify(body)
-					})).ok === true;
-				} catch {
-					return false;
-				}
-			};
-			const queued = sendQueue.then(send, send);
-			sendQueue = queued.catch(() => false);
-			return await queued;
-		}
-		/**
-		* 去重上报：**内容没变就不发**。
-		*
-		* 为什么必须有：宿主的 `clientDiag` 是 8 条环形缓冲，而取数类上报每次刷新面板都会重发，
-		* 结果把真正想看的那条（例如面板几何）挤出去（实测踩过）。按 key + 内容签名去重即可。
-		*
-		* @param key - 去重键（同一处上报用同一个 key）。
-		* @param area - 功能标识。
-		* @param outcome - 结论标识。
-		* @param detail - 上报内容（用于比对是否变化）。
-		* @param fetchImpl - 可注入，便于单测。
-		* @returns 是否真的发出去了。
-		*/
-		async function reportDiagOnce(key, area, outcome, detail = null, fetchImpl = fetch) {
-			let signature;
-			try {
-				signature = typeof detail === "string" ? detail : JSON.stringify(detail ?? null);
-			} catch {
-				signature = String(Date.now());
-			}
-			if (lastDiagSent.get(key) === signature) return false;
-			lastDiagSent.set(key, signature);
-			return await reportDiag(area, outcome, detail, fetchImpl);
-		}
-		const lastDiagSent = /* @__PURE__ */ new Map();
-		//#endregion
 		//#region src/client/badges.ts
 		/** 注册换字形注入器；失败返回 false 并说明原因 */
 		function registerChatSelectionBar(ctx, copy) {
@@ -3368,13 +3408,14 @@ window.__ModuleLoader__.load({
 					}) && document.visibilityState === "visible";
 				};
 				let failure;
-				const diagnose = (code) => {
+				const diagnose = (code, detail) => {
 					if (code === failure) return;
 					failure = code;
 					reportDiag("view-focus", code ? "rejected" : "recovered", {
 						code: code ?? "ok",
 						source,
-						activeNode: nodeId !== null
+						activeNode: nodeId !== null,
+						...detail === void 0 || detail === "" ? {} : { detail: detail.slice(0, 180) }
 					});
 				};
 				const send = async (active, claim) => {
@@ -3400,7 +3441,7 @@ window.__ModuleLoader__.load({
 						if (result.ok === true) {
 							if (typeof result.leaseMs === "number" && result.leaseMs >= 3e3) retryMs = Math.floor(result.leaseMs / 3);
 							diagnose(void 0);
-						} else diagnose(typeof result.error?.code === "string" ? result.error.code : "invalid_response");
+						} else diagnose(typeof result.error?.code === "string" ? result.error.code : "invalid_response", typeof result.error?.message === "string" ? result.error.message : void 0);
 					} catch (error) {
 						diagnose("transport_failed");
 					}
@@ -142386,12 +142427,12 @@ function(property) {
 			$root: (i) => getPublicInstance(i.root),
 			$host: (i) => i.ce,
 			$emit: (i) => i.emit,
-			$options: (i) => __VUE_OPTIONS_API__ ? resolveMergedOptions(i) : i.type,
+			$options: (i) => resolveMergedOptions(i),
 			$forceUpdate: (i) => i.f || (i.f = () => {
 				queueJob(i.update);
 			}),
 			$nextTick: (i) => i.n || (i.n = nextTick.bind(i.proxy)),
-			$watch: (i) => __VUE_OPTIONS_API__ ? instanceWatch.bind(i) : NOOP
+			$watch: (i) => instanceWatch.bind(i)
 		});
 		const isReservedPrefix = (key) => key === "_" || key === "$";
 		const hasSetupBinding = (state, key) => state !== EMPTY_OBJ && !state.__isScriptSetup && hasOwn(state, key);
@@ -142411,7 +142452,7 @@ function(property) {
 					else if (hasSetupBinding(setupState, key)) {
 						accessCache[key] = 1;
 						return setupState[key];
-					} else if (__VUE_OPTIONS_API__ && data !== EMPTY_OBJ && hasOwn(data, key)) {
+					} else if (data !== EMPTY_OBJ && hasOwn(data, key)) {
 						accessCache[key] = 2;
 						return data[key];
 					} else if (hasOwn(props, key)) {
@@ -142420,7 +142461,7 @@ function(property) {
 					} else if (ctx !== EMPTY_OBJ && hasOwn(ctx, key)) {
 						accessCache[key] = 4;
 						return ctx[key];
-					} else if (!__VUE_OPTIONS_API__ || shouldCacheAccess) accessCache[key] = 0;
+					} else if (shouldCacheAccess) accessCache[key] = 0;
 				}
 				const publicGetter = publicPropertiesMap[key];
 				let cssModule, globalProperties;
@@ -142448,7 +142489,7 @@ function(property) {
 				} else if (setupState.__isScriptSetup && hasOwn(setupState, key)) {
 					warn$1(`Cannot mutate <script setup> binding "${key}" from Options API.`);
 					return false;
-				} else if (__VUE_OPTIONS_API__ && data !== EMPTY_OBJ && hasOwn(data, key)) {
+				} else if (data !== EMPTY_OBJ && hasOwn(data, key)) {
 					data[key] = value;
 					return true;
 				} else if (hasOwn(instance.props, key)) {
@@ -142468,7 +142509,7 @@ function(property) {
 			},
 			has({ _: { data, setupState, accessCache, ctx, appContext, props, type } }, key) {
 				let cssModules;
-				return !!(accessCache[key] || __VUE_OPTIONS_API__ && data !== EMPTY_OBJ && key[0] !== "$" && hasOwn(data, key) || hasSetupBinding(setupState, key) || hasOwn(props, key) || hasOwn(ctx, key) || hasOwn(publicPropertiesMap, key) || hasOwn(appContext.config.globalProperties, key) || (cssModules = type.__cssModules) && cssModules[key]);
+				return !!(accessCache[key] || data !== EMPTY_OBJ && key[0] !== "$" && hasOwn(data, key) || hasSetupBinding(setupState, key) || hasOwn(props, key) || hasOwn(ctx, key) || hasOwn(publicPropertiesMap, key) || hasOwn(appContext.config.globalProperties, key) || (cssModules = type.__cssModules) && cssModules[key]);
 			},
 			defineProperty(target, key, descriptor) {
 				if (descriptor.get != null) target._.accessCache[key] = 0;
@@ -142825,9 +142866,8 @@ function(property) {
 						return app;
 					},
 					mixin(mixin) {
-						if (__VUE_OPTIONS_API__) if (!context.mixins.includes(mixin)) context.mixins.push(mixin);
+						if (!context.mixins.includes(mixin)) context.mixins.push(mixin);
 						else warn$1("Mixin has already been applied to target app" + (mixin.name ? `: ${mixin.name}` : ""));
-						else warn$1("Mixins are only available in builds supporting Options API");
 						return app;
 					},
 					component(name, component) {
@@ -142944,13 +142984,13 @@ If you want to remount the same app, move your app creation logic into a factory
 		}
 		const mixinEmitsCache = /* @__PURE__ */ new WeakMap();
 		function normalizeEmitsOptions(comp, appContext, asMixin = false) {
-			const cache = __VUE_OPTIONS_API__ && asMixin ? mixinEmitsCache : appContext.emitsCache;
+			const cache = asMixin ? mixinEmitsCache : appContext.emitsCache;
 			const cached = cache.get(comp);
 			if (cached !== void 0) return cached;
 			const raw = comp.emits;
 			let normalized = {};
 			let hasExtends = false;
-			if (__VUE_OPTIONS_API__ && !isFunction(comp)) {
+			if (!isFunction(comp)) {
 				const extendEmits = (raw2) => {
 					const normalizedFromExtend = normalizeEmitsOptions(raw2, appContext, true);
 					if (normalizedFromExtend) {
@@ -143273,14 +143313,14 @@ If you want to remount the same app, move your app creation logic into a factory
 		}
 		const mixinPropsCache = /* @__PURE__ */ new WeakMap();
 		function normalizePropsOptions(comp, appContext, asMixin = false) {
-			const cache = __VUE_OPTIONS_API__ && asMixin ? mixinPropsCache : appContext.propsCache;
+			const cache = asMixin ? mixinPropsCache : appContext.propsCache;
 			const cached = cache.get(comp);
 			if (cached) return cached;
 			const raw = comp.props;
 			const normalized = {};
 			const needCastKeys = [];
 			let hasExtends = false;
-			if (__VUE_OPTIONS_API__ && !isFunction(comp)) {
+			if (!isFunction(comp)) {
 				const extendProps = (raw2) => {
 					hasExtends = true;
 					const [props, keys] = normalizePropsOptions(raw2, appContext, true);
@@ -143516,18 +143556,6 @@ If you want to remount the same app, move your app creation logic into a factory
 		}
 		function initFeatureFlags() {
 			const needWarn = [];
-			if (typeof __VUE_OPTIONS_API__ !== "boolean") {
-				needWarn.push(`__VUE_OPTIONS_API__`);
-				getGlobalThis().__VUE_OPTIONS_API__ = true;
-			}
-			if (typeof __VUE_PROD_DEVTOOLS__ !== "boolean") {
-				needWarn.push(`__VUE_PROD_DEVTOOLS__`);
-				getGlobalThis().__VUE_PROD_DEVTOOLS__ = false;
-			}
-			if (typeof __VUE_PROD_HYDRATION_MISMATCH_DETAILS__ !== "boolean") {
-				needWarn.push(`__VUE_PROD_HYDRATION_MISMATCH_DETAILS__`);
-				getGlobalThis().__VUE_PROD_HYDRATION_MISMATCH_DETAILS__ = false;
-			}
 			if (needWarn.length) {
 				const multi = needWarn.length > 1;
 				console.warn(`Feature flag${multi ? `s` : ``} ${needWarn.join(", ")} ${multi ? `are` : `is`} not explicitly defined. You are running the esm-bundler build of Vue, which expects these compile-time feature flags to be globally injected via the bundler config in order to get better tree-shaking in the production bundle.
@@ -144759,7 +144787,7 @@ Component that was made reactive: `, type);
 		function finishComponentSetup(instance, isSSR, skipOptions) {
 			const Component = instance.type;
 			if (!instance.render) instance.render = Component.render || NOOP;
-			if (__VUE_OPTIONS_API__ && true) {
+			{
 				const reset = setCurrentInstance(instance);
 				pauseTracking();
 				try {
@@ -196397,6 +196425,37 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* @param inflight - 正在取的 key ✓（防并发重复取 ✓）。
 		* @param report - 诊断上报 ✓。
 		*/
+		/**
+		* **图片还没取回来时先摆一个 1×1 透明占位** ✓。
+		*
+		* 为什么需要（用户实测 2026-10-11：DevTools 控制台里每开一次笔记就报两条
+		* `dsh-app://app/image/<名字>.png` **404** ✗）：
+		* Markdown 里存的是**库内相对路径** ✓，而 Crepe 建 DOM 时会原样写进 `src` ✗ ⇒
+		* 浏览器拿文档基址去请求（`dsh-app://app/image/…`）⇒ **必然 404** ✗
+		* —— 我们随后用 `fetch` + `blob:` 换掉它 ✓（那条路才过得了鉴权 ✓），
+		* 所以**图是能显示的** ✓（上一轮截图里就是好的 ✓），但那次注定失败的请求已经发出去了 ✗，
+		* 顺带还会闪一下"裂图"图标 ✗。
+		*
+		* 做法：节点一插进来就（在**同一个微任务**里）把 `src` 换成占位 ✓ ——
+		* 图片真正开始加载是排在后面一个任务里的 ✓，换掉就等于这次请求从没发出 ✓
+		* （配合下面 `childList` 观察器 ✓）。
+		*/
+		const IMAGE_PLACEHOLDER_SRC = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+		/**
+		* 把"库内相对路径"的 `src` 掐掉、换成透明占位 ✓。
+		*
+		* 只动**还没显示出来**的图 ✗：已经是我们的 `blob:` ✓、或本来就是占位 ✓ 的都不碰
+		* （否则 Crepe 每次重渲染都会把正在显示的图打回空白 ✗）。
+		*
+		* @param image - 目标 `<img>` ✓。
+		* @param report - 诊断上报 ✓（换过一次就留一条痕 ✓）。
+		*/
+		function holdNoteImagePlaceholder(image, report) {
+			const current = image.getAttribute("src") ?? "";
+			if (current === IMAGE_PLACEHOLDER_SRC || current.startsWith("blob:") || current.startsWith("data:")) return;
+			image.setAttribute("src", IMAGE_PLACEHOLDER_SRC);
+			report?.("image-src-hold", { src: current.slice(0, 120) });
+		}
 		function ensureImageDisplay(image, raw, target, cache, inflight, report) {
 			const key = `${raw}\u0000${String(target?.root ?? target?.sessionId ?? "")}`;
 			const cached = cache.get(key);
@@ -196404,8 +196463,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 				if (image.getAttribute("src") !== cached) image.setAttribute("src", cached);
 				return;
 			}
-			if (inflight.has(key)) return;
+			if (inflight.has(key)) {
+				holdNoteImagePlaceholder(image, report);
+				return;
+			}
 			inflight.add(key);
+			holdNoteImagePlaceholder(image, report);
 			const wanted = imageDisplayUrl(GRAPH_API_ROUTE, raw, target);
 			fetch(wanted).then(async (response) => {
 				if (response.ok !== true) throw new Error(`image-http-${response.status}`);
@@ -196438,6 +196501,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 		/** Convert Crepe's saved height to a width so narrow containers preserve the image ratio. */
 		function fitNoteImage(image) {
 			const fit = () => {
+				if ((image.getAttribute("src") ?? "") === IMAGE_PLACEHOLDER_SRC) return;
 				const height = Number.parseFloat(image.style.height);
 				if (image.naturalWidth <= 0 || image.naturalHeight <= 0 || !Number.isFinite(height) || height <= 0) return;
 				const width = height * image.naturalWidth / image.naturalHeight;
@@ -197504,14 +197568,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 					childList: true,
 					subtree: true
 				});
+				const hasImage = (node) => node.nodeType === 1 && (node.tagName === "IMG" || node.querySelector?.("img") !== null);
 				const imageObserver = typeof MutationObserver === "function" ? new MutationObserver((records) => {
-					if (!records.some((record) => record.type === "attributes" && record.target.tagName === "IMG")) return;
+					if (!records.some((record) => record.type === "attributes" ? record.target.tagName === "IMG" : record.type === "childList" && [...record.addedNodes].some(hasImage))) return;
 					applyImageSources(root, props.target, imageCacheRef.current, imageInflightRef.current, (step, detail) => {
 						reportRef.current?.(step, detail);
 					});
 				}) : null;
 				imageObserver?.observe(root, {
 					subtree: true,
+					childList: true,
 					attributes: true,
 					attributeFilter: ["src", "style"]
 				});

@@ -1273,7 +1273,26 @@ async function buildClient(rolldown, css, workerSource) {
     platform: "browser",
     external: CLIENT_BASELINE,
     // 同上：上游 3D 引擎里的 `import.meta.env.DEV` 分支在插件里应当是关闭的
-    transform: { define: { "import.meta.env.DEV": "false" } },
+    transform: {
+      define: {
+        "import.meta.env.DEV": "false",
+        /*
+         * **Vue 的编译期特性开关**（用户实测：控制台里那条 `Feature flags __VUE_OPTIONS_API__ …` 警告 ✗）。
+         *
+         * Crepe 内联的是 Vue 的 **esm-bundler** 构建 ✓ ⇒ 它要求这三个全局量在**打包期**被替换掉 ✗，
+         * 否则运行时 `initFeatureFlags()` 会 `console.warn` 一遍 —— 值本身有兜底 ✓
+         * （`OPTIONS_API` 默认 `true`、另两个默认 `false` ✓），警告纯粹是"没在构建期告诉我" ✗。
+         *
+         * 这里写的**就是那三个兜底值** ✓ ⇒ 运行时行为一模一样 ✓，只是不再警告 ✓
+         * （另两个 `false` 顺带把 devtools / hydration 提示的代码摇掉 ✓，我们不做 SSR ✓）。
+         * 将来若确认 Crepe / Milkdown 都没用 Options API，可以把第一个也改成 `false` 换体积 ✓
+         * —— 那会**真的删掉** Options API 支持 ✗，所以要单独验证 ✓，别顺手改 ✗。
+         */
+        __VUE_OPTIONS_API__: "true",
+        __VUE_PROD_DEVTOOLS__: "false",
+        __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false",
+      },
+    },
     plugins: [
       panelCssPlugin(css),
       layoutWorkerPlugin(workerSource),

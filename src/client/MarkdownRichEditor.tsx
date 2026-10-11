@@ -232,6 +232,42 @@ async function uploadNoteImage(file: File, target: Record<string, unknown> | und
  * @param inflight - 正在取的 key ✓（防并发重复取 ✓）。
  * @param report - 诊断上报 ✓。
  */
+/**
+ * **图片还没取回来时先摆一个 1×1 透明占位** ✓。
+ *
+ * 为什么需要（用户实测 2026-10-11：DevTools 控制台里每开一次笔记就报两条
+ * `dsh-app://app/image/<名字>.png` **404** ✗）：
+ * Markdown 里存的是**库内相对路径** ✓，而 Crepe 建 DOM 时会原样写进 `src` ✗ ⇒
+ * 浏览器拿文档基址去请求（`dsh-app://app/image/…`）⇒ **必然 404** ✗
+ * —— 我们随后用 `fetch` + `blob:` 换掉它 ✓（那条路才过得了鉴权 ✓），
+ * 所以**图是能显示的** ✓（上一轮截图里就是好的 ✓），但那次注定失败的请求已经发出去了 ✗，
+ * 顺带还会闪一下"裂图"图标 ✗。
+ *
+ * 做法：节点一插进来就（在**同一个微任务**里）把 `src` 换成占位 ✓ ——
+ * 图片真正开始加载是排在后面一个任务里的 ✓，换掉就等于这次请求从没发出 ✓
+ * （配合下面 `childList` 观察器 ✓）。
+ */
+const IMAGE_PLACEHOLDER_SRC = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+/**
+ * 把"库内相对路径"的 `src` 掐掉、换成透明占位 ✓。
+ *
+ * 只动**还没显示出来**的图 ✗：已经是我们的 `blob:` ✓、或本来就是占位 ✓ 的都不碰
+ * （否则 Crepe 每次重渲染都会把正在显示的图打回空白 ✗）。
+ *
+ * @param image - 目标 `<img>` ✓。
+ * @param report - 诊断上报 ✓（换过一次就留一条痕 ✓）。
+ */
+function holdNoteImagePlaceholder(
+  image: HTMLImageElement,
+  report: ((step: string, detail?: unknown) => void) | undefined,
+): void {
+  const current = image.getAttribute("src") ?? "";
+  if (current === IMAGE_PLACEHOLDER_SRC || current.startsWith("blob:") || current.startsWith("data:")) return;
+  image.setAttribute("src", IMAGE_PLACEHOLDER_SRC);
+  report?.("image-src-hold", { src: current.slice(0, 120) });
+}
+
 function ensureImageDisplay(
   image: HTMLImageElement,
   raw: string,
@@ -246,8 +282,13 @@ function ensureImageDisplay(
     if (image.getAttribute("src") !== cached) image.setAttribute("src", cached);
     return;
   }
-  if (inflight.has(key)) return;
+  /* 有一张正在取 ⇒ 先把这次注定 404 的请求掐掉 ✓（别等它回来 ✗） */
+  if (inflight.has(key)) {
+    holdNoteImagePlaceholder(image, report);
+    return;
+  }
   inflight.add(key);
+  holdNoteImagePlaceholder(image, report);
   const wanted = imageDisplayUrl(GRAPH_API_ROUTE, raw, target);
   void fetch(wanted)
     .then(async (response) => {
@@ -276,6 +317,11 @@ const imageLoadListeners = new WeakSet<HTMLImageElement>();
 /** Convert Crepe's saved height to a width so narrow containers preserve the image ratio. */
 function fitNoteImage(image: HTMLImageElement): void {
   const fit = (): void => {
+    /*
+     * **别拿占位图量尺寸** ✗：占位是 1×1 ✓，用它算出来的宽度会把真图压成一条 ✗
+     * （而且它会顺手把 Crepe 给的高度改成 `auto` ⇒ 真图加载完也没法再纠正 ✗）。
+     */
+    if ((image.getAttribute("src") ?? "") === IMAGE_PLACEHOLDER_SRC) return;
     const height = Number.parseFloat(image.style.height);
     if (image.naturalWidth <= 0 || image.naturalHeight <= 0 || !Number.isFinite(height) || height <= 0) return;
     const width = height * image.naturalWidth / image.naturalHeight;
@@ -1641,11 +1687,20 @@ export function MarkdownRichEditor(props: {
     languageObserver?.observe(root, { childList: true, subtree: true });
     /*
      * **盯着 `<img src>` 的变化** ✓：Crepe 的 image-block 重渲染时会把 `src` 写回相对路径 ✗
-     * ⇒ 这里立刻再断言一次（改成 blob URL ✓）。只处理属性变化 ✓，代价极低 ✓。
+     * ⇒ 这里立刻再断言一次（改成 blob URL ✓）。
+     *
+     * **也盯着 `childList`** ✓（用户实测 2026-10-11：控制台报 `dsh-app://app/image/… 404` ✗）：
+     * 图片节点是 Crepe 建 DOM 时**新插进来**的 ⇒ 只盯属性的话我们到得**太晚** ✗，
+     * 那次注定失败的请求已经发出去了 ✓；盯住插入就能在同一个微任务里先摆占位 ✓
+     * （见 `IMAGE_PLACEHOLDER_SRC` ✓），把 404 从源头掐掉 ✓。
      */
+    const hasImage = (node: Node): boolean => node.nodeType === 1
+      && ((node as Element).tagName === "IMG" || (node as Element).querySelector?.("img") !== null);
     const imageObserver = typeof MutationObserver === "function"
       ? new MutationObserver((records) => {
-        const touched = records.some((record) => record.type === "attributes" && (record.target as Element).tagName === "IMG");
+        const touched = records.some((record) => record.type === "attributes"
+          ? (record.target as Element).tagName === "IMG"
+          : record.type === "childList" && [...record.addedNodes].some(hasImage));
         if (!touched) return;
         applyImageSources(
           root,
@@ -1656,7 +1711,7 @@ export function MarkdownRichEditor(props: {
         );
       })
       : null;
-    imageObserver?.observe(root, { subtree: true, attributes: true, attributeFilter: ["src", "style"] });
+    imageObserver?.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "style"] });
 
     syncingRef.current = true;
     void crepe.create().then(

@@ -37,6 +37,22 @@ export class LearningState {
     return view?.nodeId ? { nodeId: view.nodeId, source: view.source } : undefined;
   }
 
+  /**
+   * **这个会话最近活跃的那个视图**（不看库根 ✓），连它的库根一起给出 ✓。
+   *
+   * 为什么需要（用户实测 2026-10-11）：面板报上来的库与会话工作区解析出来的库**不一定字面相同**
+   * （一个可能是工作区路径、另一个是 `…/.dsh_knowledge` ✓），而一旦按 (会话, 库) 精确查就会查空 ✗
+   * ⇒ 用户界面上明摆着开着一篇笔记，`kn_current_node` 却说"没有当前节点" ✓。
+   * 会话内**最新活跃的视图**才是用户实际在看的东西 ✓ ⇒ 精确查不到时回落到它 ✓
+   * （跨会话仍然隔离 ✗：只在同一个 sessionId 自己的视图里找 ✓）。
+   */
+  focusAny(sessionId: string): { nodeId: string; root: string; source: "editor" | "graph" } | undefined {
+    this.prune();
+    const views = [...this.views.values()].filter(view => view.active && view.sessionId === sessionId);
+    const view = views.sort((a, b) => b.order - a.order)[0];
+    return view?.nodeId ? { nodeId: view.nodeId, root: view.root, source: view.source } : undefined;
+  }
+
   /** Record an entry action once; opening an existing conversation does not call this. */
   enter(sessionId: string, root: string, nodeId: string): void {
     if (!this.entries.has(sessionId)) this.entries.set(sessionId, { root: libraryKey(root), nodeId });

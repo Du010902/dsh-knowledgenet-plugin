@@ -225,12 +225,43 @@ describe("图片显示的接线 ✓（用户实测：插入后图裂 ✗）", ()
   });
 
   it("**盯着 `src` 变化再断言** ✓（Vue 会把 `src` 写回相对路径 ✗）", () => {
-    assert.ok(editor.includes('attributeFilter: ["src"]'), "要有针对 `src` 的 MutationObserver ✓");
+    assert.ok(
+      /attributeFilter: \["src"(?:, "style")?\]/.test(editor),
+      "要有针对 `src` 的 MutationObserver ✓（`style` 一起看也行 ✓）",
+    );
     assert.ok(
       /record\.target as Element\)\.tagName === "IMG"/.test(editor),
       "只处理 `<img>` 的 `src` 变化 ✓（别为别的属性白跑 ✓）",
     );
     assert.ok(editor.includes("imageObserver?.disconnect()"), "卸载要断开 ✓");
+  });
+
+  it("**开笔记不再报 `dsh-app://app/image/… 404`** ✓（用户实测：控制台里两条 404 ✗）", () => {
+    /*
+     * Markdown 里是**库内相对路径** ✓，Crepe 建 DOM 时原样写进 `src` ✗ ⇒
+     * 浏览器拿文档基址去请求 ⇒ 必然 404 ✗（图最后仍能显示 ✓，因为随后换成了 blob ✓，
+     * 但那两条报错刺眼 ✓，还会闪一下裂图 ✗）。
+     * ⇒ 节点一插进来就在**同一个微任务**里换成透明占位 ✓，让那次请求根本不发出 ✓。
+     */
+    assert.ok(editor.includes("IMAGE_PLACEHOLDER_SRC"), "要有透明占位 ✓");
+    assert.ok(editor.includes("function holdNoteImagePlaceholder("), "要有「先占位」这一步 ✓");
+    assert.ok(editor.includes('report?.("image-src-hold"'), "掐掉时要留痕 ✓（下一轮能看出是不是这条在起作用 ✓）");
+    /* 节点是**新插进来**的 ⇒ 观察器必须也盯 childList ✓，否则我们到得太晚 ✗ */
+    assert.ok(
+      /imageObserver\?\.observe\(root, \{[^}]*childList: true/.test(editor),
+      "要盯 `childList` ✓（只盯属性 ⇒ 到得太晚，请求已经发出去了 ✗）",
+    );
+    assert.ok(editor.includes("const hasImage = (node: Node)"), "新插入的节点里要能认出 `<img>` ✓");
+    /* 别把已经显示出来的图打回占位 ✗（Crepe 每次重渲染都会写回相对路径 ✓） */
+    assert.ok(
+      /if \(current === IMAGE_PLACEHOLDER_SRC \|\| current\.startsWith\("blob:"\) \|\| current\.startsWith\("data:"\)\) return;/.test(editor),
+      "已经是 blob / 占位 / data 的 `src` 不许再动 ✗",
+    );
+    /* 占位是 1×1 ⇒ 绝不能拿它量尺寸 ✗（否则真图被压成一条、还纠正不回来 ✗） */
+    assert.ok(
+      /if \(\(image\.getAttribute\("src"\) \?\? ""\) === IMAGE_PLACEHOLDER_SRC\) return;/.test(editor),
+      "`fitNoteImage` 要跳过占位 ✓",
+    );
   });
 
   it("**两套配置键名都写** ✓（块级图片读的是 `block*` 那套 ✗）", () => {

@@ -3918,6 +3918,24 @@ var LearningState = class {
 			source: view.source
 		} : void 0;
 	}
+	/**
+	* **这个会话最近活跃的那个视图**（不看库根 ✓），连它的库根一起给出 ✓。
+	*
+	* 为什么需要（用户实测 2026-10-11）：面板报上来的库与会话工作区解析出来的库**不一定字面相同**
+	* （一个可能是工作区路径、另一个是 `…/.dsh_knowledge` ✓），而一旦按 (会话, 库) 精确查就会查空 ✗
+	* ⇒ 用户界面上明摆着开着一篇笔记，`kn_current_node` 却说"没有当前节点" ✓。
+	* 会话内**最新活跃的视图**才是用户实际在看的东西 ✓ ⇒ 精确查不到时回落到它 ✓
+	* （跨会话仍然隔离 ✗：只在同一个 sessionId 自己的视图里找 ✓）。
+	*/
+	focusAny(sessionId) {
+		this.prune();
+		const view = [...this.views.values()].filter((view) => view.active && view.sessionId === sessionId).sort((a, b) => b.order - a.order)[0];
+		return view?.nodeId ? {
+			nodeId: view.nodeId,
+			root: view.root,
+			source: view.source
+		} : void 0;
+	}
 	/** Record an entry action once; opening an existing conversation does not call this. */
 	enter(sessionId, root, nodeId) {
 		if (!this.entries.has(sessionId)) this.entries.set(sessionId, {
@@ -4062,8 +4080,8 @@ function failure(error) {
 	return fail$1(error instanceof TypeError ? "invalid_input" : value?.code ?? "library_unavailable", value?.message ?? String(error));
 }
 /** Resolve one target; only title/path discovery needs the metadata snapshot. */
-async function target(args, exec, config) {
-	const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
+async function target(args, exec, config, rootOverride) {
+	const root = rootOverride ?? await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
 	let id = typeof args.id === "string" ? args.id.trim() : "";
 	if (!id) {
 		const context = await openFor(exec, config);
@@ -4483,28 +4501,33 @@ function createModelTools(config, state = new LearningState()) {
 					].includes(String(requested))) throw new TypeError("Invalid focus source");
 					const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
 					const sessionId = modelSessionId(exec);
-					const ui = sessionId ? state.focus(sessionId, root) : void 0;
+					const exact = sessionId ? state.focus(sessionId, root) : void 0;
+					const ui = exact ?? (sessionId ? state.focusAny(sessionId) : void 0);
+					const uiRoot = exact ? root : ui?.root;
 					const entry = sessionId ? state.entry(sessionId, root, session) : void 0;
 					const history = learningFocusOf(session) ?? currentIdOf(session);
 					const candidates = [
 						{
 							id: ui?.nodeId,
 							source: "ui",
-							detail: ui?.source
+							detail: ui?.source,
+							root: uiRoot
 						},
 						{
 							id: entry,
 							source: "entry",
-							detail: "node_conversation"
+							detail: "node_conversation",
+							root: void 0
 						},
 						{
 							id: history,
 							source: "history",
-							detail: "learning_result"
+							detail: "learning_result",
+							root: void 0
 						}
 					].filter((candidate) => candidate.id && (requested === "auto" || candidate.source === requested));
 					for (const candidate of candidates) {
-						const located = await target({ id: candidate.id }, exec, config);
+						const located = await target({ id: candidate.id }, exec, config, candidate.root);
 						if (located.error) {
 							if (located.error.error.code === "not_found" || located.error.error.code === "node_missing") continue;
 							return located.error;
@@ -6368,7 +6391,7 @@ function errorBody(error) {
 /**
 * 会话 id → 该会话工作区的 cwd。
 *
-* 两条来源，缺一不可：
+* 会话作用域来源：
 * - `ctx.agents.get(id).session.header.cwd`：与工具侧 `sessionCwdOf` 一致的活会话路径；
 * - `ctx.sessions.get(id).header.cwd`：已装载会话；
 * - `ctx.sessionPersistence.stat(id).header.cwd`：尚未装载的持久会话，只查元数据。
@@ -6763,19 +6786,55 @@ async function handleApiRequest(ctx, config, request, learningState = new Learni
 			}
 		};
 		const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.sessionId });
-		if (!scope.root || typeof record.root !== "string" || libraryKey(scope.root) !== libraryKey(record.root)) return {
+		const claimedRoot = typeof record.root === "string" && record.root.trim() !== "" ? record.root : void 0;
+		const claimed = claimedRoot === void 0 ? {
+			root: scope.root,
+			sessionUnknown: scope.sessionUnknown,
+			cwd: scope.cwd
+		} : await resolveRequestedRoot(ctx, config, { root: claimedRoot });
+		if (!claimed.root) return {
 			status: 200,
 			body: {
 				ok: false,
 				error: {
 					code: "focus_scope_mismatch",
-					message: "聚焦视图不属于当前会话知识库"
+					message: `聚焦视图报的根目录不是知识库：${record.root}（会话库 ${scope.root ?? "未知"}）`
+				}
+			}
+		};
+		if (!scope.root) {
+			learningState.update({
+				sessionId: record.sessionId,
+				root: claimed.root,
+				viewId: record.viewId,
+				sequence: Number(record.sequence),
+				active: record.active,
+				nodeId: record.nodeId,
+				source: record.focusKind,
+				claim: record.claim === true
+			});
+			return {
+				status: 200,
+				body: {
+					ok: true,
+					leaseMs: resolveLearningConfig(config).focusLeaseMs,
+					scope: "claimed"
+				}
+			};
+		}
+		if (libraryKey(scope.root) !== libraryKey(claimed.root)) return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "focus_scope_mismatch",
+					message: `聚焦视图不属于当前会话知识库（会话库 ${scope.root}，面板库 ${claimed.root}）`
 				}
 			}
 		};
 		learningState.update({
 			sessionId: record.sessionId,
-			root: scope.root,
+			root: claimed.root,
 			viewId: record.viewId,
 			sequence: Number(record.sequence),
 			active: record.active,

@@ -104,7 +104,23 @@ test("visible notes can publish focus before their persisted session is attached
   const current = await tools({}, state).kn_current_node.execute({ source: "ui" }, exec(f));
   assert.equal(current.node.title, "有包络的波包"); assert.equal(current.source, "ui");
   assert.deepEqual(readIds, ["chat"]);
-  assert.equal((await __internal.handleApiRequest(ctx, {}, request({ ...body, sessionId: "unknown" }), state)).body.error.code, "focus_scope_mismatch");
+  /*
+   * 会话的工作区**解析不出来**时（三条来源都没有 ✓）⇒ 以**面板报的库**为准 ✓
+   * （用户实测 2026-10-11：插件刚建/刚切过去的节点对话会话就属于这种 ✓，
+   *  旧契约在这里拒收 ⇒ 界面里开着笔记却说"没有当前节点" ✗）。
+   * 仍然只影响**这个会话自己**的聚焦 ✓：下面用它自己的 sessionId 查得到 ✓，别的会话查不到 ✓。
+   */
+  const unknown = await __internal.handleApiRequest(ctx, {}, request({ ...body, sessionId: "unknown" }), state);
+  assert.equal(unknown.body.ok, true);
+  assert.equal(unknown.body.scope, "claimed", "会话范围未知 ⇒ 按面板报的库记 ✓");
+  assert.equal(state.focus("unknown", f.root).nodeId, f.nodes["有包络的波包"].id);
+  assert.equal(state.focus("another-session", f.root), undefined, "别的会话仍然查不到 ✓");
+  /* 会话库**能解析**、而面板报的是**另一个库**时依旧拒收 ✗（"面板串库"这种真故障不能放过 ✓） */
+  const other = await makeV3Fixture({ nodes: ["另一个库"] });
+  assert.equal(
+    (await __internal.handleApiRequest(ctx, {}, request({ ...body, root: other.root }), state)).body.error.code,
+    "focus_scope_mismatch",
+  );
   assert.match(__internal.PROTOCOL_SECTION, /Never substitute a library root/);
 });
 

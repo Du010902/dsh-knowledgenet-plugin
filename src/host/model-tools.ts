@@ -22,8 +22,13 @@ function failure(error: unknown) {
   return fail(error instanceof TypeError ? "invalid_input" : value?.code ?? "library_unavailable", value?.message ?? String(error));
 }
 /** Resolve one target; only title/path discovery needs the metadata snapshot. */
-async function target(args: Record<string, unknown>, exec: unknown, config: KnowledgeNetConfig) {
-  const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
+async function target(args: Record<string, unknown>, exec: unknown, config: KnowledgeNetConfig, rootOverride?: string) {
+  /*
+   * `rootOverride`：调用方已经知道"该去哪个库找"时直接用它 ✓（界面聚焦那条路会带来**面板自己的库根** ✓：
+   * 面板报上来的库与会话工作区解析出来的库可能字面不同 ✓ —— 见 `LearningState.focusAny` 的注释 ✓）。
+   * 不传就是原来的语义：按会话 cwd 解析 ✓。
+   */
+  const root = rootOverride ?? await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
   let id = typeof args.id === "string" ? args.id.trim() : "";
   if (!id) {
     const context = await openFor(exec, config);
@@ -214,16 +219,24 @@ export function createModelTools(config: KnowledgeNetConfig, state = new Learnin
           if (!["auto", "ui", "entry", "history"].includes(String(requested))) throw new TypeError("Invalid focus source");
           const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
           const sessionId = modelSessionId(exec);
-          const ui = sessionId ? state.focus(sessionId, root) : undefined;
+          /*
+           * **界面聚焦优先**（用户实测 2026-10-11：面板里开着笔记，这里却报"没有当前节点" ✗）：
+           * 先按 (会话, 会话库) 精确查 ✓；查不到再取**这个会话最近活跃的视图** ✓
+           * （面板报的库可能与会话库字面不同 ✓，见 `LearningState.focusAny` ✓），
+           * 并用**那个视图自己的库根**去找节点 ✓（否则会去错误的库里找 ⇒ not_found ⇒ 又被当成"没有焦点" ✗）。
+           */
+          const exact = sessionId ? state.focus(sessionId, root) : undefined;
+          const ui = exact ?? (sessionId ? state.focusAny(sessionId) : undefined);
+          const uiRoot = exact ? root : ui?.root;
           const entry = sessionId ? state.entry(sessionId, root, session) : undefined;
           const history = learningFocusOf(session) ?? currentIdOf(session);
           const candidates = [
-            { id: ui?.nodeId, source: "ui", detail: ui?.source },
-            { id: entry, source: "entry", detail: "node_conversation" },
-            { id: history, source: "history", detail: "learning_result" },
+            { id: ui?.nodeId, source: "ui", detail: ui?.source, root: uiRoot },
+            { id: entry, source: "entry", detail: "node_conversation", root: undefined },
+            { id: history, source: "history", detail: "learning_result", root: undefined },
           ].filter(candidate => candidate.id && (requested === "auto" || candidate.source === requested));
           for (const candidate of candidates) {
-            const located = await target({ id: candidate.id }, exec, config);
+            const located = await target({ id: candidate.id }, exec, config, candidate.root);
             if (located.error) {
               if (located.error.error.code === "not_found" || located.error.error.code === "node_missing") continue;
               return located.error;

@@ -486,10 +486,73 @@ export async function handleApiRequest(
     if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.viewId !== "string" || !record.viewId || record.viewId.length > 200 || !Number.isSafeInteger(record.sequence) || Number(record.sequence) < 0 || typeof record.active !== "boolean" || (record.nodeId !== null && typeof record.nodeId !== "string") || !["editor", "graph"].includes(String(record.focusKind)) || (record.claim !== undefined && typeof record.claim !== "boolean")) {
       return { status: 400, body: { ok: false, error: { code: "bad_body", message: "聚焦状态不合法" } } };
     }
-    // Resolve only from the Session's workspace; never accept the panel's root override.
+    /*
+     * **归属校验**（用户实测 2026-10-11：面板里明明开着笔记，`kn_current_node` 却一直说没有当前节点 ✗，
+     * 客户端诊断里是 `view-focus / rejected / focus_scope_mismatch` ✓）。
+     *
+     * 原来拿**裸字符串**比：`scope.root`（按会话解析出来的**库根** ✓） vs `record.root`
+     * （面板载荷里的 `library.root` ✓）—— 只要两边**形状**不完全一样就一律拒收 ✗：
+     * 面板那边可能是**工作区路径**（`…\欺骗检测` ✓）而这里是**库根**（`…\欺骗检测\.dsh_knowledge` ✓），
+     * 也可能反过来（`resolveRequestedRoot` 两种形状都接受 ✓）。
+     * ⇒ 现在**两边各自解析一次再比** ✓（`resolveRequestedRoot` 会把工作区路径解析成库根 ✓）；
+     * 报上来的 root 解析不出库 ⇒ 仍然拒收 ✗（不能凭空claim一个不存在的库 ✓）。
+     *
+     * 拒绝时把两个路径写进 message ✓：下一轮若还拒，`kn_status` 的 `clientDiag` 里直接能读出为什么 ✓。
+     */
     const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.sessionId });
-    if (!scope.root || typeof record.root !== "string" || libraryKey(scope.root) !== libraryKey(record.root)) return { status: 200, body: { ok: false, error: { code: "focus_scope_mismatch", message: "聚焦视图不属于当前会话知识库" } } };
-    learningState.update({ sessionId: record.sessionId, root: scope.root, viewId: record.viewId, sequence: Number(record.sequence), active: record.active, nodeId: record.nodeId as string | null, source: record.focusKind as "editor" | "graph", claim: record.claim === true });
+    /*
+     * 面板**没报** root 时不要去问"配置里的库 / 上次用过的库" ✗（那会拿一个不相干的库去比 ✓）：
+     * 这时就按会话自己的库记 ✓（用户在看的就是这个会话的库 ✓）。
+     */
+    const claimedRoot = typeof record.root === "string" && record.root.trim() !== "" ? record.root : undefined;
+    const claimed = claimedRoot === undefined
+      ? { root: scope.root, sessionUnknown: scope.sessionUnknown, cwd: scope.cwd }
+      : await resolveRequestedRoot(ctx, config, { root: claimedRoot });
+    if (!claimed.root) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          error: {
+            code: "focus_scope_mismatch",
+            message: `聚焦视图报的根目录不是知识库：${record.root}（会话库 ${scope.root ?? "未知"}）`,
+          },
+        },
+      };
+    }
+    /*
+     * 会话那边解析不出来（宿主的三条来源**都没给出这个会话的 cwd** ✓ —— 例如插件刚建/刚切过去的
+     * 节点对话会话，持久元数据还没跟上 ✓）时：**以面板报上来的库为准** ✓。
+     *
+     * 为什么这不是"放松管制"（用户实测 2026-10-11，重启后诊断里就是这一条 ✗）：
+     * - 面板报的 root **已经过解析**（必须是一个真实存在的知识库 ✓，见上面 `claimed`）；
+     * - 聚焦本身是**按会话**记的 ✓（`focus`/`focusAny` 都只看这个 sessionId 自己的视图 ✓）
+     *   ⇒ 影响范围只有这个会话自己的工具调用 ✓，不会串到别的会话 ✗；
+     * - 反过来，如果这里拒收，用户界面里**明明开着一篇笔记**，`kn_current_node` 却只能说
+     *   "没有当前节点" ✗ —— 这正是这次要修的 bug ✓（那条既有用例的名字就写着
+     *   "visible notes can publish focus before their persisted session is attached" ✓）。
+     */
+    if (!scope.root) {
+      learningState.update({ sessionId: record.sessionId, root: claimed.root, viewId: record.viewId, sequence: Number(record.sequence), active: record.active, nodeId: record.nodeId as string | null, source: record.focusKind as "editor" | "graph", claim: record.claim === true });
+      return { status: 200, body: { ok: true, leaseMs: resolveLearningConfig(config).focusLeaseMs, scope: "claimed" } };
+    }
+    /*
+     * 会话库与面板库**都解析出来了、但确实不是同一个库** ⇒ 拒收 ✗（"面板串库"的真实故障 ✓，
+     * 不能悄悄把另一个库的节点当成当前节点 ✓）。
+     */
+    if (libraryKey(scope.root) !== libraryKey(claimed.root)) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          error: {
+            code: "focus_scope_mismatch",
+            message: `聚焦视图不属于当前会话知识库（会话库 ${scope.root}，面板库 ${claimed.root}）`,
+          },
+        },
+      };
+    }
+    learningState.update({ sessionId: record.sessionId, root: claimed.root, viewId: record.viewId, sequence: Number(record.sequence), active: record.active, nodeId: record.nodeId as string | null, source: record.focusKind as "editor" | "graph", claim: record.claim === true });
     return { status: 200, body: { ok: true, leaseMs: resolveLearningConfig(config).focusLeaseMs } };
   }
 
