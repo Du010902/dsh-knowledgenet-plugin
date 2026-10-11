@@ -789,7 +789,7 @@ export function NodeDocumentEditor(props: {
           ) : null}
         </h2>
         {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
-        {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} nodeTitle={title} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
+        {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
         <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
