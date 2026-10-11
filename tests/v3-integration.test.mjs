@@ -67,9 +67,9 @@ describe("v3：定位与装载", () => {
 });
 
 describe("v3：工具（读）", () => {
-  it("kn_list_graph 返回节点与关系，字段与面板共用同一份构造逻辑", async () => {
+  it("kn_list_graph 显式总览返回节点与关系", async () => {
     const fx = await makeV3Fixture({ nodes: ["A", "B"], edges: [["A", "B"]] });
-    const result = await toolNamed("kn_list_graph").execute({}, execAt(fx.workspace));
+    const result = await toolNamed("kn_list_graph").execute({ mode: "overview" }, execAt(fx.workspace));
     assert.equal(result.ok, true);
     assert.equal(result.nodes.length, 2);
     assert.equal(result.edges.length, 1);

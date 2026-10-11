@@ -1,6 +1,7 @@
-import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path, { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
 //#region src/vendor/upstream/data/errors.ts
 var RepositoryError = class extends Error {
@@ -173,7 +174,6 @@ const META_NS_DIR = `.meta/knowledgenet`;
 const NODE_FILE = "node.json";
 const LIBRARY_FILE = "library.json";
 const RELATIONS_FILE = "relations.json";
-const RESOURCES_FILE = "resources.json";
 /** 笔记冲突副本目录（节点内，跟着节点一起走） */
 const CONFLICTS_DIR = "conflicts";
 /** 知识库根部（不是节点）的元数据目录 */
@@ -218,9 +218,6 @@ function nodeMetaFile(nodeRel) {
 function relationsFile(nodeRel) {
 	return joinRel(nodeRel, META_NS_DIR, RELATIONS_FILE);
 }
-function resourcesFile(nodeRel) {
-	return joinRel(nodeRel, META_NS_DIR, RESOURCES_FILE);
-}
 function conflictsDir(nodeRel) {
 	return joinRel(nodeRel, META_NS_DIR, CONFLICTS_DIR);
 }
@@ -235,871 +232,6 @@ function extNameOf(name) {
 	const base = baseName(name);
 	const index = base.lastIndexOf(".");
 	return index <= 0 ? "" : base.slice(index);
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/schema.ts
-/**
-* v2 开放文件模型：解析、校验与构造（纯函数）
-*
-* 对应契约 §1 的六个 JSON 文件与 §2 的错误码，与 Rust `src-tauri/src/v2/schema.rs` 同构。
-*
-* 三条纪律：
-* 1. **未知字段原样保留**：解析时把已知字段摘出来，其余字段用 `...extra` 放回对象，
-*    重新序列化后用户/别的工具写进去的扩展字段一个都不会丢；
-* 2. **错误码固定**：`format` / `formatVersion` 不对是 `metadata_unsupported`，
-*    解析失败与必填字段类型错是 `metadata_invalid`（契约 §2）；
-* 3. **不做善意修正**：字段类型不对就报错，绝不「顺手」把数字当字符串用。
-*    坏文件要如实显示为坏文件，而不是被静默改写。
-*/
-const NODE_FORMAT = "knowledgenet-node";
-const RELATIONS_FORMAT = "knowledgenet-relations";
-const RESOURCES_FORMAT = "knowledgenet-resources";
-/**
-* 笔记记账文件（与 Rust `docs/v2-deviations.md` D5 同构）。
-*
-* 文档修订号描述的是**正文文件**的修订，而 `node.json` 的 `revision` 描述的是
-* **节点元数据**的修订；用一个数字表示两件事，会出现「改了标题导致笔记保存报冲突」
-* 这种莫名其妙的交互。因此正文指纹单独记在
-* `.meta/knowledgenet/notes-index.json`，坏了直接重建（它是可推导的缓存）。
-*/
-const NOTES_INDEX_FORMAT = "knowledgenet-notes-index";
-function emptyNotesIndex(nodeId) {
-	return {
-		format: NOTES_INDEX_FORMAT,
-		formatVersion: 1,
-		nodeId,
-		entries: []
-	};
-}
-function parseNotesIndexFile(text, relativePath = null) {
-	const what = "notes-index.json";
-	const raw = parseJsonRecord(text, what, relativePath);
-	requireFormat(raw, what, NOTES_INDEX_FORMAT, 1, relativePath);
-	const { format, formatVersion, nodeId, entries, ...extra } = raw;
-	const parsed = [];
-	for (const item of requireArray(entries, what, "entries", relativePath)) {
-		const { relativePath: docPath, sha256, byteLength, revision, modifiedAt, ...entryExtra } = asRecord(item, `${what} 的 entries 条目`, relativePath);
-		parsed.push({
-			relativePath: requireString(docPath, what, "entries[].relativePath", relativePath),
-			sha256: requireString(sha256 ?? "", what, "entries[].sha256", relativePath),
-			byteLength: requireInt(byteLength ?? 0, what, "entries[].byteLength", relativePath),
-			revision: requireInt(revision ?? 0, what, "entries[].revision", relativePath),
-			modifiedAt: typeof modifiedAt === "number" && Number.isFinite(modifiedAt) ? modifiedAt : 0,
-			...entryExtra
-		});
-	}
-	return {
-		format: NOTES_INDEX_FORMAT,
-		formatVersion: 1,
-		nodeId: requireUuid(nodeId, what, "nodeId", relativePath),
-		entries: parsed,
-		...extra
-	};
-}
-const LEARN_STATUSES = [
-	"todo",
-	"learning",
-	"done"
-];
-/**
-* 元数据错误。
-*
-* `parsePosition` 只在 JSON 语法错误时有值（来自解析器的位置信息），
-* 界面据此可以直接把光标指到出错的那一列；字段类型错误没有位置可言。
-*/
-var MetadataError = class extends Error {
-	code;
-	what;
-	relativePath;
-	parsePosition;
-	constructor(code, message, options) {
-		super(message);
-		this.name = "MetadataError";
-		this.code = code;
-		this.what = options.what;
-		this.relativePath = options.relativePath ?? null;
-		this.parsePosition = options.parsePosition ?? null;
-	}
-};
-function invalid(what, detail, relativePath) {
-	throw new MetadataError("metadata_invalid", `${what}：${detail}`, {
-		what,
-		relativePath: relativePath ?? null
-	});
-}
-function unsupported(what, detail, relativePath) {
-	throw new MetadataError("metadata_unsupported", `${what}：${detail}`, {
-		what,
-		relativePath: relativePath ?? null
-	});
-}
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** ID 形状检查（UUIDv7 也是 UUID）。只做形状判断，不解释内容。 */
-function isUuidLike(value) {
-	return typeof value === "string" && UUID_RE.test(value);
-}
-function asRecord(value, what, rel) {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) invalid(what, "顶层必须是一个 JSON 对象", rel);
-	return value;
-}
-/** 解析 JSON 文本；语法错误报 `metadata_invalid` 并带上解析位置 */
-function parseJsonRecord(text, what, relativePath) {
-	let raw;
-	try {
-		raw = JSON.parse(text);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		const position = /position (\d+)/i.exec(message)?.[1] ?? null;
-		throw new MetadataError("metadata_invalid", `${what}不是合法的 JSON：${message}`, {
-			what,
-			relativePath: relativePath ?? null,
-			parsePosition: position
-		});
-	}
-	return asRecord(raw, what, relativePath);
-}
-/**
-* 校验 `format` 与 `formatVersion`。
-*
-* 两者任一不匹配都是 `metadata_unsupported`：这通常意味着文件属于别的工具，
-* 或属于更新版本的 KnowledgeNet——用户需要的是「升级应用 / 换个工具」，
-* 而不是一句「文件坏了」。
-*/
-function requireFormat(raw, what, expectedFormat, expectedVersion, rel) {
-	if (raw.format !== expectedFormat) unsupported(what, `format 应为 ${expectedFormat}，实际是 ${JSON.stringify(raw.format ?? null)}`, rel);
-	const version = raw.formatVersion;
-	if (typeof version !== "number" || !Number.isInteger(version)) invalid(what, "formatVersion 必须是整数", rel);
-	if (version !== expectedVersion) unsupported(what, `formatVersion 应为 ${expectedVersion}，实际是 ${version}`, rel);
-}
-function requireString(value, what, field, rel) {
-	if (typeof value !== "string") invalid(what, `${field} 必须是字符串`, rel);
-	return value;
-}
-function requireIsoString(value, what, field, rel) {
-	const text = requireString(value, what, field, rel);
-	if (text.trim() === "") invalid(what, `${field} 不能为空`, rel);
-	return text;
-}
-function requireInt(value, what, field, rel, min = 0) {
-	if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) invalid(what, `${field} 必须是整数`, rel);
-	if (value < min) invalid(what, `${field} 不能小于 ${min}`, rel);
-	return value;
-}
-function requireUuid(value, what, field, rel) {
-	if (!isUuidLike(value)) invalid(what, `${field} 必须是 UUID`, rel);
-	return value;
-}
-function requireStringArray(value, what, field, rel) {
-	if (value === void 0 || value === null) return [];
-	if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) invalid(what, `${field} 必须是字符串数组`, rel);
-	return value;
-}
-function requireArray(value, what, field, rel) {
-	if (value === void 0 || value === null) return [];
-	if (!Array.isArray(value)) invalid(what, `${field} 必须是数组`, rel);
-	return value;
-}
-function optionalString(value, what, field, rel) {
-	if (value === void 0 || value === null) return null;
-	if (typeof value !== "string") invalid(what, `${field} 必须是字符串或 null`, rel);
-	return value;
-}
-/** 节点主文档必须是节点目录内的规范化相对路径 */
-function validatePrimaryDocument(rel) {
-	if (typeof rel !== "string" || rel.trim() === "") throw new RepositoryError("invalid_input", "主文档路径不能为空");
-	if (escapesLibrary(rel)) throw new RepositoryError("node_outside_library", `主文档路径必须是节点目录内的相对路径：${rel}`, { relativePath: rel });
-	return normalizeRel(rel);
-}
-function newNodeMeta(input) {
-	return {
-		format: NODE_FORMAT,
-		formatVersion: 1,
-		id: input.id,
-		revision: 1,
-		title: input.title,
-		aliases: input.aliases ?? [],
-		status: input.status ?? "todo",
-		primaryDocument: input.primaryDocument === void 0 || input.primaryDocument === null ? null : validatePrimaryDocument(input.primaryDocument),
-		createdAt: input.now,
-		updatedAt: input.now,
-		extensions: input.extensions ?? {}
-	};
-}
-function parseNodeMeta(text, relativePath = null) {
-	const what = "node.json";
-	const raw = parseJsonRecord(text, what, relativePath);
-	requireFormat(raw, what, NODE_FORMAT, 1, relativePath);
-	const { format, formatVersion, id, revision, title, aliases, status, primaryDocument, createdAt, updatedAt, extensions, ...extra } = raw;
-	let primary = null;
-	if (primaryDocument !== void 0 && primaryDocument !== null) {
-		if (typeof primaryDocument !== "string") invalid(what, "primaryDocument 必须是字符串或 null", relativePath);
-		if (primaryDocument.trim() !== "") {
-			if (escapesLibrary(primaryDocument)) invalid(what, `primaryDocument 必须是节点内的相对路径：${primaryDocument}`, relativePath);
-			primary = normalizeRel(primaryDocument);
-		}
-	}
-	const rawStatus = status === void 0 || status === null ? "todo" : status;
-	if (typeof rawStatus !== "string" || !LEARN_STATUSES.includes(rawStatus)) invalid(what, `status 必须是 ${LEARN_STATUSES.join(" / ")} 之一`, relativePath);
-	const extensionsRaw = extensions === void 0 || extensions === null ? {} : asRecord(extensions, what, relativePath);
-	return {
-		format: NODE_FORMAT,
-		formatVersion: 1,
-		id: requireUuid(id, what, "id", relativePath),
-		revision: requireInt(revision, what, "revision", relativePath),
-		title: requireString(title, what, "title", relativePath),
-		aliases: requireStringArray(aliases, what, "aliases", relativePath),
-		status: rawStatus,
-		primaryDocument: primary,
-		createdAt: requireIsoString(createdAt, what, "createdAt", relativePath),
-		updatedAt: requireIsoString(updatedAt, what, "updatedAt", relativePath),
-		extensions: extensionsRaw,
-		...extra
-	};
-}
-function emptyRelations(nodeId) {
-	return {
-		format: RELATIONS_FORMAT,
-		formatVersion: 1,
-		nodeId,
-		revision: 1,
-		outgoing: []
-	};
-}
-function parseEvidence(value, what, rel) {
-	const { id, threadId, messageId, snippet, question, createdAt, ...extra } = asRecord(value, `${what} 的 evidence 条目`, rel);
-	return {
-		id: requireUuid(id, what, "evidence.id", rel),
-		threadId: optionalString(threadId, what, "evidence.threadId", rel),
-		messageId: optionalString(messageId, what, "evidence.messageId", rel),
-		snippet: requireString(snippet ?? "", what, "evidence.snippet", rel),
-		question: requireString(question ?? "", what, "evidence.question", rel),
-		createdAt: requireIsoString(createdAt, what, "evidence.createdAt", rel),
-		...extra
-	};
-}
-function parseRelationsFile(text, relativePath = null) {
-	const what = "relations.json";
-	const raw = parseJsonRecord(text, what, relativePath);
-	requireFormat(raw, what, RELATIONS_FORMAT, 1, relativePath);
-	const { format, formatVersion, nodeId, revision, outgoing, ...extra } = raw;
-	const edges = [];
-	for (const item of requireArray(outgoing, what, "outgoing", relativePath)) {
-		const { id, toNodeId, type, description, toTitleSnapshot, createdAt, updatedAt, evidence, ...edgeExtra } = asRecord(item, `${what} 的 outgoing 条目`, relativePath);
-		edges.push({
-			id: requireUuid(id, what, "outgoing[].id", relativePath),
-			toNodeId: requireUuid(toNodeId, what, "outgoing[].toNodeId", relativePath),
-			type: requireString(type ?? "prerequisite", what, "outgoing[].type", relativePath),
-			description: requireString(description ?? "", what, "outgoing[].description", relativePath),
-			toTitleSnapshot: requireString(toTitleSnapshot ?? "", what, "outgoing[].toTitleSnapshot", relativePath),
-			createdAt: requireIsoString(createdAt, what, "outgoing[].createdAt", relativePath),
-			updatedAt: requireIsoString(updatedAt, what, "outgoing[].updatedAt", relativePath),
-			evidence: requireArray(evidence, what, "outgoing[].evidence", relativePath).map((e) => parseEvidence(e, what, relativePath)),
-			...edgeExtra
-		});
-	}
-	return {
-		format: RELATIONS_FORMAT,
-		formatVersion: 1,
-		nodeId: requireUuid(nodeId, what, "nodeId", relativePath),
-		revision: requireInt(revision, what, "revision", relativePath),
-		outgoing: edges,
-		...extra
-	};
-}
-function emptyResources(nodeId) {
-	return {
-		format: RESOURCES_FORMAT,
-		formatVersion: 1,
-		nodeId,
-		revision: 1,
-		entries: []
-	};
-}
-const RESOURCE_KINDS = [
-	"file",
-	"url",
-	"citation"
-];
-function parseResourceEntry(value, what, rel) {
-	const { id, kind, relativePath, url, originalName, displayName, mimeType, byteLength, sha256, description, sortOrder, createdAt, updatedAt, ...extra } = asRecord(value, `${what} 的 entries 条目`, rel);
-	if (typeof kind !== "string" || !RESOURCE_KINDS.includes(kind)) invalid(what, `entries[].kind 必须是 ${RESOURCE_KINDS.join(" / ")} 之一`, rel);
-	return {
-		id: requireUuid(id, what, "entries[].id", rel),
-		kind,
-		relativePath: optionalString(relativePath, what, "entries[].relativePath", rel),
-		url: optionalString(url, what, "entries[].url", rel),
-		originalName: requireString(originalName ?? "", what, "entries[].originalName", rel),
-		displayName: requireString(displayName ?? "", what, "entries[].displayName", rel),
-		mimeType: requireString(mimeType ?? "", what, "entries[].mimeType", rel),
-		byteLength: requireInt(byteLength ?? 0, what, "entries[].byteLength", rel),
-		sha256: requireString(sha256 ?? "", what, "entries[].sha256", rel),
-		description: requireString(description ?? "", what, "entries[].description", rel),
-		sortOrder: requireInt(sortOrder ?? 0, what, "entries[].sortOrder", rel, -1e6),
-		createdAt: requireIsoString(createdAt, what, "entries[].createdAt", rel),
-		updatedAt: requireIsoString(updatedAt, what, "entries[].updatedAt", rel),
-		...extra
-	};
-}
-function parseResourcesFile(text, relativePath = null) {
-	const what = "resources.json";
-	const raw = parseJsonRecord(text, what, relativePath);
-	requireFormat(raw, what, RESOURCES_FORMAT, 1, relativePath);
-	const { format, formatVersion, nodeId, revision, entries, ...extra } = raw;
-	return {
-		format: RESOURCES_FORMAT,
-		formatVersion: 1,
-		nodeId: requireUuid(nodeId, what, "nodeId", relativePath),
-		revision: requireInt(revision, what, "revision", relativePath),
-		entries: requireArray(entries, what, "entries", relativePath).map((e) => parseResourceEntry(e, what, relativePath)),
-		...extra
-	};
-}
-/** 统一的落盘文本：两空格缩进 + 结尾换行，便于人工阅读与 diff */
-function serializeJson(value) {
-	return `${JSON.stringify(value, null, 2)}\n`;
-}
-/** 毫秒时间戳 -> ISO 8601 UTC 字符串（与 Rust `iso_from_ms` 一致） */
-function isoFromMs(ms) {
-	return new Date(Number.isFinite(ms) ? ms : 0).toISOString();
-}
-/** ISO 字符串 -> 毫秒；不可解析时报 `metadata_invalid` */
-function parseIsoMs(text, relativePath = null) {
-	const ms = Date.parse(text);
-	if (!Number.isFinite(ms)) invalid("时间", `无法解析的 ISO 时间：${text}`, relativePath);
-	return ms;
-}
-/** 安全化文件夹名：去掉 Windows 非法字符与首尾空白（Rust `sanitize_folder_name` 的对应物） */
-function sanitizeFolderName(title, fallback = "未命名") {
-	const cleaned = String(title ?? "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").replace(/^[.\s]+/, "").replace(/[.\s]+$/, "").trim();
-	if (cleaned === "") return fallback;
-	if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(cleaned)) return `${cleaned}_`;
-	return cleaned.slice(0, 80);
-}
-/** 在已有名字集合里找一个不冲突的名字：`名字`、`名字 2`、`名字 3`… */
-function uniqueNameIn(base, existing) {
-	const taken = new Set(existing);
-	if (!taken.has(base)) return base;
-	for (let index = 2; index < 1e4; index += 1) {
-		const candidate = `${base} ${index}`;
-		if (!taken.has(candidate)) return candidate;
-	}
-	return `${base} ${Date.now()}`;
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/hash.ts
-/**
-* 纯 TS 的 SHA-256 与字节长度
-*
-* 为什么不用 `node:crypto` 或 WebCrypto：
-* - v2 文件模型要能在浏览器演示模式、Node 测试与 Tauri WebView 里跑同一份代码；
-* - WebCrypto 的 `subtle.digest` 是异步的，而指纹校验散布在同步的校验路径里；
-* - 这里只需要「内容变了指纹就变」的稳定摘要，自己实现 60 行反而最省依赖。
-*
-* 与 Rust 端 `atomic::sha256_of` 的十六进制小写输出一致。
-*/
-const K = new Uint32Array([
-	1116352408,
-	1899447441,
-	3049323471,
-	3921009573,
-	961987163,
-	1508970993,
-	2453635748,
-	2870763221,
-	3624381080,
-	310598401,
-	607225278,
-	1426881987,
-	1925078388,
-	2162078206,
-	2614888103,
-	3248222580,
-	3835390401,
-	4022224774,
-	264347078,
-	604807628,
-	770255983,
-	1249150122,
-	1555081692,
-	1996064986,
-	2554220882,
-	2821834349,
-	2952996808,
-	3210313671,
-	3336571891,
-	3584528711,
-	113926993,
-	338241895,
-	666307205,
-	773529912,
-	1294757372,
-	1396182291,
-	1695183700,
-	1986661051,
-	2177026350,
-	2456956037,
-	2730485921,
-	2820302411,
-	3259730800,
-	3345764771,
-	3516065817,
-	3600352804,
-	4094571909,
-	275423344,
-	430227734,
-	506948616,
-	659060556,
-	883997877,
-	958139571,
-	1322822218,
-	1537002063,
-	1747873779,
-	1955562222,
-	2024104815,
-	2227730452,
-	2361852424,
-	2428436474,
-	2756734187,
-	3204031479,
-	3329325298
-]);
-function rotr(value, bits) {
-	return (value >>> bits | value << 32 - bits) >>> 0;
-}
-/** UTF-8 字节；优先用 TextEncoder（浏览器与 Node 都有），否则手工编码 */
-function utf8Bytes$1(text) {
-	if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
-	const out = [];
-	for (let i = 0; i < text.length; i += 1) {
-		let code = text.charCodeAt(i);
-		if (code >= 55296 && code <= 56319 && i + 1 < text.length) {
-			const next = text.charCodeAt(i + 1);
-			if (next >= 56320 && next <= 57343) {
-				code = (code - 55296) * 1024 + (next - 56320) + 65536;
-				i += 1;
-			}
-		}
-		if (code < 128) out.push(code);
-		else if (code < 2048) out.push(192 | code >> 6, 128 | code & 63);
-		else if (code < 65536) out.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
-		else out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
-	}
-	return new Uint8Array(out);
-}
-/** UTF-8 字节数（不是字符数：中文一个字是 3 个字节） */
-function byteLengthOf(text) {
-	return utf8Bytes$1(text).byteLength;
-}
-/** 十六进制小写 SHA-256 */
-function sha256Hex(text) {
-	const bytes = utf8Bytes$1(text);
-	const bitLength = bytes.length * 8;
-	const total = Math.ceil((bytes.length + 9) / 64) * 64;
-	const buffer = new Uint8Array(total);
-	buffer.set(bytes);
-	buffer[bytes.length] = 128;
-	const view = new DataView(buffer.buffer);
-	view.setUint32(total - 8, Math.floor(bitLength / 4294967296));
-	view.setUint32(total - 4, bitLength >>> 0);
-	let h0 = 1779033703;
-	let h1 = 3144134277;
-	let h2 = 1013904242;
-	let h3 = 2773480762;
-	let h4 = 1359893119;
-	let h5 = 2600822924;
-	let h6 = 528734635;
-	let h7 = 1541459225;
-	const w = new Uint32Array(64);
-	for (let offset = 0; offset < total; offset += 64) {
-		for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
-		for (let i = 16; i < 64; i += 1) {
-			const x = w[i - 15];
-			const y = w[i - 2];
-			const s0 = rotr(x, 7) ^ rotr(x, 18) ^ x >>> 3;
-			const s1 = rotr(y, 17) ^ rotr(y, 19) ^ y >>> 10;
-			w[i] = w[i - 16] + s0 + w[i - 7] + s1 >>> 0;
-		}
-		let a = h0;
-		let b = h1;
-		let c = h2;
-		let d = h3;
-		let e = h4;
-		let f = h5;
-		let g = h6;
-		let h = h7;
-		for (let i = 0; i < 64; i += 1) {
-			const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-			const ch = e & f ^ ~e & g;
-			const t1 = h + s1 + ch + K[i] + w[i] >>> 0;
-			const t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + (a & b ^ a & c ^ b & c) >>> 0;
-			h = g;
-			g = f;
-			f = e;
-			e = d + t1 >>> 0;
-			d = c;
-			c = b;
-			b = a;
-			a = t1 + t2 >>> 0;
-		}
-		h0 = h0 + a >>> 0;
-		h1 = h1 + b >>> 0;
-		h2 = h2 + c >>> 0;
-		h3 = h3 + d >>> 0;
-		h4 = h4 + e >>> 0;
-		h5 = h5 + f >>> 0;
-		h6 = h6 + g >>> 0;
-		h7 = h7 + h >>> 0;
-	}
-	const hex = (value) => value.toString(16).padStart(8, "0");
-	return hex(h0) + hex(h1) + hex(h2) + hex(h3) + hex(h4) + hex(h5) + hex(h6) + hex(h7);
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/fs.ts
-let tempSeq = 0;
-/**
-* 原子写：先写同目录临时文件，再替换目标，最后清掉临时文件。
-*
-* 内存实现里「替换」天然是原子的，但真实磁盘上不是——把顺序固定在这里，
-* 两个后端就都走同一条写路径，Rust 端只是把 `write` 换成
-* 「临时文件 -> flush -> fsync -> rename」。
-*/
-async function writeTextAtomic(vfs, rel, text) {
-	const norm = normalizeRel(rel);
-	tempSeq += 1;
-	const tmp = joinRel(parentRel(norm), `.${baseName(norm)}.tmp-${tempSeq.toString(36)}`);
-	await vfs.write(tmp, text);
-	try {
-		await vfs.write(norm, text);
-	} finally {
-		try {
-			await vfs.remove(tmp);
-		} catch {}
-	}
-}
-/** 取单个文件的目录项（大小/修改时间）；不存在或不是文件时返回 null */
-async function fileEntry(vfs, rel) {
-	const norm = normalizeRel(rel);
-	if (norm === "") return null;
-	try {
-		const entries = await vfs.list(parentRel(norm));
-		const name = baseName(norm);
-		return entries.find((entry) => entry.name === name && entry.kind === "file") ?? null;
-	} catch {
-		return null;
-	}
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/nodeMeta.ts
-/**
-* 节点元数据（`node.json`）的读写与修订/哈希守卫
-*
-* 所有对 `node.json` 的修改都必须经过这里，原因是设计 §5.3 的外部编辑冲突规则：
-* 写之前要同时检查调用方手上的 `revision` 与磁盘文件的 SHA-256，
-* 任何一项不符都返回结构化 `external_change_conflict`，**默认绝不覆盖**。
-*
-* 注意：正文（`note.md`）的修订号**不在** `node.json` 里，而是记在
-* `.meta/knowledgenet/notes-index.json`（见 `notes.ts` 与 `docs/v2-deviations.md` D5）：
-* 节点元数据修订与文档修订是两件事，混在一个数字里会让「改标题」影响「保存正文」。
-*/
-/** 读节点元数据；解析失败原样抛 `MetadataError`，由调用方转成扫描问题或错误码 */
-async function readNodeMeta(vfs, nodeRel) {
-	const rel = nodeMetaFile(nodeRel);
-	let text;
-	try {
-		text = await vfs.read(rel);
-	} catch {
-		throw new RepositoryError("node_missing", `节点目录里没有 ${rel}`, { relativePath: rel });
-	}
-	return {
-		meta: parseNodeMeta(text, rel),
-		relativePath: nodeRel,
-		sha256: sha256Hex(text),
-		text
-	};
-}
-/** 读节点元数据；不存在时返回 null（只用于「可能还没有元数据」的路径） */
-async function readNodeMetaIfExists(vfs, nodeRel) {
-	const rel = nodeMetaFile(nodeRel);
-	if (!await vfs.exists(rel)) return null;
-	return readNodeMeta(vfs, nodeRel);
-}
-/**
-* 写入节点元数据（原子替换），并做修订号 + 哈希守卫。
-*
-* `expectedRevision` / `expectedHash` 为 null 表示调用方明确要求「不管磁盘上是什么，
-* 覆盖它」——只有新建节点与「重新分配 ID」这类不涉及用户内容的场景才允许。
-*/
-async function writeNodeMeta(vfs, nodeRel, meta, expected = {}) {
-	const rel = nodeMetaFile(nodeRel);
-	const existing = await readNodeMetaIfExists(vfs, nodeRel);
-	if (existing) {
-		const expectedRevision = expected.expectedRevision ?? null;
-		const expectedHash = expected.expectedHash ?? null;
-		if (expectedRevision !== null && expectedRevision !== existing.meta.revision) throw externalChangeConflict({
-			relativePath: rel,
-			expectedRevision,
-			actualRevision: existing.meta.revision,
-			expectedHash,
-			actualHash: existing.sha256,
-			message: "磁盘上的 node.json 已被外部修改（修订号不符），已拒绝覆盖"
-		});
-		if (expectedHash !== null && expectedHash !== existing.sha256) throw externalChangeConflict({
-			relativePath: rel,
-			expectedRevision: expectedRevision ?? existing.meta.revision,
-			actualRevision: existing.meta.revision,
-			expectedHash,
-			actualHash: existing.sha256,
-			message: "磁盘上的 node.json 已被外部修改（内容哈希不符），已拒绝覆盖"
-		});
-	} else if ((expected.expectedRevision ?? null) !== null && (expected.expectedRevision ?? 0) > 0) throw new RepositoryError("node_missing", `节点元数据不见了：${rel}`, { relativePath: rel });
-	const now = isoFromMs(Date.now());
-	const next = {
-		...meta,
-		revision: (existing?.meta.revision ?? meta.revision ?? 1) + (existing ? 1 : 0),
-		updatedAt: expected.touch === false ? meta.updatedAt : now
-	};
-	if (!existing && next.revision < 1) next.revision = 1;
-	const text = serializeJson(next);
-	await writeTextAtomic(vfs, rel, text);
-	return {
-		meta: next,
-		relativePath: nodeRel,
-		sha256: sha256Hex(text),
-		text
-	};
-}
-//#endregion
-//#region src/vendor/upstream/data/uuid.ts
-/**
-* UUID v7 形状的标识生成
-*
-* **正式知识库的 ID 一律由 Rust 发号**（UUIDv7，时间有序）。
-* 前端只在两个不该碰持久层的场景里需要自己造 ID：
-* 1. 浏览器演示后端（localStorage，不是便携知识库）；
-* 2. 导入图交换格式时给重号/缺失的 ID 重新编号（导入的旧文件里可能是 n1 这类顺序 ID）。
-*
-* 因此这里刻意不做任何 ID 分配策略，只生成不与已有值冲突的字符串。
-*/
-function randomBytes$1(length) {
-	const bytes = new Uint8Array(length);
-	const cryptoApi = globalThis.crypto;
-	if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
-		cryptoApi.getRandomValues(bytes);
-		return bytes;
-	}
-	for (let i = 0; i < length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-	return bytes;
-}
-function hex(bytes) {
-	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-/**
-* 生成 UUIDv7 形状的字符串：前 48 位是毫秒时间戳，后面是随机位。
-* 形状与 Rust 侧一致，便于导入导出后人工辨认（`isUuid` 只检查形状，不解释内容）。
-*/
-function newUuid(now = Date.now()) {
-	const timeHex = (Math.max(0, Math.trunc(now)) % 2 ** 48).toString(16).padStart(12, "0");
-	const randHex = hex(randomBytes$1(10));
-	return `${timeHex.slice(0, 8)}-${timeHex.slice(8, 12)}-${`7${randHex.slice(0, 3)}`}-${`${(Number.parseInt(randHex.slice(3, 4), 16) & 3 | 8).toString(16)}${randHex.slice(4, 7)}`}-${randHex.slice(7, 19)}`;
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/relations.ts
-/**
-* `relations.json` 的读写（只存出边）
-*
-* `A → B` 表示 A 依赖 B，这条边只写进 **A 的** `relations.json`（设计 §4.4）。
-* 这样新增/删除关系只动一个节点目录，复制节点时「我依赖什么」随节点一起走，
-* 也不需要维护双写一致性；代价是入边要在扫描时反向计算。
-*
-* 写入一律带修订号 + 哈希守卫：文件被外部改过时返回
-* `external_change_conflict`，而不是把别人的修改盖掉。
-*/
-/** 读 `relations.json`；缺失时返回空文件（没有出边是常态，不是错误） */
-async function readRelations(vfs, nodeRel, nodeId) {
-	const rel = relationsFile(nodeRel);
-	let text = null;
-	try {
-		text = await vfs.read(rel);
-	} catch {
-		text = null;
-	}
-	if (text === null) return {
-		file: emptyRelations(nodeId),
-		sha256: ""
-	};
-	return {
-		file: parseRelationsFile(text, rel),
-		sha256: sha256Hex(text)
-	};
-}
-/**
-* 写 `relations.json`（原子替换）。
-*
-* `expectedRevision` / `expectedHash` 为 null 表示调用方刚读过、明确要覆盖
-* （本模块内部的所有改边操作都属于这一类）。
-*/
-async function writeRelations(vfs, nodeRel, file, expected = {}) {
-	const rel = relationsFile(nodeRel);
-	const current = await readRelations(vfs, nodeRel, file.nodeId);
-	const hasFile = current.sha256 !== "";
-	const expectedRevision = expected.expectedRevision ?? null;
-	const expectedHash = expected.expectedHash ?? null;
-	if (hasFile) {
-		if (expectedRevision !== null && expectedRevision !== current.file.revision) throw externalChangeConflict({
-			relativePath: rel,
-			expectedRevision,
-			actualRevision: current.file.revision,
-			expectedHash,
-			actualHash: current.sha256,
-			message: "磁盘上的 relations.json 已被外部修改（修订号不符），已拒绝覆盖"
-		});
-		if (expectedHash !== null && expectedHash !== current.sha256) throw externalChangeConflict({
-			relativePath: rel,
-			expectedRevision: expectedRevision ?? current.file.revision,
-			actualRevision: current.file.revision,
-			expectedHash,
-			actualHash: current.sha256,
-			message: "磁盘上的 relations.json 已被外部修改（内容哈希不符），已拒绝覆盖"
-		});
-	}
-	const next = {
-		...file,
-		revision: hasFile ? Math.max(file.revision, current.file.revision + 1) : Math.max(1, file.revision)
-	};
-	const text = serializeJson(next);
-	await writeTextAtomic(vfs, rel, text);
-	return {
-		file: next,
-		sha256: sha256Hex(text)
-	};
-}
-/** 内部：读改写一次（revision 自增），`mutate` 里改 `outgoing` */
-async function mutateRelations(vfs, nodeRel, nodeId, mutate) {
-	const current = await readRelations(vfs, nodeRel, nodeId);
-	const file = { ...current.file };
-	if (file.nodeId !== nodeId) file.nodeId = nodeId;
-	mutate(file);
-	return (await writeRelations(vfs, nodeRel, file, {
-		expectedRevision: current.sha256 === "" ? null : current.file.revision,
-		expectedHash: current.sha256 === "" ? null : current.sha256
-	})).file;
-}
-/** 新增一条出边；同一目标 + 同一类型的重复边直接返回已有的那条 */
-async function addEdge$1(vfs, nodeRel, nodeId, input) {
-	const relationType = input.relationType?.trim() || "prerequisite";
-	let saved = null;
-	const file = await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
-		const existing = draft.outgoing.find((edge) => edge.toNodeId === input.toNodeId && edge.type === relationType);
-		if (existing) {
-			saved = existing;
-			return;
-		}
-		const now = isoFromMs(Date.now());
-		const edge = {
-			id: input.edgeId ?? newUuid(),
-			toNodeId: input.toNodeId,
-			type: relationType,
-			description: input.description ?? "",
-			toTitleSnapshot: input.toTitle,
-			createdAt: now,
-			updatedAt: now,
-			evidence: []
-		};
-		draft.outgoing.push(edge);
-		saved = edge;
-	});
-	const edge = saved ?? file.outgoing.find((item) => item.toNodeId === input.toNodeId);
-	if (!edge) throw new RepositoryError("internal", "写入关系失败");
-	return edge;
-}
-async function removeEdge$1(vfs, nodeRel, nodeId, edgeId) {
-	let removed = false;
-	await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
-		const index = draft.outgoing.findIndex((edge) => edge.id === edgeId);
-		if (index < 0) return;
-		draft.outgoing.splice(index, 1);
-		removed = true;
-	});
-	return removed;
-}
-function evidenceToFile(evidence) {
-	return {
-		id: evidence.id,
-		threadId: evidence.threadId,
-		messageId: evidence.messageId,
-		snippet: evidence.snippet,
-		question: evidence.question,
-		createdAt: isoFromMs(evidence.createdAt)
-	};
-}
-/** 把一段选中文字记到某条关系上（来源记录） */
-async function addEvidence(vfs, nodeRel, nodeId, edgeId, input) {
-	const now = Date.now();
-	const record = {
-		id: newUuid(now),
-		threadId: input.threadId ?? null,
-		messageId: input.messageId ?? null,
-		snippet: input.snippet,
-		question: input.question ?? "",
-		createdAt: now
-	};
-	let saved = false;
-	await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
-		const edge = draft.outgoing.find((item) => item.id === edgeId);
-		if (!edge) return;
-		edge.evidence.push(evidenceToFile(record));
-		saved = true;
-	});
-	if (!saved) throw new RepositoryError("not_found", `关系不存在：${edgeId}`);
-	return record;
-}
-//#endregion
-//#region src/vendor/upstream/data/v2/resources.ts
-function fileToResource(nodeId, entry) {
-	return {
-		id: entry.id,
-		nodeId,
-		resourceType: entry.kind,
-		relativePath: entry.relativePath,
-		sourceUrl: entry.url,
-		originalName: entry.originalName,
-		displayName: entry.displayName,
-		mimeType: entry.mimeType,
-		byteLength: entry.byteLength,
-		sha256: entry.sha256,
-		description: entry.description,
-		sortOrder: entry.sortOrder,
-		createdAt: parseIsoMs(entry.createdAt),
-		updatedAt: parseIsoMs(entry.updatedAt)
-	};
-}
-/** 读 `resources.json`；缺失时返回空文件（不是错误：没有登记资料是常态） */
-async function readResourcesFile(vfs, nodeRel, nodeId) {
-	const rel = resourcesFile(nodeRel);
-	let text = null;
-	try {
-		text = await vfs.read(rel);
-	} catch {
-		text = null;
-	}
-	if (text === null) {
-		const file = emptyResources(nodeId);
-		const rendered = serializeJson(file);
-		return {
-			file,
-			sha256: sha256Hex(rendered),
-			text: rendered
-		};
-	}
-	return {
-		file: parseResourcesFile(text, rel),
-		sha256: sha256Hex(text),
-		text
-	};
-}
-async function listResources(vfs, nodeRel, nodeId) {
-	const { file } = await readResourcesFile(vfs, nodeRel, nodeId);
-	return file.entries.map((entry) => fileToResource(nodeId, entry)).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
 }
 //#endregion
 //#region src/host/graph.ts
@@ -1176,6 +308,105 @@ function neighborhood(snapshot, nodeId) {
 		edges
 	};
 }
+//#endregion
+//#region src/host/node-vfs.ts
+/**
+* 真实磁盘上的 `Vfs`（v2 开放文件模型只需要「读一个相对路径 / 列一层目录」这几件事）。
+*
+* 语义与上游 `MemoryVfs`（src/data/v2/fs.ts:60）逐条对齐：
+* - `read` 对不存在或不是文件都抛 `not_found`；
+* - `list` 只列直接子项、按名字排序、不跟随符号链接；
+* - `write` 自动补齐父目录；`remove` 递归且缺失不报错；`mkdir` 递归且已存在不报错。
+*
+* 写入额外走「同目录临时文件 → rename」，避免中途崩掉留下半个文件
+* （上游 `writeTextAtomic` 已经写了一遍临时文件，这里再保证一次替换的完整性）。
+*/
+let atomicSeq = 0;
+var NodeVfs = class {
+	root;
+	constructor(root) {
+		this.root = root;
+	}
+	/** 相对路径 → 绝对路径。逃出知识库根的写法一律拒绝，而不是悄悄修正。 */
+	absolute(rel) {
+		if (escapesLibrary(rel)) throw new RepositoryError("node_outside_library", `路径逃出知识库根目录：${rel}`, { relativePath: rel });
+		const norm = normalizeRel(rel);
+		return norm === "" ? this.root : path.join(this.root, ...norm.split("/"));
+	}
+	async read(rel) {
+		const norm = normalizeRel(rel);
+		const abs = this.absolute(norm);
+		try {
+			return await readFile(abs, "utf8");
+		} catch (error) {
+			throw new RepositoryError("not_found", `${error.code === "EISDIR" ? "目录不是文件" : "文件不存在"}：${norm}`, { relativePath: norm });
+		}
+	}
+	async write(rel, text) {
+		const norm = normalizeRel(rel);
+		if (norm === "") throw new RepositoryError("invalid_input", "不能写到知识库根目录本身");
+		const abs = this.absolute(norm);
+		await mkdir(path.dirname(abs), { recursive: true });
+		atomicSeq += 1;
+		const tmp = `${abs}.${process.pid.toString(36)}.${atomicSeq.toString(36)}.kn-tmp`;
+		await writeFile(tmp, text, "utf8");
+		await rm(abs, { force: true }).catch(() => void 0);
+		await rename(tmp, abs);
+	}
+	async exists(rel) {
+		const abs = this.absolute(rel);
+		try {
+			await stat(abs);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	async list(rel) {
+		const norm = normalizeRel(rel);
+		const abs = this.absolute(norm);
+		let entries;
+		try {
+			entries = await readdir(abs, { withFileTypes: true });
+		} catch {
+			throw new RepositoryError("not_found", `目录不存在：${norm}`, { relativePath: norm });
+		}
+		const out = [];
+		for (const entry of entries) {
+			if (entry.isDirectory()) {
+				out.push({
+					name: entry.name,
+					kind: "dir",
+					byteLength: 0,
+					modifiedMs: 0
+				});
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			const info = await stat(path.join(abs, entry.name)).catch(() => null);
+			out.push({
+				name: entry.name,
+				kind: "file",
+				byteLength: info?.size ?? 0,
+				modifiedMs: info?.mtimeMs ?? 0
+			});
+		}
+		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+	async remove(rel) {
+		const norm = normalizeRel(rel);
+		if (norm === "") throw new RepositoryError("invalid_input", "拒绝删除知识库根目录本身");
+		await rm(this.absolute(norm), {
+			recursive: true,
+			force: true
+		});
+	}
+	async mkdir(rel) {
+		const norm = normalizeRel(rel);
+		if (norm === "") return;
+		await mkdir(this.absolute(norm), { recursive: true });
+	}
+};
 //#endregion
 //#region src/host/node-conversation-file.ts
 /** Read the complete plugin-owned index, refusing damaged records. */
@@ -2161,7 +1392,7 @@ async function readGraph(base) {
 * @param now - 时间戳。
 * @returns 结果；重复边会被幂等返回。
 */
-async function addEdge(root, input, now = Date.now()) {
+async function addEdge$1(root, input, now = Date.now()) {
 	const base = assertRoot(root);
 	const library = await readLibrary(base, { withNotes: false });
 	if (library === void 0) return {
@@ -2235,7 +1466,7 @@ async function addEdge(root, input, now = Date.now()) {
 * @param edgeId - 边 id。
 * @returns 结果。
 */
-async function removeEdge(root, edgeId) {
+async function removeEdge$1(root, edgeId) {
 	const base = assertRoot(root);
 	const graph = await readGraph(base);
 	const edge = graph.edges.find((item) => item.id === edgeId);
@@ -2295,105 +1526,14 @@ async function removeNode(root, input) {
 		title: node.title
 	};
 }
-//#endregion
-//#region src/host/node-vfs.ts
-/**
-* 真实磁盘上的 `Vfs`（v2 开放文件模型只需要「读一个相对路径 / 列一层目录」这几件事）。
-*
-* 语义与上游 `MemoryVfs`（src/data/v2/fs.ts:60）逐条对齐：
-* - `read` 对不存在或不是文件都抛 `not_found`；
-* - `list` 只列直接子项、按名字排序、不跟随符号链接；
-* - `write` 自动补齐父目录；`remove` 递归且缺失不报错；`mkdir` 递归且已存在不报错。
-*
-* 写入额外走「同目录临时文件 → rename」，避免中途崩掉留下半个文件
-* （上游 `writeTextAtomic` 已经写了一遍临时文件，这里再保证一次替换的完整性）。
-*/
-let atomicSeq = 0;
-var NodeVfs = class {
-	root;
-	constructor(root) {
-		this.root = root;
-	}
-	/** 相对路径 → 绝对路径。逃出知识库根的写法一律拒绝，而不是悄悄修正。 */
-	absolute(rel) {
-		if (escapesLibrary(rel)) throw new RepositoryError("node_outside_library", `路径逃出知识库根目录：${rel}`, { relativePath: rel });
-		const norm = normalizeRel(rel);
-		return norm === "" ? this.root : path.join(this.root, ...norm.split("/"));
-	}
-	async read(rel) {
-		const norm = normalizeRel(rel);
-		const abs = this.absolute(norm);
-		try {
-			return await readFile(abs, "utf8");
-		} catch (error) {
-			throw new RepositoryError("not_found", `${error.code === "EISDIR" ? "目录不是文件" : "文件不存在"}：${norm}`, { relativePath: norm });
-		}
-	}
-	async write(rel, text) {
-		const norm = normalizeRel(rel);
-		if (norm === "") throw new RepositoryError("invalid_input", "不能写到知识库根目录本身");
-		const abs = this.absolute(norm);
-		await mkdir(path.dirname(abs), { recursive: true });
-		atomicSeq += 1;
-		const tmp = `${abs}.${process.pid.toString(36)}.${atomicSeq.toString(36)}.kn-tmp`;
-		await writeFile(tmp, text, "utf8");
-		await rm(abs, { force: true }).catch(() => void 0);
-		await rename(tmp, abs);
-	}
-	async exists(rel) {
-		const abs = this.absolute(rel);
-		try {
-			await stat(abs);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-	async list(rel) {
-		const norm = normalizeRel(rel);
-		const abs = this.absolute(norm);
-		let entries;
-		try {
-			entries = await readdir(abs, { withFileTypes: true });
-		} catch {
-			throw new RepositoryError("not_found", `目录不存在：${norm}`, { relativePath: norm });
-		}
-		const out = [];
-		for (const entry of entries) {
-			if (entry.isDirectory()) {
-				out.push({
-					name: entry.name,
-					kind: "dir",
-					byteLength: 0,
-					modifiedMs: 0
-				});
-				continue;
-			}
-			if (!entry.isFile()) continue;
-			const info = await stat(path.join(abs, entry.name)).catch(() => null);
-			out.push({
-				name: entry.name,
-				kind: "file",
-				byteLength: info?.size ?? 0,
-				modifiedMs: info?.mtimeMs ?? 0
-			});
-		}
-		return out.sort((a, b) => a.name.localeCompare(b.name));
-	}
-	async remove(rel) {
-		const norm = normalizeRel(rel);
-		if (norm === "") throw new RepositoryError("invalid_input", "拒绝删除知识库根目录本身");
-		await rm(this.absolute(norm), {
-			recursive: true,
-			force: true
-		});
-	}
-	async mkdir(rel) {
-		const norm = normalizeRel(rel);
-		if (norm === "") return;
-		await mkdir(this.absolute(norm), { recursive: true });
-	}
-};
+/** Read only the relation file for a known node, without scanning other documents. */
+async function readNodeRelations(root, id) {
+	const graph = await readGraph(assertRoot(root));
+	return {
+		prerequisites: graph.edges.filter((edge) => edge.fromId === id),
+		dependents: graph.edges.filter((edge) => edge.toId === id)
+	};
+}
 //#endregion
 //#region src/host/v3/adapter.ts
 /**
@@ -3212,6 +2352,617 @@ function takeCreationQuota(sessionId, now = Date.now()) {
 	};
 }
 //#endregion
+//#region src/vendor/upstream/data/uuid.ts
+/**
+* UUID v7 形状的标识生成
+*
+* **正式知识库的 ID 一律由 Rust 发号**（UUIDv7，时间有序）。
+* 前端只在两个不该碰持久层的场景里需要自己造 ID：
+* 1. 浏览器演示后端（localStorage，不是便携知识库）；
+* 2. 导入图交换格式时给重号/缺失的 ID 重新编号（导入的旧文件里可能是 n1 这类顺序 ID）。
+*
+* 因此这里刻意不做任何 ID 分配策略，只生成不与已有值冲突的字符串。
+*/
+function randomBytes$1(length) {
+	const bytes = new Uint8Array(length);
+	const cryptoApi = globalThis.crypto;
+	if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+		cryptoApi.getRandomValues(bytes);
+		return bytes;
+	}
+	for (let i = 0; i < length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+	return bytes;
+}
+function hex(bytes) {
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+/**
+* 生成 UUIDv7 形状的字符串：前 48 位是毫秒时间戳，后面是随机位。
+* 形状与 Rust 侧一致，便于导入导出后人工辨认（`isUuid` 只检查形状，不解释内容）。
+*/
+function newUuid(now = Date.now()) {
+	const timeHex = (Math.max(0, Math.trunc(now)) % 2 ** 48).toString(16).padStart(12, "0");
+	const randHex = hex(randomBytes$1(10));
+	return `${timeHex.slice(0, 8)}-${timeHex.slice(8, 12)}-${`7${randHex.slice(0, 3)}`}-${`${(Number.parseInt(randHex.slice(3, 4), 16) & 3 | 8).toString(16)}${randHex.slice(4, 7)}`}-${randHex.slice(7, 19)}`;
+}
+//#endregion
+//#region src/vendor/upstream/data/v2/schema.ts
+/**
+* v2 开放文件模型：解析、校验与构造（纯函数）
+*
+* 对应契约 §1 的六个 JSON 文件与 §2 的错误码，与 Rust `src-tauri/src/v2/schema.rs` 同构。
+*
+* 三条纪律：
+* 1. **未知字段原样保留**：解析时把已知字段摘出来，其余字段用 `...extra` 放回对象，
+*    重新序列化后用户/别的工具写进去的扩展字段一个都不会丢；
+* 2. **错误码固定**：`format` / `formatVersion` 不对是 `metadata_unsupported`，
+*    解析失败与必填字段类型错是 `metadata_invalid`（契约 §2）；
+* 3. **不做善意修正**：字段类型不对就报错，绝不「顺手」把数字当字符串用。
+*    坏文件要如实显示为坏文件，而不是被静默改写。
+*/
+const NODE_FORMAT = "knowledgenet-node";
+const RELATIONS_FORMAT = "knowledgenet-relations";
+/**
+* 笔记记账文件（与 Rust `docs/v2-deviations.md` D5 同构）。
+*
+* 文档修订号描述的是**正文文件**的修订，而 `node.json` 的 `revision` 描述的是
+* **节点元数据**的修订；用一个数字表示两件事，会出现「改了标题导致笔记保存报冲突」
+* 这种莫名其妙的交互。因此正文指纹单独记在
+* `.meta/knowledgenet/notes-index.json`，坏了直接重建（它是可推导的缓存）。
+*/
+const NOTES_INDEX_FORMAT = "knowledgenet-notes-index";
+function emptyNotesIndex(nodeId) {
+	return {
+		format: NOTES_INDEX_FORMAT,
+		formatVersion: 1,
+		nodeId,
+		entries: []
+	};
+}
+function parseNotesIndexFile(text, relativePath = null) {
+	const what = "notes-index.json";
+	const raw = parseJsonRecord(text, what, relativePath);
+	requireFormat(raw, what, NOTES_INDEX_FORMAT, 1, relativePath);
+	const { format, formatVersion, nodeId, entries, ...extra } = raw;
+	const parsed = [];
+	for (const item of requireArray(entries, what, "entries", relativePath)) {
+		const { relativePath: docPath, sha256, byteLength, revision, modifiedAt, ...entryExtra } = asRecord(item, `${what} 的 entries 条目`, relativePath);
+		parsed.push({
+			relativePath: requireString(docPath, what, "entries[].relativePath", relativePath),
+			sha256: requireString(sha256 ?? "", what, "entries[].sha256", relativePath),
+			byteLength: requireInt(byteLength ?? 0, what, "entries[].byteLength", relativePath),
+			revision: requireInt(revision ?? 0, what, "entries[].revision", relativePath),
+			modifiedAt: typeof modifiedAt === "number" && Number.isFinite(modifiedAt) ? modifiedAt : 0,
+			...entryExtra
+		});
+	}
+	return {
+		format: NOTES_INDEX_FORMAT,
+		formatVersion: 1,
+		nodeId: requireUuid(nodeId, what, "nodeId", relativePath),
+		entries: parsed,
+		...extra
+	};
+}
+const LEARN_STATUSES = [
+	"todo",
+	"learning",
+	"done"
+];
+/**
+* 元数据错误。
+*
+* `parsePosition` 只在 JSON 语法错误时有值（来自解析器的位置信息），
+* 界面据此可以直接把光标指到出错的那一列；字段类型错误没有位置可言。
+*/
+var MetadataError = class extends Error {
+	code;
+	what;
+	relativePath;
+	parsePosition;
+	constructor(code, message, options) {
+		super(message);
+		this.name = "MetadataError";
+		this.code = code;
+		this.what = options.what;
+		this.relativePath = options.relativePath ?? null;
+		this.parsePosition = options.parsePosition ?? null;
+	}
+};
+function invalid(what, detail, relativePath) {
+	throw new MetadataError("metadata_invalid", `${what}：${detail}`, {
+		what,
+		relativePath: relativePath ?? null
+	});
+}
+function unsupported(what, detail, relativePath) {
+	throw new MetadataError("metadata_unsupported", `${what}：${detail}`, {
+		what,
+		relativePath: relativePath ?? null
+	});
+}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** ID 形状检查（UUIDv7 也是 UUID）。只做形状判断，不解释内容。 */
+function isUuidLike(value) {
+	return typeof value === "string" && UUID_RE.test(value);
+}
+function asRecord(value, what, rel) {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) invalid(what, "顶层必须是一个 JSON 对象", rel);
+	return value;
+}
+/** 解析 JSON 文本；语法错误报 `metadata_invalid` 并带上解析位置 */
+function parseJsonRecord(text, what, relativePath) {
+	let raw;
+	try {
+		raw = JSON.parse(text);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const position = /position (\d+)/i.exec(message)?.[1] ?? null;
+		throw new MetadataError("metadata_invalid", `${what}不是合法的 JSON：${message}`, {
+			what,
+			relativePath: relativePath ?? null,
+			parsePosition: position
+		});
+	}
+	return asRecord(raw, what, relativePath);
+}
+/**
+* 校验 `format` 与 `formatVersion`。
+*
+* 两者任一不匹配都是 `metadata_unsupported`：这通常意味着文件属于别的工具，
+* 或属于更新版本的 KnowledgeNet——用户需要的是「升级应用 / 换个工具」，
+* 而不是一句「文件坏了」。
+*/
+function requireFormat(raw, what, expectedFormat, expectedVersion, rel) {
+	if (raw.format !== expectedFormat) unsupported(what, `format 应为 ${expectedFormat}，实际是 ${JSON.stringify(raw.format ?? null)}`, rel);
+	const version = raw.formatVersion;
+	if (typeof version !== "number" || !Number.isInteger(version)) invalid(what, "formatVersion 必须是整数", rel);
+	if (version !== expectedVersion) unsupported(what, `formatVersion 应为 ${expectedVersion}，实际是 ${version}`, rel);
+}
+function requireString(value, what, field, rel) {
+	if (typeof value !== "string") invalid(what, `${field} 必须是字符串`, rel);
+	return value;
+}
+function requireIsoString(value, what, field, rel) {
+	const text = requireString(value, what, field, rel);
+	if (text.trim() === "") invalid(what, `${field} 不能为空`, rel);
+	return text;
+}
+function requireInt(value, what, field, rel, min = 0) {
+	if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) invalid(what, `${field} 必须是整数`, rel);
+	if (value < min) invalid(what, `${field} 不能小于 ${min}`, rel);
+	return value;
+}
+function requireUuid(value, what, field, rel) {
+	if (!isUuidLike(value)) invalid(what, `${field} 必须是 UUID`, rel);
+	return value;
+}
+function requireStringArray(value, what, field, rel) {
+	if (value === void 0 || value === null) return [];
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) invalid(what, `${field} 必须是字符串数组`, rel);
+	return value;
+}
+function requireArray(value, what, field, rel) {
+	if (value === void 0 || value === null) return [];
+	if (!Array.isArray(value)) invalid(what, `${field} 必须是数组`, rel);
+	return value;
+}
+function optionalString(value, what, field, rel) {
+	if (value === void 0 || value === null) return null;
+	if (typeof value !== "string") invalid(what, `${field} 必须是字符串或 null`, rel);
+	return value;
+}
+/** 节点主文档必须是节点目录内的规范化相对路径 */
+function validatePrimaryDocument(rel) {
+	if (typeof rel !== "string" || rel.trim() === "") throw new RepositoryError("invalid_input", "主文档路径不能为空");
+	if (escapesLibrary(rel)) throw new RepositoryError("node_outside_library", `主文档路径必须是节点目录内的相对路径：${rel}`, { relativePath: rel });
+	return normalizeRel(rel);
+}
+function newNodeMeta(input) {
+	return {
+		format: NODE_FORMAT,
+		formatVersion: 1,
+		id: input.id,
+		revision: 1,
+		title: input.title,
+		aliases: input.aliases ?? [],
+		status: input.status ?? "todo",
+		primaryDocument: input.primaryDocument === void 0 || input.primaryDocument === null ? null : validatePrimaryDocument(input.primaryDocument),
+		createdAt: input.now,
+		updatedAt: input.now,
+		extensions: input.extensions ?? {}
+	};
+}
+function parseNodeMeta(text, relativePath = null) {
+	const what = "node.json";
+	const raw = parseJsonRecord(text, what, relativePath);
+	requireFormat(raw, what, NODE_FORMAT, 1, relativePath);
+	const { format, formatVersion, id, revision, title, aliases, status, primaryDocument, createdAt, updatedAt, extensions, ...extra } = raw;
+	let primary = null;
+	if (primaryDocument !== void 0 && primaryDocument !== null) {
+		if (typeof primaryDocument !== "string") invalid(what, "primaryDocument 必须是字符串或 null", relativePath);
+		if (primaryDocument.trim() !== "") {
+			if (escapesLibrary(primaryDocument)) invalid(what, `primaryDocument 必须是节点内的相对路径：${primaryDocument}`, relativePath);
+			primary = normalizeRel(primaryDocument);
+		}
+	}
+	const rawStatus = status === void 0 || status === null ? "todo" : status;
+	if (typeof rawStatus !== "string" || !LEARN_STATUSES.includes(rawStatus)) invalid(what, `status 必须是 ${LEARN_STATUSES.join(" / ")} 之一`, relativePath);
+	const extensionsRaw = extensions === void 0 || extensions === null ? {} : asRecord(extensions, what, relativePath);
+	return {
+		format: NODE_FORMAT,
+		formatVersion: 1,
+		id: requireUuid(id, what, "id", relativePath),
+		revision: requireInt(revision, what, "revision", relativePath),
+		title: requireString(title, what, "title", relativePath),
+		aliases: requireStringArray(aliases, what, "aliases", relativePath),
+		status: rawStatus,
+		primaryDocument: primary,
+		createdAt: requireIsoString(createdAt, what, "createdAt", relativePath),
+		updatedAt: requireIsoString(updatedAt, what, "updatedAt", relativePath),
+		extensions: extensionsRaw,
+		...extra
+	};
+}
+function emptyRelations(nodeId) {
+	return {
+		format: RELATIONS_FORMAT,
+		formatVersion: 1,
+		nodeId,
+		revision: 1,
+		outgoing: []
+	};
+}
+function parseEvidence(value, what, rel) {
+	const { id, threadId, messageId, snippet, question, createdAt, ...extra } = asRecord(value, `${what} 的 evidence 条目`, rel);
+	return {
+		id: requireUuid(id, what, "evidence.id", rel),
+		threadId: optionalString(threadId, what, "evidence.threadId", rel),
+		messageId: optionalString(messageId, what, "evidence.messageId", rel),
+		snippet: requireString(snippet ?? "", what, "evidence.snippet", rel),
+		question: requireString(question ?? "", what, "evidence.question", rel),
+		createdAt: requireIsoString(createdAt, what, "evidence.createdAt", rel),
+		...extra
+	};
+}
+function parseRelationsFile(text, relativePath = null) {
+	const what = "relations.json";
+	const raw = parseJsonRecord(text, what, relativePath);
+	requireFormat(raw, what, RELATIONS_FORMAT, 1, relativePath);
+	const { format, formatVersion, nodeId, revision, outgoing, ...extra } = raw;
+	const edges = [];
+	for (const item of requireArray(outgoing, what, "outgoing", relativePath)) {
+		const { id, toNodeId, type, description, toTitleSnapshot, createdAt, updatedAt, evidence, ...edgeExtra } = asRecord(item, `${what} 的 outgoing 条目`, relativePath);
+		edges.push({
+			id: requireUuid(id, what, "outgoing[].id", relativePath),
+			toNodeId: requireUuid(toNodeId, what, "outgoing[].toNodeId", relativePath),
+			type: requireString(type ?? "prerequisite", what, "outgoing[].type", relativePath),
+			description: requireString(description ?? "", what, "outgoing[].description", relativePath),
+			toTitleSnapshot: requireString(toTitleSnapshot ?? "", what, "outgoing[].toTitleSnapshot", relativePath),
+			createdAt: requireIsoString(createdAt, what, "outgoing[].createdAt", relativePath),
+			updatedAt: requireIsoString(updatedAt, what, "outgoing[].updatedAt", relativePath),
+			evidence: requireArray(evidence, what, "outgoing[].evidence", relativePath).map((e) => parseEvidence(e, what, relativePath)),
+			...edgeExtra
+		});
+	}
+	return {
+		format: RELATIONS_FORMAT,
+		formatVersion: 1,
+		nodeId: requireUuid(nodeId, what, "nodeId", relativePath),
+		revision: requireInt(revision, what, "revision", relativePath),
+		outgoing: edges,
+		...extra
+	};
+}
+/** 统一的落盘文本：两空格缩进 + 结尾换行，便于人工阅读与 diff */
+function serializeJson(value) {
+	return `${JSON.stringify(value, null, 2)}\n`;
+}
+/** 毫秒时间戳 -> ISO 8601 UTC 字符串（与 Rust `iso_from_ms` 一致） */
+function isoFromMs(ms) {
+	return new Date(Number.isFinite(ms) ? ms : 0).toISOString();
+}
+/** 安全化文件夹名：去掉 Windows 非法字符与首尾空白（Rust `sanitize_folder_name` 的对应物） */
+function sanitizeFolderName(title, fallback = "未命名") {
+	const cleaned = String(title ?? "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").replace(/^[.\s]+/, "").replace(/[.\s]+$/, "").trim();
+	if (cleaned === "") return fallback;
+	if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(cleaned)) return `${cleaned}_`;
+	return cleaned.slice(0, 80);
+}
+/** 在已有名字集合里找一个不冲突的名字：`名字`、`名字 2`、`名字 3`… */
+function uniqueNameIn(base, existing) {
+	const taken = new Set(existing);
+	if (!taken.has(base)) return base;
+	for (let index = 2; index < 1e4; index += 1) {
+		const candidate = `${base} ${index}`;
+		if (!taken.has(candidate)) return candidate;
+	}
+	return `${base} ${Date.now()}`;
+}
+//#endregion
+//#region src/vendor/upstream/data/v2/hash.ts
+/**
+* 纯 TS 的 SHA-256 与字节长度
+*
+* 为什么不用 `node:crypto` 或 WebCrypto：
+* - v2 文件模型要能在浏览器演示模式、Node 测试与 Tauri WebView 里跑同一份代码；
+* - WebCrypto 的 `subtle.digest` 是异步的，而指纹校验散布在同步的校验路径里；
+* - 这里只需要「内容变了指纹就变」的稳定摘要，自己实现 60 行反而最省依赖。
+*
+* 与 Rust 端 `atomic::sha256_of` 的十六进制小写输出一致。
+*/
+const K = new Uint32Array([
+	1116352408,
+	1899447441,
+	3049323471,
+	3921009573,
+	961987163,
+	1508970993,
+	2453635748,
+	2870763221,
+	3624381080,
+	310598401,
+	607225278,
+	1426881987,
+	1925078388,
+	2162078206,
+	2614888103,
+	3248222580,
+	3835390401,
+	4022224774,
+	264347078,
+	604807628,
+	770255983,
+	1249150122,
+	1555081692,
+	1996064986,
+	2554220882,
+	2821834349,
+	2952996808,
+	3210313671,
+	3336571891,
+	3584528711,
+	113926993,
+	338241895,
+	666307205,
+	773529912,
+	1294757372,
+	1396182291,
+	1695183700,
+	1986661051,
+	2177026350,
+	2456956037,
+	2730485921,
+	2820302411,
+	3259730800,
+	3345764771,
+	3516065817,
+	3600352804,
+	4094571909,
+	275423344,
+	430227734,
+	506948616,
+	659060556,
+	883997877,
+	958139571,
+	1322822218,
+	1537002063,
+	1747873779,
+	1955562222,
+	2024104815,
+	2227730452,
+	2361852424,
+	2428436474,
+	2756734187,
+	3204031479,
+	3329325298
+]);
+function rotr(value, bits) {
+	return (value >>> bits | value << 32 - bits) >>> 0;
+}
+/** UTF-8 字节；优先用 TextEncoder（浏览器与 Node 都有），否则手工编码 */
+function utf8Bytes$1(text) {
+	if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
+	const out = [];
+	for (let i = 0; i < text.length; i += 1) {
+		let code = text.charCodeAt(i);
+		if (code >= 55296 && code <= 56319 && i + 1 < text.length) {
+			const next = text.charCodeAt(i + 1);
+			if (next >= 56320 && next <= 57343) {
+				code = (code - 55296) * 1024 + (next - 56320) + 65536;
+				i += 1;
+			}
+		}
+		if (code < 128) out.push(code);
+		else if (code < 2048) out.push(192 | code >> 6, 128 | code & 63);
+		else if (code < 65536) out.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
+		else out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
+	}
+	return new Uint8Array(out);
+}
+/** UTF-8 字节数（不是字符数：中文一个字是 3 个字节） */
+function byteLengthOf(text) {
+	return utf8Bytes$1(text).byteLength;
+}
+/** 十六进制小写 SHA-256 */
+function sha256Hex(text) {
+	const bytes = utf8Bytes$1(text);
+	const bitLength = bytes.length * 8;
+	const total = Math.ceil((bytes.length + 9) / 64) * 64;
+	const buffer = new Uint8Array(total);
+	buffer.set(bytes);
+	buffer[bytes.length] = 128;
+	const view = new DataView(buffer.buffer);
+	view.setUint32(total - 8, Math.floor(bitLength / 4294967296));
+	view.setUint32(total - 4, bitLength >>> 0);
+	let h0 = 1779033703;
+	let h1 = 3144134277;
+	let h2 = 1013904242;
+	let h3 = 2773480762;
+	let h4 = 1359893119;
+	let h5 = 2600822924;
+	let h6 = 528734635;
+	let h7 = 1541459225;
+	const w = new Uint32Array(64);
+	for (let offset = 0; offset < total; offset += 64) {
+		for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
+		for (let i = 16; i < 64; i += 1) {
+			const x = w[i - 15];
+			const y = w[i - 2];
+			const s0 = rotr(x, 7) ^ rotr(x, 18) ^ x >>> 3;
+			const s1 = rotr(y, 17) ^ rotr(y, 19) ^ y >>> 10;
+			w[i] = w[i - 16] + s0 + w[i - 7] + s1 >>> 0;
+		}
+		let a = h0;
+		let b = h1;
+		let c = h2;
+		let d = h3;
+		let e = h4;
+		let f = h5;
+		let g = h6;
+		let h = h7;
+		for (let i = 0; i < 64; i += 1) {
+			const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+			const ch = e & f ^ ~e & g;
+			const t1 = h + s1 + ch + K[i] + w[i] >>> 0;
+			const t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + (a & b ^ a & c ^ b & c) >>> 0;
+			h = g;
+			g = f;
+			f = e;
+			e = d + t1 >>> 0;
+			d = c;
+			c = b;
+			b = a;
+			a = t1 + t2 >>> 0;
+		}
+		h0 = h0 + a >>> 0;
+		h1 = h1 + b >>> 0;
+		h2 = h2 + c >>> 0;
+		h3 = h3 + d >>> 0;
+		h4 = h4 + e >>> 0;
+		h5 = h5 + f >>> 0;
+		h6 = h6 + g >>> 0;
+		h7 = h7 + h >>> 0;
+	}
+	const hex = (value) => value.toString(16).padStart(8, "0");
+	return hex(h0) + hex(h1) + hex(h2) + hex(h3) + hex(h4) + hex(h5) + hex(h6) + hex(h7);
+}
+//#endregion
+//#region src/vendor/upstream/data/v2/fs.ts
+let tempSeq = 0;
+/**
+* 原子写：先写同目录临时文件，再替换目标，最后清掉临时文件。
+*
+* 内存实现里「替换」天然是原子的，但真实磁盘上不是——把顺序固定在这里，
+* 两个后端就都走同一条写路径，Rust 端只是把 `write` 换成
+* 「临时文件 -> flush -> fsync -> rename」。
+*/
+async function writeTextAtomic(vfs, rel, text) {
+	const norm = normalizeRel(rel);
+	tempSeq += 1;
+	const tmp = joinRel(parentRel(norm), `.${baseName(norm)}.tmp-${tempSeq.toString(36)}`);
+	await vfs.write(tmp, text);
+	try {
+		await vfs.write(norm, text);
+	} finally {
+		try {
+			await vfs.remove(tmp);
+		} catch {}
+	}
+}
+/** 取单个文件的目录项（大小/修改时间）；不存在或不是文件时返回 null */
+async function fileEntry(vfs, rel) {
+	const norm = normalizeRel(rel);
+	if (norm === "") return null;
+	try {
+		const entries = await vfs.list(parentRel(norm));
+		const name = baseName(norm);
+		return entries.find((entry) => entry.name === name && entry.kind === "file") ?? null;
+	} catch {
+		return null;
+	}
+}
+//#endregion
+//#region src/vendor/upstream/data/v2/nodeMeta.ts
+/**
+* 节点元数据（`node.json`）的读写与修订/哈希守卫
+*
+* 所有对 `node.json` 的修改都必须经过这里，原因是设计 §5.3 的外部编辑冲突规则：
+* 写之前要同时检查调用方手上的 `revision` 与磁盘文件的 SHA-256，
+* 任何一项不符都返回结构化 `external_change_conflict`，**默认绝不覆盖**。
+*
+* 注意：正文（`note.md`）的修订号**不在** `node.json` 里，而是记在
+* `.meta/knowledgenet/notes-index.json`（见 `notes.ts` 与 `docs/v2-deviations.md` D5）：
+* 节点元数据修订与文档修订是两件事，混在一个数字里会让「改标题」影响「保存正文」。
+*/
+/** 读节点元数据；解析失败原样抛 `MetadataError`，由调用方转成扫描问题或错误码 */
+async function readNodeMeta(vfs, nodeRel) {
+	const rel = nodeMetaFile(nodeRel);
+	let text;
+	try {
+		text = await vfs.read(rel);
+	} catch {
+		throw new RepositoryError("node_missing", `节点目录里没有 ${rel}`, { relativePath: rel });
+	}
+	return {
+		meta: parseNodeMeta(text, rel),
+		relativePath: nodeRel,
+		sha256: sha256Hex(text),
+		text
+	};
+}
+/** 读节点元数据；不存在时返回 null（只用于「可能还没有元数据」的路径） */
+async function readNodeMetaIfExists(vfs, nodeRel) {
+	const rel = nodeMetaFile(nodeRel);
+	if (!await vfs.exists(rel)) return null;
+	return readNodeMeta(vfs, nodeRel);
+}
+/**
+* 写入节点元数据（原子替换），并做修订号 + 哈希守卫。
+*
+* `expectedRevision` / `expectedHash` 为 null 表示调用方明确要求「不管磁盘上是什么，
+* 覆盖它」——只有新建节点与「重新分配 ID」这类不涉及用户内容的场景才允许。
+*/
+async function writeNodeMeta(vfs, nodeRel, meta, expected = {}) {
+	const rel = nodeMetaFile(nodeRel);
+	const existing = await readNodeMetaIfExists(vfs, nodeRel);
+	if (existing) {
+		const expectedRevision = expected.expectedRevision ?? null;
+		const expectedHash = expected.expectedHash ?? null;
+		if (expectedRevision !== null && expectedRevision !== existing.meta.revision) throw externalChangeConflict({
+			relativePath: rel,
+			expectedRevision,
+			actualRevision: existing.meta.revision,
+			expectedHash,
+			actualHash: existing.sha256,
+			message: "磁盘上的 node.json 已被外部修改（修订号不符），已拒绝覆盖"
+		});
+		if (expectedHash !== null && expectedHash !== existing.sha256) throw externalChangeConflict({
+			relativePath: rel,
+			expectedRevision: expectedRevision ?? existing.meta.revision,
+			actualRevision: existing.meta.revision,
+			expectedHash,
+			actualHash: existing.sha256,
+			message: "磁盘上的 node.json 已被外部修改（内容哈希不符），已拒绝覆盖"
+		});
+	} else if ((expected.expectedRevision ?? null) !== null && (expected.expectedRevision ?? 0) > 0) throw new RepositoryError("node_missing", `节点元数据不见了：${rel}`, { relativePath: rel });
+	const now = isoFromMs(Date.now());
+	const next = {
+		...meta,
+		revision: (existing?.meta.revision ?? meta.revision ?? 1) + (existing ? 1 : 0),
+		updatedAt: expected.touch === false ? meta.updatedAt : now
+	};
+	if (!existing && next.revision < 1) next.revision = 1;
+	const text = serializeJson(next);
+	await writeTextAtomic(vfs, rel, text);
+	return {
+		meta: next,
+		relativePath: nodeRel,
+		sha256: sha256Hex(text),
+		text
+	};
+}
+//#endregion
 //#region src/vendor/upstream/data/v2/notes.ts
 /**
 * 主文档（通常是 `note.md`）的按需读写与冲突保护
@@ -3431,6 +3182,157 @@ async function createPrimaryDocument(vfs, nodeRel, nodeId, content = "", documen
 	};
 }
 //#endregion
+//#region src/vendor/upstream/data/v2/relations.ts
+/**
+* `relations.json` 的读写（只存出边）
+*
+* `A → B` 表示 A 依赖 B，这条边只写进 **A 的** `relations.json`（设计 §4.4）。
+* 这样新增/删除关系只动一个节点目录，复制节点时「我依赖什么」随节点一起走，
+* 也不需要维护双写一致性；代价是入边要在扫描时反向计算。
+*
+* 写入一律带修订号 + 哈希守卫：文件被外部改过时返回
+* `external_change_conflict`，而不是把别人的修改盖掉。
+*/
+/** 读 `relations.json`；缺失时返回空文件（没有出边是常态，不是错误） */
+async function readRelations(vfs, nodeRel, nodeId) {
+	const rel = relationsFile(nodeRel);
+	let text = null;
+	try {
+		text = await vfs.read(rel);
+	} catch {
+		text = null;
+	}
+	if (text === null) return {
+		file: emptyRelations(nodeId),
+		sha256: ""
+	};
+	return {
+		file: parseRelationsFile(text, rel),
+		sha256: sha256Hex(text)
+	};
+}
+/**
+* 写 `relations.json`（原子替换）。
+*
+* `expectedRevision` / `expectedHash` 为 null 表示调用方刚读过、明确要覆盖
+* （本模块内部的所有改边操作都属于这一类）。
+*/
+async function writeRelations(vfs, nodeRel, file, expected = {}) {
+	const rel = relationsFile(nodeRel);
+	const current = await readRelations(vfs, nodeRel, file.nodeId);
+	const hasFile = current.sha256 !== "";
+	const expectedRevision = expected.expectedRevision ?? null;
+	const expectedHash = expected.expectedHash ?? null;
+	if (hasFile) {
+		if (expectedRevision !== null && expectedRevision !== current.file.revision) throw externalChangeConflict({
+			relativePath: rel,
+			expectedRevision,
+			actualRevision: current.file.revision,
+			expectedHash,
+			actualHash: current.sha256,
+			message: "磁盘上的 relations.json 已被外部修改（修订号不符），已拒绝覆盖"
+		});
+		if (expectedHash !== null && expectedHash !== current.sha256) throw externalChangeConflict({
+			relativePath: rel,
+			expectedRevision: expectedRevision ?? current.file.revision,
+			actualRevision: current.file.revision,
+			expectedHash,
+			actualHash: current.sha256,
+			message: "磁盘上的 relations.json 已被外部修改（内容哈希不符），已拒绝覆盖"
+		});
+	}
+	const next = {
+		...file,
+		revision: hasFile ? Math.max(file.revision, current.file.revision + 1) : Math.max(1, file.revision)
+	};
+	const text = serializeJson(next);
+	await writeTextAtomic(vfs, rel, text);
+	return {
+		file: next,
+		sha256: sha256Hex(text)
+	};
+}
+/** 内部：读改写一次（revision 自增），`mutate` 里改 `outgoing` */
+async function mutateRelations(vfs, nodeRel, nodeId, mutate) {
+	const current = await readRelations(vfs, nodeRel, nodeId);
+	const file = { ...current.file };
+	if (file.nodeId !== nodeId) file.nodeId = nodeId;
+	mutate(file);
+	return (await writeRelations(vfs, nodeRel, file, {
+		expectedRevision: current.sha256 === "" ? null : current.file.revision,
+		expectedHash: current.sha256 === "" ? null : current.sha256
+	})).file;
+}
+/** 新增一条出边；同一目标 + 同一类型的重复边直接返回已有的那条 */
+async function addEdge(vfs, nodeRel, nodeId, input) {
+	const relationType = input.relationType?.trim() || "prerequisite";
+	let saved = null;
+	const file = await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
+		const existing = draft.outgoing.find((edge) => edge.toNodeId === input.toNodeId && edge.type === relationType);
+		if (existing) {
+			saved = existing;
+			return;
+		}
+		const now = isoFromMs(Date.now());
+		const edge = {
+			id: input.edgeId ?? newUuid(),
+			toNodeId: input.toNodeId,
+			type: relationType,
+			description: input.description ?? "",
+			toTitleSnapshot: input.toTitle,
+			createdAt: now,
+			updatedAt: now,
+			evidence: []
+		};
+		draft.outgoing.push(edge);
+		saved = edge;
+	});
+	const edge = saved ?? file.outgoing.find((item) => item.toNodeId === input.toNodeId);
+	if (!edge) throw new RepositoryError("internal", "写入关系失败");
+	return edge;
+}
+async function removeEdge(vfs, nodeRel, nodeId, edgeId) {
+	let removed = false;
+	await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
+		const index = draft.outgoing.findIndex((edge) => edge.id === edgeId);
+		if (index < 0) return;
+		draft.outgoing.splice(index, 1);
+		removed = true;
+	});
+	return removed;
+}
+function evidenceToFile(evidence) {
+	return {
+		id: evidence.id,
+		threadId: evidence.threadId,
+		messageId: evidence.messageId,
+		snippet: evidence.snippet,
+		question: evidence.question,
+		createdAt: isoFromMs(evidence.createdAt)
+	};
+}
+/** 把一段选中文字记到某条关系上（来源记录） */
+async function addEvidence(vfs, nodeRel, nodeId, edgeId, input) {
+	const now = Date.now();
+	const record = {
+		id: newUuid(now),
+		threadId: input.threadId ?? null,
+		messageId: input.messageId ?? null,
+		snippet: input.snippet,
+		question: input.question ?? "",
+		createdAt: now
+	};
+	let saved = false;
+	await mutateRelations(vfs, nodeRel, nodeId, (draft) => {
+		const edge = draft.outgoing.find((item) => item.id === edgeId);
+		if (!edge) return;
+		edge.evidence.push(evidenceToFile(record));
+		saved = true;
+	});
+	if (!saved) throw new RepositoryError("not_found", `关系不存在：${edgeId}`);
+	return record;
+}
+//#endregion
 //#region src/host/mutate.ts
 /**
 * 写操作（P1）：建前置知识、写笔记。
@@ -3626,7 +3528,7 @@ async function addPrerequisite(context, input, options = {}) {
 		}
 	};
 	if (context.library.storage === "v3") {
-		const added = await addEdge(context.library.root, {
+		const added = await addEdge$1(context.library.root, {
 			fromId: from.id,
 			toId: target.id,
 			type: input.relationType?.trim() || "prerequisite",
@@ -3669,7 +3571,7 @@ async function addPrerequisite(context, input, options = {}) {
 		};
 	}
 	try {
-		const edge = await addEdge$1(context.library.vfs, from.relativePath, from.id, {
+		const edge = await addEdge(context.library.vfs, from.relativePath, from.id, {
 			toNodeId: target.id,
 			toTitle: target.title,
 			relationType: input.relationType?.trim() || "prerequisite",
@@ -3811,100 +3713,6 @@ async function readNote(context, node, maxChars = 6e3) {
 		};
 	}
 }
-/**
-* 边数上限：节点被裁到 400 时，边仍可能成倍于节点（枢纽节点尤其明显）。
-* 超出部分直接截断——图上画不下，模型也不需要。
-*/
-const MAX_EDGES = 4e3;
-/**
-* 载荷字节预算（序列化后）。
-*
-* 为什么放在这里：`maxNodes` 只限制**节点数**，节点很多或说明很长时载荷仍可能到几 MB，
-* 面板首载与模型上下文都要为它付费（审查指出）。超预算就从尾部丢节点重算，直到进预算。
-*/
-const MAX_PAYLOAD_BYTES = 18e5;
-function clampMaxNodes(value) {
-	return Math.min(Math.max(typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 400, 10), 2e3);
-}
-/** 说明超长就截断（加省略号），避免单条说明把载荷撑大 */
-function clipDescription(value) {
-	if (typeof value !== "string" || value.length <= 240) return value;
-	return `${value.slice(0, 240)}…`;
-}
-/** 按上限裁剪节点，并只保留两端都留下的边 */
-function clipGraph(snapshot, maxNodes) {
-	const nodes = snapshot.nodes.slice(0, maxNodes).map(summarizeNode);
-	const kept = new Set(nodes.map((node) => node.id));
-	const allEdges = snapshot.edges.filter((edge) => kept.has(edge.fromId) && kept.has(edge.toId)).map((edge) => {
-		const summary = summarizeEdge(edge);
-		if (typeof summary.description === "string") summary.description = clipDescription(summary.description) ?? "";
-		return summary;
-	});
-	const edges = allEdges.slice(0, MAX_EDGES);
-	return {
-		truncated: snapshot.nodes.length > nodes.length || allEdges.length > edges.length,
-		nodes,
-		edges
-	};
-}
-/** 聚焦谁：显式 rootId 优先，否则第一个学习目标；都没有就不聚焦（二维视图会退化成平铺） */
-function focusOf(snapshot, rootId) {
-	if (typeof rootId === "string" && rootId.trim() !== "") {
-		const found = snapshot.nodes.find((node) => node.id === rootId.trim());
-		if (found !== void 0) return found.id;
-		return null;
-	}
-	const goal = snapshot.goals[0];
-	return goal === void 0 ? null : goal.rootNodeId;
-}
-function graphPayload(context, options = {}) {
-	const snapshot = context.snapshot;
-	const clipped = clipGraph(snapshot, clampMaxNodes(options.maxNodes));
-	const payload = {
-		library: {
-			root: context.library.root,
-			name: context.library.manifest.title,
-			formatVersion: context.library.manifest.formatVersion
-		},
-		focusId: options.focusId ?? focusOf(snapshot, options.rootId),
-		goals: snapshot.goals.map((goal) => ({
-			id: goal.id,
-			title: goal.title,
-			rootNodeId: goal.rootNodeId
-		})),
-		nodes: clipped.nodes,
-		edges: clipped.edges,
-		counts: {
-			nodes: snapshot.nodes.length,
-			edges: snapshot.edges.length,
-			issues: context.library.report.issues.length
-		},
-		issues: context.library.report.issues.slice(0, 5).map((issue) => ({
-			code: issue.code,
-			relativePath: issue.relativePath,
-			detail: issue.detail
-		})),
-		truncated: clipped.truncated,
-		revision: snapshot.revision
-	};
-	if (JSON.stringify(payload).length > 18e5) {
-		let nodes = payload.nodes;
-		let edges = payload.edges;
-		while (nodes.length > 10 && JSON.stringify({
-			...payload,
-			nodes,
-			edges
-		}).length > 18e5) {
-			nodes = nodes.slice(0, Math.max(10, Math.floor(nodes.length * .8)));
-			const kept = new Set(nodes.map((node) => node.id));
-			edges = edges.filter((edge) => kept.has(edge.fromId) && kept.has(edge.toId));
-		}
-		payload.nodes = nodes;
-		payload.edges = edges;
-		payload.truncated = true;
-	}
-	return payload;
-}
 //#endregion
 //#region src/shared/routes.ts
 /**
@@ -3918,80 +3726,550 @@ const GRAPH_API_PATH = "/api/knowledgenet.graph";
 const GRAPH_API_ROUTE = GRAPH_API_PATH.slice(1);
 //#endregion
 //#region src/host/stack.ts
-const ENTER_TOOL = "kn_enter_node";
-const BACK_TOOL = "kn_back";
-function idFromArguments(raw) {
-	if (typeof raw !== "string" || raw.trim() === "") return null;
-	try {
-		const parsed = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) return null;
-		const id = parsed.id;
-		return typeof id === "string" && id.trim() !== "" ? id.trim() : null;
-	} catch {
-		return null;
+function record(value) {
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function payload(content) {
+	if (!Array.isArray(content)) return void 0;
+	for (const raw of content) {
+		const block = record(raw);
+		if (block?.type !== "text" || typeof block.text !== "string") continue;
+		try {
+			const value = record(JSON.parse(block.text));
+			if (value?.ok === true) return value;
+		} catch (error) {}
 	}
 }
-/** 从事件列表折叠出学习栈（栈底在前，栈顶在最后） */
-function foldStack(events) {
-	const last = events.length > 0 ? events[events.length - 1] : null;
-	if (foldCache !== null && foldCache.length === events.length && foldCache.last === last) return foldCache.result;
-	const stack = [];
-	for (const event of events) {
-		if (event === null || typeof event !== "object") continue;
-		if (event.type !== "tool/call") continue;
-		const name = event.data?.name;
-		if (name === ENTER_TOOL) {
-			const id = idFromArguments(event.data?.arguments);
-			if (id === null) continue;
-			const at = stack.indexOf(id);
-			if (at >= 0) stack.splice(at, 1);
-			stack.push(id);
-		} else if (name === BACK_TOOL) stack.pop();
+/** Pair native calls/results and include successful PTC sub-dispatches in log order. */
+function knowledgeResults(events) {
+	const calls = /* @__PURE__ */ new Map();
+	const results = [];
+	const completed = /* @__PURE__ */ new Set();
+	for (let index = 0; index < events.length; index += 1) {
+		const event = events[index];
+		const data = record(event?.data);
+		if (!data) continue;
+		if (event.type === "tool/call" && typeof data.callId === "string" && typeof data.name === "string") calls.set(data.callId, data.name);
+		else if (event.type === "tool/result") {
+			const message = record(data.message);
+			const callId = record(message?.source)?.callId ?? message?.callId;
+			if (typeof callId !== "string" || completed.has(callId)) continue;
+			completed.add(callId);
+			const name = calls.get(callId);
+			if (!name?.startsWith("kn_") || message?.isError === true) continue;
+			const value = payload(message?.content);
+			if (value) results.push({
+				name,
+				value,
+				index
+			});
+		} else if (event.type === "tool/ptc-dispatch" && typeof data.name === "string" && data.name.startsWith("kn_") && data.isError !== true) {
+			const value = payload(data.content);
+			if (value) results.push({
+				name: data.name,
+				value,
+				index
+			});
+		}
 	}
-	foldCache = {
-		length: events.length,
-		last,
-		result: stack
-	};
+	return results;
+}
+/** Fold resolved IDs; unfinished and failed calls never change the stack. */
+function foldStack(events) {
+	const stack = [];
+	for (const { name, value } of knowledgeResults(events)) if (name === "kn_enter_node") {
+		const id = record(value.current)?.id;
+		if (typeof id !== "string" || !id.trim()) continue;
+		const at = stack.indexOf(id);
+		if (at >= 0) stack.splice(at, 1);
+		stack.push(id);
+	} else if (name === "kn_back") stack.pop();
 	return stack;
 }
-/** foldStack 的记忆（长度 + 末事件引用 + 结果）：会话日志只追加，所以这样判等是安全的 */
-let foldCache = null;
-/** 取会话的完整自有事件；拿不到（非 Agent 调用、宿主版本差异）时返回空数组 */
+/** A successful read is a temporary learning target, never a node/session binding. */
+function learningFocusOf(session) {
+	let focus = null;
+	for (const { name, value } of knowledgeResults(eventsOf(session))) {
+		if (name !== "kn_read_node" && name !== "kn_enter_node" && name !== "kn_back") continue;
+		const node = record(name === "kn_read_node" ? value.node : value.current);
+		focus = typeof node?.id === "string" ? node.id : null;
+	}
+	return focus;
+}
+/** Only results after the latest request/turn activate detailed learning context. */
+function currentLearningResults(session) {
+	const events = eventsOf(session);
+	let boundary = -1;
+	for (let index = 0; index < events.length; index += 1) {
+		const event = events[index];
+		if (event?.type === "turn/start") boundary = index;
+		if (event?.type === "user/message") {
+			if (record(record(event.data)?.source)?.form === void 0) boundary = index;
+		}
+	}
+	return knowledgeResults(events).filter((result) => result.index > boundary);
+}
+/** Read this session's durable events without borrowing another session's state. */
 function eventsOf(session) {
-	const snapshotEvents = session?.snapshotEvents;
-	if (typeof snapshotEvents !== "function") return [];
+	const snapshot = session?.snapshotEvents;
+	if (typeof snapshot !== "function") return [];
 	try {
-		const events = snapshotEvents.call(session);
+		const events = snapshot.call(session);
 		return Array.isArray(events) ? events : [];
-	} catch {
+	} catch (error) {
 		return [];
 	}
 }
-/** 会话当前的学习栈 */
 function stackOf(session) {
 	return foldStack(eventsOf(session));
 }
-/** 会话当前的知识点 id（栈顶）；空栈返回 null */
 function currentIdOf(session) {
-	const stack = stackOf(session);
-	return stack.length > 0 ? stack[stack.length - 1] : null;
+	return stackOf(session).at(-1) ?? null;
 }
-/** `kn_enter_node` 之后的新栈（当前这次调用还没落盘，所以要自己算一遍） */
 function stackAfterEnter(session, id) {
-	const stack = [...stackOf(session)];
-	const at = stack.indexOf(id);
-	if (at >= 0) stack.splice(at, 1);
+	const stack = stackOf(session).filter((item) => item !== id);
 	stack.push(id);
 	return stack;
 }
-/** `kn_back` 之后的新栈 */
 function stackAfterBack(session) {
-	const stack = [...stackOf(session)];
+	const stack = stackOf(session);
 	return {
-		previous: stack.length > 0 ? stack.pop() ?? null : null,
+		previous: stack.pop() ?? null,
 		stack
 	};
+}
+//#endregion
+//#region src/host/learning-config.ts
+/** Resolve validated model-query defaults without changing any DSH setting. */
+function resolveLearningConfig(config = {}) {
+	const defaults = {
+		modelMaxNodes: 40,
+		modelMaxEdges: 100,
+		noteMaxChars: 3e3,
+		maxNoteChars: 12e3,
+		searchLimit: 5,
+		relationLimit: 5,
+		relationDescriptionChars: 240
+	};
+	const result = { ...defaults };
+	for (const key of Object.keys(defaults)) {
+		const value = config[key];
+		if (value === void 0 || value === null) continue;
+		if (!Number.isSafeInteger(value) || value < 1) throw new TypeError("KnowledgeNet config." + key + " must be a positive safe integer");
+		result[key] = value;
+	}
+	if (result.noteMaxChars > result.maxNoteChars) throw new TypeError("noteMaxChars must not exceed maxNoteChars");
+	return result;
+}
+/** Validate a paging parameter and apply the configured ceiling. */
+function pageNumber(value, fallback, ceiling, zero = false) {
+	if (value === void 0) return fallback;
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (zero ? 0 : 1)) throw new TypeError("Paging values must be safe integers in range");
+	return Math.min(value, ceiling);
+}
+//#endregion
+//#region src/host/model-tools.ts
+/** Bounded model queries are independent of the graph panel's rendering payload. */
+const output = {
+	schema: { type: "object" },
+	render: (_args, value) => [{
+		type: "text",
+		text: JSON.stringify(value)
+	}]
+};
+const fail$1 = (code, message, extra = {}) => ({
+	ok: false,
+	error: {
+		code,
+		message
+	},
+	...extra
+});
+function summary(node, understood) {
+	return {
+		id: node.id,
+		title: node.title,
+		path: node.relativePath,
+		status: node.status,
+		understood,
+		aliases: node.aliases,
+		revision: node.rev,
+		health: node.adopted ? "needs_adoption" : "ok"
+	};
+}
+function failure(error) {
+	const value = error;
+	return fail$1(error instanceof TypeError ? "invalid_input" : value?.code ?? "library_unavailable", value?.message ?? String(error));
+}
+/** Resolve one target; only title/path discovery needs the metadata snapshot. */
+async function target(args, exec, config) {
+	const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
+	let id = typeof args.id === "string" ? args.id.trim() : "";
+	if (!id) {
+		const context = await openFor(exec, config);
+		if (typeof args.title === "string") {
+			const title = normalizeTitle(args.title);
+			const matches = context.snapshot.nodes.filter((node) => normalizeTitle(node.title) === title || node.aliases.some((alias) => normalizeTitle(alias) === title));
+			if (matches.length > 1) return { error: fail$1("ambiguous_title", "同名节点不止一个，请选择节点 ID。", { candidates: matches.slice(0, resolveLearningConfig(config).searchLimit).map((node) => ({
+				id: node.id,
+				title: node.title,
+				path: node.relativePath
+			})) }) };
+		}
+		id = resolveNodeArg(context.snapshot, args)?.id ?? "";
+		if (!id && typeof args.title === "string") id = context.snapshot.nodes.find((node) => node.aliases.some((alias) => normalizeTitle(alias) === normalizeTitle(String(args.title))))?.id ?? "";
+	}
+	if (!id) return { error: fail$1("not_found", "没有找到该节点，请用 kn_find_node 确认目标。") };
+	const fast = await readNodeFast(root, id);
+	if (fast.ok) return {
+		root,
+		node: fast.node
+	};
+	if (fast.code === "node_missing" && fast.unverified) {
+		const authoritative = await readNode(root, { id });
+		if (authoritative.ok) return {
+			root,
+			node: authoritative.node
+		};
+	}
+	return { error: fail$1(fast.code, "无法读取目标知识点，请确认它仍然存在。") };
+}
+function direction(value, fallback) {
+	const result = value ?? fallback;
+	if (result !== "none" && result !== "prerequisites" && result !== "dependents" && result !== "both") throw new TypeError("Invalid relationship direction");
+	return String(result);
+}
+const refProperties = {
+	id: {
+		type: "string",
+		description: "目标节点 ID；已知 ID 时优先使用。"
+	},
+	path: {
+		type: "string",
+		description: "目标节点相对库根的路径。"
+	},
+	title: {
+		type: "string",
+		description: "目标标题或别名；重名时先选择 ID。"
+	}
+};
+/** Create read-only tools with validated plugin-owned limits. */
+function createModelTools(config) {
+	const limits = resolveLearningConfig(config);
+	return [
+		{
+			name: "kn_list_graph",
+			description: "仅用于用户明确要求的知识库关系、路线或全库总览；普通问候、编程、解释一个节点不先调用它。neighborhood 真实返回目标的一跳关系，默认只取前置；overview 必须显式指定并分页。图谱界面另行加载完整图，不依赖本工具结果。",
+			parameters: {
+				type: "object",
+				properties: {
+					mode: {
+						type: "string",
+						enum: ["neighborhood", "overview"],
+						description: "默认 neighborhood；用户明确要求全库总览时才指定 overview。"
+					},
+					rootId: {
+						type: "string",
+						description: "局部查询目标 ID。"
+					},
+					focusId: {
+						type: "string",
+						description: "rootId 的同义参数；仅设一个即可。"
+					},
+					direction: {
+						type: "string",
+						enum: [
+							"prerequisites",
+							"dependents",
+							"both"
+						],
+						description: "默认 prerequisites。"
+					},
+					offset: {
+						type: "integer",
+						minimum: 0,
+						description: "节点续页偏移，默认 0；局部页始终包含中心节点。"
+					},
+					edgeOffset: {
+						type: "integer",
+						minimum: 0,
+						description: "总览的边独立分页偏移，默认 0。"
+					},
+					maxNodes: {
+						type: "integer",
+						minimum: 1,
+						description: "本页节点数，不超过插件模型预算。"
+					},
+					maxEdges: {
+						type: "integer",
+						minimum: 1,
+						description: "总览本页边数，不超过插件模型预算。"
+					},
+					refresh: {
+						type: "boolean",
+						description: "需要确认外部变更时刷新本地图谱。"
+					}
+				}
+			},
+			output,
+			async execute(args, exec) {
+				try {
+					const mode = args.mode ?? "neighborhood";
+					if (mode !== "neighborhood" && mode !== "overview") throw new TypeError("Invalid graph mode");
+					if (typeof args.rootId === "string" && typeof args.focusId === "string" && args.rootId !== args.focusId) throw new TypeError("rootId and focusId must refer to the same node");
+					const id = args.rootId ?? args.focusId ?? currentIdOf(exec?.agent?.session) ?? learningFocusOf(exec?.agent?.session);
+					if (mode === "neighborhood" && (typeof id !== "string" || !id.trim())) return fail$1("focus_required", "请指定目标节点；明确要看全库时使用 mode: overview。");
+					const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
+					const edgeOffset = pageNumber(args.edgeOffset, 0, Number.MAX_SAFE_INTEGER, true);
+					const requestedNodes = pageNumber(args.maxNodes, limits.modelMaxNodes, limits.modelMaxNodes);
+					const requestedEdges = pageNumber(args.maxEdges, limits.modelMaxEdges, limits.modelMaxEdges);
+					if (mode === "neighborhood" && requestedNodes < 2) throw new TypeError("Neighborhood pages require room for a neighbor");
+					const dir = direction(args.direction, "prerequisites");
+					if (dir === "none") throw new TypeError("Graph direction cannot be none");
+					const context = await openFor(exec, config, { refresh: args.refresh === true });
+					const snapshot = context.snapshot;
+					const marks = await readUnderstanding(context.library.root);
+					let candidates = snapshot.nodes;
+					let edges = snapshot.edges;
+					let focus;
+					if (mode === "neighborhood") {
+						focus = candidates.find((node) => node.id === id);
+						if (!focus) return fail$1("not_found", "没有找到目标节点。");
+						edges = edges.filter((edge) => dir !== "dependents" && edge.fromId === id || dir !== "prerequisites" && edge.toId === id);
+						const ids = new Set(edges.flatMap((edge) => [edge.fromId, edge.toId]));
+						candidates = candidates.filter((node) => node.id !== id && ids.has(node.id));
+					}
+					const count = mode === "neighborhood" ? Math.min(requestedNodes - 1, limits.relationLimit) : requestedNodes;
+					const neighbors = candidates.slice(offset, offset + Math.max(0, count));
+					const selected = focus ? [focus, ...neighbors] : neighbors;
+					const kept = new Set(selected.map((node) => node.id));
+					const relationEdges = mode === "neighborhood" ? edges.filter((edge) => kept.has(edge.fromId) && kept.has(edge.toId)) : edges;
+					const shownEdges = relationEdges.slice(edgeOffset, edgeOffset + requestedEdges);
+					const nodes = selected.map((node) => ({
+						id: node.id,
+						title: node.title,
+						path: node.relativePath,
+						understood: marks[node.id] === true
+					}));
+					const nextOffset = offset + neighbors.length < candidates.length && neighbors.length ? offset + neighbors.length : null;
+					const nextEdgeOffset = edgeOffset + shownEdges.length < relationEdges.length ? edgeOffset + shownEdges.length : null;
+					return {
+						ok: true,
+						mode,
+						focusId: focus?.id ?? null,
+						direction: mode === "neighborhood" ? dir : void 0,
+						library: { name: context.library.manifest.title },
+						nodes,
+						edges: shownEdges.map((edge) => ({
+							id: edge.id,
+							fromId: edge.fromId,
+							toId: edge.toId,
+							relationType: edge.relationType,
+							relation: edge.relation.slice(0, limits.relationDescriptionChars)
+						})),
+						counts: {
+							nodes: candidates.length + (focus ? 1 : 0),
+							edges: edges.length
+						},
+						offset,
+						nextOffset,
+						edgeOffset,
+						nextEdgeOffset,
+						truncated: neighbors.length < candidates.length || shownEdges.length < edges.length,
+						pagingNote: mode === "overview" ? "节点和边独立分页；边端点可能不在本节点页中，可按 ID 读取。" : "每页保留中心节点，nextOffset 用于继续读取邻居；只返回本页关系。"
+					};
+				} catch (error) {
+					return failure(error);
+				}
+			}
+		},
+		{
+			name: "kn_find_node",
+			description: "只在用户要求操作库内节点且尚无 ID 时按标题/别名找少量候选；不先取全库图谱，不创建或修改任何内容。明确提供的普通概念问题可以直接解释，无需查库。",
+			parameters: {
+				type: "object",
+				properties: {
+					query: { type: "string" },
+					limit: {
+						type: "integer",
+						minimum: 1,
+						description: "候选上限，受插件 searchLimit 限制。"
+					}
+				},
+				required: ["query"]
+			},
+			output,
+			async execute(args, exec) {
+				try {
+					const query = typeof args.query === "string" ? normalizeTitle(args.query) : "";
+					if (!query) return fail$1("invalid_input", "query 不能为空");
+					const limit = pageNumber(args.limit, limits.searchLimit, limits.searchLimit);
+					const context = await openFor(exec, config);
+					const found = search(context.snapshot, query, context.snapshot.nodes.length);
+					const similar = found.similar.filter((node) => node.id !== found.exact?.id);
+					return {
+						ok: true,
+						query,
+						exact: found.exact,
+						similar: similar.slice(0, limit - (found.exact ? 1 : 0)),
+						truncated: similar.length > limit - (found.exact ? 1 : 0)
+					};
+				} catch (error) {
+					return failure(error);
+				}
+			}
+		},
+		{
+			name: "kn_read_node",
+			description: "按需读取用户正在问的一个知识点，不遍历其他节点正文。默认只返回目标正文的一页、理解标记和关系计数；不展开前置/后继。用户要求关系时显式选择 relations；长文按 nextOffset 续读。先解释本次疑问，不自动规划路线或建点。",
+			parameters: {
+				type: "object",
+				properties: {
+					...refProperties,
+					offset: {
+						type: "integer",
+						minimum: 0,
+						description: "正文字符偏移，默认 0；续读使用 nextOffset。"
+					},
+					noteMaxChars: {
+						type: "integer",
+						minimum: 1,
+						description: "本页正文字符数，默认插件 noteMaxChars，受 maxNoteChars 限制。"
+					},
+					relations: {
+						type: "string",
+						enum: [
+							"none",
+							"prerequisites",
+							"dependents",
+							"both"
+						],
+						description: "默认 none；本次需要关系时才选择方向。"
+					},
+					relationOffset: {
+						type: "integer",
+						minimum: 0
+					},
+					relationLimit: {
+						type: "integer",
+						minimum: 1,
+						description: "关系条数，受插件 relationLimit 限制。"
+					}
+				}
+			},
+			output,
+			async execute(args, exec) {
+				try {
+					const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
+					const maxChars = pageNumber(args.noteMaxChars, limits.noteMaxChars, limits.maxNoteChars);
+					const relationOffset = pageNumber(args.relationOffset, 0, Number.MAX_SAFE_INTEGER, true);
+					const relationLimit = pageNumber(args.relationLimit, limits.relationLimit, limits.relationLimit);
+					const dir = direction(args.relations, "none");
+					const located = await target(args, exec, config);
+					if (located.error) return located.error;
+					const { root, node } = located;
+					const graph = await readNodeRelations(root, node.id);
+					const marks = await readUnderstanding(root);
+					const full = node.note ?? "";
+					if (offset > full.length) return fail$1("invalid_input", "正文偏移超出长度。");
+					const prerequisites = [], dependents = [];
+					const candidates = dir === "none" ? [] : [...dir !== "dependents" ? graph.prerequisites.map((edge) => ({
+						edge,
+						direction: "prerequisites",
+						id: edge.toId
+					})) : [], ...dir !== "prerequisites" ? graph.dependents.map((edge) => ({
+						edge,
+						direction: "dependents",
+						id: edge.fromId
+					})) : []];
+					const relations = [];
+					for (const item of candidates.slice(relationOffset, relationOffset + relationLimit)) {
+						const related = await readNodeFast(root, item.id);
+						const info = related.ok ? {
+							id: related.node.id,
+							title: related.node.title,
+							path: related.node.relativePath,
+							understood: marks[item.id] === true
+						} : {
+							id: item.id,
+							dangling: true
+						};
+						(item.direction === "prerequisites" ? prerequisites : dependents).push(info);
+						relations.push({
+							id: item.edge.id,
+							fromId: item.edge.fromId,
+							toNodeId: item.edge.toId,
+							direction: item.direction,
+							toTitle: related.ok ? related.node.title : "",
+							relationType: item.edge.type,
+							description: (item.edge.description ?? "").slice(0, limits.relationDescriptionChars)
+						});
+					}
+					const end = Math.min(full.length, offset + maxChars);
+					return {
+						ok: true,
+						node: {
+							...summary(node, marks[node.id] === true),
+							primaryDocument: node.relativePath,
+							createdAt: node.createdAt,
+							updatedAt: node.updatedAt
+						},
+						note: {
+							path: node.relativePath,
+							text: full.slice(offset, end),
+							truncated: offset > 0 || end < full.length,
+							byteLength: Buffer.byteLength(full, "utf8"),
+							totalChars: full.length,
+							offset,
+							nextOffset: end < full.length ? end : null,
+							maxChars
+						},
+						relationCounts: {
+							prerequisites: graph.prerequisites.length,
+							dependents: graph.dependents.length
+						},
+						prerequisites,
+						dependents,
+						relations,
+						resources: [],
+						relationPage: {
+							direction: dir,
+							offset: relationOffset,
+							total: candidates.length,
+							nextOffset: relationOffset + relations.length < candidates.length ? relationOffset + relations.length : null
+						}
+					};
+				} catch (error) {
+					return failure(error);
+				}
+			}
+		},
+		{
+			name: "kn_current_node",
+			description: "仅当用户明确追问此前学习的知识库节点、且本次没有给出目标时，读取此前目标的身份与理解标记；不读笔记正文。不把此目标当成普通任务的主题。",
+			parameters: {
+				type: "object",
+				properties: {}
+			},
+			output,
+			async execute(_args, exec) {
+				try {
+					const session = exec?.agent?.session;
+					const id = learningFocusOf(session) ?? currentIdOf(session);
+					if (!id) return fail$1("no_learning_target", "此前没有明确学习目标，请用户说明目标节点。");
+					const located = await target({ id }, exec, config);
+					if (located.error) return located.error;
+					const marks = await readUnderstanding(located.root);
+					return {
+						ok: true,
+						node: summary(located.node, marks[located.node.id] === true)
+					};
+				} catch (error) {
+					return failure(error);
+				}
+			}
+		}
+	];
 }
 //#endregion
 //#region src/host/tools.ts
@@ -4063,210 +4341,7 @@ async function openFor(exec, config, options = {}) {
 }
 function createTools(config = {}) {
 	return [
-		{
-			name: "kn_list_graph",
-			description: "列出当前知识库（DSH 工作区）里的知识点与依赖关系。方向约定：A → B 表示「为了理解 A，需要先理解 B」，即 B 是 A 的前置知识。返回每个节点的标题、相对路径、学习状态与前置计数，以及 goals（学习入口）。需要看某个节点周围的一跳关系时优先用它并传 focusId。",
-			parameters: {
-				type: "object",
-				properties: {
-					rootId: {
-						type: "string",
-						description: "可选：要聚焦的节点 id；不传则用第一个学习目标。"
-					},
-					maxNodes: {
-						type: "number",
-						description: "可选：返回节点上限，默认 400。"
-					},
-					refresh: {
-						type: "boolean",
-						description: "可选：为 true 时跳过缓存重新扫描知识库。"
-					}
-				}
-			},
-			output: {
-				schema: { type: "object" },
-				render: (_args, value) => renderJson(value)
-			},
-			async execute(args, exec) {
-				try {
-					return {
-						ok: true,
-						...graphPayload(await openFor(exec, config, { refresh: args.refresh === true }), {
-							rootId: args.rootId,
-							maxNodes: args.maxNodes
-						})
-					};
-				} catch (error) {
-					return errorPayload(error, "library_unavailable");
-				}
-			}
-		},
-		{
-			name: "kn_find_node",
-			description: "【只读】只查库，**不创建任何节点、不改任何关系**；用户说「搜索 / 找找 / 有哪些」时就用它，不要为了顺手补全而调用任何写入工具。在知识库里按标题/别名查找知识点，用于「这个概念已经有了吗」这类复用判断。返回 exact（标题完全一致）与 similar（相近候选）。",
-			parameters: {
-				type: "object",
-				properties: {
-					query: {
-						type: "string",
-						description: "要查找的标题或别名。"
-					},
-					limit: {
-						type: "number",
-						description: "可选：相似候选上限，默认 8。"
-					}
-				},
-				required: ["query"]
-			},
-			output: {
-				schema: { type: "object" },
-				render: (_args, value) => renderJson(value)
-			},
-			async execute(args, exec) {
-				const query = typeof args.query === "string" ? normalizeTitle(args.query) : "";
-				if (query === "") return fail("invalid_input", "query 不能为空");
-				try {
-					const context = await openFor(exec, config);
-					const limit = typeof args.limit === "number" ? Math.min(Math.max(Math.trunc(args.limit), 1), 50) : 8;
-					const found = search(context.snapshot, query, limit);
-					return {
-						ok: true,
-						query,
-						exact: found.exact,
-						similar: found.similar
-					};
-				} catch (error) {
-					return errorPayload(error, "library_unavailable");
-				}
-			}
-		},
-		{
-			name: "kn_read_node",
-			description: "读取一个知识点的完整信息：元数据、主文档正文（笔记）、它的前置知识与后继节点、以及依赖边（存在库里的 `graph.json`，含「为什么依赖」的说明与来源）。先用它拿到上下文，再决定要不要建新的前置知识。",
-			parameters: {
-				type: "object",
-				properties: {
-					id: {
-						type: "string",
-						description: "节点 id（与 path 二选一）。"
-					},
-					path: {
-						type: "string",
-						description: "节点相对知识库根的路径，例如 Nodes/注意力机制（与 id 二选一）。"
-					},
-					title: {
-						type: "string",
-						description: "标题（与 id/path 三选一，精确匹配）。"
-					},
-					noteMaxChars: {
-						type: "number",
-						description: "可选：正文返回字数上限，默认 6000。"
-					}
-				}
-			},
-			output: {
-				schema: { type: "object" },
-				render: (_args, value) => renderJson(value)
-			},
-			async execute(args, exec) {
-				try {
-					const context = await openFor(exec, config);
-					const node = resolveNodeArg(context.snapshot, {
-						id: args.id,
-						path: args.path,
-						title: args.title
-					});
-					if (node === void 0) return fail("not_found", "没有找到该节点：请用 kn_find_node 确认真实标题或路径。");
-					const noteMaxCharsV3 = typeof args.noteMaxChars === "number" && args.noteMaxChars > 0 ? Math.trunc(args.noteMaxChars) : 6e3;
-					if (context.library.storage === "v3") {
-						const read = await readNode(context.library.root, { id: node.id });
-						if (!read.ok) return {
-							ok: false,
-							error: {
-								code: read.code,
-								message: read.message
-							}
-						};
-						const full = read.node.note ?? "";
-						const truncated = full.length > noteMaxCharsV3;
-						return {
-							ok: true,
-							node: {
-								...summarizeNode(node),
-								primaryDocument: node.relativePath,
-								createdAt: node.createdAt,
-								updatedAt: node.updatedAt
-							},
-							note: {
-								path: node.relativePath,
-								text: truncated ? full.slice(0, noteMaxCharsV3) : full,
-								truncated,
-								byteLength: Buffer.byteLength(full, "utf8"),
-								maxChars: noteMaxCharsV3
-							},
-							prerequisites: prerequisitesOf(context.snapshot, node.id).map(summarizeNode),
-							dependents: dependentsOf(context.snapshot, node.id).map(summarizeNode),
-							relations: read.prerequisites.map((edge) => ({
-								id: edge.id,
-								toNodeId: edge.toId,
-								toTitle: context.snapshot.nodes.find((item) => item.id === edge.toId)?.title ?? "",
-								relationType: edge.type,
-								description: edge.description ?? "",
-								evidence: edge.source === void 0 ? [] : [{
-									threadId: null,
-									messageId: edge.source.messageId ?? null,
-									snippet: edge.source.snippet ?? ""
-								}]
-							})),
-							resources: []
-						};
-					}
-					const nodeRel = node.relativePath;
-					const meta = (await readNodeMeta(context.library.vfs, nodeRel)).meta;
-					const noteMaxChars = typeof args.noteMaxChars === "number" && args.noteMaxChars > 0 ? Math.trunc(args.noteMaxChars) : 6e3;
-					const note = await readNote(context, node, noteMaxChars);
-					const relations = await readRelations(context.library.vfs, nodeRel, node.id).catch(() => null);
-					const resources = await listResources(context.library.vfs, nodeRel).catch(() => []);
-					return {
-						ok: true,
-						node: {
-							...summarizeNode(node),
-							primaryDocument: meta.primaryDocument,
-							createdAt: node.createdAt,
-							updatedAt: node.updatedAt
-						},
-						note: {
-							path: note.path,
-							text: note.text,
-							truncated: note.truncated,
-							byteLength: note.byteLength,
-							maxChars: noteMaxChars
-						},
-						prerequisites: prerequisitesOf(context.snapshot, node.id).map(summarizeNode),
-						dependents: dependentsOf(context.snapshot, node.id).map(summarizeNode),
-						relations: relations === null ? [] : relations.file.outgoing.map((edge) => ({
-							id: edge.id,
-							toNodeId: edge.toNodeId,
-							toTitle: edge.toTitleSnapshot,
-							relationType: edge.type,
-							description: edge.description,
-							evidence: edge.evidence.map((item) => ({
-								threadId: item.threadId,
-								messageId: item.messageId,
-								snippet: item.snippet
-							}))
-						})),
-						resources: resources.map((resource) => ({
-							id: resource.id,
-							title: resource.title,
-							type: resource.type
-						}))
-					};
-				} catch (error) {
-					return errorPayload(error, "library_unavailable");
-				}
-			}
-		},
+		...createModelTools(config),
 		{
 			name: "kn_add_prerequisite",
 			description: "把「当前（或指定）知识点还不懂的一个概念」记成它的前置知识：A → B，B 是 A 的前置。先查重：标题完全一致就复用已有节点；只命中相近候选时**不会**擅自建点，而是返回 candidates 让你先问用户「复用哪个 / 还是新建」；确认是不同概念后带 create: true 重试。从回答里划词得到的原文放进 evidence.snippet，这样关系会带上出处（可回溯到哪次回答）。成环会被拒绝；节点元数据与关系文件都有修订号/哈希守卫，冲突时不会覆盖。【写入纪律·必须遵守】这是**写操作**，且节点不存在时会真的新建：① 用户只要求“搜索/看看/有哪些”时**不得调用本工具**（用 kn_find_node / kn_list_graph）；② 调用前要在回复里说明“准备把 B 作为 A 的前置（新建/复用）”，并**等用户同意**；③ 同一轮最多用一次；需要一次处理多个概念时，**必须**改用 kn_propose_prerequisites 提交提案，由用户在面板里审阅后再落地；④ 超过配额会被拒绝并提示你改用提案。",
@@ -4361,7 +4436,7 @@ function createTools(config = {}) {
 		},
 		{
 			name: "kn_enter_node",
-			description: "进入一个知识点（把它压到学习栈顶）：之后「当前知识点」就是它，逐轮注入的上下文与后续建前置都会以它为准。沿依赖往下学（先弄懂前置）时用它；学完用 kn_back 回到上一层。标题/路径/id 都可以，栈从会话事件流折叠得到，因此换会话、恢复、fork 都不会丢。",
+			description: "进入用户明确要学习的知识点并压栈；本轮知识库操作以它为目标，普通任务不会自动沿用学习规则。沿依赖往下学（先弄懂前置）时用它；学完用 kn_back 回到上一层。标题/路径/id 都可以，栈从会话事件流折叠得到，因此换会话、恢复、fork 都不会丢。",
 			parameters: {
 				type: "object",
 				properties: {
@@ -4395,18 +4470,15 @@ function createTools(config = {}) {
 					const stack = stackAfterEnter(sessionOf(exec), node.id);
 					return {
 						ok: true,
-						current: summarizeNode(node),
+						current: {
+							...summarizeNode(node),
+							understood: (await readUnderstanding(context.library.root))[node.id] === true
+						},
 						stackDepth: stack.length,
-						prerequisites: prerequisitesOf(context.snapshot, node.id).map((item) => ({
-							id: item.id,
-							title: item.title,
-							status: item.status
-						})),
-						dependents: dependentsOf(context.snapshot, node.id).map((item) => ({
-							id: item.id,
-							title: item.title,
-							status: item.status
-						})),
+						relationCounts: {
+							prerequisites: prerequisitesOf(context.snapshot, node.id).length,
+							dependents: dependentsOf(context.snapshot, node.id).length
+						},
 						note: "已进入该节点；返回上一层用 kn_back。"
 					};
 				} catch (error) {
@@ -4888,7 +4960,7 @@ async function removePrerequisiteFromUi(context, root, input) {
 		}
 	};
 	if (context.library.storage === "v3") {
-		const removedV3 = await removeEdge(context.library.root, edgeId);
+		const removedV3 = await removeEdge$1(context.library.root, edgeId);
 		if (!removedV3.ok) return {
 			ok: false,
 			removed: false,
@@ -4904,7 +4976,7 @@ async function removePrerequisiteFromUi(context, root, input) {
 		};
 	}
 	try {
-		const removed = await removeEdge$1(context.library.vfs, from.relativePath, from.id, edgeId);
+		const removed = await removeEdge(context.library.vfs, from.relativePath, from.id, edgeId);
 		if (removed) invalidateLibrary(root);
 		return removed ? {
 			ok: true,
@@ -5209,110 +5281,85 @@ function isLibrarySession(cwd, probe = {}) {
 }
 //#endregion
 //#region src/host/prompts.ts
-/**
-* 逐轮注入（P2）：让模型**不用被提醒**就知道「现在在学哪个知识点、它的前置是什么」。
-*
-* 两层，都注册在插件自己的作用域上：
-* - 静态「学习协议」**按会话**注册（`agent/created` 时判定工作区是否为知识库）：方向约定、什么时候建前置、机器文件不要手改；普通工作区渲染为空 ⇒ 模型看不到；
-* - 动态「当前节点」用 `systemPrompt.context()`，但必须注册在 **agent 作用域**
-*   （`agent/created` 里拿到的 `agent.ctx`）——因为 `AssembleContext` 不带 agent，
-*   只有作用域本身能确定「这是哪个会话」。
-*
-* 两条硬约束：
-* 1. `text` 是**同步**函数，所以只能读 `peekLibrary`（本会话已装载过的缓存），
-*    不能在这里做文件 IO；缓存为空时给「先调用工具加载」的提示，而不是假装知道标题。
-* 2. `agent/created` 的监听器**绝不能抛**：它抛了会导致 agent 创建失败、整个会话起不来。
-*    所以整个函数体包在 try/catch 里，任何宿主 API 差异都退化成「不注入」。
-*/
-/**
-* 协议文本刻意写成「行为约定」，不重复工具说明（工具说明在各自的 description 里）。
-*
-* ⚠️ **「笔记属于用户」那一段是用户明确要求的口径**（2026-10）：
-* 节点正文是使用者记录自己想法的地方，不是装解释、资料、摘要的框子。
-* 因此模型**默认不许动笔记**：解释概念、回答问题、顺手"整理一下"都不是写笔记的理由；
-* 只有用户明确要求、或明确同意某个具体改动时才写，而且写之前要先把"准备写什么"说清楚并等同意。
-* 改这里之前先读一遍用户原话的要点：AI 不是不能写，而是**非必要不写、写必先问**。
-*/
+/** KnowledgeNet guidance is conditional on the current request, never the workspace's general purpose. */
+/** Small availability notice; ordinary tasks do not start a library workflow. */
 const PROTOCOL_SECTION = [
-	"This session can read and extend a local KnowledgeNet library (知识库) — a folder of knowledge nodes.",
-	"Direction convention: A → B means \"to understand A you must first understand B\", so B is a prerequisite of A.",
-	"Notes belong to the user (mandatory): a node's main document (笔记) is the user's own notebook — their thoughts, in their words. It is NOT a store for your explanations, summaries, or reference material.",
-	"a. Never write or edit a note on your own initiative. Explaining a concept, answering a question, or \"tidying up\" is not a reason to touch the user's note.",
-	"b. Only call kn_write_note when the user explicitly asked for a specific write, or explicitly agreed to a concrete change you proposed. It refuses without `userConsent: true`, and that flag means exactly that agreement.",
-	"c. Before writing, say in one sentence what you are about to write and into which node, then WAIT for the user's agreement. If they did not ask, do not write — offer it instead.",
-	"d. When you do write, never overwrite text the user wrote: quote the exact region you intend to replace and get agreement first. Prefer adding over rewriting.",
-	"e. Explaining in the conversation is the default; keeping it in the note is the user's decision, not yours.",
-	"Learning loop to follow:",
-	"1. Before explaining a node, call kn_read_node (or kn_list_graph) so the explanation is grounded in the library, not guessed.",
-	"2. When the user meets a concept they do not understand — or explicitly asks to add one — call kn_add_prerequisite with the passage in evidence.snippet. It reuses an existing node when the title matches; when it reports candidates, ask the user to reuse or confirm creating a new node instead of creating duplicates.",
-	"3. Use kn_enter_node to descend into a prerequisite and kn_back to return; the current node is remembered from the session log.",
-	"4. Record something in a note only after the user asks for it: kn_write_note takes the whole new body plus `userConsent: true`. Never overwrite a note or node metadata that changed on disk (the tools refuse and report the conflict).",
-	"Paths under .knowledgenet/** (inside the library) are machine metadata: read them freely, but do not hand-edit them.",
-	"Writing discipline (mandatory — node creation is a real, visible change on the user's disk):",
-	"a. Search/read requests are read-only: kn_find_node / kn_list_graph / kn_read_node create nothing. If the user says \"搜索/看看/有哪些\", never call a writing tool.",
-	"b. Never create nodes on your own initiative. Before any kn_add_prerequisite that would create a node, state which node you are about to create and for which parent, then WAIT for the user's agreement.",
-	"c. kn_add_prerequisite is one node per call and is rate-limited (a few per window). When it reports creation_quota_exceeded, stop and switch to kn_propose_prerequisites.",
-	"d. To propose more than one node at once, call kn_propose_prerequisites (writes only a plan file, creates nothing). The landing step belongs to the user: they review the plan in the Knowledge-graph panel and click apply. You cannot apply a plan yourself; use kn_plan_status to report what the user landed.",
-	"e. Any node you created can be deleted by the user from the panel; that removes its markdown file for good (nothing is kept). Say so when you report creations."
+	"KnowledgeNet tools are available only for explicit requests about this library's nodes, notes or learning routes.",
+	"A library folder, an open graph or a previous learning target does not make an ordinary greeting, coding task or general question a library task. Do not read the library to introduce yourself or prepare for unrelated work.",
+	"For a node question, use the supplied passage directly when sufficient; otherwise find/read only the target. Never start with a whole-library graph. Only an explicit overview/route request uses kn_list_graph.",
+	"For an explicit follow-up about a previously studied node, kn_current_node can retrieve the earlier target. Do not treat it as a permanent conversation topic.",
+	"For library questions, explain the specific point first with one simple example; introduce only necessary terminology. Expand other nodes or applications when requested, and respect requests for deeper detail.",
+	"Library notes are the user's own thoughts. Do not write notes, create nodes or add prerequisites without a specific user request/agreement; explaining an unfamiliar concept is not consent to edit the library."
 ].join("\n");
-const CONTEXT_ORDER = 820;
-function titleList(library, ids, limit = 6) {
-	return ids.slice(0, limit).map((id) => library.snapshot.nodes.find((node) => node.id === id)?.title ?? id.slice(0, 8)).join(" / ");
+/** Detailed safeguards apply only while this request is using KnowledgeNet. */
+const LEARNING_SECTION = [
+	"KnowledgeNet rules apply only to the current library request, not to other DSH tasks:",
+	"A → B means B is a prerequisite of A. Answer the current question before discussing the route.",
+	"Read only the requested node/section. Use nextOffset to continue a truncated note. Relations are background, not a list of subjects to explain; do not recursively read every prerequisite.",
+	"An understood flag is the user's own mark, not a test of competence; the current question determines explanation depth.",
+	"If a necessary foundation is unfamiliar, briefly explain that one foundation. Offer to explore it further; do not automatically create a node or plan.",
+	"Notes belong to the user: explanations and summaries stay in the conversation unless the user requests recording them. kn_write_note requires userConsent: true. State the proposed destination/content and obtain agreement before writing; quote and get agreement before replacing the user's existing text.",
+	"Search/read requests create nothing. Before adding a prerequisite, state the parent and proposed prerequisite and obtain agreement. Respect the creation quota; multiple-node proposals use kn_propose_prerequisites and are applied only by the user in the graph panel.",
+	"Never overwrite externally changed notes or metadata. Machine metadata is managed through plugin tools, not hand edits."
+].join("\n");
+/** Return only facts already in successful model-visible results for this request. */
+function currentContextText(agent, _config) {
+	const results = currentLearningResults(agent?.session);
+	if (!results.length) return void 0;
+	const target = [...results].reverse().find((result) => result.name === "kn_read_node" || result.name === "kn_enter_node" || result.name === "kn_current_node" || result.name === "kn_back");
+	const raw = target?.value.node ?? target?.value.current;
+	if (!raw || typeof raw !== "object") return LEARNING_SECTION;
+	const node = raw;
+	const identity = JSON.stringify({
+		id: node.id,
+		title: node.title,
+		path: node.path,
+		understood: node.understood
+	});
+	return LEARNING_SECTION + "\nTarget for this library request: " + identity + "\nUse this target only while the user's request still concerns it.";
 }
-/** 当前节点上下文文本；返回 undefined 表示「没有可注入的事实」，此时不注入任何内容 */
-function currentContextText(agent, config) {
-	const session = agent?.session;
-	const sessionId = agent?.id ?? session?.id ?? null;
-	if (sessionId !== null) resetCreationQuotaForTurn(sessionId);
-	const header = session?.header;
-	const currentId = currentIdOf(session);
-	if (currentId === null) return void 0;
-	const library = peekLibrary((typeof config.libraryRoot === "string" && config.libraryRoot.trim() !== "" ? path.resolve(config.libraryRoot.trim()) : void 0) ?? findCachedRoot(header?.cwd));
-	if (library === void 0) return `Current knowledge node: id=${currentId}（知识库尚未加载：先调用 kn_list_graph 或 kn_read_node 取上下文）`;
-	const node = library.snapshot.nodes.find((item) => item.id === currentId);
-	if (node === void 0) return `Current knowledge node: id=${currentId}（不在当前知识库里，可能已被删除）`;
-	const prerequisites = prerequisitesOf(library.snapshot, node.id).map((item) => item.id);
-	const dependents = dependentsOf(library.snapshot, node.id).map((item) => item.id);
-	return [
-		`Current knowledge node: ${node.title}（${node.relativePath}，状态 ${node.status}）`,
-		prerequisites.length > 0 ? `Its prerequisites: ${titleList(library, prerequisites)}` : "It has no recorded prerequisites yet.",
-		dependents.length > 0 ? `Nodes that depend on it: ${titleList(library, dependents)}` : "",
-		"Read its note with kn_read_node before answering; add missing prerequisites with kn_add_prerequisite.",
-		"Its note is the user's own text: do not edit it unless the user explicitly asks (kn_write_note needs their consent)."
-	].filter((line) => line !== "").join("\n");
-}
-/** 注册静态协议 + 每 agent 的动态上下文；任何一步失败都只跳过注入，不影响会话 */
-function registerPrompts(ctx, config) {
+/** Register per-agent guidance without scanning files or suppressing DSH's own context. */
+function registerPrompts(ctx, config, enabled = () => true) {
 	const context = ctx;
-	let section = false;
-	let perAgent = false;
+	if (typeof context?.on !== "function") return {
+		section: false,
+		perAgent: false
+	};
 	try {
-		section = true;
-	} catch {}
-	try {
-		context?.on?.("agent/created", (payload) => {
+		context.on("agent/created", (payload) => {
 			try {
 				const agent = payload?.agent;
-				const agentCtx = agent?.ctx;
-				if (typeof agentCtx?.systemPrompt?.context !== "function") return;
-				const cwd = sessionCwdOf({ agent }) ?? "";
-				agentCtx.systemPrompt.context({
+				if (typeof agent?.ctx?.systemPrompt?.context !== "function") return;
+				const cwd = sessionCwdOf({ agent });
+				let lastRequest = Symbol("first request");
+				agent.ctx.systemPrompt.context({
 					name: "knowledgenet-current",
-					order: CONTEXT_ORDER,
+					order: 820,
 					text: () => {
-						if (!isLibrarySession(cwd)) return "";
-						const dynamic = currentContextText(agent, config) ?? "";
-						return dynamic === "" ? PROTOCOL_SECTION : `${PROTOCOL_SECTION}\n${dynamic}`;
+						if (!enabled() || !isLibrarySession(cwd)) return "";
+						const sessionId = agent?.id ?? (agent?.session)?.id;
+						const request = [...eventsOf(agent?.session)].reverse().find((event) => event.type === "turn/start");
+						const marker = request?.data?.turn ?? request?.data?.turnId ?? eventsOf(agent?.session).filter((event) => event.type === "turn/start").length;
+						if (sessionId && lastRequest !== marker) {
+							resetCreationQuotaForTurn(sessionId);
+							lastRequest = marker;
+						}
+						const dynamic = currentContextText(agent, config);
+						return dynamic ? PROTOCOL_SECTION + "\n" + dynamic : PROTOCOL_SECTION;
 					}
 				});
-			} catch {}
+			} catch (error) {}
 		});
-		perAgent = true;
-	} catch {}
-	return {
-		section,
-		perAgent
-	};
+		return {
+			section: true,
+			perAgent: true
+		};
+	} catch (error) {
+		return {
+			section: false,
+			perAgent: false
+		};
+	}
 }
 //#endregion
 //#region src/host/node-conversations.ts
@@ -5911,6 +5958,100 @@ function __resetIsolationStatesForTest() {
 		state.active?.();
 	} catch {}
 	states.clear();
+}
+/**
+* 边数上限：节点被裁到 400 时，边仍可能成倍于节点（枢纽节点尤其明显）。
+* 超出部分直接截断——图上画不下，模型也不需要。
+*/
+const MAX_EDGES = 4e3;
+/**
+* 载荷字节预算（序列化后）。
+*
+* 为什么放在这里：`maxNodes` 只限制**节点数**，节点很多或说明很长时载荷仍可能到几 MB，
+* 面板首载与模型上下文都要为它付费（审查指出）。超预算就从尾部丢节点重算，直到进预算。
+*/
+const MAX_PAYLOAD_BYTES = 18e5;
+function clampMaxNodes(value) {
+	return Math.min(Math.max(typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 400, 10), 2e3);
+}
+/** 说明超长就截断（加省略号），避免单条说明把载荷撑大 */
+function clipDescription(value) {
+	if (typeof value !== "string" || value.length <= 240) return value;
+	return `${value.slice(0, 240)}…`;
+}
+/** 按上限裁剪节点，并只保留两端都留下的边 */
+function clipGraph(snapshot, maxNodes) {
+	const nodes = snapshot.nodes.slice(0, maxNodes).map(summarizeNode);
+	const kept = new Set(nodes.map((node) => node.id));
+	const allEdges = snapshot.edges.filter((edge) => kept.has(edge.fromId) && kept.has(edge.toId)).map((edge) => {
+		const summary = summarizeEdge(edge);
+		if (typeof summary.description === "string") summary.description = clipDescription(summary.description) ?? "";
+		return summary;
+	});
+	const edges = allEdges.slice(0, MAX_EDGES);
+	return {
+		truncated: snapshot.nodes.length > nodes.length || allEdges.length > edges.length,
+		nodes,
+		edges
+	};
+}
+/** 聚焦谁：显式 rootId 优先，否则第一个学习目标；都没有就不聚焦（二维视图会退化成平铺） */
+function focusOf(snapshot, rootId) {
+	if (typeof rootId === "string" && rootId.trim() !== "") {
+		const found = snapshot.nodes.find((node) => node.id === rootId.trim());
+		if (found !== void 0) return found.id;
+		return null;
+	}
+	const goal = snapshot.goals[0];
+	return goal === void 0 ? null : goal.rootNodeId;
+}
+function graphPayload(context, options = {}) {
+	const snapshot = context.snapshot;
+	const clipped = clipGraph(snapshot, clampMaxNodes(options.maxNodes));
+	const payload = {
+		library: {
+			root: context.library.root,
+			name: context.library.manifest.title,
+			formatVersion: context.library.manifest.formatVersion
+		},
+		focusId: options.focusId ?? focusOf(snapshot, options.rootId),
+		goals: snapshot.goals.map((goal) => ({
+			id: goal.id,
+			title: goal.title,
+			rootNodeId: goal.rootNodeId
+		})),
+		nodes: clipped.nodes,
+		edges: clipped.edges,
+		counts: {
+			nodes: snapshot.nodes.length,
+			edges: snapshot.edges.length,
+			issues: context.library.report.issues.length
+		},
+		issues: context.library.report.issues.slice(0, 5).map((issue) => ({
+			code: issue.code,
+			relativePath: issue.relativePath,
+			detail: issue.detail
+		})),
+		truncated: clipped.truncated,
+		revision: snapshot.revision
+	};
+	if (JSON.stringify(payload).length > 18e5) {
+		let nodes = payload.nodes;
+		let edges = payload.edges;
+		while (nodes.length > 10 && JSON.stringify({
+			...payload,
+			nodes,
+			edges
+		}).length > 18e5) {
+			nodes = nodes.slice(0, Math.max(10, Math.floor(nodes.length * .8)));
+			const kept = new Set(nodes.map((node) => node.id));
+			edges = edges.filter((edge) => kept.has(edge.fromId) && kept.has(edge.toId));
+		}
+		payload.nodes = nodes;
+		payload.edges = edges;
+		payload.truncated = true;
+	}
+	return payload;
 }
 //#endregion
 //#region src/host/api.ts
@@ -7020,7 +7161,7 @@ function registerApi(ctx, config) {
 * 形态：Cordis 函数式插件（`export function apply`），`inject: ['tools']` 等待工具注册表。
 * 职责边界：
 * - 把**本地知识库**（v2 开放文件格式）读进来并允许受控写入，作为一组工具暴露给模型；
-* - 逐轮把「当前学习节点 + 它的前置」注入上下文，让模型不必被提醒；
+* - 仅在当前知识库请求中提供聚焦学习规则，不自动注入前置和后继；
 * - 注册一条精确 Fetch 路由（`/api/knowledgenet.graph`）给**常驻面板**取数据；
 * - 不持有全局「当前库」单例：库由调用方会话的 cwd 决定（见 library.ts），
 *   面板没有会话绑定时用「最近装载过的库」兜底（见 lastLibraryRoot）；
@@ -7034,8 +7175,23 @@ function apply(ctx, config = {}) {
 	const tools = ctx.tools;
 	/** 本插件注册的全部工具名（隔离时整批 deny 用；直接从注册内容取，避免漏掉将来新增的工具） */
 	const toolNames = [];
+	const toolDisposers = [];
+	let modelEnabled = true;
+	let modelDisabledReason;
+	const disableModelTools = (reason) => {
+		modelEnabled = false;
+		modelDisabledReason = reason;
+		for (const dispose of toolDisposers.splice(0)) dispose();
+		recordIsolation({
+			sessionCwd: null,
+			isLibrary: false,
+			restricted: true,
+			reason
+		});
+	};
 	if (tools !== void 0 && typeof tools.register === "function") for (const tool of createTools(config)) {
-		tools.register(tool);
+		const dispose = tools.register(tool);
+		if (typeof dispose === "function") toolDisposers.push(dispose);
 		const name = tool.name;
 		if (typeof name === "string" && name !== "") toolNames.push(name);
 	}
@@ -7046,11 +7202,17 @@ function apply(ctx, config = {}) {
 				const cwd = sessionCwdOf({ agent }) ?? "";
 				const reveal = () => isLibrarySession(cwd);
 				const scoped = (agent?.ctx)?.tools;
+				if (typeof scoped?.restrict !== "function") {
+					disableModelTools("no-agent-tools: plugin model tools disabled");
+					return;
+				}
+				const restrict = scoped.restrict.bind(scoped);
 				const hidden = registerAgentIsolation(cwd, () => {
-					if (typeof scoped?.restrict !== "function") return null;
+					if (!modelEnabled) return null;
 					try {
-						return scoped.restrict({ deny: toolNames });
-					} catch {
+						return restrict({ deny: toolNames });
+					} catch (error) {
+						disableModelTools(`agent restriction failed: ${error instanceof Error ? error.message : String(error)}`);
 						return null;
 					}
 				}, reveal());
@@ -7069,8 +7231,11 @@ function apply(ctx, config = {}) {
 				});
 			}
 		});
-	} catch {}
-	const prompts = registerPrompts(ctx, config);
+	} catch (error) {
+		disableModelTools(`agent event registration failed: ${String(error)}`);
+	}
+	else disableModelTools("no-agent-events: plugin model tools disabled");
+	const prompts = registerPrompts(ctx, config, () => modelEnabled);
 	setRuntimeStatus({
 		api: {
 			path: GRAPH_API_PATH,
@@ -7082,7 +7247,13 @@ function apply(ctx, config = {}) {
 		probes: [],
 		clientDiag: [],
 		scans: [],
-		isolation: [],
+		isolation: modelDisabledReason ? [{
+			at: Date.now(),
+			sessionCwd: null,
+			isLibrary: false,
+			restricted: true,
+			reason: modelDisabledReason
+		}] : [],
 		docReads: [],
 		noteApi: []
 	});
@@ -7142,6 +7313,9 @@ const __internal = {
 	currentContextText,
 	registerPrompts,
 	PROTOCOL_SECTION,
+	LEARNING_SECTION,
+	learningFocusOf,
+	currentLearningResults,
 	foldStack,
 	stackOf,
 	stackAfterEnter,

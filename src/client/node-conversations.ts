@@ -11,6 +11,7 @@ export interface ConversationServices {
    * 两个都给时宿主只认 `workspaceId`（cwd 由工作区自己解析），所以调用方二选一。
    */
   sessions: {
+    scope?(sessionId: string): unknown;
     create(options: { cwd?: string; workspaceId?: string }): Promise<string>;
     list?: {
       getSnapshot(): { byId: Record<string, { title?: string; displayTitle?: string; blank?: boolean }>; phase?: string };
@@ -29,6 +30,7 @@ export interface ConversationServices {
   /** 可选：工作区控制器（老宿主没有）——只用它读快照，用来解析"这个节点属于哪个工作区" */
   workspaces?: { list?: { getSnapshot?(): unknown; subscribe?(listener: () => void): () => void } };
   sidebarRight?: ConversationSidebar;
+  inputFor?(sessionId: string): { state: { getSnapshot(): { draft: string; phase: string; attachmentIds?: readonly unknown[] } }; setDraft(text: string): void; focus(): void } | undefined;
 }
 export interface ConversationRecord { sessionId: string; createdAt: number }
 export interface ConversationList { root: string; cwd: string; conversations: ConversationRecord[] }
@@ -131,6 +133,15 @@ export function makeConversationActions(getServices: () => ConversationServices 
   };
   return {
     list,
+    /** Seed only an empty, idle composer; never send or replace an existing draft. */
+    prepareDraft(sessionId: string, text: string): boolean {
+      const input = getServices()?.inputFor?.(sessionId);
+      if (!input) return false;
+      const state = input.state.getSnapshot();
+      if (state.phase !== "plain" || state.draft.trim() || state.attachmentIds?.length) return false;
+      input.setDraft(text);
+      return true;
+    },
     subscribe(listener: (recordsChanged: boolean) => void): () => void {
       listeners.add(listener);
       if (listeners.size === 1) bindWatchers();

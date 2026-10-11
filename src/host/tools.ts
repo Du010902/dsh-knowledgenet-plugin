@@ -18,11 +18,7 @@ import { RepositoryError } from "../vendor/upstream/data/errors.ts";
 import type { KnowledgeNode } from "../vendor/upstream/data/types.ts";
 import { normalizeTitle } from "../vendor/upstream/data/types.ts";
 import { dependentsOf, prerequisitesOf } from "../vendor/upstream/data/engine.ts";
-import { readNodeMeta } from "../vendor/upstream/data/v2/nodeMeta.ts";
-import { readRelations } from "../vendor/upstream/data/v2/relations.ts";
-import { listResources } from "../vendor/upstream/data/v2/resources.ts";
 import { resolveNodeArg, search, summarizeNode, type NodeSummary } from "./graph.ts";
-import { readNode as readV3Node } from "./v3/store.ts";
 import {
   loadLibrary,
   resolveLibraryRoot,
@@ -38,7 +34,11 @@ import { GRAPH_API_PATH } from "../shared/routes.ts";
 import { currentIdOf, stackAfterBack, stackAfterEnter, stackOf } from "./stack.ts";
 import { runtimeStatus } from "./status.ts";
 
-export interface KnowledgeNetConfig {
+import { createModelTools } from "./model-tools.ts";
+import type { LearningConfigInput } from "./learning-config.ts";
+import { readUnderstanding } from "./understanding-file.ts";
+
+export interface KnowledgeNetConfig extends LearningConfigInput {
   /** 留空则按会话 cwd 向上找最近的 library.json */
   libraryRoot?: string | null;
   /**
@@ -48,7 +48,7 @@ export interface KnowledgeNetConfig {
    * 用户在这里改 ✓ —— 客户端插入图片时把这个路径交给宿主 ✓。
    */
   imageDir?: string | null;
-  /** 返回给模型的节点上限（默认 400） */
+  /** 图谱面板节点上限（默认 400）；模型预算使用 modelMaxNodes */
   maxNodes?: number | null;
 }
 
@@ -99,198 +99,7 @@ export async function openFor(
 
 export function createTools(config: KnowledgeNetConfig = {}): Array<Record<string, unknown>> {
   return [
-    {
-      name: "kn_list_graph",
-      description:
-        "列出当前知识库（DSH 工作区）里的知识点与依赖关系。方向约定：A → B 表示「为了理解 A，"
-        + "需要先理解 B」，即 B 是 A 的前置知识。返回每个节点的标题、相对路径、学习状态与前置计数，"
-        + "以及 goals（学习入口）。需要看某个节点周围的一跳关系时优先用它并传 focusId。",
-      parameters: {
-        type: "object",
-        properties: {
-          rootId: { type: "string", description: "可选：要聚焦的节点 id；不传则用第一个学习目标。" },
-          maxNodes: { type: "number", description: "可选：返回节点上限，默认 400。" },
-          refresh: { type: "boolean", description: "可选：为 true 时跳过缓存重新扫描知识库。" },
-        },
-      },
-      output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) => renderJson(value) },
-      async execute(args: Record<string, unknown>, exec: unknown) {
-        try {
-          const context = await openFor(exec, config, { refresh: args.refresh === true });
-          // 与 /api/knowledgenet.graph 共用同一份构造逻辑：卡片、面板、模型看到的永远同形
-          return {
-            ok: true,
-            ...graphPayload(context, {
-              rootId: args.rootId as string | undefined,
-              maxNodes: args.maxNodes as number | undefined,
-            }),
-          };
-        } catch (error) {
-          return errorPayload(error, "library_unavailable");
-        }
-      },
-    },
-    {
-      name: "kn_find_node",
-      description:
-        "【只读】只查库，**不创建任何节点、不改任何关系**；用户说「搜索 / 找找 / 有哪些」时就用它，"
-        + "不要为了顺手补全而调用任何写入工具。"
-        + "在知识库里按标题/别名查找知识点，用于「这个概念已经有了吗」这类复用判断。"
-        + "返回 exact（标题完全一致）与 similar（相近候选）。",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "要查找的标题或别名。" },
-          limit: { type: "number", description: "可选：相似候选上限，默认 8。" },
-        },
-        required: ["query"],
-      },
-      output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) => renderJson(value) },
-      async execute(args: Record<string, unknown>, exec: unknown) {
-        const query = typeof args.query === "string" ? normalizeTitle(args.query) : "";
-        if (query === "") return fail("invalid_input", "query 不能为空");
-        try {
-          const context = await openFor(exec, config);
-          const limit = typeof args.limit === "number" ? Math.min(Math.max(Math.trunc(args.limit), 1), 50) : 8;
-          const found = search(context.snapshot, query, limit);
-          return { ok: true, query, exact: found.exact, similar: found.similar };
-        } catch (error) {
-          return errorPayload(error, "library_unavailable");
-        }
-      },
-    },
-    {
-      name: "kn_read_node",
-      description:
-        "读取一个知识点的完整信息：元数据、主文档正文（笔记）、它的前置知识与后继节点、"
-        + "以及依赖边（存在库里的 `graph.json`，含「为什么依赖」的说明与来源）。"
-        + "先用它拿到上下文，再决定要不要建新的前置知识。",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string", description: "节点 id（与 path 二选一）。" },
-          path: { type: "string", description: "节点相对知识库根的路径，例如 Nodes/注意力机制（与 id 二选一）。" },
-          title: { type: "string", description: "标题（与 id/path 三选一，精确匹配）。" },
-          noteMaxChars: { type: "number", description: "可选：正文返回字数上限，默认 6000。" },
-        },
-      },
-      output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) => renderJson(value) },
-      async execute(args: Record<string, unknown>, exec: unknown) {
-        try {
-          const context = await openFor(exec, config);
-          const node = resolveNodeArg(context.snapshot, {
-            id: args.id as string | undefined,
-            path: args.path as string | undefined,
-            title: args.title as string | undefined,
-          });
-          if (node === undefined) {
-            return fail("not_found", "没有找到该节点：请用 kn_find_node 确认真实标题或路径。");
-          }
-
-          /*
-           * **v3 分支必须在 v2 读取之前**：v2 的 `readNodeMeta` 对 v3 节点（`Nodes/x.md`）
-           * 会先抛 `node_missing` ✗ —— 放在后面就永远走不到（这是我第一版的错，集成测试抓到了 ✓）。
-           */
-          const noteMaxCharsV3 =
-            typeof args.noteMaxChars === "number" && args.noteMaxChars > 0
-              ? Math.trunc(args.noteMaxChars)
-              : 6000;
-          if (context.library.storage === "v3") {
-            const read = await readV3Node(context.library.root, { id: node.id });
-            if (!read.ok) return { ok: false, error: { code: read.code, message: read.message } };
-            const full = read.node.note ?? "";
-            const truncated = full.length > noteMaxCharsV3;
-            return {
-              ok: true,
-              node: {
-                ...summarizeNode(node),
-                primaryDocument: node.relativePath,
-                createdAt: node.createdAt,
-                updatedAt: node.updatedAt,
-              },
-              note: {
-                path: node.relativePath,
-                text: truncated ? full.slice(0, noteMaxCharsV3) : full,
-                truncated,
-                byteLength: Buffer.byteLength(full, "utf8"),
-                maxChars: noteMaxCharsV3,
-              },
-              prerequisites: prerequisitesOf(context.snapshot, node.id).map(summarizeNode),
-              dependents: dependentsOf(context.snapshot, node.id).map(summarizeNode),
-              relations: read.prerequisites.map((edge) => ({
-                id: edge.id,
-                toNodeId: edge.toId,
-                toTitle: context.snapshot.nodes.find((item) => item.id === edge.toId)?.title ?? "",
-                relationType: edge.type,
-                description: edge.description ?? "",
-                evidence:
-                  edge.source === undefined
-                    ? []
-                    : [{
-                      threadId: null,
-                      messageId: edge.source.messageId ?? null,
-                      snippet: edge.source.snippet ?? "",
-                    }],
-              })),
-              resources: [],
-            };
-          }
-
-          const nodeRel = node.relativePath;
-          const meta = (await readNodeMeta(context.library.vfs, nodeRel)).meta;
-          const noteMaxChars =
-            typeof args.noteMaxChars === "number" && args.noteMaxChars > 0
-              ? Math.trunc(args.noteMaxChars)
-              : 6000;
-
-          const note = await readNote(context, node, noteMaxChars);
-
-          const relations = await readRelations(context.library.vfs, nodeRel, node.id).catch(() => null);
-          const resources = await listResources(context.library.vfs, nodeRel).catch(() => []);
-
-          return {
-            ok: true,
-            node: {
-              ...summarizeNode(node),
-              primaryDocument: meta.primaryDocument,
-              createdAt: node.createdAt,
-              updatedAt: node.updatedAt,
-            },
-            note: {
-              path: note.path,
-              text: note.text,
-              truncated: note.truncated,
-              byteLength: note.byteLength,
-              maxChars: noteMaxChars,
-            },
-            prerequisites: prerequisitesOf(context.snapshot, node.id).map(summarizeNode),
-            dependents: dependentsOf(context.snapshot, node.id).map(summarizeNode),
-            relations:
-              relations === null
-                ? []
-                : relations.file.outgoing.map((edge) => ({
-                    id: edge.id,
-                    toNodeId: edge.toNodeId,
-                    toTitle: edge.toTitleSnapshot,
-                    relationType: edge.type,
-                    description: edge.description,
-                    evidence: edge.evidence.map((item) => ({
-                      threadId: item.threadId,
-                      messageId: item.messageId,
-                      snippet: item.snippet,
-                    })),
-                  })),
-            resources: resources.map((resource) => ({
-              id: resource.id,
-              title: resource.title,
-              type: resource.type,
-            })),
-          };
-        } catch (error) {
-          return errorPayload(error, "library_unavailable");
-        }
-      },
-    },
+    ...createModelTools(config),
     {
       name: "kn_add_prerequisite",
       description:
@@ -376,7 +185,7 @@ export function createTools(config: KnowledgeNetConfig = {}): Array<Record<strin
     {
       name: "kn_enter_node",
       description:
-        "进入一个知识点（把它压到学习栈顶）：之后「当前知识点」就是它，逐轮注入的上下文与后续建前置都会以它为准。"
+        "进入用户明确要学习的知识点并压栈；本轮知识库操作以它为目标，普通任务不会自动沿用学习规则。"
         + "沿依赖往下学（先弄懂前置）时用它；学完用 kn_back 回到上一层。标题/路径/id 都可以，"
         + "栈从会话事件流折叠得到，因此换会话、恢复、fork 都不会丢。",
       parameters: {
@@ -403,18 +212,9 @@ export function createTools(config: KnowledgeNetConfig = {}): Array<Record<strin
           const stack = stackAfterEnter(session, node.id);
           return {
             ok: true,
-            current: summarizeNode(node),
+            current: { ...summarizeNode(node), understood: (await readUnderstanding(context.library.root))[node.id] === true },
             stackDepth: stack.length,
-            prerequisites: prerequisitesOf(context.snapshot, node.id).map((item) => ({
-              id: item.id,
-              title: item.title,
-              status: item.status,
-            })),
-            dependents: dependentsOf(context.snapshot, node.id).map((item) => ({
-              id: item.id,
-              title: item.title,
-              status: item.status,
-            })),
+            relationCounts: { prerequisites: prerequisitesOf(context.snapshot, node.id).length, dependents: dependentsOf(context.snapshot, node.id).length },
             note: "已进入该节点；返回上一层用 kn_back。",
           };
         } catch (error) {

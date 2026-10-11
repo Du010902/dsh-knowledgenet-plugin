@@ -1698,3 +1698,6 @@
 .kn-node-conversations .kn-note-relation-item { display: flex; flex-direction: column; gap: 3px; }
 .kn-node-conversations small, .kn-node-chat-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .kn-node-conversations .kn-note-relations-popover { max-height: min(360px, 60vh); overflow-y: auto; }
+
+.kn-node-chat-question { display: grid; gap: 8px; margin: 8px 0 12px; }
+.kn-node-chat-question textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: transparent; color: inherit; font: inherit; }

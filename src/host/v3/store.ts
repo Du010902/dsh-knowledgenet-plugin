@@ -1013,3 +1013,9 @@ export async function removeNode(
 
   return { ok: true, id: node.id, title: node.title };
 }
+
+/** Read only the relation file for a known node, without scanning other documents. */
+export async function readNodeRelations(root: string, id: string): Promise<{ prerequisites: V3Edge[]; dependents: V3Edge[] }> {
+  const graph = await readGraph(assertRoot(root));
+  return { prerequisites: graph.edges.filter(edge => edge.fromId === id), dependents: graph.edges.filter(edge => edge.toId === id) };
+}

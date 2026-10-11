@@ -3,15 +3,17 @@ import type { DocumentTarget } from "./node-document-client.ts";
 import { nodeConversations, type ConversationRecord, type ConversationState } from "./node-conversations.ts";
 import { makeTranslator } from "./card-model.ts";
 
-const LITERAL = { nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档" };
+const LITERAL = { nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatAsk: "围绕节点提问", nodeChatQuestion: "写下本次想理解的问题", nodeChatUseQuestion: "带上问题打开对话", nodeChatDraftHint: "只准备问题草稿，不发送笔记。宿主不支持填入时，将问题复制到剪贴板后粘贴。", nodeChatDraftTemplate: "我想理解知识库节点「{title}」（ID: {id}）。\n本次问题：{question}\n请先聚焦这个问题；需要时仅读取此节点，必要的前置概念简要解释即可，不展开整个知识库。", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档" };
 
 /** 侧栏筛选变化后的轮询间隔：筛选值只落在 localStorage 里（宿主没暴露服务），只能这么跟 ✓ */
 const FILTER_POLL_MS = 500;
 
 /** Compact node-owned history picker; navigation is delegated to the editor's leave guard. */
-export function NodeConversations(props: { nodeId: string; target?: DocumentTarget; t?: unknown; onOpen: (sessionId: string) => void }): ReactNode {
+export function NodeConversations(props: { nodeId: string; nodeTitle?: string; target?: DocumentTarget; t?: unknown; onOpen: (sessionId: string) => void }): ReactNode {
   const t = useMemo(() => makeTranslator(props.t, LITERAL), [props.t]);
   const [items, setItems] = useState<ConversationRecord[]>([]);
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -37,7 +39,7 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     setBusy(false);
     let active = true;
     let generation = 0;
-    setItems([]); setLoading(true); setError(""); setOpen(false);
+    setQuestion(""); setAsking(false); setItems([]); setLoading(true); setError(""); setOpen(false);
     const reload = async () => {
       const request = ++generation;
       try { const data = await nodeConversations.list(props.nodeId, { root, sessionId }); if (active && request === generation) { setItems(data.conversations); setError(""); } }
@@ -65,12 +67,17 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     const timer = setInterval(() => setFilterRevision(value => value + 1), FILTER_POLL_MS);
     return () => clearInterval(timer);
   }, []);
-  const create = async () => {
+  const create = async (withQuestion = false) => {
     if (pending.current === identity) return;
     pending.current = identity; setBusy(true); setError("");
     try {
       const id = await nodeConversations.create(props.nodeId, props.target);
 
+      if (current.current !== identity) return;
+      if (withQuestion) {
+        const draft = t("nodeChatDraftTemplate", { title: props.nodeTitle ?? props.nodeId, id: props.nodeId, question: question.trim() });
+        if (!nodeConversations.prepareDraft(id, draft)) await navigator.clipboard.writeText(draft);
+      }
       if (current.current !== identity) return;
       setOpen(false); props.onOpen(id);
     } catch (e) { if (current.current === identity) setError(e instanceof Error ? e.message : t("nodeChatFailed")); }
@@ -98,6 +105,12 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     {open ? <div className="kn-note-relations-popover">
       <div className="kn-note-relations-head"><strong>{t("nodeChats", { count: rows.length })}</strong><button type="button" aria-label={t("nodeChatClose")} onClick={() => setOpen(false)}>×</button></div>
       <button type="button" disabled={busy || loading} onClick={() => { void create(); }}>{t(busy ? "nodeChatCreating" : "nodeChatNew")}</button>
+      <button type="button" disabled={busy || loading} onClick={() => setAsking(value => !value)}>{t("nodeChatAsk")}</button>
+      {asking ? <div className="kn-node-chat-question">
+        <textarea aria-label={t("nodeChatQuestion")} placeholder={t("nodeChatQuestion")} value={question} onChange={event => setQuestion(event.target.value)} rows={3} disabled={busy} />
+        <div className="kn-editor-dim">{t("nodeChatDraftHint")}</div>
+        <button type="button" disabled={busy || !question.trim()} onClick={() => { void create(true); }}>{t("nodeChatUseQuestion")}</button>
+      </div> : null}
       {loading ? <div className="kn-editor-dim">{t("nodeChatLoading")}</div> : rows.length ? rows.map(({ item, archived }) => <button className="kn-note-relation-item" type="button" key={item.sessionId} disabled={busy || archived} title={archived ? t("nodeChatArchivedHint") : undefined} onClick={() => { try { props.onOpen(item.sessionId); setOpen(false); } catch (e) { setError(e instanceof Error ? e.message : t("nodeChatFailed")); } }}><span>{nodeConversations.title(item.sessionId)}</span><small>{new Date(item.createdAt).toLocaleString()}{archived ? ` · ${t("nodeChatArchived")}` : ""}</small></button>) : <div className="kn-editor-dim">{t("nodeChatEmpty")}</div>}
       {error ? <div className="kn-editor-error" role="alert">{error}</div> : null}
       <div className="kn-editor-dim kn-node-chat-hint">{t("nodeChatHint")}</div>

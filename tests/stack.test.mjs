@@ -1,70 +1,43 @@
-/**
- * 学习栈折叠（纯函数）测试。
- *
- * 学习栈是「当前学到哪个知识点」的唯一真相来源，且必须是**可回放**的：
- * 同样的事件序列在任何时候、任何进程里都折叠出同样的栈。
- */
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-
+import { test } from "node:test";
 import { __internal } from "../index.js";
-
-const call = (name, args) => ({ type: "tool/call", data: { name, arguments: JSON.stringify(args) } });
-const other = { type: "tool/call", data: { name: "read", arguments: "{}" } };
-const result = { type: "tool/result", data: {} };
-
-describe("学习栈从事件流折叠", () => {
-  it("空事件流 → 空栈", () => {
-    assert.deepEqual(__internal.foldStack([]), []);
-  });
-
-  it("enter 压栈，back 弹栈，其它工具不影响", () => {
-    const events = [
-      other,
-      call("kn_enter_node", { id: "A" }),
-      result,
-      call("kn_read_node", { id: "A" }),
-      call("kn_enter_node", { id: "B" }),
-      call("kn_back", {}),
-    ];
-    assert.deepEqual(__internal.foldStack(events), ["A"]);
-  });
-
-  it("重复 enter 同一个节点等价于「切到它」，不会出现两份", () => {
-    const events = [
-      call("kn_enter_node", { id: "A" }),
-      call("kn_enter_node", { id: "B" }),
-      call("kn_enter_node", { id: "A" }),
-    ];
-    assert.deepEqual(__internal.foldStack(events), ["B", "A"]);
-  });
-
-  it("空栈上 back 是无操作（不会变成负数或抛错）", () => {
-    assert.deepEqual(__internal.foldStack([call("kn_back", {}), call("kn_back", {})]), []);
-  });
-
-  it("坏掉的 arguments 不会污染栈", () => {
-    const events = [
-      { type: "tool/call", data: { name: "kn_enter_node", arguments: "{not json" } },
-      { type: "tool/call", data: { name: "kn_enter_node", arguments: JSON.stringify({ id: 42 }) } },
-      call("kn_enter_node", { id: "C" }),
-    ];
-    assert.deepEqual(__internal.foldStack(events), ["C"]);
-  });
-
-  it("会话对象不可用时退化成空栈，而不是抛错", () => {
-    assert.deepEqual(__internal.stackOf(undefined), []);
-    assert.deepEqual(__internal.stackOf({}), []);
-    assert.equal(__internal.currentIdOf({}), null);
-  });
-
-  it("enter/back 的「预演」栈与折叠后的栈一致（工具返回的栈就是下一次折叠的结果）", () => {
-    const session = {
-      snapshotEvents: () => [call("kn_enter_node", { id: "A" }), call("kn_enter_node", { id: "B" })],
-    };
-    assert.deepEqual(__internal.stackOf(session), ["A", "B"]);
-    assert.deepEqual(__internal.stackAfterEnter(session, "C"), ["A", "B", "C"]);
-    assert.deepEqual(__internal.stackAfterEnter(session, "A"), ["B", "A"]);
-    assert.deepEqual(__internal.stackAfterBack(session), { previous: "B", stack: ["A"] });
-  });
+let sequence = 0;
+export const success = (name, value, args = {}) => {
+  const callId = String(++sequence);
+  return [{ type: "tool/call", data: { name, callId, arguments: JSON.stringify(args) } },
+    { type: "tool/result", data: { message: { source: { kind: "tool", callId }, content: [{ type: "text", text: JSON.stringify(value) }] } } }];
+};
+const enter = id => success("kn_enter_node", { ok: true, current: { id } }, { title: "resolved by title" });
+test("successful resolved results replay navigation; reads do not push", () => {
+  const events = [...enter("A"), ...success("kn_read_node", { ok: true, node: { id: "A" } }), ...enter("B"), ...success("kn_back", { ok: true, current: { id: "A" } })];
+  assert.deepEqual(__internal.foldStack(events), ["A"]);
+  assert.equal(__internal.learningFocusOf({ snapshotEvents: () => events }), "A");
+});
+test("unfinished, failed and malformed results do not move the learning stack", () => {
+  const events = [...enter("A"), { type: "tool/call", data: { name: "kn_enter_node", callId: "unfinished", arguments: '{"id":"B"}' } },
+    ...success("kn_enter_node", { ok: false, error: {} }), ...success("kn_back", { ok: false })];
+  assert.deepEqual(__internal.foldStack(events), ["A"]);
+});
+test("PTC successful navigation is replayable", () => {
+  const event = { type: "tool/ptc-dispatch", data: { name: "kn_enter_node", subCallId: "ptc", content: [{ type: "text", text: '{"ok":true,"current":{"id":"C"}}' }] } };
+  assert.deepEqual(__internal.foldStack([event]), ["C"]);
+});
+test("repeat enter switches target and helpers predict successful navigation", () => {
+  const events = [...enter("A"), ...enter("B"), ...enter("A")];
+  const session = { snapshotEvents: () => events };
+  assert.deepEqual(__internal.stackOf(session), ["B", "A"]);
+  assert.deepEqual(__internal.stackAfterEnter(session, "B"), ["A", "B"]);
+  assert.deepEqual(__internal.stackAfterBack(session), { previous: "A", stack: ["B"] });
+  assert.deepEqual(__internal.stackOf(undefined), []);
+  assert.equal(__internal.currentIdOf({}), null);
+});
+test("a new ordinary request clears detailed context while explicit follow-up can retrieve identity", () => {
+  const events = [{ type: "turn/start", data: { turn: 1 } }, ...enter("A")];
+  const session = { snapshotEvents: () => events };
+  assert.match(__internal.currentContextText({ session }, {}), /Target.*A/);
+  events.push({ type: "user/message", data: { source: { kind: "human" }, content: [] } });
+  assert.equal(__internal.currentContextText({ session }, {}), undefined);
+  assert.equal(__internal.learningFocusOf(session), "A");
+  events.push({ type: "turn/start", data: { turn: 2 } });
+  assert.equal(__internal.currentContextText({ session }, {}), undefined);
 });

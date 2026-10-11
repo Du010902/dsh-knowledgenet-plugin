@@ -32,7 +32,7 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
-  nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
+  nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatAsk: "围绕节点提问", nodeChatQuestion: "写下本次想理解的问题", nodeChatUseQuestion: "带上问题打开对话", nodeChatDraftHint: "只准备问题草稿，不发送笔记。宿主不支持填入时，将问题复制到剪贴板后粘贴。", nodeChatDraftTemplate: "我想理解知识库节点「{title}」（ID: {id}）。\n本次问题：{question}\n请先聚焦这个问题；需要时仅读取此节点，必要的前置概念简要解释即可，不展开整个知识库。", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
   understood: "已理解", notUnderstood: "未理解", understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
   planPendingTitle: "agent 提交了一份提案",
   planTagCreate: "新建",
@@ -267,7 +267,7 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
-  nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
+  nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatAsk: "Ask about this node", nodeChatQuestion: "What would you like to understand?", nodeChatUseQuestion: "Open chat with question", nodeChatDraftHint: "Prepare a draft without sending notes. If the host cannot fill it, the question is copied for pasting.", nodeChatDraftTemplate: "I want to understand library node “{title}” (ID: {id}).\nMy question: {question}\nFocus on this question; read only this node if needed, briefly explain necessary prerequisites, and avoid expanding the entire library.", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
   understood: "Understood", notUnderstood: "Not understood", understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
   planPendingTitle: "The agent submitted a proposal",
   planTagCreate: "New",
@@ -538,8 +538,10 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
      * 右侧栏按会话保存；服务缺席时仍可使用标准对话导航。
      */
     const sidebarRight = ctx.get?.("sidebarRight") as ConversationServices["sidebarRight"] | undefined;
+    const conversation = ctx.get?.("conversation") as { input?: { for(scope: unknown): ReturnType<NonNullable<ConversationServices["inputFor"]>> } } | undefined;
+    const inputFor = (id: string) => { const scope = sessions?.scope?.(id); return scope ? conversation?.input?.for(scope) : undefined; };
     return sessions && uiWorkspace
-      ? { sessions, uiWorkspace, ...(workspaces === undefined ? {} : { workspaces }), ...(sidebarRight === undefined ? {} : { sidebarRight }) }
+      ? { sessions, uiWorkspace, inputFor, ...(workspaces === undefined ? {} : { workspaces }), ...(sidebarRight === undefined ? {} : { sidebarRight }) }
       : undefined;
   });
   if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");

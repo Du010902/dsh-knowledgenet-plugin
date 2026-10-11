@@ -4,7 +4,7 @@
  * 形态：Cordis 函数式插件（`export function apply`），`inject: ['tools']` 等待工具注册表。
  * 职责边界：
  * - 把**本地知识库**（v2 开放文件格式）读进来并允许受控写入，作为一组工具暴露给模型；
- * - 逐轮把「当前学习节点 + 它的前置」注入上下文，让模型不必被提醒；
+ * - 仅在当前知识库请求中提供聚焦学习规则，不自动注入前置和后继；
  * - 注册一条精确 Fetch 路由（`/api/knowledgenet.graph`）给**常驻面板**取数据；
  * - 不持有全局「当前库」单例：库由调用方会话的 cwd 决定（见 library.ts），
  *   面板没有会话绑定时用「最近装载过的库」兜底（见 lastLibraryRoot）；
@@ -19,8 +19,8 @@ import { addPrerequisite, createNodeFromUi, readNote, writeNote } from "./mutate
 import { __setCreationQuotaForTest, resetCreationQuotaForTurn } from "./creation-quota.ts";
 import { listPlans } from "./plans.ts";
 import { addPrerequisiteFromUi, applyPlanFromUi, removePrerequisiteFromUi, undoPlanFromUi } from "./graph-edit.ts";
-import { currentContextText, registerPrompts, PROTOCOL_SECTION } from "./prompts.ts";
-import { currentIdOf, foldStack, stackAfterBack, stackAfterEnter, stackOf } from "./stack.ts";
+import { currentContextText, registerPrompts, PROTOCOL_SECTION, LEARNING_SECTION } from "./prompts.ts";
+import { currentIdOf, foldStack, stackAfterBack, stackAfterEnter, stackOf, learningFocusOf, currentLearningResults } from "./stack.ts";
 import {
   GRAPH_API_PATH,
   GRAPH_API_ROUTE,
@@ -67,9 +67,19 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
   const tools = ctx.tools;
   /** 本插件注册的全部工具名（隔离时整批 deny 用；直接从注册内容取，避免漏掉将来新增的工具） */
   const toolNames: string[] = [];
+  const toolDisposers: Array<() => void> = [];
+  let modelEnabled = true;
+  let modelDisabledReason: string | undefined;
+  const disableModelTools = (reason: string) => {
+    modelEnabled = false;
+    modelDisabledReason = reason;
+    for (const dispose of toolDisposers.splice(0)) dispose();
+    recordIsolation({ sessionCwd: null, isLibrary: false, restricted: true, reason });
+  };
   if (tools !== undefined && typeof tools.register === "function") {
     for (const tool of createTools(config)) {
-      tools.register(tool);
+      const dispose = tools.register(tool);
+      if (typeof dispose === "function") toolDisposers.push(dispose as () => void);
       const name = (tool as { name?: unknown }).name;
       if (typeof name === "string" && name !== "") toolNames.push(name);
     }
@@ -83,7 +93,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
    * 在 **agent 作用域**调用，只影响那一个会话（同进程里别的知识库会话不受影响）。
    *
    * 判定在 `agent/created` 时刻**同步**做（不做扫描，只向上找 library.json），
-   * 所以首轮就不会漏出去；拿不到 agent 作用域工具面时**只记录不报错**（工具照旧全局可见）。
+   * 所以首轮就不会漏出去；拿不到 agent 作用域工具面时停止暴露插件模型工具；图谱和宿主其他工具保留。
    */
   if (typeof ctx.on === "function") {
     try {
@@ -93,13 +103,16 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
           const cwd = sessionCwdOf({ agent }) ?? "";
           const reveal = (): boolean => isLibrarySession(cwd);
           const scoped = (agent?.ctx as { tools?: { restrict?: (filter: object) => unknown } } | undefined)?.tools;
+          if (typeof scoped?.restrict !== "function") { disableModelTools("no-agent-tools: plugin model tools disabled"); return; }
+          const restrict = scoped.restrict.bind(scoped);
           const hidden = registerAgentIsolation(
             cwd,
             () => {
-              if (typeof scoped?.restrict !== "function") return null;
+              if (!modelEnabled) return null;
               try {
-                return scoped.restrict({ deny: toolNames }) as () => void;
-              } catch {
+                return restrict({ deny: toolNames }) as () => void;
+              } catch (error) {
+                disableModelTools(`agent restriction failed: ${error instanceof Error ? error.message : String(error)}`);
                 return null;
               }
             },
@@ -120,12 +133,12 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
           });
         }
       });
-    } catch {
-      // 没有事件总线时跳过隔离（工具仍全局可见，但不影响任何功能）
+    } catch (error) {
+      disableModelTools(`agent event registration failed: ${String(error)}`);
     }
-  }
+  } else disableModelTools("no-agent-events: plugin model tools disabled");
 
-  const prompts = registerPrompts(ctx, config);
+  const prompts = registerPrompts(ctx, config, () => modelEnabled);
   const startedAt = Date.now();
   // 先记「等待中」：真正的注册发生在 connection 就绪时（见下）。
   // 这样即使注册一直没发生，kn_status 也能说出原因，而不是留一句 not found。
@@ -136,7 +149,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
     probes: [],
     clientDiag: [],
     scans: [],
-    isolation: [],
+    isolation: modelDisabledReason ? [{ at: Date.now(), sessionCwd: null, isLibrary: false, restricted: true, reason: modelDisabledReason }] : [],
     /* 读正文的分阶段指标（实施顺序第 1 条 ✓）：启动时为空 ✓ */
     docReads: [],
     /* 正文接口的端到端指标（问题三 ✓）：启动时为空 ✓ */
@@ -212,6 +225,9 @@ export const __internal = {
   currentContextText,
   registerPrompts,
   PROTOCOL_SECTION,
+  LEARNING_SECTION,
+  learningFocusOf,
+  currentLearningResults,
   foldStack,
   stackOf,
   stackAfterEnter,

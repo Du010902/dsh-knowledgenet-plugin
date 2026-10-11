@@ -164,3 +164,10 @@ test('恢复标签触发宿主同步通知时不重入，不重复创建',()=>{
  const actions=makeConversationActions(()=>({sessions:{create:async()=>'new'},sidebarRight:fixture.sidebar,uiWorkspace:{openSession:id=>fixture.setMounted(id)}}),async()=>{});
  actions.open('new');assert.equal(fixture.opened.length,3);assert.equal(fixture.listeners.size,0);assert.equal(events.size,0);
 });
+
+test("节点提问草稿只填空闲空输入，不覆盖已有草稿、附件或发送",()=>{
+ let state={draft:"",phase:"plain",attachmentIds:[]};const values=[];const services={inputFor:()=>({state:{getSnapshot:()=>state},setDraft:text=>values.push(text)}),sessions:{create:async()=>"chat"},uiWorkspace:{openSession:()=>{}}};
+ const actions=makeConversationActions(()=>services,async()=>({ok:true,json:async()=>({})}));assert.equal(actions.prepareDraft("chat","node question"),true);assert.deepEqual(values,["node question"]);
+ for(const blocked of [{draft:"existing",phase:"plain"},{draft:"",phase:"submitting"},{draft:"",phase:"plain",attachmentIds:["image"]}]){state=blocked;assert.equal(actions.prepareDraft("chat","new"),false);}assert.equal(values.length,1);
+ assert.equal(makeConversationActions(()=>undefined,async()=>({})).prepareDraft("chat","q"),false);
+});
