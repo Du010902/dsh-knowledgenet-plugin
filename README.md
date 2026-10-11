@@ -244,6 +244,8 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 
 `kn_current_node` 默认依次查询活动界面中的笔记/实际图谱选择、首轮入口线索和此前学习目标；`source: history` 专门追问此前目标。自动布局指定的节点不作为实际选择。界面聚焦按会话、库根和视图实例同步；正常关闭/隐藏时清理，异常断连后租约到期清理。`kn_read_node` 的 `role: background` 用于补充材料，不替换历史学习目标；默认 `role: target` 保持旧调用兼容。
 
+聚焦有效性观察整个插件面板，不依赖图谱标题栏或键盘焦点。切到聊天输入框、开发者工具或其他窗口，仍可见的笔记继续作为当前节点；隐藏、卸载或页面离开才撤销。宿主可通过会话持久元数据确认尚未装载会话的工作区，不读取聊天内容。聚焦上报失败记录在 `kn_status` 的 `clientDiag` 中，区域为 `view-focus`。无可靠当前节点时不能把库根或总览第一项当作用户当前节点。详见 [当前笔记识别修复](design/current-note-focus-repair.md)。
+
 全库结构默认每页最多 200 个节点、400 条关系、24,000 个 JSON 字符，分别通过 `structureMaxNodes`、`structureMaxEdges`、`structureMaxChars` 配置；局部图仍使用 `modelMaxNodes`/`modelMaxEdges`。节点和关系独立分页，完成的一侧用对应总数作为偏移，续页传回 `revision`，结构变化时从零重查。笔记长度预算不变。聚焦租约 `focusLeaseMs` 默认 45,000 毫秒，最小 3,000 毫秒，客户端按宿主返回值每三分之一租约续期。
 
 实现与验证见 [结构上下文及聚焦学习优化](design/knowledge-structure-learning-implementation.md)，此前实现见 [聚焦学习实现记录](design/focused-learning-implementation.md)。配置默认值在插件中解析，不修改 DSH 本体、会话格式、普通工具或全局配置。DSH 原有文件工具仍可读取文件，因此这些策略不能保证模型绝不通过其他工具扫描知识库。

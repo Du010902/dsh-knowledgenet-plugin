@@ -92,6 +92,22 @@ test("focus HTTP rejects foreign roots; node-origin records add only plugin memo
   assert.deepEqual(Object.keys(JSON.parse(await readFile(join(f.root, "node-conversations.json"), "utf8"))).sort(), ["nodes", "version"]);
 });
 
+test("visible notes can publish focus before their persisted session is attached", async () => {
+  const f = await makeV3Fixture({ nodes: ["有包络的波包"] });
+  const state = new LearningState(); const readIds = [];
+  const ctx = { get: name => name === "sessionPersistence" ? { stat: async id => {
+    readIds.push(id); return id === "chat" ? { header: { cwd: f.workspace } } : undefined;
+  } } : undefined };
+  const body = { kind: "view-focus", sessionId: "chat", root: f.root, viewId: "view", sequence: 1,
+    nodeId: f.nodes["有包络的波包"].id, focusKind: "editor", active: true };
+  assert.equal((await __internal.handleApiRequest(ctx, {}, request(body), state)).body.ok, true);
+  const current = await tools({}, state).kn_current_node.execute({ source: "ui" }, exec(f));
+  assert.equal(current.node.title, "有包络的波包"); assert.equal(current.source, "ui");
+  assert.deepEqual(readIds, ["chat"]);
+  assert.equal((await __internal.handleApiRequest(ctx, {}, request({ ...body, sessionId: "unknown" }), state)).body.error.code, "focus_scope_mismatch");
+  assert.match(__internal.PROTOCOL_SECTION, /Never substitute a library root/);
+});
+
 test("prompts expose only first-request origin ID; changed revisions fail explicitly", async () => {
   const f = await makeV3Fixture({ nodes: ["A"] }); const s = new LearningState(); s.enter("chat", f.root, f.nodes.A.id);
   const events = [{ type: "turn/start" }]; let context;

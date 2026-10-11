@@ -55,8 +55,9 @@ interface SessionLike {
 interface ConnectionRegistrar {
   get?(name: string): unknown;
   agents?: { get?(id: string): { session?: { header?: { cwd?: unknown } } } | undefined };
-  /** 会话存储：`Session.header.cwd`。**全新会话还没有 agent，但它已经在会话存储里** */
+  /** 已装载会话的工作区元数据。 */
   sessions?: { get?(id: string): { header?: { cwd?: unknown } } | undefined };
+  sessionPersistence?: { stat(id: string): Promise<{ header: { cwd?: unknown } } | undefined> };
 }
 
 function jsonResponse(body: unknown, status = 200, head = false): Response {
@@ -94,12 +95,12 @@ function errorBody(error: unknown): { code: string; message: string; createPath?
 /**
  * 会话 id → 该会话工作区的 cwd。
  *
- * 两条来源，缺一不可：
+ * 会话作用域来源：
  * - `ctx.agents.get(id).session.header.cwd`：与工具侧 `sessionCwdOf` 一致的活会话路径；
- * - `ctx.sessions.get(id).header.cwd`：**刚建、还没 agent 的会话只在这里**——
- *   只有第一条时，"新会话"会被判成"问不到 cwd"，进而被误判成"工作区不是知识库"。
+ * - `ctx.sessions.get(id).header.cwd`：已装载会话；
+ * - `ctx.sessionPersistence.stat(id).header.cwd`：尚未装载的持久会话，只查元数据。
  */
-function cwdOfSession(ctx: ConnectionRegistrar, sessionId: string): string | undefined {
+async function cwdOfSession(ctx: ConnectionRegistrar, sessionId: string): Promise<string | undefined> {
   const pick = (value: unknown): string | undefined => {
     const shaped = value as
       | { session?: { header?: { cwd?: unknown } }; header?: { cwd?: unknown } }
@@ -108,14 +109,24 @@ function cwdOfSession(ctx: ConnectionRegistrar, sessionId: string): string | und
     return typeof cwd === "string" && cwd !== "" ? cwd : undefined;
   };
   try {
-    const fromAgent = pick(ctx.agents?.get?.(sessionId));
+    const agents = ctx.agents ?? ctx.get?.("agents") as ConnectionRegistrar["agents"];
+    const fromAgent = pick(agents?.get?.(sessionId));
     if (fromAgent !== undefined) return fromAgent;
   } catch {
     // 走下一来源
   }
   try {
-    return pick(ctx.sessions?.get?.(sessionId));
+    const sessions = ctx.sessions ?? ctx.get?.("sessions") as ConnectionRegistrar["sessions"];
+    const fromSession = pick(sessions?.get?.(sessionId));
+    if (fromSession !== undefined) return fromSession;
   } catch {
+    // A detached session may still have persisted metadata.
+  }
+  try {
+    const persistence = ctx.sessionPersistence ?? ctx.get?.("sessionPersistence") as ConnectionRegistrar["sessionPersistence"];
+    return pick(await persistence?.stat(sessionId));
+  } catch (error) {
+    void error; // Missing or inaccessible stored metadata leaves the scope unknown.
     return undefined;
   }
 }
@@ -182,7 +193,7 @@ export async function resolveRequestedRoot(
   }
   const asked = typeof options.sessionId === "string" && options.sessionId !== "";
   if (asked) {
-    const cwd = cwdOfSession(ctx, options.sessionId as string);
+    const cwd = await cwdOfSession(ctx, options.sessionId as string);
     // 问到了 cwd：这里找不到库就是「工作区不是知识库」——但要把"该在哪儿建"带出去，
     // 否则面板收不到 `library_missing`，静默创建永远不会发生（新模型的核心体验）。
     if (cwd !== undefined) {

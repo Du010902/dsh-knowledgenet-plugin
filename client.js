@@ -3356,17 +3356,26 @@ window.__ModuleLoader__.load({
 			const sequence = (0, react.useRef)(0);
 			(0, react.useEffect)(() => {
 				const { sessionId, root, nodeId, source, element } = options;
-				if (!sessionId || !root) return;
+				if (!sessionId || !root || !element) return;
 				let disposed = false;
 				let timer;
 				let retryMs = 15e3;
 				const visible = () => {
-					const view = element.current;
-					const rect = view?.getBoundingClientRect();
-					return !!view && !!rect && rect.width > 0 && rect.height > 0 && view.checkVisibility({
+					const rect = element.getBoundingClientRect();
+					return element.isConnected && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth && element.checkVisibility({
 						checkOpacity: true,
 						checkVisibilityCSS: true
-					}) && document.visibilityState === "visible" && document.hasFocus();
+					}) && document.visibilityState === "visible";
+				};
+				let failure;
+				const diagnose = (code) => {
+					if (code === failure) return;
+					failure = code;
+					reportDiag("view-focus", code ? "rejected" : "recovered", {
+						code: code ?? "ok",
+						source,
+						activeNode: nodeId !== null
+					});
 				};
 				const send = async (active, claim) => {
 					if (timer !== void 0) clearTimeout(timer);
@@ -3388,8 +3397,13 @@ window.__ModuleLoader__.load({
 								claim
 							})
 						})).json();
-						if (result.ok === true && typeof result.leaseMs === "number" && result.leaseMs >= 3e3) retryMs = Math.floor(result.leaseMs / 3);
-					} catch (error) {}
+						if (result.ok === true) {
+							if (typeof result.leaseMs === "number" && result.leaseMs >= 3e3) retryMs = Math.floor(result.leaseMs / 3);
+							diagnose(void 0);
+						} else diagnose(typeof result.error?.code === "string" ? result.error.code : "invalid_response");
+					} catch (error) {
+						diagnose("transport_failed");
+					}
 					if (!disposed && sentSequence === sequence.current) timer = setTimeout(() => {
 						send(visible(), false);
 					}, retryMs);
@@ -3404,22 +3418,22 @@ window.__ModuleLoader__.load({
 					send(false, false);
 				};
 				const pointer = (event) => {
-					if (event.composedPath().includes(element.current?.getRootNode())) activate();
+					if (event.composedPath().includes(element)) activate();
 				};
 				window.addEventListener("focus", resume);
-				window.addEventListener("blur", deactivate);
+				window.addEventListener("blur", resume);
 				window.addEventListener("pagehide", deactivate);
 				document.addEventListener("visibilitychange", resume);
 				document.addEventListener("pointerdown", pointer);
 				const observer = new ResizeObserver(resume);
-				if (element.current) observer.observe(element.current);
+				observer.observe(element);
 				activate();
 				return () => {
 					disposed = true;
 					if (timer !== void 0) clearTimeout(timer);
 					observer.disconnect();
 					window.removeEventListener("focus", resume);
-					window.removeEventListener("blur", deactivate);
+					window.removeEventListener("blur", resume);
 					window.removeEventListener("pagehide", deactivate);
 					document.removeEventListener("visibilitychange", resume);
 					document.removeEventListener("pointerdown", pointer);
@@ -199533,7 +199547,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			/** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
 			const [refreshing, setRefreshing] = (0, react.useState)(false);
 			const [focusId, setFocusId] = (0, react.useState)(null);
-			const focusViewRef = (0, react.useRef)(null);
+			const [focusView, setFocusView] = (0, react.useState)(null);
 			const [zoom, setZoom] = (0, react.useState)(1);
 			const [relayoutToken, setRelayoutToken] = (0, react.useState)(0);
 			/** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -199962,7 +199976,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				root: typeof payload?.library?.root === "string" ? payload.library.root : void 0,
 				nodeId: graph?.nodes.some((node) => node.id === actualFocus) ? actualFocus : null,
 				source: editingNodeId ? "editor" : "graph",
-				element: focusViewRef
+				element: focusView
 			});
 			payload?.counts?.nodes ?? graph?.nodes.length;
 			payload?.counts?.edges ?? graph?.edges.length;
@@ -200092,358 +200106,364 @@ Expected function or array of functions, received type ${typeof value}.`);
 					window.removeEventListener("knowledgenet:geometry", onGeometry);
 				};
 			}, []);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ShadowPanel, {
-				height: "fill",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						ref: focusViewRef,
-						className: searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "kn-btn kn-icon-btn",
-								"aria-label": t("relayout"),
-								title: t("relayoutHint"),
-								onClick: () => {
-									window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT, { detail: { libraryKey: libraryKeyOf(payload?.library) } }));
-									setRelayoutToken((value) => value + 1);
-									fitWholeGraph();
-								},
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelayoutTreeIcon, {})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "kn-btn kn-icon-btn",
-								"aria-label": t("refresh"),
-								title: t("refreshHint"),
-								onClick: () => {
-									setRefreshing(true);
-									load({ refresh: true }).finally(() => {
-										setRefreshing(false);
-									});
-								},
-								disabled: refreshing,
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RefreshRingIcon, {})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
-								className: "kn-search",
-								role: "search",
-								onSubmit: (event) => {
-									event.preventDefault();
-									submitSearch();
-								},
-								onFocus: () => {
-									setSearchFocused(true);
-								},
-								onBlur: (event) => {
-									if (event.currentTarget.contains(event.relatedTarget)) return;
-									setSearchFocused(false);
-								},
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kn-search-box",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SearchGlyphIcon, {}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-											className: "kn-search-field",
-											type: "search",
-											value: searchQuery,
-											"aria-label": t("searchPlaceholder"),
-											placeholder: t("searchPlaceholder"),
-											spellCheck: false,
-											"aria-expanded": searchOpen,
-											"aria-controls": SEARCH_LIST_ID,
-											"aria-activedescendant": searchOpen && searchMatches.length > 0 ? `${SEARCH_LIST_ID}-${searchActive}` : void 0,
-											onChange: (event) => {
-												setSearchQuery(event.currentTarget.value);
-											},
-											onKeyDown: (event) => {
-												if (event.key === "ArrowDown") {
-													event.preventDefault();
-													setSearchActive((index) => searchMatches.length === 0 ? 0 : Math.min(searchMatches.length - 1, index + 1));
-													return;
-												}
-												if (event.key === "ArrowUp") {
-													event.preventDefault();
-													setSearchActive((index) => Math.max(0, index - 1));
-													return;
-												}
-												if (event.key === "Escape") {
-													event.preventDefault();
-													setSearchQuery("");
-												}
-											}
-										}),
-										searchOpen ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "kn-search-list",
-											id: SEARCH_LIST_ID,
-											role: "listbox",
-											"aria-label": t("searchResults"),
-											children: searchMissed ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "kn-search-empty",
-												children: t("searchMiss")
-											}) : searchMatches.map((hit, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-												id: `${SEARCH_LIST_ID}-${index}`,
-												type: "button",
-												role: "option",
-												"aria-selected": index === searchActive,
-												className: index === searchActive ? "kn-search-item is-active" : "kn-search-item",
-												onMouseEnter: () => {
-													setSearchActive(index);
-												},
-												onMouseDown: (event) => {
-													event.preventDefault();
-												},
-												onClick: () => {
-													focusSearchResult(index);
-												},
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "kn-search-item-title",
-													children: hit.node.title
-												}), hit.via === "alias" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "kn-search-item-alias",
-													children: hit.matched
-												}) : null]
-											}, hit.node.id))
-										}) : null
-									]
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "submit",
-									className: "kn-icon-btn",
-									"aria-label": t("searchGo"),
-									title: t("searchGo"),
-									disabled: searchQuery.trim() === "",
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SubmitArrowIcon, {})
-								})]
-							})
-						]
-					}),
-					spaceNotice !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kn-warn kn-warn-inline",
-						children: spaceNotice
-					}) : null,
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PlanReview, {
-						root: workspacePath,
-						reloadToken: payload?.revision ?? 0,
-						onChanged: () => {
-							load({ refresh: true });
-						},
-						report: (step, detail) => {
-							reportDiagOnce("plan-review", step, step, detail ?? null);
-						},
-						copy: {
-							pendingTitle: t("planPendingTitle"),
-							tagCreate: t("planTagCreate"),
-							tagReuse: t("planTagReuse"),
-							nothingSelected: t("planNothingSelected"),
-							discard: t("planDiscard"),
-							hint: t("planHint"),
-							appliedTitle: t("planAppliedTitle"),
-							createdCount: t("planCreatedCount"),
-							undo: t("planUndo"),
-							undoDone: t("planUndoDone"),
-							close: t("planClose")
-						}
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kn-graph",
-						"data-understanding": "true",
-						children: error !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "kn-msg kn-body",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "kn-error",
-								children: [
-									t("failed"),
-									" — ",
-									error
-								]
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kn-dim",
-								children: t("workspaceHint")
-							})]
-						}) : graph === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "kn-msg",
-							children: t("loading")
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "graph",
-							ref: graphHostRef,
-							onContextMenuCapture: (event) => {
-								const target = event.target;
-								if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) return;
-								requestCanvasMenu(event.clientX, event.clientY);
-								event.preventDefault();
-							},
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				ref: setFocusView,
+				style: {
+					height: "100%",
+					minHeight: "320px"
+				},
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ShadowPanel, {
+					height: "fill",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel",
 							children: [
-								graph.nodes.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kn-msg kn-empty-hint",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("noNodes") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "kn-dim",
-										children: t("emptyHint")
-									})]
-								}) : null,
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "kn-graph-stage",
-									"data-visible": visible ? "true" : "false",
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ErrorBoundary, {
-										fallback: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "kn-msg",
-											children: t("spaceFailed")
-										}),
-										onError: () => {
-											setSpaceNotice(t("spaceFailed"));
-										},
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphUniverse, {
-											graph: coloredGraph ?? graph,
-											rootId: payload?.focusId ?? null,
-											focusId: effectiveFocus,
-											labelDensity: "smart",
-											command: cameraCommand,
-											relayoutToken,
-											libraryKey,
-											onEnter: (id) => setFocusId(id)
-										}, sceneKey)
-									})
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(InteriorMinimap, {
-									hostRef: graphHostRef,
-									active: visible,
-									sceneKey
-								}),
-								selectedNode !== null && editingNodeId === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kn-sel",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "kn-sel-tag",
-											children: t("focusNow")
-										}),
-										" ",
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "kn-sel-title",
-											children: selectedNode.title
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "kn-sel-sub",
-											children: [t(selectedNode.status === "done" ? "statusDone" : selectedNode.status === "learning" ? "statusLearning" : "statusTodo"), selectedNode.prerequisites > 0 ? ` · ${selectedNode.prerequisites} ${t("prerequisites")}` : ""]
-										})
-									] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										type: "button",
-										className: "kn-sel-edit",
-										onClick: () => {
-											requestEdit({
-												kind: "open",
-												nodeId: selectedNode.id
-											});
-										},
-										children: t("editNote")
-									})]
-								}) : null,
-								editingNodeId !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeDocumentEditor, {
-									nodeId: editingNodeId,
-									libraryKey,
-									graph: graph ?? void 0,
-									onRelationsChanged: () => {
-										load({ refresh: true });
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-btn kn-icon-btn",
+									"aria-label": t("relayout"),
+									title: t("relayoutHint"),
+									onClick: () => {
+										window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT, { detail: { libraryKey: libraryKeyOf(payload?.library) } }));
+										setRelayoutToken((value) => value + 1);
+										fitWholeGraph();
 									},
-									understood: payload?.understanding?.[editingNodeId] === true,
-									onOpenConversation: (sessionId, dirty) => requestEdit({
-										kind: "conversation",
-										sessionId
-									}, dirty),
-									onUnderstandingSaved: updateUnderstanding,
-									target: editingTarget,
-									t: props.t,
-									saveNonce: editorSaveNonce,
-									onDirtyChange: setEditorDirty,
-									onSaveOutcome: onEditorSaveOutcome,
-									onSaveableChange: setEditorSaveable,
-									onOpenNode: (nodeId) => {
-										requestEdit({
-											kind: "open",
-											nodeId
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelayoutTreeIcon, {})
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "kn-btn kn-icon-btn",
+									"aria-label": t("refresh"),
+									title: t("refreshHint"),
+									onClick: () => {
+										setRefreshing(true);
+										load({ refresh: true }).finally(() => {
+											setRefreshing(false);
 										});
 									},
-									onClose: (dirty) => {
-										requestEdit({ kind: "close" }, dirty);
+									disabled: refreshing,
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RefreshRingIcon, {})
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
+									className: "kn-search",
+									role: "search",
+									onSubmit: (event) => {
+										event.preventDefault();
+										submitSearch();
 									},
-									onSaved: (document) => {
-										const adopted = document.nodeId !== editingNodeId;
-										if (adopted) {
-											forgetDraft(draftKey(libraryKey, editingNodeId));
-											setEditingNodeId(document.nodeId);
-											setFocusId(document.nodeId);
-										}
-										const pending = pendingEditRef.current;
-										pendingEditRef.current = null;
-										setLeaveDialog(null);
-										if (pending !== null) {
-											const next = pending.kind === "open" ? adopted && pending.nodeId === editingNodeId ? document.nodeId : pending.nodeId : null;
-											if (!(adopted && next === document.nodeId)) if (pending.kind === "conversation") applyEdit(pending);
-											else if (next === null) applyEdit({ kind: "close" });
-											else applyEdit({
-												kind: "open",
-												nodeId: next
-											});
-										}
-										load({ refresh: true });
+									onFocus: () => {
+										setSearchFocused(true);
 									},
-									report: editorReport
-								}, `${libraryKey}::${editingNodeId}`) : null,
-								leaveDialog !== null && leaveCopy !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ConfirmDialog, {
-									title: leaveCopy.title,
-									message: leaveCopy.message,
-									confirmLabel: leaveCopy.confirmLabel,
-									cancelLabel: t("leaveStay"),
-									extraLabel: t("leaveDiscard"),
-									busy: editorSaving,
-									confirmDisabled: !editorSaveable,
-									onCancel: cancelLeave,
-									onExtra: discardLeave,
-									onConfirm: saveAndLeave
-								}) : null,
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphContextMenu, {
-									t,
-									nodes: graph.nodes,
-									edges: graph.edges,
-									root: target !== void 0 && target.kind === "root" ? target.value : void 0,
-									sessionId: target !== void 0 && target.kind === "session" ? target.value : props.sessionId,
-									onChanged: () => {
-										load({ refresh: true });
+									onBlur: (event) => {
+										if (event.currentTarget.contains(event.relatedTarget)) return;
+										setSearchFocused(false);
 									},
-									onEditNote: (nodeId) => {
-										requestEdit({
-											kind: "open",
-											nodeId
-										});
-									},
-									report: (step, detail) => {
-										reportDiag("graph-menu", step, detail ?? null);
-									},
-									copy: {
-										nodeMenuTitle: t("nodeMenuTitle"),
-										editNote: t("editNote"),
-										addPrerequisite: t("addPrerequisite"),
-										edgeMenuTitle: t("edgeMenuTitle"),
-										removeRelation: t("removeRelation"),
-										removeNode: t("removeNode"),
-										removeNodeConfirmTitle: t("removeNodeConfirmTitle"),
-										removeNodeConfirmMessage: t("removeNodeConfirmMessage"),
-										removeNodeDone: t("removeNodeDone"),
-										promptTitle: t("promptTitle"),
-										promptHint: t("promptHint"),
-										confirmCreate: t("confirmCreate"),
-										cancel: t("cancel"),
-										removeConfirmTitle: t("removeConfirmTitle"),
-										removeConfirmMessage: t("removeConfirmMessage"),
-										candidatesTitle: t("candidatesTitle"),
-										candidatesMessage: t("candidatesMessage"),
-										reuse: t("reuse"),
-										createAnyway: t("createAnyway"),
-										failed: t("menuFailed")
-									}
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "kn-search-box",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SearchGlyphIcon, {}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+												className: "kn-search-field",
+												type: "search",
+												value: searchQuery,
+												"aria-label": t("searchPlaceholder"),
+												placeholder: t("searchPlaceholder"),
+												spellCheck: false,
+												"aria-expanded": searchOpen,
+												"aria-controls": SEARCH_LIST_ID,
+												"aria-activedescendant": searchOpen && searchMatches.length > 0 ? `${SEARCH_LIST_ID}-${searchActive}` : void 0,
+												onChange: (event) => {
+													setSearchQuery(event.currentTarget.value);
+												},
+												onKeyDown: (event) => {
+													if (event.key === "ArrowDown") {
+														event.preventDefault();
+														setSearchActive((index) => searchMatches.length === 0 ? 0 : Math.min(searchMatches.length - 1, index + 1));
+														return;
+													}
+													if (event.key === "ArrowUp") {
+														event.preventDefault();
+														setSearchActive((index) => Math.max(0, index - 1));
+														return;
+													}
+													if (event.key === "Escape") {
+														event.preventDefault();
+														setSearchQuery("");
+													}
+												}
+											}),
+											searchOpen ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "kn-search-list",
+												id: SEARCH_LIST_ID,
+												role: "listbox",
+												"aria-label": t("searchResults"),
+												children: searchMissed ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+													className: "kn-search-empty",
+													children: t("searchMiss")
+												}) : searchMatches.map((hit, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+													id: `${SEARCH_LIST_ID}-${index}`,
+													type: "button",
+													role: "option",
+													"aria-selected": index === searchActive,
+													className: index === searchActive ? "kn-search-item is-active" : "kn-search-item",
+													onMouseEnter: () => {
+														setSearchActive(index);
+													},
+													onMouseDown: (event) => {
+														event.preventDefault();
+													},
+													onClick: () => {
+														focusSearchResult(index);
+													},
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "kn-search-item-title",
+														children: hit.node.title
+													}), hit.via === "alias" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "kn-search-item-alias",
+														children: hit.matched
+													}) : null]
+												}, hit.node.id))
+											}) : null
+										]
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "submit",
+										className: "kn-icon-btn",
+										"aria-label": t("searchGo"),
+										title: t("searchGo"),
+										disabled: searchQuery.trim() === "",
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SubmitArrowIcon, {})
+									})]
 								})
 							]
+						}),
+						spaceNotice !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "kn-warn kn-warn-inline",
+							children: spaceNotice
+						}) : null,
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PlanReview, {
+							root: workspacePath,
+							reloadToken: payload?.revision ?? 0,
+							onChanged: () => {
+								load({ refresh: true });
+							},
+							report: (step, detail) => {
+								reportDiagOnce("plan-review", step, step, detail ?? null);
+							},
+							copy: {
+								pendingTitle: t("planPendingTitle"),
+								tagCreate: t("planTagCreate"),
+								tagReuse: t("planTagReuse"),
+								nothingSelected: t("planNothingSelected"),
+								discard: t("planDiscard"),
+								hint: t("planHint"),
+								appliedTitle: t("planAppliedTitle"),
+								createdCount: t("planCreatedCount"),
+								undo: t("planUndo"),
+								undoDone: t("planUndoDone"),
+								close: t("planClose")
+							}
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "kn-graph",
+							"data-understanding": "true",
+							children: error !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "kn-msg kn-body",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "kn-error",
+									children: [
+										t("failed"),
+										" — ",
+										error
+									]
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "kn-dim",
+									children: t("workspaceHint")
+								})]
+							}) : graph === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "kn-msg",
+								children: t("loading")
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "graph",
+								ref: graphHostRef,
+								onContextMenuCapture: (event) => {
+									const target = event.target;
+									if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) return;
+									requestCanvasMenu(event.clientX, event.clientY);
+									event.preventDefault();
+								},
+								children: [
+									graph.nodes.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "kn-msg kn-empty-hint",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("noNodes") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "kn-dim",
+											children: t("emptyHint")
+										})]
+									}) : null,
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "kn-graph-stage",
+										"data-visible": visible ? "true" : "false",
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ErrorBoundary, {
+											fallback: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "kn-msg",
+												children: t("spaceFailed")
+											}),
+											onError: () => {
+												setSpaceNotice(t("spaceFailed"));
+											},
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphUniverse, {
+												graph: coloredGraph ?? graph,
+												rootId: payload?.focusId ?? null,
+												focusId: effectiveFocus,
+												labelDensity: "smart",
+												command: cameraCommand,
+												relayoutToken,
+												libraryKey,
+												onEnter: (id) => setFocusId(id)
+											}, sceneKey)
+										})
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(InteriorMinimap, {
+										hostRef: graphHostRef,
+										active: visible,
+										sceneKey
+									}),
+									selectedNode !== null && editingNodeId === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "kn-sel",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "kn-sel-tag",
+												children: t("focusNow")
+											}),
+											" ",
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "kn-sel-title",
+												children: selectedNode.title
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "kn-sel-sub",
+												children: [t(selectedNode.status === "done" ? "statusDone" : selectedNode.status === "learning" ? "statusLearning" : "statusTodo"), selectedNode.prerequisites > 0 ? ` · ${selectedNode.prerequisites} ${t("prerequisites")}` : ""]
+											})
+										] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											className: "kn-sel-edit",
+											onClick: () => {
+												requestEdit({
+													kind: "open",
+													nodeId: selectedNode.id
+												});
+											},
+											children: t("editNote")
+										})]
+									}) : null,
+									editingNodeId !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeDocumentEditor, {
+										nodeId: editingNodeId,
+										libraryKey,
+										graph: graph ?? void 0,
+										onRelationsChanged: () => {
+											load({ refresh: true });
+										},
+										understood: payload?.understanding?.[editingNodeId] === true,
+										onOpenConversation: (sessionId, dirty) => requestEdit({
+											kind: "conversation",
+											sessionId
+										}, dirty),
+										onUnderstandingSaved: updateUnderstanding,
+										target: editingTarget,
+										t: props.t,
+										saveNonce: editorSaveNonce,
+										onDirtyChange: setEditorDirty,
+										onSaveOutcome: onEditorSaveOutcome,
+										onSaveableChange: setEditorSaveable,
+										onOpenNode: (nodeId) => {
+											requestEdit({
+												kind: "open",
+												nodeId
+											});
+										},
+										onClose: (dirty) => {
+											requestEdit({ kind: "close" }, dirty);
+										},
+										onSaved: (document) => {
+											const adopted = document.nodeId !== editingNodeId;
+											if (adopted) {
+												forgetDraft(draftKey(libraryKey, editingNodeId));
+												setEditingNodeId(document.nodeId);
+												setFocusId(document.nodeId);
+											}
+											const pending = pendingEditRef.current;
+											pendingEditRef.current = null;
+											setLeaveDialog(null);
+											if (pending !== null) {
+												const next = pending.kind === "open" ? adopted && pending.nodeId === editingNodeId ? document.nodeId : pending.nodeId : null;
+												if (!(adopted && next === document.nodeId)) if (pending.kind === "conversation") applyEdit(pending);
+												else if (next === null) applyEdit({ kind: "close" });
+												else applyEdit({
+													kind: "open",
+													nodeId: next
+												});
+											}
+											load({ refresh: true });
+										},
+										report: editorReport
+									}, `${libraryKey}::${editingNodeId}`) : null,
+									leaveDialog !== null && leaveCopy !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ConfirmDialog, {
+										title: leaveCopy.title,
+										message: leaveCopy.message,
+										confirmLabel: leaveCopy.confirmLabel,
+										cancelLabel: t("leaveStay"),
+										extraLabel: t("leaveDiscard"),
+										busy: editorSaving,
+										confirmDisabled: !editorSaveable,
+										onCancel: cancelLeave,
+										onExtra: discardLeave,
+										onConfirm: saveAndLeave
+									}) : null,
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphContextMenu, {
+										t,
+										nodes: graph.nodes,
+										edges: graph.edges,
+										root: target !== void 0 && target.kind === "root" ? target.value : void 0,
+										sessionId: target !== void 0 && target.kind === "session" ? target.value : props.sessionId,
+										onChanged: () => {
+											load({ refresh: true });
+										},
+										onEditNote: (nodeId) => {
+											requestEdit({
+												kind: "open",
+												nodeId
+											});
+										},
+										report: (step, detail) => {
+											reportDiag("graph-menu", step, detail ?? null);
+										},
+										copy: {
+											nodeMenuTitle: t("nodeMenuTitle"),
+											editNote: t("editNote"),
+											addPrerequisite: t("addPrerequisite"),
+											edgeMenuTitle: t("edgeMenuTitle"),
+											removeRelation: t("removeRelation"),
+											removeNode: t("removeNode"),
+											removeNodeConfirmTitle: t("removeNodeConfirmTitle"),
+											removeNodeConfirmMessage: t("removeNodeConfirmMessage"),
+											removeNodeDone: t("removeNodeDone"),
+											promptTitle: t("promptTitle"),
+											promptHint: t("promptHint"),
+											confirmCreate: t("confirmCreate"),
+											cancel: t("cancel"),
+											removeConfirmTitle: t("removeConfirmTitle"),
+											removeConfirmMessage: t("removeConfirmMessage"),
+											candidatesTitle: t("candidatesTitle"),
+											candidatesMessage: t("candidatesMessage"),
+											reuse: t("reuse"),
+											createAnyway: t("createAnyway"),
+											failed: t("menuFailed")
+										}
+									})
+								]
+							})
 						})
-					})
-				]
+					]
+				})
 			});
 		}
 		//#endregion

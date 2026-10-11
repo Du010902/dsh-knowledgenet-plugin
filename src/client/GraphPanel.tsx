@@ -227,7 +227,7 @@ function GraphPanelInner(props: {
   /** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
   const [refreshing, setRefreshing] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
-  const focusViewRef = useRef<HTMLDivElement | null>(null);
+  const [focusView, setFocusView] = useState<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [relayoutToken, setRelayoutToken] = useState(0);
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -781,7 +781,7 @@ function GraphPanelInner(props: {
     sessionId: props.sessionId,
     root: typeof payload?.library?.root === "string" ? payload.library.root : undefined,
     nodeId: graph?.nodes.some(node => node.id === actualFocus) ? actualFocus : null,
-    source: editingNodeId ? "editor" : "graph", element: focusViewRef,
+    source: editingNodeId ? "editor" : "graph", element: focusView,
   });
   const nodeCount = payload?.counts?.nodes ?? graph?.nodes.length ?? 0;
   const edgeCount = payload?.counts?.edges ?? graph?.edges.length ?? 0;
@@ -964,13 +964,14 @@ function GraphPanelInner(props: {
   // 空图 / 未装载时也别只给一片空白：至少让标题栏与计数可见（下面照常渲染）
 
   return (
+    <div ref={setFocusView} style={{ height: "100%", minHeight: "320px" }}>
     <ShadowPanel height="fill">
       {/*
        * 这里**不再显示库名与计数**（用户反馈：知识库必然是当前项目下的 `.dsh_knowledge`，
        * 那行是冗余信息 ✗）。面板顶部只留操作按钮；视图也只保留**空间视图**——
        * 「聚焦视图」按用户要求整体去掉 ✓。
        */}
-      <div ref={focusViewRef} className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
+      <div className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
         {/*
           * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
           * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。
@@ -1410,5 +1411,6 @@ function GraphPanelInner(props: {
         )}
       </div>
     </ShadowPanel>
+    </div>
   );
 }

@@ -16,10 +16,10 @@ const entry = `import React from 'react'; import {createRoot} from 'react-dom/cl
 import {useViewFocus} from '${plugin}src/client/view-focus.ts';
 window.packets=[]; window.fetch=async(url,opts)=>{window.packets.push(JSON.parse(opts.body));return {json:async()=>({ok:true,leaseMs:3000})};};
 const shadow=document.getElementById('app').attachShadow({mode:'open'}); const mount=document.createElement('div');shadow.append(mount);const root=createRoot(mount);
-function App(){const[graph,setGraph]=React.useState(null);const[editor,setEditor]=React.useState(null);const[session,setSession]=React.useState('chat');const ref=React.useRef(null);
-useViewFocus({sessionId:session,root:'/library',nodeId:editor??graph,source:editor?'editor':'graph',element:ref});
+function App(){const[graph,setGraph]=React.useState(null);const[editor,setEditor]=React.useState(null);const[session,setSession]=React.useState('chat');const[element,setElement]=React.useState(null);
+useViewFocus({sessionId:session,root:'/library',nodeId:editor??graph,source:editor?'editor':'graph',element});
 window.choose=id=>setGraph(id);window.edit=id=>setEditor(id);window.switchSession=()=>{setGraph(null);setEditor(null);setSession('next');};
-return React.createElement('div',{ref,style:{width:300,height:100}},React.createElement('button',{onClick:()=>setGraph('A')},'选择 A'));}
+return React.createElement('div',{ref:setElement,style:{width:300,height:100}},React.createElement('button',{onClick:()=>setGraph('A')},'选择 A'));}
 root.render(React.createElement(App));window.hide=()=>{mount.style.display='none';};window.unmount=()=>root.unmount();`;
 const build = await rolldown({ input: "virtual:entry", plugins: [{ name: "focus-fixture", resolveId(id) {
   if (id === "virtual:entry") return id;
@@ -42,6 +42,8 @@ try {
   await page.waitForFunction(() => window.packets.some(p => p.active && p.nodeId === "A" && p.focusKind === "graph"));
   await page.evaluate(() => window.edit("B"));
   await page.waitForFunction(() => window.packets.at(-1)?.nodeId === "B" && window.packets.at(-1)?.focusKind === "editor");
+  await page.evaluate(() => { document.hasFocus = () => false; window.dispatchEvent(new Event('blur')); });
+  await page.waitForFunction(() => window.packets.at(-1)?.active === true && window.packets.at(-1)?.nodeId === "B");
   await page.evaluate(() => window.choose("C"));
   await page.waitForTimeout(50);
   assert.equal(await page.evaluate(() => window.packets.at(-1).nodeId), "B");

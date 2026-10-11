@@ -5550,6 +5550,7 @@ const PROTOCOL_SECTION = [
 	"A library folder, an open graph or a previous learning target does not permanently make ordinary greetings, coding or general questions library tasks. Do not read all notes to introduce yourself or prepare for unrelated work.",
 	"For a relevant learning question, kn_list_graph mode: overview gives metadata-only structure: titles, aliases, relationships and understanding marks, never note bodies. A small library may fit one page; for larger libraries continue or search as needed, never claim a partial page is the entire map.",
 	"When the user refers to the current node without naming it, query kn_current_node; do not ask them to operate a node picker. source: history resolves a follow-up about the previously studied node. The user's explicit topic takes precedence over UI focus and entry hints.",
+	"If kn_current_node has no reliable target, the current node is unknown. Never substitute a library root, goal, understanding mark or first overview item and claim it is the user's current node. Ask which concept they mean if their message does not identify it. A history result is a previous learning target, not evidence of a currently open note; for the node visible now use source: ui.",
 	"For library questions, explain the specific point first with one simple example; introduce only necessary terminology. Expand other nodes or applications when requested, and respect requests for deeper detail.",
 	"Library notes are the user's own thoughts. Do not write notes, create nodes or add prerequisites without a specific user request/agreement; explaining an unfamiliar concept is not consent to edit the library."
 ].join("\n");
@@ -6369,22 +6370,26 @@ function errorBody(error) {
 *
 * 两条来源，缺一不可：
 * - `ctx.agents.get(id).session.header.cwd`：与工具侧 `sessionCwdOf` 一致的活会话路径；
-* - `ctx.sessions.get(id).header.cwd`：**刚建、还没 agent 的会话只在这里**——
-*   只有第一条时，"新会话"会被判成"问不到 cwd"，进而被误判成"工作区不是知识库"。
+* - `ctx.sessions.get(id).header.cwd`：已装载会话；
+* - `ctx.sessionPersistence.stat(id).header.cwd`：尚未装载的持久会话，只查元数据。
 */
-function cwdOfSession(ctx, sessionId) {
+async function cwdOfSession(ctx, sessionId) {
 	const pick = (value) => {
 		const shaped = value;
 		const cwd = shaped?.session?.header?.cwd ?? shaped?.header?.cwd;
 		return typeof cwd === "string" && cwd !== "" ? cwd : void 0;
 	};
 	try {
-		const fromAgent = pick(ctx.agents?.get?.(sessionId));
+		const fromAgent = pick((ctx.agents ?? ctx.get?.("agents"))?.get?.(sessionId));
 		if (fromAgent !== void 0) return fromAgent;
 	} catch {}
 	try {
-		return pick(ctx.sessions?.get?.(sessionId));
-	} catch {
+		const fromSession = pick((ctx.sessions ?? ctx.get?.("sessions"))?.get?.(sessionId));
+		if (fromSession !== void 0) return fromSession;
+	} catch {}
+	try {
+		return pick(await (ctx.sessionPersistence ?? ctx.get?.("sessionPersistence"))?.stat(sessionId));
+	} catch (error) {
 		return;
 	}
 }
@@ -6430,7 +6435,7 @@ async function resolveRequestedRoot(ctx, config, options = {}) {
 		}
 	}
 	if (typeof options.sessionId === "string" && options.sessionId !== "") {
-		const cwd = cwdOfSession(ctx, options.sessionId);
+		const cwd = await cwdOfSession(ctx, options.sessionId);
 		if (cwd !== void 0) try {
 			return {
 				root: await resolveLibraryRoot(cwd, config.libraryRoot),
@@ -7586,6 +7591,7 @@ function apply(ctx, config = {}) {
 * 多出的具名导出不影响插件装载）。
 */
 const __internal = {
+	LearningState,
 	NodeVfs,
 	loadLibrary,
 	peekLibrary,

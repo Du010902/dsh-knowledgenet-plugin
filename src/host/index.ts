@@ -192,6 +192,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
  * 多出的具名导出不影响插件装载）。
  */
 export const __internal = {
+  LearningState,
   NodeVfs,
   loadLibrary,
   peekLibrary,
