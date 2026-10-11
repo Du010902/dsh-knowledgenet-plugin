@@ -3791,6 +3791,7 @@ function learningFocusOf(session) {
 	let focus = null;
 	for (const { name, value } of knowledgeResults(eventsOf(session))) {
 		if (name !== "kn_read_node" && name !== "kn_enter_node" && name !== "kn_back") continue;
+		if (name === "kn_read_node" && value.role === "background") continue;
 		const node = record(name === "kn_read_node" ? value.node : value.current);
 		focus = typeof node?.id === "string" ? node.id : null;
 	}
@@ -3849,7 +3850,11 @@ function resolveLearningConfig(config = {}) {
 		maxNoteChars: 12e3,
 		searchLimit: 5,
 		relationLimit: 5,
-		relationDescriptionChars: 240
+		relationDescriptionChars: 240,
+		structureMaxNodes: 200,
+		structureMaxEdges: 400,
+		structureMaxChars: 24e3,
+		focusLeaseMs: 45e3
 	};
 	const result = { ...defaults };
 	for (const key of Object.keys(defaults)) {
@@ -3859,6 +3864,7 @@ function resolveLearningConfig(config = {}) {
 		result[key] = value;
 	}
 	if (result.noteMaxChars > result.maxNoteChars) throw new TypeError("noteMaxChars must not exceed maxNoteChars");
+	if (result.focusLeaseMs < 3e3) throw new TypeError("focusLeaseMs must be at least 3000");
 	return result;
 }
 /** Validate a paging parameter and apply the configured ceiling. */
@@ -3866,6 +3872,160 @@ function pageNumber(value, fallback, ceiling, zero = false) {
 	if (value === void 0) return fallback;
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (zero ? 0 : 1)) throw new TypeError("Paging values must be safe integers in range");
 	return Math.min(value, ceiling);
+}
+//#endregion
+//#region src/host/learning-state.ts
+/** Plugin-local view leases and first-request entry hints; no Session metadata is written. */
+function libraryKey(root) {
+	const absolute = resolve(root);
+	return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+}
+/** One instance belongs to one plugin activation and is shared only by its API, prompts and tools. */
+var LearningState = class {
+	leaseMs;
+	now;
+	views = /* @__PURE__ */ new Map();
+	entries = /* @__PURE__ */ new Map();
+	order = 0;
+	constructor(leaseMs = 45e3, now = Date.now) {
+		this.leaseMs = leaseMs;
+		this.now = now;
+	}
+	/** Accept monotonic updates; inactive records prevent late packets reviving a closed view. */
+	update(input) {
+		const root = libraryKey(input.root);
+		const key = JSON.stringify([
+			input.sessionId,
+			root,
+			input.viewId
+		]);
+		const previous = this.views.get(key);
+		if (previous && previous.sequence >= input.sequence) return;
+		this.views.set(key, {
+			...input,
+			root,
+			expires: this.now() + this.leaseMs,
+			order: input.claim || !previous ? ++this.order : previous.order
+		});
+		this.prune();
+	}
+	/** Return only the most recently active view, never a node from another scope. */
+	focus(sessionId, root) {
+		this.prune();
+		const view = [...this.views.values()].filter((view) => view.active && view.sessionId === sessionId && view.root === libraryKey(root)).sort((a, b) => b.order - a.order)[0];
+		return view?.nodeId ? {
+			nodeId: view.nodeId,
+			source: view.source
+		} : void 0;
+	}
+	/** Record an entry action once; opening an existing conversation does not call this. */
+	enter(sessionId, root, nodeId) {
+		if (!this.entries.has(sessionId)) this.entries.set(sessionId, {
+			root: libraryKey(root),
+			nodeId
+		});
+	}
+	/** A hint survives tool continuations of the first human request, but no subsequent request. */
+	entry(sessionId, root, session) {
+		const hint = this.entries.get(sessionId);
+		if (!hint || hint.root !== libraryKey(root)) return void 0;
+		const events = eventsOf(session);
+		const requests = events.filter((event) => event.type === "user/message" && (event.data?.source)?.form === void 0).length;
+		const turns = events.filter((event) => event.type === "turn/start").length;
+		const request = Math.max(requests, turns);
+		let lastStart = -1, lastEnd = -1;
+		for (let index = 0; index < events.length; index++) {
+			if (events[index].type === "turn/start") lastStart = index;
+			if (events[index].type === "turn/end") lastEnd = index;
+		}
+		if (lastStart >= 0 && lastEnd > lastStart) {
+			this.entries.delete(sessionId);
+			return;
+		}
+		if (request > 1 || hint.request !== void 0 && request !== hint.request) {
+			this.entries.delete(sessionId);
+			return;
+		}
+		if (!request) return void 0;
+		hint.request = request;
+		return hint.nodeId;
+	}
+	dispose() {
+		this.views.clear();
+		this.entries.clear();
+	}
+	prune() {
+		for (const [key, view] of this.views) if (view.expires <= this.now()) this.views.delete(key);
+	}
+};
+/** Agent IDs are Session IDs in the host; tests/headless callers may provide session.id. */
+function modelSessionId(exec) {
+	const agent = exec?.agent;
+	return agent?.session?.id ?? agent?.id;
+}
+//#endregion
+//#region src/host/structure-page.ts
+/** Serialize metadata-only graph pages under node, edge and complete JSON character budgets. */
+function structurePage(options) {
+	const { nodes, edges, offset, edgeOffset, maxNodes, maxEdges, maxChars } = options;
+	const selectedNodes = [];
+	const selectedEdges = [];
+	const result = () => ({
+		ok: true,
+		mode: "overview",
+		library: options.library,
+		revision: options.revision,
+		nodes: selectedNodes,
+		edges: selectedEdges,
+		counts: {
+			nodes: nodes.length,
+			edges: edges.length
+		},
+		offset,
+		edgeOffset,
+		nextOffset: offset + selectedNodes.length < nodes.length ? offset + selectedNodes.length : null,
+		nextEdgeOffset: edgeOffset + selectedEdges.length < edges.length ? edgeOffset + selectedEdges.length : null,
+		truncated: offset > 0 || edgeOffset > 0 || offset + selectedNodes.length < nodes.length || edgeOffset + selectedEdges.length < edges.length,
+		pagingNote: "节点和边独立分页。续读时用 nextOffset / nextEdgeOffset；已完成的一侧使用 counts 中的总数。只有两侧从零完整读取，才是全库结构。结构不含正文。"
+	});
+	const fits = () => JSON.stringify(result()).length <= maxChars;
+	if (!fits()) return {
+		ok: false,
+		error: {
+			code: "structure_budget_too_small",
+			message: "结构字符预算不足以容纳分页信息，请增加 structureMaxChars。"
+		}
+	};
+	let nodeBlocked = false;
+	let edgeBlocked = false;
+	while (true) {
+		let added = false;
+		if (!nodeBlocked && selectedNodes.length < maxNodes && offset + selectedNodes.length < nodes.length) {
+			selectedNodes.push(nodes[offset + selectedNodes.length]);
+			if (!fits()) {
+				selectedNodes.pop();
+				nodeBlocked = true;
+			} else added = true;
+		}
+		if (!edgeBlocked && selectedEdges.length < maxEdges && edgeOffset + selectedEdges.length < edges.length) {
+			selectedEdges.push(edges[edgeOffset + selectedEdges.length]);
+			if (!fits()) {
+				selectedEdges.pop();
+				edgeBlocked = true;
+			} else added = true;
+		}
+		if (!added) break;
+	}
+	if (!selectedNodes.length && offset < nodes.length || !selectedEdges.length && edgeOffset < edges.length) {
+		if (!selectedNodes.length && !selectedEdges.length) return {
+			ok: false,
+			error: {
+				code: "structure_record_too_large",
+				message: "单条结构记录超出字符预算，请增加 structureMaxChars 或使用搜索和局部查询。"
+			}
+		};
+	}
+	return result();
 }
 //#endregion
 //#region src/host/model-tools.ts
@@ -3954,19 +4114,19 @@ const refProperties = {
 	}
 };
 /** Create read-only tools with validated plugin-owned limits. */
-function createModelTools(config) {
+function createModelTools(config, state = new LearningState()) {
 	const limits = resolveLearningConfig(config);
 	return [
 		{
 			name: "kn_list_graph",
-			description: "仅用于用户明确要求的知识库关系、路线或全库总览；普通问候、编程、解释一个节点不先调用它。neighborhood 真实返回目标的一跳关系，默认只取前置；overview 必须显式指定并分页。图谱界面另行加载完整图，不依赖本工具结果。",
+			description: "当前对话正在或可能讨论本工作区知识库时，可自主查询结构背景。overview 仅返回标题、别名、理解标记与关系，不含正文；小库一页、大库按需续页。neighborhood 查询一跳关系。结构是解释背景，不是必须全部讲解或读取正文的清单；无关任务不必调用。",
 			parameters: {
 				type: "object",
 				properties: {
 					mode: {
 						type: "string",
 						enum: ["neighborhood", "overview"],
-						description: "默认 neighborhood；用户明确要求全库总览时才指定 overview。"
+						description: "默认 neighborhood；需要了解全库结构背景时选择 overview，不要求用户明确提出总览。"
 					},
 					rootId: {
 						type: "string",
@@ -4008,6 +4168,10 @@ function createModelTools(config) {
 					refresh: {
 						type: "boolean",
 						description: "需要确认外部变更时刷新本地图谱。"
+					},
+					revision: {
+						type: "string",
+						description: "续页时原样传上一页结构内容指纹 revision；实际内容变更会要求重新查询。"
 					}
 				}
 			},
@@ -4021,14 +4185,49 @@ function createModelTools(config) {
 					if (mode === "neighborhood" && (typeof id !== "string" || !id.trim())) return fail$1("focus_required", "请指定目标节点；明确要看全库时使用 mode: overview。");
 					const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
 					const edgeOffset = pageNumber(args.edgeOffset, 0, Number.MAX_SAFE_INTEGER, true);
-					const requestedNodes = pageNumber(args.maxNodes, limits.modelMaxNodes, limits.modelMaxNodes);
-					const requestedEdges = pageNumber(args.maxEdges, limits.modelMaxEdges, limits.modelMaxEdges);
+					const nodeCeiling = mode === "overview" ? limits.structureMaxNodes : limits.modelMaxNodes;
+					const edgeCeiling = mode === "overview" ? limits.structureMaxEdges : limits.modelMaxEdges;
+					const requestedNodes = pageNumber(args.maxNodes, nodeCeiling, nodeCeiling);
+					const requestedEdges = pageNumber(args.maxEdges, edgeCeiling, edgeCeiling);
 					if (mode === "neighborhood" && requestedNodes < 2) throw new TypeError("Neighborhood pages require room for a neighbor");
 					const dir = direction(args.direction, "prerequisites");
 					if (dir === "none") throw new TypeError("Graph direction cannot be none");
 					const context = await openFor(exec, config, { refresh: args.refresh === true });
 					const snapshot = context.snapshot;
 					const marks = await readUnderstanding(context.library.root);
+					if (mode === "overview") {
+						const library = { name: context.library.manifest.title };
+						const nodes = snapshot.nodes.map((node) => ({
+							id: node.id,
+							title: node.title,
+							aliases: node.aliases,
+							understood: marks[node.id] === true,
+							understandingMarked: Object.hasOwn(marks, node.id)
+						})).sort((a, b) => a.id.localeCompare(b.id));
+						const edges = snapshot.edges.map((edge) => ({
+							id: edge.id,
+							fromId: edge.fromId,
+							toId: edge.toId,
+							relationType: edge.relationType
+						})).sort((a, b) => a.id.localeCompare(b.id));
+						const revision = createHash("sha256").update(JSON.stringify({
+							library,
+							nodes,
+							edges
+						})).digest("hex");
+						if (args.revision !== void 0 && args.revision !== revision) return fail$1("structure_changed", "图谱结构或理解标记已变更，请从零重新分页读取。");
+						return structurePage({
+							library,
+							revision,
+							nodes,
+							edges,
+							offset,
+							edgeOffset,
+							maxNodes: requestedNodes,
+							maxEdges: requestedEdges,
+							maxChars: limits.structureMaxChars
+						});
+					}
 					let candidates = snapshot.nodes;
 					let edges = snapshot.edges;
 					let focus;
@@ -4039,7 +4238,7 @@ function createModelTools(config) {
 						const ids = new Set(edges.flatMap((edge) => [edge.fromId, edge.toId]));
 						candidates = candidates.filter((node) => node.id !== id && ids.has(node.id));
 					}
-					const count = mode === "neighborhood" ? Math.min(requestedNodes - 1, limits.relationLimit) : requestedNodes;
+					const count = Math.min(requestedNodes - 1, limits.relationLimit);
 					const neighbors = candidates.slice(offset, offset + Math.max(0, count));
 					const selected = focus ? [focus, ...neighbors] : neighbors;
 					const kept = new Set(selected.map((node) => node.id));
@@ -4048,8 +4247,10 @@ function createModelTools(config) {
 					const nodes = selected.map((node) => ({
 						id: node.id,
 						title: node.title,
+						aliases: node.aliases,
 						path: node.relativePath,
-						understood: marks[node.id] === true
+						understood: marks[node.id] === true,
+						understandingMarked: Object.hasOwn(marks, node.id)
 					}));
 					const nextOffset = offset + neighbors.length < candidates.length && neighbors.length ? offset + neighbors.length : null;
 					const nextEdgeOffset = edgeOffset + shownEdges.length < relationEdges.length ? edgeOffset + shownEdges.length : null;
@@ -4057,7 +4258,7 @@ function createModelTools(config) {
 						ok: true,
 						mode,
 						focusId: focus?.id ?? null,
-						direction: mode === "neighborhood" ? dir : void 0,
+						direction: dir,
 						library: { name: context.library.manifest.title },
 						nodes,
 						edges: shownEdges.map((edge) => ({
@@ -4076,7 +4277,7 @@ function createModelTools(config) {
 						edgeOffset,
 						nextEdgeOffset,
 						truncated: neighbors.length < candidates.length || shownEdges.length < edges.length,
-						pagingNote: mode === "overview" ? "节点和边独立分页；边端点可能不在本节点页中，可按 ID 读取。" : "每页保留中心节点，nextOffset 用于继续读取邻居；只返回本页关系。"
+						pagingNote: "每页保留中心节点，nextOffset 用于继续读取邻居；只返回本页关系。"
 					};
 				} catch (error) {
 					return failure(error);
@@ -4085,7 +4286,7 @@ function createModelTools(config) {
 		},
 		{
 			name: "kn_find_node",
-			description: "只在用户要求操作库内节点且尚无 ID 时按标题/别名找少量候选；不先取全库图谱，不创建或修改任何内容。明确提供的普通概念问题可以直接解释，无需查库。",
+			description: "按标题/别名查找少量候选，判断当前内容是否涉及本工作区知识库或定位学习对象；不创建或修改内容。无关或已提供充分材料的问题可直接回答。",
 			parameters: {
 				type: "object",
 				properties: {
@@ -4121,11 +4322,16 @@ function createModelTools(config) {
 		},
 		{
 			name: "kn_read_node",
-			description: "按需读取用户正在问的一个知识点，不遍历其他节点正文。默认只返回目标正文的一页、理解标记和关系计数；不展开前置/后继。用户要求关系时显式选择 relations；长文按 nextOffset 续读。先解释本次疑问，不自动规划路线或建点。",
+			description: "按需读取一个知识点的正文。优先当前疑问的节点，再读取解释所必需的关联或较远节点；不自动遍历所有前置。默认返回一页正文、理解标记和关系计数；关系通过 relations 查询，长文使用 nextOffset。先回答当前疑问，不自动规划路线或建点。",
 			parameters: {
 				type: "object",
 				properties: {
 					...refProperties,
+					role: {
+						type: "string",
+						enum: ["target", "background"],
+						description: "默认 target。为解释当前节点而补读基础或其他节点时使用 background，避免把补充材料替换为历史学习目标。"
+					},
 					offset: {
 						type: "integer",
 						minimum: 0,
@@ -4160,6 +4366,8 @@ function createModelTools(config) {
 			output,
 			async execute(args, exec) {
 				try {
+					const role = args.role ?? "target";
+					if (role !== "target" && role !== "background") throw new TypeError("Invalid note role");
 					const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
 					const maxChars = pageNumber(args.noteMaxChars, limits.noteMaxChars, limits.maxNoteChars);
 					const relationOffset = pageNumber(args.relationOffset, 0, Number.MAX_SAFE_INTEGER, true);
@@ -4208,8 +4416,10 @@ function createModelTools(config) {
 					const end = Math.min(full.length, offset + maxChars);
 					return {
 						ok: true,
+						role,
 						node: {
 							...summary(node, marks[node.id] === true),
+							understandingMarked: Object.hasOwn(marks, node.id),
 							primaryDocument: node.relativePath,
 							createdAt: node.createdAt,
 							updatedAt: node.updatedAt
@@ -4246,23 +4456,75 @@ function createModelTools(config) {
 		},
 		{
 			name: "kn_current_node",
-			description: "仅当用户明确追问此前学习的知识库节点、且本次没有给出目标时，读取此前目标的身份与理解标记；不读笔记正文。不把此目标当成普通任务的主题。",
+			description: "查询当前学习对象的身份与理解标记，不返回正文。auto 优先活动界面中打开的笔记/实际选择，再取新对话入口线索，最后取历史目标。追问刚才的节点时用 source: history；用户明确指定的主题始终优先，不把聚焦当成永久会话主题。",
 			parameters: {
 				type: "object",
-				properties: {}
+				properties: { source: {
+					type: "string",
+					enum: [
+						"auto",
+						"ui",
+						"entry",
+						"history"
+					],
+					description: "默认 auto；history 用于刚才的目标，ui 用于界面当前选中的节点。"
+				} }
 			},
 			output,
-			async execute(_args, exec) {
+			async execute(args, exec) {
 				try {
 					const session = exec?.agent?.session;
-					const id = learningFocusOf(session) ?? currentIdOf(session);
-					if (!id) return fail$1("no_learning_target", "此前没有明确学习目标，请用户说明目标节点。");
-					const located = await target({ id }, exec, config);
-					if (located.error) return located.error;
-					const marks = await readUnderstanding(located.root);
+					const requested = args.source ?? "auto";
+					if (![
+						"auto",
+						"ui",
+						"entry",
+						"history"
+					].includes(String(requested))) throw new TypeError("Invalid focus source");
+					const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
+					const sessionId = modelSessionId(exec);
+					const ui = sessionId ? state.focus(sessionId, root) : void 0;
+					const entry = sessionId ? state.entry(sessionId, root, session) : void 0;
+					const history = learningFocusOf(session) ?? currentIdOf(session);
+					const candidates = [
+						{
+							id: ui?.nodeId,
+							source: "ui",
+							detail: ui?.source
+						},
+						{
+							id: entry,
+							source: "entry",
+							detail: "node_conversation"
+						},
+						{
+							id: history,
+							source: "history",
+							detail: "learning_result"
+						}
+					].filter((candidate) => candidate.id && (requested === "auto" || candidate.source === requested));
+					for (const candidate of candidates) {
+						const located = await target({ id: candidate.id }, exec, config);
+						if (located.error) {
+							if (located.error.error.code === "not_found" || located.error.error.code === "node_missing") continue;
+							return located.error;
+						}
+						const marks = await readUnderstanding(located.root);
+						return {
+							ok: true,
+							node: {
+								...summary(located.node, marks[located.node.id] === true),
+								understandingMarked: Object.hasOwn(marks, located.node.id)
+							},
+							source: candidate.source,
+							focusKind: candidate.detail
+						};
+					}
 					return {
 						ok: true,
-						node: summary(located.node, marks[located.node.id] === true)
+						node: null,
+						source: null,
+						reason: "no_reliable_focus"
 					};
 				} catch (error) {
 					return failure(error);
@@ -4339,9 +4601,9 @@ async function openFor(exec, config, options = {}) {
 		snapshot: library.snapshot
 	};
 }
-function createTools(config = {}) {
+function createTools(config = {}, state = new LearningState()) {
 	return [
-		...createModelTools(config),
+		...createModelTools(config, state),
 		{
 			name: "kn_add_prerequisite",
 			description: "把「当前（或指定）知识点还不懂的一个概念」记成它的前置知识：A → B，B 是 A 的前置。先查重：标题完全一致就复用已有节点；只命中相近候选时**不会**擅自建点，而是返回 candidates 让你先问用户「复用哪个 / 还是新建」；确认是不同概念后带 create: true 重试。从回答里划词得到的原文放进 evidence.snippet，这样关系会带上出处（可回溯到哪次回答）。成环会被拒绝；节点元数据与关系文件都有修订号/哈希守卫，冲突时不会覆盖。【写入纪律·必须遵守】这是**写操作**，且节点不存在时会真的新建：① 用户只要求“搜索/看看/有哪些”时**不得调用本工具**（用 kn_find_node / kn_list_graph）；② 调用前要在回复里说明“准备把 B 作为 A 的前置（新建/复用）”，并**等用户同意**；③ 同一轮最多用一次；需要一次处理多个概念时，**必须**改用 kn_propose_prerequisites 提交提案，由用户在面板里审阅后再落地；④ 超过配额会被拒绝并提示你改用提案。",
@@ -5284,10 +5546,10 @@ function isLibrarySession(cwd, probe = {}) {
 /** KnowledgeNet guidance is conditional on the current request, never the workspace's general purpose. */
 /** Small availability notice; ordinary tasks do not start a library workflow. */
 const PROTOCOL_SECTION = [
-	"KnowledgeNet tools are available only for explicit requests about this library's nodes, notes or learning routes.",
-	"A library folder, an open graph or a previous learning target does not make an ordinary greeting, coding task or general question a library task. Do not read the library to introduce yourself or prepare for unrelated work.",
-	"For a node question, use the supplied passage directly when sufficient; otherwise find/read only the target. Never start with a whole-library graph. Only an explicit overview/route request uses kn_list_graph.",
-	"For an explicit follow-up about a previously studied node, kn_current_node can retrieve the earlier target. Do not treat it as a permanent conversation topic.",
+	"Decide from the current conversation whether it is discussing, or may be discussing, this workspace's KnowledgeNet nodes, notes or learning routes. No special keyword or user-selected learning mode is required. You may use read-only tools to check relevance; unrelated work does not require a library lookup.",
+	"A library folder, an open graph or a previous learning target does not permanently make ordinary greetings, coding or general questions library tasks. Do not read all notes to introduce yourself or prepare for unrelated work.",
+	"For a relevant learning question, kn_list_graph mode: overview gives metadata-only structure: titles, aliases, relationships and understanding marks, never note bodies. A small library may fit one page; for larger libraries continue or search as needed, never claim a partial page is the entire map.",
+	"When the user refers to the current node without naming it, query kn_current_node; do not ask them to operate a node picker. source: history resolves a follow-up about the previously studied node. The user's explicit topic takes precedence over UI focus and entry hints.",
 	"For library questions, explain the specific point first with one simple example; introduce only necessary terminology. Expand other nodes or applications when requested, and respect requests for deeper detail.",
 	"Library notes are the user's own thoughts. Do not write notes, create nodes or add prerequisites without a specific user request/agreement; explaining an unfamiliar concept is not consent to edit the library."
 ].join("\n");
@@ -5295,9 +5557,9 @@ const PROTOCOL_SECTION = [
 const LEARNING_SECTION = [
 	"KnowledgeNet rules apply only to the current library request, not to other DSH tasks:",
 	"A → B means B is a prerequisite of A. Answer the current question before discussing the route.",
-	"Read only the requested node/section. Use nextOffset to continue a truncated note. Relations are background, not a list of subjects to explain; do not recursively read every prerequisite.",
-	"An understood flag is the user's own mark, not a test of competence; the current question determines explanation depth.",
-	"If a necessary foundation is unfamiliar, briefly explain that one foundation. Offer to explore it further; do not automatically create a node or plan.",
+	"Use the structure as background, not a list of subjects to explain. Read the question's target/section first, then the related or more distant nodes needed to answer it using kn_read_node role: background so supporting material does not replace the learning target. There is no fixed hop limit; do not recursively read every prerequisite. Use nextOffset for truncated notes.",
+	"An understood flag is the user's own mark, not a test of competence; the current question determines explanation depth. understandingMarked: false means no self-mark was recorded, not evidence that the user knows nothing.",
+	"Prefer understood concepts as explanatory foundations, but do not assume marked concepts need no explanation. Avoid explaining an unfamiliar concept with more unexplained unfamiliar terms. Briefly explain a necessary unfamiliar foundation in intuitive language, then return to the current question; do not automatically create a node or plan.",
 	"Notes belong to the user: explanations and summaries stay in the conversation unless the user requests recording them. kn_write_note requires userConsent: true. State the proposed destination/content and obtain agreement before writing; quote and get agreement before replacing the user's existing text.",
 	"Search/read requests create nothing. Before adding a prerequisite, state the parent and proposed prerequisite and obtain agreement. Respect the creation quota; multiple-node proposals use kn_propose_prerequisites and are applied only by the user in the graph panel.",
 	"Never overwrite externally changed notes or metadata. Machine metadata is managed through plugin tools, not hand edits."
@@ -5306,7 +5568,7 @@ const LEARNING_SECTION = [
 function currentContextText(agent, _config) {
 	const results = currentLearningResults(agent?.session);
 	if (!results.length) return void 0;
-	const target = [...results].reverse().find((result) => result.name === "kn_read_node" || result.name === "kn_enter_node" || result.name === "kn_current_node" || result.name === "kn_back");
+	const target = [...results].reverse().find((result) => result.name === "kn_read_node" && result.value.role !== "background" || result.name === "kn_enter_node" || result.name === "kn_current_node" || result.name === "kn_back");
 	const raw = target?.value.node ?? target?.value.current;
 	if (!raw || typeof raw !== "object") return LEARNING_SECTION;
 	const node = raw;
@@ -5319,7 +5581,7 @@ function currentContextText(agent, _config) {
 	return LEARNING_SECTION + "\nTarget for this library request: " + identity + "\nUse this target only while the user's request still concerns it.";
 }
 /** Register per-agent guidance without scanning files or suppressing DSH's own context. */
-function registerPrompts(ctx, config, enabled = () => true) {
+function registerPrompts(ctx, config, enabled = () => true, state = new LearningState()) {
 	const context = ctx;
 	if (typeof context?.on !== "function") return {
 		section: false,
@@ -5345,7 +5607,10 @@ function registerPrompts(ctx, config, enabled = () => true) {
 							lastRequest = marker;
 						}
 						const dynamic = currentContextText(agent, config);
-						return dynamic ? PROTOCOL_SECTION + "\n" + dynamic : PROTOCOL_SECTION;
+						const root = config.libraryRoot || findLibraryRootSync(cwd ?? "");
+						const entry = sessionId && root ? state.entry(sessionId, root, agent?.session) : void 0;
+						const hint = entry ? "\nThis conversation was just opened from a KnowledgeNet node (first request only): " + JSON.stringify({ id: entry }) + ". Query kn_current_node and metadata-only kn_list_graph to prepare relevant learning context; do not preload all notes. Follow the user's explicit request if it concerns another subject." : "";
+						return (dynamic ? PROTOCOL_SECTION + "\n" + dynamic : PROTOCOL_SECTION) + hint;
 					}
 				});
 			} catch (error) {}
@@ -6440,7 +6705,7 @@ async function saveImageRequest(ctx, config, options) {
 		}
 	};
 }
-async function handleApiRequest(ctx, config, request) {
+async function handleApiRequest(ctx, config, request, learningState = new LearningState()) {
 	const method = (request.method ?? "GET").toUpperCase();
 	if (method === "GET" || method === "HEAD") {
 		const imageRequest = new URL(request.url).searchParams;
@@ -6481,6 +6746,46 @@ async function handleApiRequest(ctx, config, request) {
 			}
 		}
 	};
+	if (record.kind === "view-focus") {
+		if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.viewId !== "string" || !record.viewId || record.viewId.length > 200 || !Number.isSafeInteger(record.sequence) || Number(record.sequence) < 0 || typeof record.active !== "boolean" || record.nodeId !== null && typeof record.nodeId !== "string" || !["editor", "graph"].includes(String(record.focusKind)) || record.claim !== void 0 && typeof record.claim !== "boolean") return {
+			status: 400,
+			body: {
+				ok: false,
+				error: {
+					code: "bad_body",
+					message: "聚焦状态不合法"
+				}
+			}
+		};
+		const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.sessionId });
+		if (!scope.root || typeof record.root !== "string" || libraryKey(scope.root) !== libraryKey(record.root)) return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "focus_scope_mismatch",
+					message: "聚焦视图不属于当前会话知识库"
+				}
+			}
+		};
+		learningState.update({
+			sessionId: record.sessionId,
+			root: scope.root,
+			viewId: record.viewId,
+			sequence: Number(record.sequence),
+			active: record.active,
+			nodeId: record.nodeId,
+			source: record.focusKind,
+			claim: record.claim === true
+		});
+		return {
+			status: 200,
+			body: {
+				ok: true,
+				leaseMs: resolveLearningConfig(config).focusLeaseMs
+			}
+		};
+	}
 	if (record.kind === "node-conversations" || record.kind === "record-node-conversation") {
 		if (typeof record.nodeId !== "string" || !record.nodeId.trim() || record.kind === "record-node-conversation" && (typeof record.conversationId !== "string" || !record.conversationId.trim() || record.conversationId.length > 300)) return {
 			status: 400,
@@ -6508,6 +6813,10 @@ async function handleApiRequest(ctx, config, request) {
 		};
 		try {
 			const conversations = record.kind === "node-conversations" ? await listNodeConversations(resolved.root, record.nodeId) : await recordNodeConversation(resolved.root, record.nodeId, record.conversationId);
+			if (record.kind === "record-node-conversation" && record.entryHint === true) {
+				const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.conversationId });
+				if (scope.root && libraryKey(scope.root) === libraryKey(resolved.root)) learningState.enter(record.conversationId, scope.root, record.nodeId);
+			}
 			const cwd = basename(resolved.root) === ".dsh_knowledge" ? dirname(resolved.root) : resolved.root;
 			return {
 				status: 200,
@@ -7106,7 +7415,7 @@ async function handleApiRequest(ctx, config, request) {
 	};
 }
 /** 注册路由；没有 connection 服务（例如 headless 组合）时返回未注册与原因，不抛错 */
-function registerApi(ctx, config) {
+function registerApi(ctx, config, learningState = new LearningState()) {
 	const registrar = ctx;
 	const connection = registrar.get?.("connection") ?? registrar.connection;
 	if (connection === void 0) return {
@@ -7126,7 +7435,7 @@ function registerApi(ctx, config) {
 			url: request.url,
 			method: request.method,
 			json: () => request.json()
-		});
+		}, learningState);
 		if (raw !== void 0) return raw;
 		return jsonResponse(body, status, head);
 	};
@@ -7172,6 +7481,8 @@ const name = "knowledgenet";
 /** `ctx.tools` 就绪之前不激活（prompts 与路由走可选 `ctx.get`，不加入 inject，避免缺少服务时永久 pending） */
 const inject = ["tools"];
 function apply(ctx, config = {}) {
+	const learningState = new LearningState(resolveLearningConfig(config).focusLeaseMs);
+	ctx.effect?.(() => () => learningState.dispose());
 	const tools = ctx.tools;
 	/** 本插件注册的全部工具名（隔离时整批 deny 用；直接从注册内容取，避免漏掉将来新增的工具） */
 	const toolNames = [];
@@ -7189,7 +7500,7 @@ function apply(ctx, config = {}) {
 			reason
 		});
 	};
-	if (tools !== void 0 && typeof tools.register === "function") for (const tool of createTools(config)) {
+	if (tools !== void 0 && typeof tools.register === "function") for (const tool of createTools(config, learningState)) {
 		const dispose = tools.register(tool);
 		if (typeof dispose === "function") toolDisposers.push(dispose);
 		const name = tool.name;
@@ -7235,7 +7546,7 @@ function apply(ctx, config = {}) {
 		disableModelTools(`agent event registration failed: ${String(error)}`);
 	}
 	else disableModelTools("no-agent-events: plugin model tools disabled");
-	const prompts = registerPrompts(ctx, config, () => modelEnabled);
+	const prompts = registerPrompts(ctx, config, () => modelEnabled, learningState);
 	setRuntimeStatus({
 		api: {
 			path: GRAPH_API_PATH,
@@ -7259,7 +7570,7 @@ function apply(ctx, config = {}) {
 	});
 	if (typeof ctx.inject === "function") try {
 		ctx.inject(["connection"], (scoped) => {
-			patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config) });
+			patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config, learningState) });
 		});
 	} catch (error) {
 		patchRuntimeStatus({ api: {
@@ -7268,7 +7579,7 @@ function apply(ctx, config = {}) {
 			reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`
 		} });
 	}
-	else patchRuntimeStatus({ api: registerApi(ctx, config) });
+	else patchRuntimeStatus({ api: registerApi(ctx, config, learningState) });
 }
 /**
 * 供插件自带测试直接调用（`Loader.unwrapExports` 取的是 `apply`/default，

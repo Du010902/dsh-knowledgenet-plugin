@@ -66,6 +66,7 @@ export function learningFocusOf(session: unknown): string | null {
   let focus: string | null = null;
   for (const { name, value } of knowledgeResults(eventsOf(session))) {
     if (name !== "kn_read_node" && name !== "kn_enter_node" && name !== "kn_back") continue;
+    if (name === "kn_read_node" && value.role === "background") continue;
     const node = record(name === "kn_read_node" ? value.node : value.current);
     focus = typeof node?.id === "string" ? node.id : null;
   }

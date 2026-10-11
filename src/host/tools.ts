@@ -35,6 +35,7 @@ import { currentIdOf, stackAfterBack, stackAfterEnter, stackOf } from "./stack.t
 import { runtimeStatus } from "./status.ts";
 
 import { createModelTools } from "./model-tools.ts";
+import { LearningState } from "./learning-state.ts";
 import type { LearningConfigInput } from "./learning-config.ts";
 import { readUnderstanding } from "./understanding-file.ts";
 
@@ -97,9 +98,9 @@ export async function openFor(
   return { library, snapshot: library.snapshot };
 }
 
-export function createTools(config: KnowledgeNetConfig = {}): Array<Record<string, unknown>> {
+export function createTools(config: KnowledgeNetConfig = {}, state = new LearningState()): Array<Record<string, unknown>> {
   return [
-    ...createModelTools(config),
+    ...createModelTools(config, state),
     {
       name: "kn_add_prerequisite",
       description:

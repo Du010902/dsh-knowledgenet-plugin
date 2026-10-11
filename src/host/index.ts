@@ -12,6 +12,8 @@
  * - 不 import 任何 `@deepseek-ai/*`，一切都通过 `ctx` 服务使用。
  */
 import { createTools, type KnowledgeNetConfig } from "./tools.ts";
+import { LearningState } from "./learning-state.ts";
+import { resolveLearningConfig } from "./learning-config.ts";
 import { findCachedRoot, lastLibraryRoot, loadLibrary, peekLibrary, resolveLibraryRoot, isLibraryRoot, createLibrary, sessionCwdOf } from "./library.ts";
 import { NodeVfs } from "./node-vfs.ts";
 import { neighborhood, resolveNodeArg, search, summarizeNode } from "./graph.ts";
@@ -61,9 +63,12 @@ interface MinimalContext {
   on?(name: string, listener: (payload: unknown) => void): unknown;
   /** Cordis 的可选注入：服务就绪时在其作用域里执行回调，服务缺席也不会让插件 pending */
   inject?(names: string[], callback: (scoped: unknown) => unknown): unknown;
+  effect?(callback: () => (() => void)): unknown;
 }
 
 export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): void {
+  const learningState = new LearningState(resolveLearningConfig(config).focusLeaseMs);
+  ctx.effect?.(() => () => learningState.dispose());
   const tools = ctx.tools;
   /** 本插件注册的全部工具名（隔离时整批 deny 用；直接从注册内容取，避免漏掉将来新增的工具） */
   const toolNames: string[] = [];
@@ -77,7 +82,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
     recordIsolation({ sessionCwd: null, isLibrary: false, restricted: true, reason });
   };
   if (tools !== undefined && typeof tools.register === "function") {
-    for (const tool of createTools(config)) {
+    for (const tool of createTools(config, learningState)) {
       const dispose = tools.register(tool);
       if (typeof dispose === "function") toolDisposers.push(dispose as () => void);
       const name = (tool as { name?: unknown }).name;
@@ -138,7 +143,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
     }
   } else disableModelTools("no-agent-events: plugin model tools disabled");
 
-  const prompts = registerPrompts(ctx, config, () => modelEnabled);
+  const prompts = registerPrompts(ctx, config, () => modelEnabled, learningState);
   const startedAt = Date.now();
   // 先记「等待中」：真正的注册发生在 connection 就绪时（见下）。
   // 这样即使注册一直没发生，kn_status 也能说出原因，而不是留一句 not found。
@@ -166,7 +171,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
   if (typeof ctx.inject === "function") {
     try {
       ctx.inject(["connection"], (scoped: unknown) => {
-        patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config) });
+        patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config, learningState) });
       });
     } catch (error) {
       patchRuntimeStatus({
@@ -178,7 +183,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
       });
     }
   } else {
-    patchRuntimeStatus({ api: registerApi(ctx, config) });
+    patchRuntimeStatus({ api: registerApi(ctx, config, learningState) });
   }
 }
 

@@ -1,4 +1,6 @@
 import { listNodeConversations, recordNodeConversation } from "./node-conversations.ts";
+import { LearningState, libraryKey } from "./learning-state.ts";
+import { resolveLearningConfig } from "./learning-config.ts";
 import { dirname, basename } from "node:path";
 import { readUnderstanding, setUnderstanding } from "./understanding.ts";
 /**
@@ -404,6 +406,7 @@ export async function handleApiRequest(
   ctx: ConnectionRegistrar,
   config: KnowledgeNetConfig,
   request: { url: string; method?: string; json?: () => Promise<unknown> },
+  learningState = new LearningState(),
 ): Promise<{ status: number; body: Record<string, unknown>; raw?: Response }> {
   const method = (request.method ?? "GET").toUpperCase();
   /*
@@ -447,6 +450,12 @@ export async function handleApiRequest(
     snippet?: unknown;
     nodeId?: unknown;
     conversationId?: unknown;
+    entryHint?: unknown;
+    viewId?: unknown;
+    sequence?: unknown;
+    active?: unknown;
+    focusKind?: unknown;
+    claim?: unknown;
     question?: unknown;
     query?: unknown;
     /** 节点正文编辑：完整正文与读取时的整文件指纹 ✓ */
@@ -462,6 +471,17 @@ export async function handleApiRequest(
     return { status: 200, body: { ok: false, error: { code: "bad_body", message: "请求体必须是对象" } } };
   }
 
+  if (record.kind === "view-focus") {
+    if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.viewId !== "string" || !record.viewId || record.viewId.length > 200 || !Number.isSafeInteger(record.sequence) || Number(record.sequence) < 0 || typeof record.active !== "boolean" || (record.nodeId !== null && typeof record.nodeId !== "string") || !["editor", "graph"].includes(String(record.focusKind)) || (record.claim !== undefined && typeof record.claim !== "boolean")) {
+      return { status: 400, body: { ok: false, error: { code: "bad_body", message: "聚焦状态不合法" } } };
+    }
+    // Resolve only from the Session's workspace; never accept the panel's root override.
+    const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.sessionId });
+    if (!scope.root || typeof record.root !== "string" || libraryKey(scope.root) !== libraryKey(record.root)) return { status: 200, body: { ok: false, error: { code: "focus_scope_mismatch", message: "聚焦视图不属于当前会话知识库" } } };
+    learningState.update({ sessionId: record.sessionId, root: scope.root, viewId: record.viewId, sequence: Number(record.sequence), active: record.active, nodeId: record.nodeId as string | null, source: record.focusKind as "editor" | "graph", claim: record.claim === true });
+    return { status: 200, body: { ok: true, leaseMs: resolveLearningConfig(config).focusLeaseMs } };
+  }
+
   /*
    * **插入图片**（POST `{kind:'image-save', name, dataUrl, root?, sessionId?}` ✓）：
    * 落盘到 `<库根>/<imageDir>/` ✓（默认 `image` ⇒ 用户要的 `.dsh_knowledge/image/` ✓），
@@ -475,6 +495,10 @@ export async function handleApiRequest(
       const conversations = record.kind === "node-conversations"
         ? await listNodeConversations(resolved.root, record.nodeId)
         : await recordNodeConversation(resolved.root, record.nodeId, record.conversationId as string);
+      if (record.kind === "record-node-conversation" && record.entryHint === true) {
+        const scope = await resolveRequestedRoot(ctx, config, { sessionId: record.conversationId as string });
+        if (scope.root && libraryKey(scope.root) === libraryKey(resolved.root)) learningState.enter(record.conversationId as string, scope.root, record.nodeId);
+      }
       const cwd = basename(resolved.root) === ".dsh_knowledge" ? dirname(resolved.root) : resolved.root;
       return { status: 200, body: { ok: true, root: resolved.root, cwd, conversations } };
     } catch (error) { return { status: 200, body: { ok: false, error: { code: "conversation_index_failed", message: error instanceof Error ? error.message : String(error) } } }; }
@@ -925,7 +949,7 @@ export interface ApiRegistration {
 }
 
 /** 注册路由；没有 connection 服务（例如 headless 组合）时返回未注册与原因，不抛错 */
-export function registerApi(ctx: unknown, config: KnowledgeNetConfig): ApiRegistration {
+export function registerApi(ctx: unknown, config: KnowledgeNetConfig, learningState = new LearningState()): ApiRegistration {
   const registrar = ctx as ConnectionRegistrar;
   // Cordis 注入后的作用域里，服务既可以用 get() 取，也可以当属性读
   // （shipped 的 bundle/web-app 就是 `connectionCtx.connection.…`），这里两条都试。
@@ -947,7 +971,7 @@ export function registerApi(ctx: unknown, config: KnowledgeNetConfig): ApiRegist
       url: request.url,
       method: request.method,
       json: () => request.json() as Promise<unknown>,
-    });
+    }, learningState);
     /* 取图那条路直接回字节 ✓（JSON 包装会把图片编码坏 ✗） */
     if (raw !== undefined) return raw;
     return jsonResponse(body, status, head);

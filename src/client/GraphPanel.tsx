@@ -1,4 +1,5 @@
 import { nodeConversations } from "./node-conversations.ts";
+import { useViewFocus } from "./view-focus.ts";
 /**
  * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
  *
@@ -226,6 +227,7 @@ function GraphPanelInner(props: {
   /** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
   const [refreshing, setRefreshing] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const focusViewRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [relayoutToken, setRelayoutToken] = useState(0);
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -774,6 +776,13 @@ function GraphPanelInner(props: {
   );
 
   const effectiveFocus = focusId ?? payload?.focusId ?? null;
+  const actualFocus = editingNodeId ?? focusId;
+  useViewFocus({
+    sessionId: props.sessionId,
+    root: typeof payload?.library?.root === "string" ? payload.library.root : undefined,
+    nodeId: graph?.nodes.some(node => node.id === actualFocus) ? actualFocus : null,
+    source: editingNodeId ? "editor" : "graph", element: focusViewRef,
+  });
   const nodeCount = payload?.counts?.nodes ?? graph?.nodes.length ?? 0;
   const edgeCount = payload?.counts?.edges ?? graph?.edges.length ?? 0;
 
@@ -961,7 +970,7 @@ function GraphPanelInner(props: {
        * 那行是冗余信息 ✗）。面板顶部只留操作按钮；视图也只保留**空间视图**——
        * 「聚焦视图」按用户要求整体去掉 ✓。
        */}
-      <div className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
+      <div ref={focusViewRef} className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
         {/*
           * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
           * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。

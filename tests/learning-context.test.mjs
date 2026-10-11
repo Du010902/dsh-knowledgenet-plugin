@@ -8,9 +8,9 @@ import { makeV3Fixture, cleanupFixtures } from "./support/v3-fixture.mjs";
 after(cleanupFixtures);
 const tools = config => Object.fromEntries(__internal.createTools(config).map(tool => [tool.name, tool]));
 const exec = cwd => ({ agent: { session: { header: { cwd }, snapshotEvents: () => [] } } });
-test("local graph excludes unrelated nodes; overview is explicit and independently paged", async () => {
+test("local graph excludes unrelated nodes; overview has independent structure budgets and paging", async () => {
   const f = await makeV3Fixture({ nodes: ["A", "B", "C"], edges: [["A", "B"]] });
-  const t = tools({ modelMaxNodes: 2, modelMaxEdges: 1 });
+  const t = tools({ modelMaxNodes: 2, modelMaxEdges: 1, structureMaxNodes: 2, structureMaxEdges: 1 });
   assert.equal((await t.kn_list_graph.execute({}, exec(f.workspace))).error.code, "focus_required");
   const local = await t.kn_list_graph.execute({ focusId: f.nodes.A.id }, exec(f.workspace));
   assert.equal(local.ok, true); assert.deepEqual(local.nodes.map(n => n.title), ["A", "B"]);

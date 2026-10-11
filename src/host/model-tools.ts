@@ -1,5 +1,6 @@
 /** Bounded model queries are independent of the graph panel's rendering payload. */
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { normalizeTitle } from "../vendor/upstream/data/types.ts";
 import { resolveNodeArg, search } from "./graph.ts";
 import { resolveLibraryRoot, sessionCwdOf } from "./library.ts";
@@ -8,6 +9,8 @@ import { readUnderstanding } from "./understanding-file.ts";
 import { learningFocusOf, currentIdOf } from "./stack.ts";
 import { pageNumber, resolveLearningConfig } from "./learning-config.ts";
 import { openFor, type KnowledgeNetConfig } from "./tools.ts";
+import { LearningState, modelSessionId } from "./learning-state.ts";
+import { structurePage } from "./structure-page.ts";
 
 const output = { schema: { type: "object" }, render: (_args: unknown, value: unknown) => [{ type: "text", text: JSON.stringify(value) }] };
 const fail = (code: string, message: string, extra: object = {}) => ({ ok: false, error: { code, message }, ...extra });
@@ -53,14 +56,14 @@ const refProperties = {
 };
 
 /** Create read-only tools with validated plugin-owned limits. */
-export function createModelTools(config: KnowledgeNetConfig): Array<Record<string, unknown>> {
+export function createModelTools(config: KnowledgeNetConfig, state = new LearningState()): Array<Record<string, unknown>> {
   const limits = resolveLearningConfig(config);
   return [
     {
       name: "kn_list_graph",
-      description: "仅用于用户明确要求的知识库关系、路线或全库总览；普通问候、编程、解释一个节点不先调用它。neighborhood 真实返回目标的一跳关系，默认只取前置；overview 必须显式指定并分页。图谱界面另行加载完整图，不依赖本工具结果。",
+      description: "当前对话正在或可能讨论本工作区知识库时，可自主查询结构背景。overview 仅返回标题、别名、理解标记与关系，不含正文；小库一页、大库按需续页。neighborhood 查询一跳关系。结构是解释背景，不是必须全部讲解或读取正文的清单；无关任务不必调用。",
       parameters: { type: "object", properties: {
-        mode: { type: "string", enum: ["neighborhood", "overview"], description: "默认 neighborhood；用户明确要求全库总览时才指定 overview。" },
+        mode: { type: "string", enum: ["neighborhood", "overview"], description: "默认 neighborhood；需要了解全库结构背景时选择 overview，不要求用户明确提出总览。" },
         rootId: { type: "string", description: "局部查询目标 ID。" },
         focusId: { type: "string", description: "rootId 的同义参数；仅设一个即可。" },
         direction: { type: "string", enum: ["prerequisites", "dependents", "both"], description: "默认 prerequisites。" },
@@ -69,6 +72,7 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
         maxNodes: { type: "integer", minimum: 1, description: "本页节点数，不超过插件模型预算。" },
         maxEdges: { type: "integer", minimum: 1, description: "总览本页边数，不超过插件模型预算。" },
         refresh: { type: "boolean", description: "需要确认外部变更时刷新本地图谱。" },
+        revision: { type: "string", description: "续页时原样传上一页结构内容指纹 revision；实际内容变更会要求重新查询。" },
       } },
       output,
       async execute(args: Record<string, unknown>, exec: unknown) {
@@ -80,14 +84,25 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
           if (mode === "neighborhood" && (typeof id !== "string" || !id.trim())) return fail("focus_required", "请指定目标节点；明确要看全库时使用 mode: overview。");
           const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
           const edgeOffset = pageNumber(args.edgeOffset, 0, Number.MAX_SAFE_INTEGER, true);
-          const requestedNodes = pageNumber(args.maxNodes, limits.modelMaxNodes, limits.modelMaxNodes);
-          const requestedEdges = pageNumber(args.maxEdges, limits.modelMaxEdges, limits.modelMaxEdges);
+          const nodeCeiling = mode === "overview" ? limits.structureMaxNodes : limits.modelMaxNodes;
+          const edgeCeiling = mode === "overview" ? limits.structureMaxEdges : limits.modelMaxEdges;
+          const requestedNodes = pageNumber(args.maxNodes, nodeCeiling, nodeCeiling);
+          const requestedEdges = pageNumber(args.maxEdges, edgeCeiling, edgeCeiling);
           if (mode === "neighborhood" && requestedNodes < 2) throw new TypeError("Neighborhood pages require room for a neighbor");
           const dir = direction(args.direction, "prerequisites");
           if (dir === "none") throw new TypeError("Graph direction cannot be none");
           const context = await openFor(exec, config, { refresh: args.refresh === true });
           const snapshot = context.snapshot;
           const marks = await readUnderstanding(context.library.root);
+          if (mode === "overview") {
+            const library = { name: context.library.manifest.title };
+            const nodes = snapshot.nodes.map(node => ({ id: node.id, title: node.title, aliases: node.aliases, understood: marks[node.id] === true, understandingMarked: Object.hasOwn(marks, node.id) })).sort((a, b) => a.id.localeCompare(b.id));
+            const edges = snapshot.edges.map(edge => ({ id: edge.id, fromId: edge.fromId, toId: edge.toId, relationType: edge.relationType })).sort((a, b) => a.id.localeCompare(b.id));
+            // Scanner generations expire independently of contents; they cannot be paging revisions.
+            const revision = createHash("sha256").update(JSON.stringify({ library, nodes, edges })).digest("hex");
+            if (args.revision !== undefined && args.revision !== revision) return fail("structure_changed", "图谱结构或理解标记已变更，请从零重新分页读取。");
+            return structurePage({ library, revision, nodes, edges, offset, edgeOffset, maxNodes: requestedNodes, maxEdges: requestedEdges, maxChars: limits.structureMaxChars });
+          }
           let candidates = snapshot.nodes;
           let edges = snapshot.edges;
           let focus: typeof snapshot.nodes[number] | undefined;
@@ -98,30 +113,30 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
             const ids = new Set(edges.flatMap(edge => [edge.fromId, edge.toId]));
             candidates = candidates.filter(node => node.id !== id && ids.has(node.id));
           }
-          const count = mode === "neighborhood" ? Math.min(requestedNodes - 1, limits.relationLimit) : requestedNodes;
+          const count = Math.min(requestedNodes - 1, limits.relationLimit);
           const neighbors = candidates.slice(offset, offset + Math.max(0, count));
           const selected = focus ? [focus, ...neighbors] : neighbors;
           const kept = new Set(selected.map(node => node.id));
           const relationEdges = mode === "neighborhood" ? edges.filter(edge => kept.has(edge.fromId) && kept.has(edge.toId)) : edges;
           const shownEdges = relationEdges.slice(edgeOffset, edgeOffset + requestedEdges);
-          const nodes = selected.map(node => ({ id: node.id, title: node.title, path: node.relativePath, understood: marks[node.id] === true }));
+          const nodes = selected.map(node => ({ id: node.id, title: node.title, aliases: node.aliases, path: node.relativePath, understood: marks[node.id] === true, understandingMarked: Object.hasOwn(marks, node.id) }));
           const nextOffset = offset + neighbors.length < candidates.length && neighbors.length ? offset + neighbors.length : null;
           const nextEdgeOffset = edgeOffset + shownEdges.length < relationEdges.length ? edgeOffset + shownEdges.length : null;
           return {
-            ok: true, mode, focusId: focus?.id ?? null, direction: mode === "neighborhood" ? dir : undefined,
+            ok: true, mode, focusId: focus?.id ?? null, direction: dir,
             library: { name: context.library.manifest.title }, nodes,
             edges: shownEdges.map(edge => ({ id: edge.id, fromId: edge.fromId, toId: edge.toId, relationType: edge.relationType, relation: edge.relation.slice(0, limits.relationDescriptionChars) })),
             counts: { nodes: candidates.length + (focus ? 1 : 0), edges: edges.length },
             offset, nextOffset, edgeOffset, nextEdgeOffset,
             truncated: neighbors.length < candidates.length || shownEdges.length < edges.length,
-            pagingNote: mode === "overview" ? "节点和边独立分页；边端点可能不在本节点页中，可按 ID 读取。" : "每页保留中心节点，nextOffset 用于继续读取邻居；只返回本页关系。",
+            pagingNote: "每页保留中心节点，nextOffset 用于继续读取邻居；只返回本页关系。",
           };
         } catch (error) { return failure(error); }
       },
     },
     {
       name: "kn_find_node",
-      description: "只在用户要求操作库内节点且尚无 ID 时按标题/别名找少量候选；不先取全库图谱，不创建或修改任何内容。明确提供的普通概念问题可以直接解释，无需查库。",
+      description: "按标题/别名查找少量候选，判断当前内容是否涉及本工作区知识库或定位学习对象；不创建或修改内容。无关或已提供充分材料的问题可直接回答。",
       parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, description: "候选上限，受插件 searchLimit 限制。" } }, required: ["query"] },
       output,
       async execute(args: Record<string, unknown>, exec: unknown) {
@@ -138,9 +153,10 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
     },
     {
       name: "kn_read_node",
-      description: "按需读取用户正在问的一个知识点，不遍历其他节点正文。默认只返回目标正文的一页、理解标记和关系计数；不展开前置/后继。用户要求关系时显式选择 relations；长文按 nextOffset 续读。先解释本次疑问，不自动规划路线或建点。",
+      description: "按需读取一个知识点的正文。优先当前疑问的节点，再读取解释所必需的关联或较远节点；不自动遍历所有前置。默认返回一页正文、理解标记和关系计数；关系通过 relations 查询，长文使用 nextOffset。先回答当前疑问，不自动规划路线或建点。",
       parameters: { type: "object", properties: {
         ...refProperties,
+        role: { type: "string", enum: ["target", "background"], description: "默认 target。为解释当前节点而补读基础或其他节点时使用 background，避免把补充材料替换为历史学习目标。" },
         offset: { type: "integer", minimum: 0, description: "正文字符偏移，默认 0；续读使用 nextOffset。" },
         noteMaxChars: { type: "integer", minimum: 1, description: "本页正文字符数，默认插件 noteMaxChars，受 maxNoteChars 限制。" },
         relations: { type: "string", enum: ["none", "prerequisites", "dependents", "both"], description: "默认 none；本次需要关系时才选择方向。" },
@@ -150,6 +166,8 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
       output,
       async execute(args: Record<string, unknown>, exec: unknown) {
         try {
+          const role = args.role ?? "target";
+          if (role !== "target" && role !== "background") throw new TypeError("Invalid note role");
           const offset = pageNumber(args.offset, 0, Number.MAX_SAFE_INTEGER, true);
           const maxChars = pageNumber(args.noteMaxChars, limits.noteMaxChars, limits.maxNoteChars);
           const relationOffset = pageNumber(args.relationOffset, 0, Number.MAX_SAFE_INTEGER, true);
@@ -176,7 +194,7 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
           }
           const end = Math.min(full.length, offset + maxChars);
           return {
-            ok: true, node: { ...summary(node!, marks[node!.id] === true), primaryDocument: node!.relativePath, createdAt: node!.createdAt, updatedAt: node!.updatedAt },
+            ok: true, role, node: { ...summary(node!, marks[node!.id] === true), understandingMarked: Object.hasOwn(marks, node!.id), primaryDocument: node!.relativePath, createdAt: node!.createdAt, updatedAt: node!.updatedAt },
             note: { path: node!.relativePath, text: full.slice(offset, end), truncated: offset > 0 || end < full.length, byteLength: Buffer.byteLength(full, "utf8"), totalChars: full.length, offset, nextOffset: end < full.length ? end : null, maxChars },
             relationCounts: { prerequisites: graph.prerequisites.length, dependents: graph.dependents.length },
             prerequisites, dependents, relations, resources: [],
@@ -187,17 +205,33 @@ export function createModelTools(config: KnowledgeNetConfig): Array<Record<strin
     },
     {
       name: "kn_current_node",
-      description: "仅当用户明确追问此前学习的知识库节点、且本次没有给出目标时，读取此前目标的身份与理解标记；不读笔记正文。不把此目标当成普通任务的主题。",
-      parameters: { type: "object", properties: {} }, output,
-      async execute(_args: Record<string, unknown>, exec: unknown) {
+      description: "查询当前学习对象的身份与理解标记，不返回正文。auto 优先活动界面中打开的笔记/实际选择，再取新对话入口线索，最后取历史目标。追问刚才的节点时用 source: history；用户明确指定的主题始终优先，不把聚焦当成永久会话主题。",
+      parameters: { type: "object", properties: { source: { type: "string", enum: ["auto", "ui", "entry", "history"], description: "默认 auto；history 用于刚才的目标，ui 用于界面当前选中的节点。" } } }, output,
+      async execute(args: Record<string, unknown>, exec: unknown) {
         try {
           const session = (exec as { agent?: { session?: unknown } })?.agent?.session;
-          const id = learningFocusOf(session) ?? currentIdOf(session);
-          if (!id) return fail("no_learning_target", "此前没有明确学习目标，请用户说明目标节点。");
-          const located = await target({ id }, exec, config);
-          if (located.error) return located.error;
-          const marks = await readUnderstanding(located.root!);
-          return { ok: true, node: summary(located.node!, marks[located.node!.id] === true) };
+          const requested = args.source ?? "auto";
+          if (!["auto", "ui", "entry", "history"].includes(String(requested))) throw new TypeError("Invalid focus source");
+          const root = await resolveLibraryRoot(sessionCwdOf(exec), config.libraryRoot);
+          const sessionId = modelSessionId(exec);
+          const ui = sessionId ? state.focus(sessionId, root) : undefined;
+          const entry = sessionId ? state.entry(sessionId, root, session) : undefined;
+          const history = learningFocusOf(session) ?? currentIdOf(session);
+          const candidates = [
+            { id: ui?.nodeId, source: "ui", detail: ui?.source },
+            { id: entry, source: "entry", detail: "node_conversation" },
+            { id: history, source: "history", detail: "learning_result" },
+          ].filter(candidate => candidate.id && (requested === "auto" || candidate.source === requested));
+          for (const candidate of candidates) {
+            const located = await target({ id: candidate.id }, exec, config);
+            if (located.error) {
+              if (located.error.error.code === "not_found" || located.error.error.code === "node_missing") continue;
+              return located.error;
+            }
+            const marks = await readUnderstanding(located.root!);
+            return { ok: true, node: { ...summary(located.node!, marks[located.node!.id] === true), understandingMarked: Object.hasOwn(marks, located.node!.id) }, source: candidate.source, focusKind: candidate.detail };
+          }
+          return { ok: true, node: null, source: null, reason: "no_reliable_focus" };
         } catch (error) { return failure(error); }
       },
     },

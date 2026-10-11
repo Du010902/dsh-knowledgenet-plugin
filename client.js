@@ -317,7 +317,8 @@ window.__ModuleLoader__.load({
 							kind: "record-node-conversation",
 							root: info.root,
 							nodeId,
-							conversationId: sessionId
+							conversationId: sessionId,
+							entryHint: true
 						});
 						pending.delete(key);
 						notify(true);
@@ -3346,6 +3347,91 @@ window.__ModuleLoader__.load({
 		function GraphTabTitle({ t }) {
 			const translate = (0, react.useMemo)(() => makeTranslator(t, LITERAL$4), [t]);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphPanelIcon, { size: 16 }), translate("tabShort")] });
+		}
+		//#endregion
+		//#region src/client/view-focus.ts
+		/** Keep host focus tied to the visible plugin view; no chat creation or model requests occur here. */
+		function useViewFocus(options) {
+			const viewId = (0, react.useRef)(globalThis.crypto.randomUUID());
+			const sequence = (0, react.useRef)(0);
+			(0, react.useEffect)(() => {
+				const { sessionId, root, nodeId, source, element } = options;
+				if (!sessionId || !root) return;
+				let disposed = false;
+				let timer;
+				let retryMs = 15e3;
+				const visible = () => {
+					const view = element.current;
+					const rect = view?.getBoundingClientRect();
+					return !!view && !!rect && rect.width > 0 && rect.height > 0 && view.checkVisibility({
+						checkOpacity: true,
+						checkVisibilityCSS: true
+					}) && document.visibilityState === "visible" && document.hasFocus();
+				};
+				const send = async (active, claim) => {
+					if (timer !== void 0) clearTimeout(timer);
+					const sentSequence = ++sequence.current;
+					try {
+						const result = await (await fetch(GRAPH_API_ROUTE, {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							keepalive: true,
+							body: JSON.stringify({
+								kind: "view-focus",
+								sessionId,
+								root,
+								viewId: viewId.current,
+								sequence: sentSequence,
+								nodeId,
+								focusKind: source,
+								active,
+								claim
+							})
+						})).json();
+						if (result.ok === true && typeof result.leaseMs === "number" && result.leaseMs >= 3e3) retryMs = Math.floor(result.leaseMs / 3);
+					} catch (error) {}
+					if (!disposed && sentSequence === sequence.current) timer = setTimeout(() => {
+						send(visible(), false);
+					}, retryMs);
+				};
+				const activate = () => {
+					send(visible(), true);
+				};
+				const resume = () => {
+					send(visible(), false);
+				};
+				const deactivate = () => {
+					send(false, false);
+				};
+				const pointer = (event) => {
+					if (event.composedPath().includes(element.current?.getRootNode())) activate();
+				};
+				window.addEventListener("focus", resume);
+				window.addEventListener("blur", deactivate);
+				window.addEventListener("pagehide", deactivate);
+				document.addEventListener("visibilitychange", resume);
+				document.addEventListener("pointerdown", pointer);
+				const observer = new ResizeObserver(resume);
+				if (element.current) observer.observe(element.current);
+				activate();
+				return () => {
+					disposed = true;
+					if (timer !== void 0) clearTimeout(timer);
+					observer.disconnect();
+					window.removeEventListener("focus", resume);
+					window.removeEventListener("blur", deactivate);
+					window.removeEventListener("pagehide", deactivate);
+					document.removeEventListener("visibilitychange", resume);
+					document.removeEventListener("pointerdown", pointer);
+					send(false, false);
+				};
+			}, [
+				options.sessionId,
+				options.root,
+				options.nodeId,
+				options.source,
+				options.element
+			]);
 		}
 		//#endregion
 		//#region src/client/trackball.ts
@@ -199447,6 +199533,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			/** 只表示「手动刷新」是否在飞：自动取数不该把刷新按钮变灰 */
 			const [refreshing, setRefreshing] = (0, react.useState)(false);
 			const [focusId, setFocusId] = (0, react.useState)(null);
+			const focusViewRef = (0, react.useRef)(null);
 			const [zoom, setZoom] = (0, react.useState)(1);
 			const [relayoutToken, setRelayoutToken] = (0, react.useState)(0);
 			/** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
@@ -199869,6 +199956,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 			*/
 			const sceneKey = (0, react.useMemo)(() => `${libraryKey}#${(graph?.nodes ?? []).map((node) => node.id).sort().join(",")}`, [libraryKey, graph]);
 			const effectiveFocus = focusId ?? payload?.focusId ?? null;
+			const actualFocus = editingNodeId ?? focusId;
+			useViewFocus({
+				sessionId: props.sessionId,
+				root: typeof payload?.library?.root === "string" ? payload.library.root : void 0,
+				nodeId: graph?.nodes.some((node) => node.id === actualFocus) ? actualFocus : null,
+				source: editingNodeId ? "editor" : "graph",
+				element: focusViewRef
+			});
 			payload?.counts?.nodes ?? graph?.nodes.length;
 			payload?.counts?.edges ?? graph?.edges.length;
 			/**
@@ -200001,6 +200096,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 				height: "fill",
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						ref: focusViewRef,
 						className: searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel",
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {

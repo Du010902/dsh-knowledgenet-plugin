@@ -154,7 +154,7 @@ export function makeConversationActions(getServices: () => ConversationServices 
             : await services.sessions.create(workspaceId === undefined ? { cwd: info.cwd } : { workspaceId });
           pending.set(key, sessionId);
         }
-        await request(fetcher, { kind: "record-node-conversation", root: info.root, nodeId, conversationId: sessionId });
+        await request(fetcher, { kind: "record-node-conversation", root: info.root, nodeId, conversationId: sessionId, entryHint: true });
         pending.delete(key);
         notify(true);
         return sessionId;
