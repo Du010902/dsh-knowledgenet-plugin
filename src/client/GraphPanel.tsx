@@ -1292,6 +1292,13 @@ function GraphPanelInner(props: {
                 graph={graph ?? undefined}
                 onRelationsChanged={() => { void load({ refresh: true }); }}
                 understood={payload?.understanding?.[editingNodeId] === true}
+                /*
+                 * 把**整份理解标记**也交给编辑器 ✓：前置 / 被依赖列表里要给已理解的节点挂「已理解」标签 ✓
+                 * （用户实测要求 ✓）。缺省空对象 ⇒ 一个标签都不加 ✓（数据还没到时列表就是原来的样子 ✓）。
+                 * 这里传的是**面板手上那一份** ✓ ⇒ 刚在编辑器里点过理解，`updateUnderstanding` 一改，
+                 * 列表里那个节点的标签**当拍**就跟着出现 / 消失 ✓（不必等下一次刷新 ✓）。
+                 */
+                understanding={payload?.understanding ?? {}}
                 onOpenConversation={(sessionId, dirty) => requestEdit({ kind: "conversation", sessionId }, dirty)}
                 onUnderstandingSaved={updateUnderstanding}
                 target={editingTarget}

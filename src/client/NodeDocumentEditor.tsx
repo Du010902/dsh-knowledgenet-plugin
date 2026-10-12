@@ -81,6 +81,13 @@ export function NodeDocumentEditor(props: {
    * 只传 **node id** ✓；切不切得动由父面板决定 ✓（它有"未保存改动"的三选一 ✓）。
    */
   onOpenNode?: ((nodeId: string) => void) | undefined;
+  /**
+   * **各节点的理解标记**（前置 / 被依赖列表里给"已理解"的节点挂标签用 ✓，用户实测要求 ✓）。
+   *
+   * 一路从图谱面板透下来 ✓（那份数据就在面板手上 ✓）—— 不在这里另发请求 ✗：
+   * 编辑器每次渲染都请求一次全库标记纯属浪费 ✓，而且会让"刚点过的标记"慢半拍才出现在列表里 ✓。
+   */
+  understanding?: Record<string, boolean> | undefined;
   onSaved?: (document: NodeDocument) => void;
   onDirtyChange?: ((dirty: boolean) => void) | undefined;
   /** 现在能不能保存（父面板据此提前禁用离开弹窗里的「保存并继续」✓） */
@@ -790,7 +797,7 @@ export function NodeDocumentEditor(props: {
         </h2>
         {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
         {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
-        <NoteRelations nodeId={props.nodeId} graph={props.graph} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
+        <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>

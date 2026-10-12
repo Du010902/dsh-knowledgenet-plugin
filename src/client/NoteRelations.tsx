@@ -24,6 +24,14 @@ const LITERAL: Record<string, string> = {
   relFailed: "添加失败，请重试",
   relClose: "关闭关系面板",
   relOpen: "打开「{title}」",
+  /**
+   * 列表里「已理解」标签的文案 ✓。
+   *
+   * **刻意与 `UnderstandingButton` 用同一个键 `understood`** ✓：中英词典里
+   * 已经有这一条（`"已理解"` / `"Understood"` ✓），再起一个同义键只会多一份可能不同步的翻译 ✗。
+   * 这里给出**本文件的回落值** ✓（与 `UnderstandingButton` 一致 ✓）：宿主与插件的翻译都缺席时也不会露出键名 ✓。
+   */
+  understood: "已理解",
 };
 
 /** 笔记关系查看与添加；边 fromId 指向其前置 toId。 */
@@ -40,6 +48,16 @@ export function NoteRelations(props: {
    * ⇒ 直接切不会悄悄丢掉正在编辑的草稿 ✓。
    */
   onOpenNode?: ((nodeId: string) => void) | undefined;
+  /**
+   * **各节点的理解标记**（`Record<nodeId, boolean>` ✓，也就是宿主 `understanding.json` 的内容 ✓）。
+   *
+   * 用户实测要求：前置 / 被依赖列表里**已经理解**的节点后面加一个「已理解」标签 ✓，
+   * **没有理解的节点什么都不加** ✗（不显示"未理解"✓ —— 没标记只是"没标过"，
+   * 不等于"他不懂"，多一个灰标签反而变成噪声 ✓）。
+   *
+   * 缺席（宿主没给这份数据 / 只读场景）⇒ 一律当作没标记 ✓：列表退回原来的样子 ✓。
+   */
+  understanding?: Record<string, boolean> | undefined;
   /** 宿主 / 插件的翻译函数 ✓（缺席时用本文件的中文字面文案 ✓） */
   t?: unknown;
   selection?: { text: string; top: number; left: number } | null;
@@ -90,7 +108,19 @@ export function NoteRelations(props: {
           disabled={props.onOpenNode === undefined}
           title={props.onOpenNode === undefined ? undefined : t("relOpen", { title: n!.title })}
           onClick={() => { props.onOpenNode?.(n!.id); }}
-        >{n!.title}</button>
+        >
+          {/*
+            * **已理解的节点后面加一个「已理解」标签** ✓（用户实测要求 ✓）。
+            *
+            * 判据只有一条：`understanding[n.id] === true` ✓ —— 没有标记、或显式标成"未理解"的节点
+            * **一律什么都不加** ✗（用户明确要求"没理解的不做任何改变"✓；
+            * 而且"没标过"不等于"他不懂"✓，多挂一个灰标签只是噪声 ✓）。
+            *
+            * 标签是**装饰性**的 ✓（`aria-hidden`）⇒ 按钮的无障碍名字仍然只有节点标题 ✓
+            * （读屏听到"打开「克隆」"就够 ✓；理解状态另有编辑器头部那个真正的按钮承担 ✓）。
+            */}
+          {n!.title}{props.understanding?.[n!.id] === true ? <span className="kn-note-relation-understood" aria-hidden="true"><span className="kn-note-relation-understood-dot" />{t("understood")}</span> : null}
+        </button>
       )) : <div className="kn-editor-dim">{t("relEmpty")}</div>}
       {error ? <div role="alert" className="kn-editor-error">{error}</div> : null}
     </div> : null}

@@ -1677,6 +1677,35 @@
 .kn-note-relations .kn-note-relation-item:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent); }
 .kn-note-relations .kn-note-relation-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .kn-note-relations .kn-note-relation-item:disabled { cursor: default; opacity: 1; }
+/*
+ * **关系列表里的「已理解」标签** ✓（用户实测要求：已理解的节点后面加个标签，
+ * 没理解的不做任何改变 ✓）。
+ *
+ * 只在 `understanding[id] === true` 时才渲染这个 span ✓ ⇒ 样式不必再管"有没有标记"✗。
+ * 颜色沿用理解按钮那套绿（`#167346` ✓，与 `.kn-understanding-button[aria-pressed="true"]` / `.kn-understanding-dot` 一致 ✓）：
+ * 同一个语义在两处的颜色必须一样，否则用户会以为是两回事 ✓。
+ * 小字号 + 不换行 ✓：它是**行尾注脚**，不该把节点标题挤成两行 ✓。
+ */
+.kn-note-relations .kn-note-relation-understood {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #167346 12%, transparent);
+  color: #167346;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.kn-note-relations .kn-note-relation-understood-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #167346;
+}
 .kn-note-relations .kn-note-selection { position: fixed; z-index: 40; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 @container (max-width: 480px) { .kn-note-relations { gap: 0; } .kn-note-relations button { padding: 5px; font-size: 11px; } }
 

@@ -118,3 +118,86 @@ describe("关系列表可点：点一下切到那个节点 ✓", () => {
     assert.ok(/\.kn-note-relations \.kn-note-relation-item:focus-visible/.test(css), "键盘聚焦要看得见 ✓");
   });
 });
+
+/**
+ * **已理解的节点，后面带一个「已理解」标签；没理解的不做任何改变** ✓
+ * （用户实测要求 ✓）。
+ *
+ * 这条要求有两个容易做错的方向 ✗：
+ * ① 把"没标记"也画出来（灰色"未理解"）—— 用户明确说了**不做任何改变** ✗，
+ *    而且"没标记"只代表没标过，不代表不懂 ✓；
+ * ② 标签画成按钮里的**文字** ⇒ 读屏用户听到的按钮名会变成"克隆 已理解" ✗
+ *    （状态另有编辑器头部那个真正的理解按钮承担 ✓）。
+ * 所以这里钉住：只在 `=== true` 时渲染 ✓、标签是 `aria-hidden` 的装饰 ✓、
+ * 且数据**一路从图谱面板透到关系组件** ✓（缺一段就永远不显示 ✓）。
+ */
+describe("关系列表里的「已理解」标签 ✓", () => {
+  it("只在**真的标为已理解**时才多渲染那个 span ✓（没标记 ⇒ 与原来一模一样 ✗）", () => {
+    assert.ok(
+      relations.includes('props.understanding?.[n!.id] === true ?'),
+      "必须按 node id 判 `=== true` 才渲染标签 ✓（falsy / undefined 一律不加 ✓）",
+    );
+    assert.ok(
+      relations.includes('className="kn-note-relation-understood"'),
+      "标签要有自己的类名 ✓",
+    );
+    /*
+     * 标签必须**只在 `=== true`** 时渲染 ✓，而且是**同一个按钮里**的兄弟节点（与标题一起 ✓）：
+     * 分成两个按钮的话，点标签就开不了那个节点 ✓、键盘也多一次 Tab ✓。
+     * `[\s\S]{0,600}` 允许中间夹一段说明性注释 ✓（把理由写成注释时，这里就是第一个被卡住的地方 ✓）。
+     */
+    assert.ok(
+      /understanding\?\.\[n!\.id\] === true \? <span[\s\S]{0,600}?aria-hidden="true"/.test(relations),
+      "标签要标成装饰性（`aria-hidden`）✓ ⇒ 按钮的无障碍名字仍只有节点标题 ✓",
+    );
+    /* 不许反着来：把"未理解"也画成一个标签 ✗ */
+    assert.ok(
+      !/understanding[\s\S]{0,80}?notUnderstood/.test(relations),
+      "没有理解的节点**不许**显示「未理解」标签 ✗（用户要求：不做任何改变 ✓）",
+    );
+    assert.ok(
+      relations.includes('understood: "已理解"'),
+      "回落文案要在本文件里 ✓（宿主与插件翻译都缺席时不许露出键名 ✗）",
+    );
+  });
+
+  it("数据要一路透下来 ✓：GraphPanel → NodeDocumentEditor → NoteRelations", () => {
+    /* ① 面板有这份数据（`api/knowledgenet.graph` 的 `understanding` ✓）⇒ 原样交给编辑器 ✓ */
+    assert.ok(
+      panel.includes("understanding={payload?.understanding ?? {}}"),
+      "面板要把整份理解标记交给编辑器 ✓（缺席时给空对象 ⇒ 一个标签都不加 ✓）",
+    );
+    assert.ok(
+      /understanding\?:\s*Record<string, boolean>/.test(panel),
+      "面板的 payload 类型里要有 understanding ✓",
+    );
+    /* ② 编辑器只做透传 ✓（不许在编辑器里另发一次请求 ✗） */
+    assert.ok(
+      editor.includes("understanding={props.understanding}"),
+      "编辑器要把 understanding 透给关系组件 ✓",
+    );
+    assert.ok(
+      /understanding\?:\s*Record<string, boolean> \| undefined;/.test(editor),
+      "编辑器的 props 里要声明它 ✓",
+    );
+    /* ③ 关系组件自己是按 id 查的 ✓ */
+    assert.ok(
+      /understanding\?:\s*Record<string, boolean> \| undefined;/.test(relations),
+      "关系组件的 props 里要声明它 ✓",
+    );
+  });
+
+  it("标签外观：与理解按钮同一个绿、行尾注脚、不换行 ✓", () => {
+    const at = css.indexOf(".kn-note-relations .kn-note-relation-understood {");
+    assert.notEqual(at, -1, "标签要有样式定义 ✓（否则退化成裸文字 ✗）");
+    const block = css.slice(at, at + 500);
+    for (const part of ["color: #167346", "white-space: nowrap", "font-size: 11px", "border-radius: 999px"]) {
+      assert.ok(block.includes(part), `标签样式要有 ${part} ✓`);
+    }
+    /* 与理解按钮同一个语义色 ✓（两处颜色不一致会让用户以为是两回事 ✓） */
+    assert.ok(
+      css.includes('.kn-understanding-button[aria-pressed="true"] { color: #167346; }'),
+      "参照色仍在 ✓（标签沿用它 ✓）",
+    );
+  });
+});
