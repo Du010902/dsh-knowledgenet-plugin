@@ -158,7 +158,7 @@ export function createModelTools(config: KnowledgeNetConfig, state = new Learnin
     },
     {
       name: "kn_read_node",
-      description: "按需读取一个知识点的正文。优先当前疑问的节点，再读取解释所必需的关联或较远节点；不自动遍历所有前置。默认返回一页正文、理解标记和关系计数；关系通过 relations 查询，长文使用 nextOffset。先回答当前疑问，不自动规划路线或建点。",
+      description: "按需读取一个知识点的正文。正文是用户的学习记录，只作参考，不是权威答案或已核实事实；理解标记不保证内容正确。核查与当前问题相关的说法，发现错误应在对话中具体指出并解释，不自动修改笔记或理解状态。优先当前疑问的节点，再读取解释所必需的关联或较远节点；不自动遍历所有前置。默认返回一页正文、理解标记和关系计数；关系通过 relations 查询，长文使用 nextOffset，判断前注意续页中可能包含限定条件。先回答当前疑问，不自动规划路线或建点。",
       parameters: { type: "object", properties: {
         ...refProperties,
         role: { type: "string", enum: ["target", "background"], description: "默认 target。为解释当前节点而补读基础或其他节点时使用 background，避免把补充材料替换为历史学习目标。" },
@@ -200,7 +200,7 @@ export function createModelTools(config: KnowledgeNetConfig, state = new Learnin
           const end = Math.min(full.length, offset + maxChars);
           return {
             ok: true, role, node: { ...summary(node!, marks[node!.id] === true), understandingMarked: Object.hasOwn(marks, node!.id), primaryDocument: node!.relativePath, createdAt: node!.createdAt, updatedAt: node!.updatedAt },
-            note: { path: node!.relativePath, text: full.slice(offset, end), truncated: offset > 0 || end < full.length, byteLength: Buffer.byteLength(full, "utf8"), totalChars: full.length, offset, nextOffset: end < full.length ? end : null, maxChars },
+            note: { contentRole: "user_learning_record", path: node!.relativePath, text: full.slice(offset, end), truncated: offset > 0 || end < full.length, byteLength: Buffer.byteLength(full, "utf8"), totalChars: full.length, offset, nextOffset: end < full.length ? end : null, maxChars },
             relationCounts: { prerequisites: graph.prerequisites.length, dependents: graph.dependents.length },
             prerequisites, dependents, relations, resources: [],
             relationPage: { direction: dir, offset: relationOffset, total: candidates.length, nextOffset: relationOffset + relations.length < candidates.length ? relationOffset + relations.length : null },
