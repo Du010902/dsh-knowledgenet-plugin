@@ -5,7 +5,7 @@
  */
 import { useMemo } from "react";
 
-import { makeTranslator, nodeCardModel, parseToolResult, type NodeRef } from "./card-model.ts";
+import { makeTranslator, nodeCardModel, parseToolResult, relationChipState, type NodeRef } from "./card-model.ts";
 import { ShadowPanel } from "./shadow.tsx";
 
 const LITERAL: Record<string, string> = {
@@ -17,20 +17,29 @@ const LITERAL: Record<string, string> = {
   dependents: "依赖它的地方",
   relations: "依赖说明与来源",
   none: "（暂无）",
+  relationsCollapsed: "共 {count} 个（未展开）",
+  relationsMore: "另有 {count} 个未展开",
   note: "正文摘录",
   truncated: "（已截断）",
   resources: "资料",
 };
 
-function chips(refs: NodeRef[], t: (key: string) => string) {
-  if (refs.length === 0) return <span className="kn-dim">{t("none")}</span>;
+/** 关系计数可能大于列表长度（默认 `relations: none` 只返回计数 ⇒ 列表为空 ≠ 没有关系） */
+function chips(refs: NodeRef[], total: number, t: ReturnType<typeof makeTranslator>) {
+  const state = relationChipState(refs, total);
+  if (state.refs.length === 0) {
+    return state.hidden > 0
+      ? <span className="kn-chips"><span className="kn-chip kn-dim">{t("relationsCollapsed", { count: state.hidden })}</span></span>
+      : <span className="kn-dim">{t("none")}</span>;
+  }
   return (
     <span className="kn-chips">
-      {refs.map((ref) => (
+      {state.refs.map((ref) => (
         <span key={ref.id === "" ? ref.title : ref.id} className="kn-chip">
           {ref.status === undefined ? ref.title : `${ref.title} · ${ref.status}`}
         </span>
       ))}
+      {state.hidden > 0 ? <span key="more" className="kn-chip kn-dim">{t("relationsMore", { count: state.hidden })}</span> : null}
     </span>
   );
 }
@@ -56,11 +65,11 @@ export function NodeCard(props: { phase?: string; block?: Parameters<typeof pars
       <div className="kn-body">
         <div className="kn-sect">
           <span className="kn-sect-title">{t("prerequisites")}</span>
-          {chips(model.prerequisites, t)}
+          {chips(model.prerequisites, model.prerequisiteCount, t)}
         </div>
         <div className="kn-sect">
           <span className="kn-sect-title">{t("dependents")}</span>
-          {chips(model.dependents, t)}
+          {chips(model.dependents, model.dependentCount, t)}
         </div>
         {model.relations.length > 0 ? (
           <div className="kn-sect">

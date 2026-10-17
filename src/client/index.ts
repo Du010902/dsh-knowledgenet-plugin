@@ -252,6 +252,8 @@ const DICT_ZH: Record<string, string> = {
   dependents: "依赖它的地方",
   relations: "依赖说明与来源",
   none: "（暂无）",
+  relationsCollapsed: "共 {count} 个（未展开）",
+  relationsMore: "另有 {count} 个未展开",
   note: "正文摘录",
   resources: "资料",
   // 建前置卡片
@@ -477,6 +479,8 @@ const DICT_EN: Record<string, string> = {
   dependents: "Depended on by",
   relations: "Recorded links",
   none: "(none)",
+  relationsCollapsed: "{count} total (not expanded)",
+  relationsMore: "{count} more not expanded",
   note: "Note excerpt",
   resources: "Resources",
   created: "New node",

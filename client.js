@@ -699,11 +699,36 @@ window.__ModuleLoader__.load({
 				status: asString(value.status) || void 0
 			};
 		}
+		/** 非负整数；缺字段/坏值时用调用方给的回落值（旧结果没有 relationCounts ⇒ 用列表长度） */
+		function countValue(value, fallback) {
+			return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+		}
+		/**
+		* 前置 / 被依赖列表的**展示决策**（纯函数，便于单测）。
+		*
+		* 空列表有两种完全不同的含义：
+		* - `hidden === 0` ⇒ 真的没有关系（界面显示「（暂无）」）；
+		* - `hidden > 0` ⇒ 有关系、但本次 `relations` 没展开（界面显示「共 N 个（未展开）」）。
+		* 列表非空时 `hidden` 表示被 `relationLimit` 截断掉的数量（界面提示「另有 N 个未展开」）。
+		*
+		* @param refs - 工具结果里已展开的引用（可能为空）。
+		* @param total - `relationCounts` 里的总数；缺字段时传列表长度。
+		* @returns 原样的 refs + 未展示的数量（永远非负）。
+		*/
+		function relationChipState(refs, total) {
+			return {
+				refs,
+				hidden: Math.max(0, Math.max(refs.length, total) - refs.length)
+			};
+		}
 		/** `kn_read_node` 的卡片模型 */
 		function nodeCardModel(data) {
 			const node = data.node ?? {};
 			const note = data.note ?? {};
 			const noteText = asString(note.text);
+			const prerequisites = asArray$2(data.prerequisites).flatMap((item) => nodeRef(item) ?? []);
+			const dependents = asArray$2(data.dependents).flatMap((item) => nodeRef(item) ?? []);
+			const counts = data.relationCounts ?? {};
 			const relations = asArray$2(data.relations).flatMap((item) => {
 				if (typeof item !== "object" || item === null) return [];
 				const edge = item;
@@ -722,8 +747,10 @@ window.__ModuleLoader__.load({
 				noteText,
 				noteTruncated: note.truncated === true,
 				noteChars: noteText.length,
-				prerequisites: asArray$2(data.prerequisites).flatMap((item) => nodeRef(item) ?? []),
-				dependents: asArray$2(data.dependents).flatMap((item) => nodeRef(item) ?? []),
+				prerequisites,
+				dependents,
+				prerequisiteCount: Math.max(prerequisites.length, countValue(counts.prerequisites, 0)),
+				dependentCount: Math.max(dependents.length, countValue(counts.dependents, 0)),
 				relations,
 				resources: asArray$2(data.resources).flatMap((item) => {
 					if (typeof item !== "object" || item === null) return [];
@@ -2881,21 +2908,34 @@ window.__ModuleLoader__.load({
 			dependents: "依赖它的地方",
 			relations: "依赖说明与来源",
 			none: "（暂无）",
+			relationsCollapsed: "共 {count} 个（未展开）",
+			relationsMore: "另有 {count} 个未展开",
 			note: "正文摘录",
 			truncated: "（已截断）",
 			resources: "资料"
 		};
-		function chips(refs, t) {
-			if (refs.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		/** 关系计数可能大于列表长度（默认 `relations: none` 只返回计数 ⇒ 列表为空 ≠ 没有关系） */
+		function chips(refs, total, t) {
+			const state = relationChipState(refs, total);
+			if (state.refs.length === 0) return state.hidden > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "kn-chips",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "kn-chip kn-dim",
+					children: t("relationsCollapsed", { count: state.hidden })
+				})
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: "kn-dim",
 				children: t("none")
 			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 				className: "kn-chips",
-				children: refs.map((ref) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				children: [state.refs.map((ref) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					className: "kn-chip",
 					children: ref.status === void 0 ? ref.title : `${ref.title} · ${ref.status}`
-				}, ref.id === "" ? ref.title : ref.id))
+				}, ref.id === "" ? ref.title : ref.id)), state.hidden > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "kn-chip kn-dim",
+					children: t("relationsMore", { count: state.hidden })
+				}, "more") : null]
 			});
 		}
 		function NodeCard(props) {
@@ -2936,14 +2976,14 @@ window.__ModuleLoader__.load({
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "kn-sect-title",
 								children: t("prerequisites")
-							}), chips(model.prerequisites, t)]
+							}), chips(model.prerequisites, model.prerequisiteCount, t)]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "kn-sect",
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "kn-sect-title",
 								children: t("dependents")
-							}), chips(model.dependents, t)]
+							}), chips(model.dependents, model.dependentCount, t)]
 						}),
 						model.relations.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "kn-sect",
@@ -201879,6 +201919,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			dependents: "依赖它的地方",
 			relations: "依赖说明与来源",
 			none: "（暂无）",
+			relationsCollapsed: "共 {count} 个（未展开）",
+			relationsMore: "另有 {count} 个未展开",
 			note: "正文摘录",
 			resources: "资料",
 			created: "新建节点",
@@ -202103,6 +202145,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			dependents: "Depended on by",
 			relations: "Recorded links",
 			none: "(none)",
+			relationsCollapsed: "{count} total (not expanded)",
+			relationsMore: "{count} more not expanded",
 			note: "Note excerpt",
 			resources: "Resources",
 			created: "New node",

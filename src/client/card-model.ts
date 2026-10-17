@@ -84,8 +84,37 @@ export interface NodeCardModel {
   noteChars: number;
   prerequisites: NodeRef[];
   dependents: NodeRef[];
+  /**
+   * 关系**总数**（宿主 `relationCounts`），可能大于上面两个列表的长度：
+   * `kn_read_node` 默认 `relations: "none"` 只返回计数 ⇒ 列表为空**不代表没有关系**。
+   * 卡片必须用计数区分「真的没有」与「本次没展开」，否则会显示成误导性的「暂无」。
+   */
+  prerequisiteCount: number;
+  dependentCount: number;
   relations: Array<{ title: string; type: string; description: string; hasEvidence: boolean }>;
   resources: Array<{ title: string; type: string }>;
+}
+
+/** 非负整数；缺字段/坏值时用调用方给的回落值（旧结果没有 relationCounts ⇒ 用列表长度） */
+function countValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
+/**
+ * 前置 / 被依赖列表的**展示决策**（纯函数，便于单测）。
+ *
+ * 空列表有两种完全不同的含义：
+ * - `hidden === 0` ⇒ 真的没有关系（界面显示「（暂无）」）；
+ * - `hidden > 0` ⇒ 有关系、但本次 `relations` 没展开（界面显示「共 N 个（未展开）」）。
+ * 列表非空时 `hidden` 表示被 `relationLimit` 截断掉的数量（界面提示「另有 N 个未展开」）。
+ *
+ * @param refs - 工具结果里已展开的引用（可能为空）。
+ * @param total - `relationCounts` 里的总数；缺字段时传列表长度。
+ * @returns 原样的 refs + 未展示的数量（永远非负）。
+ */
+export function relationChipState(refs: NodeRef[], total: number): { refs: NodeRef[]; hidden: number } {
+  /* 计数比列表短说明结果自相矛盾 ⇒ 以列表为准，避免算出负的「未展开」 */
+  return { refs, hidden: Math.max(0, Math.max(refs.length, total) - refs.length) };
 }
 
 /** `kn_read_node` 的卡片模型 */
@@ -93,6 +122,9 @@ export function nodeCardModel(data: Record<string, unknown>): NodeCardModel {
   const node = (data.node ?? {}) as Record<string, unknown>;
   const note = (data.note ?? {}) as Record<string, unknown>;
   const noteText = asString(note.text);
+  const prerequisites = asArray(data.prerequisites).flatMap((item) => nodeRef(item) ?? []);
+  const dependents = asArray(data.dependents).flatMap((item) => nodeRef(item) ?? []);
+  const counts = (data.relationCounts ?? {}) as Record<string, unknown>;
   const relations = asArray(data.relations).flatMap((item) => {
     if (typeof item !== "object" || item === null) return [];
     const edge = item as Record<string, unknown>;
@@ -111,8 +143,11 @@ export function nodeCardModel(data: Record<string, unknown>): NodeCardModel {
     noteText,
     noteTruncated: note.truncated === true,
     noteChars: noteText.length,
-    prerequisites: asArray(data.prerequisites).flatMap((item) => nodeRef(item) ?? []),
-    dependents: asArray(data.dependents).flatMap((item) => nodeRef(item) ?? []),
+    prerequisites,
+    dependents,
+    /* 计数比列表短说明结果自相矛盾 ⇒ 以列表为准，避免卡片算出负的「未展开」 */
+    prerequisiteCount: Math.max(prerequisites.length, countValue(counts.prerequisites, 0)),
+    dependentCount: Math.max(dependents.length, countValue(counts.dependents, 0)),
     relations,
     resources: asArray(data.resources).flatMap((item) => {
       if (typeof item !== "object" || item === null) return [];
