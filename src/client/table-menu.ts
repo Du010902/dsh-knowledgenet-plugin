@@ -62,6 +62,10 @@ export const TABLE_LITERAL: Record<string, string> = {
   imageCaptionPlaceholder: "写一段图注",
   imageConfirm: "确定 ⏎",
   editorResultOnly: "只看结果",
+  /* Mermaid 图块预览里的两个动作 ✓（`design/mermaid-note-blocks.md` ✓） */
+  mermaidCopyCode: "复制为代码",
+  mermaidDownloadImage: "下载图像",
+  mermaidRenderFailed: "Mermaid 图渲染失败",
   tableRowBefore: "在上方插入行",
   tableRowAfter: "在下方插入行",
   tableColBefore: "在左侧插入列",

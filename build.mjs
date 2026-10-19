@@ -823,21 +823,30 @@ function slashMenuPatchPlugin() {
 }
 
 function browserUtilProbePatchPlugin() {
-  const NEEDLE = 'freeModule$1 && freeModule$1.require && freeModule$1.require("util").types';
-  let patched = false;
+  /*
+   * lodash（含 Crepe / mermaid 各自内联的那几份）里有一段 **Node 专用探测** ✓：
+   * `freeModule && freeModule.require && freeModule.require("util").types` ✓。
+   * 浏览器里 `freeModule` 是 undefined ⇒ 永远不会真的调用 ✓，
+   * 但**字符串** `require("util")` 会留在产物里 ✗ —— `tests/selfcontained.test.mjs`
+   * 会据此判"客户端半请求了非基线模块" ✓；而且真到宿主模块加载器里也只有基线模块 ✓。
+   * ⇒ 构建期把这整段表达式换成 `void 0` ✓（保留 `.types` 的语义：拿不到就是 undefined ✓）。
+   *
+   * 变量名不固定 ✗：lodash 的几份副本分别叫 `freeModule$1` / `freeModule$2` / `freeModule2` … ✓
+   * ⇒ 用**同名的反向引用**匹配 ✓，替换后必须一个 `require("util")` 都不剩 ✓（否则直接失败 ✓）。
+   */
+  const UTIL_PROBE = /([A-Za-z_$][\w$]*) && \1\.require && \1\.require\("util"\)\.types/g;
   return {
     name: "kn-browser-util-probe-patch",
     renderChunk(code) {
-      if (!code.includes(NEEDLE)) return null;
-      patched = true;
-      return {
-        code: code.split(NEEDLE).join("void 0"),
-        map: null,
-      };
-    },
-    buildEnd() {
-      /* 允许"上游已经改掉"（那时本来就没有 util 请求 ✓），只要求**打过补丁后**产物干净 ✓ */
-      void patched;
+      if (!code.includes('require("util")')) return null;
+      const patched = code.replace(UTIL_PROBE, "void 0");
+      if (patched.includes('require("util")')) {
+        throw new Error(
+          "客户端产物里仍有 require(\"util\")（依赖里的 Node 专用探测换个形状又出现了）"
+          + "：请在 build.mjs 的 browserUtilProbePatchPlugin 里补匹配，再重新构建。",
+        );
+      }
+      return { code: patched, map: null };
     },
   };
 }
@@ -1343,6 +1352,19 @@ async function buildClient(rolldown, css, workerSource) {
     }
     if (!code.trimEnd().endsWith("});")) {
       throw new Error("Client 半产物结尾不是注册调用的收尾");
+    }
+    /*
+     * **只许请求宿主基线模块** ✗：`require("…")` 的每个说明符都必须在基线表里 ✓
+     * （`tests/selfcontained.test.mjs` 也断言这条 ✓ —— 这里提前失败，省得构建完才发现 ✓）。
+     * 典型坑：第三方包里的 Node 专用探测（见上面 browserUtilProbePatchPlugin ✓）。
+     */
+    const requests = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+    const unexpected = [...new Set(requests)].filter((id) => !CLIENT_BASELINE.includes(id));
+    if (unexpected.length > 0) {
+      throw new Error(
+        `Client 半请求了宿主基线模块表之外的模块：${unexpected.join(", ")}`
+        + " ⇒ 运行时会拿不到它（只能内联，不能 external 到别处）。",
+      );
     }
     await writeFile(path.join(PLUGIN, "client.js"), code, "utf8");
     return { bytes: Buffer.byteLength(code, "utf8"), modules: modulesOf(entry).length };

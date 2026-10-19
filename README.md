@@ -130,6 +130,13 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   在本插件正文里粘贴时会**还原成一个完整代码块**（语言、缩进、空行、`<iostream>` 一字不改 ✓，
   一次撤销回到粘贴前 ✓）；在已有代码块里粘贴仍然只插字符、不嵌套新块 ✓，
   从别处复制的 Markdown / HTML 继续走原有粘贴 ✓。
+- **Mermaid 图块**：正文里的 ` ```mermaid ` 围栏渲染成图（文件里仍只有围栏源码，**不落 SVG / HTML** ✓）。
+  打开笔记默认「只看结果」✓，图悬停出「复制为代码 / 下载图像」✓（下载优先 PNG，画不出来就退回 SVG ✓）；
+  点「编辑源码」可改围栏内容 ✓。渲染失败时图的位置显示失败原因，源码照旧可编辑、可复制 ✓。
+  语言列表里补了 `mermaid` 一项（没有语法高亮，纯文本编辑 ✓），新建块、粘贴含 mermaid 围栏的 Markdown 都可用 ✓。
+  浅色 / 深色、中文字体跟随宿主主题 token 与正文 ✓；一页多张图各自渲染、互不串 ✓。
+  源码里的 `%%{init}%%` 中 `themeCSS` / `htmlLabels` 会被收窄（防止外部资源 / HTML 标签 ✓），
+  其余 init 配置照旧生效 ✓。细节与实测见 [设计记录](design/mermaid-note-blocks.md)。
 - **打开有多快**：读正文**不再扫全库** ✓ —— 宿主按"节点身份 → 文件路径"的索引**只读目标文件**
   （图谱/工具刚扫过的结果会直接喂给索引，所以通常一个文件都不多扫 ✓），
   接口的格式检查也只看 `library.json` 一个小文件 ✓（不再顺手加载整个图谱 ✗）；
@@ -207,6 +214,14 @@ node --test "tests/*.test.mjs" # 全部测试
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 
+浏览器端到端测试（需要 DSH 源码/依赖仓库里的 playwright 与 rolldown）：
+
+```powershell
+$env:KN_PROJECT='D:/AppInstallation/DSH/deepseek-harness'
+node --test tests/mermaid-note.browser.mjs   # Mermaid 图块（图 / 复制 / 下载 / 输入保护 / 失败路径）
+node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
+```
+
 - 上游（`src/vendor/upstream/**`）是**逐字节冻结**的开放格式实现：只读、不手改；
   需要改行为时用 `build.mjs` 的 needle 补丁，或写在自己模块里。
 - 类型体检：`node_modules/.bin/tsc --noEmit --ignoreDeprecations 6.0 -p tsconfig.json`。
@@ -215,6 +230,18 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 
 ## 已知取舍 / 尚未实现
 
+- **`client.js` 体积**：Mermaid 渲染器（`mermaid@11.17.2`）在构建期内联进客户端半 ✓（运行时零依赖 ✓），
+  实测 `client.js` 8.06 MB → **14.88 MB**（+6.82 MB，未压缩）。mermaid 的**顶层求值**用动态 import
+  推迟到第一次遇到图 ✓（首次渲染扣防抖约 75–90 ms），但 **6.8 MB 源码的解析/编译每次页面启动都要付** ✗
+  （实测启动约 +0.5 s；控制实验证明增量主要是解析，不是启动期执行 mermaid）。
+  "宿主路由按需加载"是后续优化方向，但它会打破"客户端单文件自包含"的既有约定，本次没有做。
+- **Mermaid 下载**：优先 PNG（2× 缩放、铺渲染时的主题底色 ✓）；个别图元 / 老浏览器画不出来时
+  自动退回 `.svg` ✓。**先切主题再下载旧图**也没问题：底色用的是**渲染时**记下的那一份 ✓。
+- **正在编辑的 mermaid 块**：图在**失焦后**才刷新（编辑中先让路，否则异步预览回填会把源码藏起来、
+  打断输入——真实浏览器实测过 ✗；失焦后立刻回焦继续打字也有保护 ✓）。这是有意取舍，不是"没实现"。
+- **Mermaid 主题兜底**：宿主 token 若换用 `oklch` / `color-mix` 等现代颜色语法，
+  渲染器会用 canvas 采样成 legacy `rgb()` 再交给 mermaid ✓；万一采样不可用就退回内置浅色兜底 ✓
+  （图不会渲染失败，但配色可能朴素一点）。
 - **v2 兼容代码仍在源码里但不可达**（`loadLibrary` 只认 v3）⇒ 可以整体删除，属机械清理。
 - 一个工作区**一个**知识库（固定的 `.dsh_knowledge/`）；多库、跨工作区共享尚未实现。
 - 图谱面板与模型查询分别返回数据；模型节点页、边页和正文页可独立续读。

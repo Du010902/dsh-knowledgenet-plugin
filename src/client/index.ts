@@ -124,6 +124,10 @@ const DICT_ZH: Record<string, string> = {
   relOpen: "打开「{title}」",
   /* 公式 / 代码块的预览开关 ✓ */
   editorEditSource: "编辑源码",
+  /* Mermaid 图块：预览里的两个轻量动作 + 渲染失败提示 ✓（`design/mermaid-note-blocks.md` ✓） */
+  mermaidCopyCode: "复制为代码",
+  mermaidDownloadImage: "下载图像",
+  mermaidRenderFailed: "Mermaid 图渲染失败",
   /* 图片块 ✓ */
   imageUploadButton: "插入图片",
   imageUploadPlaceholder: "或者粘贴图片链接…",
@@ -354,6 +358,10 @@ const DICT_EN: Record<string, string> = {
   relClose: "Close the relations panel",
   relOpen: "Open “{title}”",
   editorEditSource: "Edit source",
+  /* Mermaid blocks: two light actions in the preview + the failure notice ✓ */
+  mermaidCopyCode: "Copy as code",
+  mermaidDownloadImage: "Download image",
+  mermaidRenderFailed: "Mermaid diagram failed to render",
   imageUploadButton: "Insert image",
   imageUploadPlaceholder: "or paste an image link…",
   imageCaptionPlaceholder: "Write a caption",

@@ -824,6 +824,126 @@
   .kn-root .kn-editor * { transition: none; }
 }
 
+/* ------------------- ⑩ Mermaid 图块（`design/mermaid-note-blocks.md`） ------------------- */
+
+/*
+ * 图块 = 普通围栏代码块 + 预览面板里的图 ✓（`skin` 保持代码块原有卡片外观 ✓，
+ * 不学公式块那样去掉边框 ✗ —— 图是一张"插在正文里的图"，有边界的卡片更清楚 ✓）。
+ *
+ * 为什么全用 `:has(.kn-mermaid)` 定向 ✗：同一套 `.preview` 容器公式块也在用 ✓；
+ * 只按"预览里真有 mermaid 图"命中 ✓，普通代码块 / 公式块的既有排版一概不动 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid) .preview-panel,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid) .preview {
+  /* 图要有完整正文宽度 ✓；超宽图横向滚动 ✓（不裁掉 ✗） */
+  text-align: left;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid) .preview-divider {
+  display: none;
+}
+
+/* 预览模式（默认只看结果 ✓）时上边距交给图自己 ✓ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid) .preview-label {
+  padding: 4px 12px 0;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 72px;
+  /* 顶部那行按钮浮在图上 ✓ ⇒ 给图留出不被遮住的空白 ✓（按钮只在悬停 / 聚焦时出现 ✓） */
+  padding: 14px 12px 10px;
+  box-sizing: border-box;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-canvas {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * mermaid 自己会写 `style="max-width: …"` / `width: 100%` ✓；
+ * 这里再兜一层：窄阅读栏里**整张图缩到栏宽** ✓（不撑破正文也不裁切 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-canvas > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* 悬停 / 聚焦才出现的小按钮（与代码块工具条同一套观感 ✓，不常驻 ✓） */
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid):hover .kn-mermaid-actions,
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid):focus-within .kn-mermaid-actions {
+  opacity: 1;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-action {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-overlay);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-action:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, var(--dsw-alias-bg-overlay)));
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-action:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/* 渲染失败：保留源码（仍可编辑 ✓），在预览位置说清楚错在哪 ✓ */
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-error {
+  display: block;
+  padding: 12px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-error-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.kn-root .kn-editor-rich .milkdown .kn-mermaid-error-detail {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--crepe-font-code);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* 图片适应笔记宽度，保持原始比例；图注与正文保持轻量层次。 */
 .kn-root .kn-editor-rich .milkdown img { max-width: 100%; height: auto; object-fit: contain; }
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block { margin: 1em 0; }

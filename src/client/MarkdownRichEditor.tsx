@@ -33,10 +33,12 @@ import {
 } from "@milkdown/kit/preset/gfm";
 import { deleteColumn, deleteRow, deleteTable } from "@milkdown/kit/prose/tables";
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
+import type { Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import { replaceAll } from "@milkdown/kit/utils";
 import { EditorView } from "@codemirror/view";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
+import { languages as CODE_MIRROR_LANGUAGES } from "@codemirror/language-data";
 import { tags } from "@lezer/highlight";
 
 import { makeTranslator } from "./card-model.ts";
@@ -55,6 +57,13 @@ import {
 } from "./code-block-clipboard.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
 import { SLASH_MENU_SLICE, readSlashMenuApi, shouldOpenSlashMenu, prepareSlashInsertion, type SlashMenuApi } from "./slash-menu.ts";
+import {
+  MERMAID_ACTION_ATTR,
+  MERMAID_BACKGROUND_ATTR,
+  MERMAID_SOURCE_ATTR,
+  decodeMermaidSource,
+} from "./mermaid-block.ts";
+import { MERMAID_PREVIEW_SELECTOR, createMermaidRenderer, mermaidSvgOf } from "./mermaid-renderer.ts";
 import {
   caretTargetForClick,
   caretTargetForSelection,
@@ -81,6 +90,28 @@ import {
   type TableMenuAction,
   type TableMoveState,
 } from "./table-menu.ts";
+
+/**
+ * 代码块的语言列表 = CodeMirror 自带的全套语言 + **Mermaid** ✓
+ * （`design/mermaid-note-blocks.md` ✓）。
+ *
+ * 为什么要加一项 ✗：Mermaid 围栏在 Markdown 里就是普通代码块 ✓，
+ * 但 CodeMirror 的语言数据里**没有** mermaid ✗ ⇒ 不补这一项的话，
+ * 用户从语言列表里根本选不到 mermaid ✓，也就没法在编辑器里新建一张图 ✗
+ * （只能靠粘贴 / 已有笔记带进来的围栏 ✓）。
+ *
+ * `load` 返回 `undefined` 是**故意**的 ✓：mermaid 没有 CodeMirror 语法高亮 ✓，
+ * 加载器拿不到语言支持时只当纯文本 ✓（源码照旧可编辑 ✓），图由预览面板渲染 ✓。
+ */
+const CODE_BLOCK_LANGUAGES: LanguageDescription[] = [
+  ...CODE_MIRROR_LANGUAGES,
+  LanguageDescription.of({
+    name: "mermaid",
+    alias: ["mermaid", "mmd"],
+    extensions: ["mermaid", "mmd"],
+    load: async () => undefined as never,
+  }),
+];
 
 /**
  * 收集一个表格块里的 **table 候选** ✓
@@ -627,6 +658,9 @@ export function MarkdownRichEditor(props: {
   t?: unknown;
 }): ReactNode {
   const t = useMemo(() => makeTranslator(props.t, TABLE_LITERAL), [props.t]);
+  /** 渲染器 / 事件处理里**现取**文案 ✓（locale 切换后不用重建编辑器 ✓） */
+  const tRef = useRef(t);
+  tRef.current = t;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
   /** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
@@ -1204,6 +1238,40 @@ export function MarkdownRichEditor(props: {
     readyRef.current = false;
     failedRef.current = false;
 
+    /*
+     * **Mermaid 渲染器**（`design/mermaid-note-blocks.md` ✓）。
+     *
+     * 为什么每个编辑器实例建一个 ✗：它自己持有防抖计时器 / 代次 / 串行队列 ✓；
+     * 切节点重开编辑器时旧的必须整体失效 ✓（`dispose()` 见下面的清理 ✓）。
+     * 建在 `new Crepe` **之前** ✓：code-mirror 特性的 `renderPreview` 要在构造配置里就位 ✓。
+     */
+    const mermaid = createMermaidRenderer({
+      root,
+      labels: () => ({
+        copy: tRef.current("mermaidCopyCode"),
+        download: tRef.current("mermaidDownloadImage"),
+        failed: tRef.current("mermaidRenderFailed"),
+      }),
+      /*
+       * **文档里现有的代码块清单** ✓：异步渲染回来时要确认"那一块现在还是 mermaid 吗" ✓
+       * —— 用户可能已经把语言改成 LaTeX / 普通代码了 ✗（LaTeX 由 latex 特性直接接管，
+       * 不会通知我们的 `renderPreview` ✗）。从 ProseMirror 状态取才准 ✓（DOM 里的 CodeMirror
+       * 会在失焦后被拆掉 ✗）。
+       */
+      blocks: () => {
+        const view = viewRef.current;
+        if (view === null) return [];
+        const found: Array<{ language: string; text: string }> = [];
+        view.state.doc.descendants((node: ProseMirrorNode) => {
+          if (node.type.name !== "code_block") return true;
+          found.push({ language: String(node.attrs.language ?? ""), text: node.textContent });
+          return false;
+        });
+        return found;
+      },
+      report: (step, detail) => { reportRef.current?.(step, detail); },
+    });
+
     const crepe = new Crepe({
       root,
       /* **进来时补显式空标题** ✓：`![](...)` ⇒ `![](... "")` ✓（见 `withExplicitImageTitles` ✓） */
@@ -1261,6 +1329,17 @@ export function MarkdownRichEditor(props: {
           /* 代码/公式源码**成套**的编辑主题 ✓（见 KN_CODE_THEME ✓） */
           theme: KN_CODE_THEME,
           extensions: [syntaxHighlighting(KN_CODE_HIGHLIGHT)],
+          /*
+           * **语言列表补上 mermaid** ✓（CodeMirror 自带的数据里没有它 ✗）——
+           * 否则用户只能靠粘贴 / 已有笔记得到 mermaid 围栏 ✓，没法从界面上新建 ✓。
+           */
+          languages: CODE_BLOCK_LANGUAGES,
+          /*
+           * **Mermaid 图块的预览** ✓：Crepe 的接口约定是
+           * `null` = 没预览 ✓、`undefined` = 异步渲染中 ✓（渲染完再回填 ✓）。
+           * 普通代码块 / 公式块照旧走它自己的路径 ✓（公式块由 latex 特性在外层再包一层 ✓）。
+           */
+          renderPreview: mermaid.renderPreview,
         },
         [CrepeFeature.Latex]: {
           /* 行内公式局部编辑的确认按钮 ✓（只提交到草稿，不等于保存文件 ✓） */
@@ -1529,6 +1608,44 @@ export function MarkdownRichEditor(props: {
         .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
     };
     root.addEventListener("click", onCopyClick, true);
+
+    /*
+     * **Mermaid 预览里的两个动作** ✓（复制为代码 / 下载图像 ✓，`design/mermaid-note-blocks.md`）。
+     *
+     * 为什么用**事件委托** ✗：Crepe 每次重渲染预览都会把那段 HTML 整块 `innerHTML` 换掉 ✓
+     * ⇒ 直接挂在按钮上的监听下一次就没了 ✗；挂在编辑器根上、按 `data-*` 属性认才稳定 ✓。
+     * 两个动作都**不碰文档内容** ✓（复制不改剪贴板以外的状态 ✓；下载只读 SVG ✓）。
+     */
+    const onMermaidAction = (event: Event): void => {
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      const button = target.closest<HTMLElement>(`[${MERMAID_ACTION_ATTR}]`);
+      if (button === null || !root.contains(button)) return;
+      const preview = button.closest<HTMLElement>(MERMAID_PREVIEW_SELECTOR);
+      if (preview === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const action = button.getAttribute(MERMAID_ACTION_ATTR);
+      const source = decodeMermaidSource(preview.getAttribute(MERMAID_SOURCE_ATTR));
+      /* 渲染时的主题底色 ✓（主题切换后下载也不会「深色图 + 浅色底」✗） */
+      const background = decodeMermaidSource(preview.getAttribute(MERMAID_BACKGROUND_ATTR));
+      if (action === "copy") {
+        if (source === "") return;
+        /* 与代码块复制走**同一条**多格式剪贴板路径 ✓（裸代码 + HTML + 本插件载荷 ✓） */
+        void writeCodeBlockClipboard({ language: "mermaid", code: source })
+          .then(() => {
+            lastCopiedBlock = { language: "mermaid", code: source };
+            flashCopied(button);
+            reportRef.current?.("mermaid-copy", { chars: source.length });
+          })
+          .catch((error: unknown) => { reportRef.current?.("mermaid-copy-failed", String(error)); });
+        return;
+      }
+      if (action === "download") {
+        void mermaid.download(mermaidSvgOf(preview), source, background);
+      }
+    };
+    root.addEventListener("click", onMermaidAction, true);
 
     /*
      * **点语言选择器里的搜索框，不许把弹窗关掉** ✓
@@ -1853,6 +1970,9 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("pointerdown", dismissSlashAnchor, true);
     root.removeEventListener("keydown", onSlashKey, true);
       root.removeEventListener("click", onCopyClick, true);
+      root.removeEventListener("click", onMermaidAction, true);
+      /* 丢掉还在飞的 Mermaid 渲染 ✓（别对已销毁的组件回填预览 ✗） */
+      mermaid.dispose();
       root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);
       root.removeEventListener("contextmenu", onTableContext, true);
