@@ -192,6 +192,11 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
       }
       return used;
     };
+    /* 编辑器里**第二份**回落字典（图片原图预览那几条 ✓）：从源码里取键 ✓（它是模块内私有 ✓） */
+    const richExtraBlock = /const IMAGE_VIEWER_LITERAL[^=]*=\s*\{([\s\S]*?)\n\};/.exec(richSource);
+    const richExtra = new Set(
+      [...((richExtraBlock?.[1] ?? "").matchAll(/^\s{2}([A-Za-z0-9_]+):/gm))].map((match) => match[1]),
+    );
     /* `t(tab === "source" ? …)` 里的 `source` / `rich` 是**模式名** ✗，不是词典键 ✓ */
     const modeNames = new Set(["source", "rich"]);
     const editorUsed = keysOf(editorSource);
@@ -199,8 +204,13 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
     const editorMissing = [...editorUsed].filter((key) => !modeNames.has(key) && !(key in EDITOR_LITERAL));
     assert.deepEqual(editorMissing, [], `NodeDocumentEditor 缺回落文案 ✗：${editorMissing.join(", ")}`);
     const richUsed = keysOf(richSource);
-    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL));
+    /*
+     * 富文本编辑器的回落字典现在是**两份并起来** ✓：
+     * `{ ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL }` ✓（后者给宿主 `ImageLightbox` 的两条 labels ✓）。
+     */
+    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !richExtra.has(key));
     assert.deepEqual(richMissing, [], `MarkdownRichEditor 缺回落文案 ✗：${richMissing.join(", ")}`);
+    assert.ok(richExtra.size >= 3, `编辑器第二份回落字典要能扫到（实际 ${richExtra.size} 个 ✓）`);
     assert.ok("unsupportedNoticeRich" in EDITOR_LITERAL, "正文模式那句必须在这份字典里 ✓");
     assert.ok(
       "tableMenuLabel" in EDITOR_LITERAL && "tableEntryDisabled" in EDITOR_LITERAL,

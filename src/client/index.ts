@@ -138,6 +138,14 @@ const DICT_ZH: Record<string, string> = {
   imageUploadPlaceholder: "或者粘贴图片链接…",
   imageCaptionPlaceholder: "写一段图注",
   imageConfirm: "确定 ⏎",
+  /*
+   * 图片「原图预览」（正文栏只有 ~770px ⇒ 大图被压到 24% 就看不清了 ✗）。
+   * 两条是传给**宿主共享 `ImageLightbox`** 的 labels ✓（它自己不带语言 ✓），
+   * 第三条是正文图上的悬停提示 ✓ —— 见 `MarkdownRichEditor.tsx` 的 `IMAGE_VIEWER_LITERAL` ✓。
+   */
+  imageViewerTitle: "查看大图",
+  imageViewerClose: "关闭",
+  imageViewerOpenHint: "点击查看大图",
   editorResultOnly: "只看结果",
   /* 划词浮条 / 收集弹窗（`ChatSelectionBar` ✓）—— 之前是硬编码中文默认值 ✗ */
   addNode: "添加节点",
@@ -375,6 +383,13 @@ const DICT_EN: Record<string, string> = {
   imageUploadPlaceholder: "or paste an image link…",
   imageCaptionPlaceholder: "Write a caption",
   imageConfirm: "Confirm ⏎",
+  /*
+   * Image "view at original size" (the note column is only ~770px wide ⇒ a 3200px image is shown at 24% ✗).
+   * Two labels go to the host-shared `ImageLightbox`; the third is the hover hint on the note image.
+   */
+  imageViewerTitle: "View image",
+  imageViewerClose: "Close",
+  imageViewerOpenHint: "Click to view larger",
   editorResultOnly: "Result only",
   /* Chat selection bar / collection dialog ✓ */
   addNode: "Add node",

@@ -966,4 +966,13 @@
 .kn-root .kn-editor-rich .milkdown img { max-width: 100%; height: auto; object-fit: contain; }
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block { margin: 1em 0; }
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block img { border-radius: 8px; }
+/*
+ * **点一下看原图** ✓（用户实测：插入的图片"会变得很糊"✗）。
+ * 正文栏最宽 860px ⇒ 3200px 的示意图只剩 ~24% ⇒ 小字没有足够的像素 ✓；
+ * 点开后交给**宿主共享的 `ImageLightbox`** ✓（按窗口铺开；它自己会避开 Windows 标题栏 ✓，
+ * 见 `packages/client/ui-primitives/src/ImageLightbox.tsx` ✓）。
+ * 提示只有两处 ✓：这个光标形状 ✓ + 图片上的 `title`（「点击查看大图」✓，见 `applyImageSources` ✓）——
+ * **不往 node view 里塞外来按钮** ✗（见本文件上方表入口那条口径 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-image-block img { cursor: zoom-in; }
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block .caption-input { color: var(--dsw-alias-label-secondary); font-size: .875em; text-align: center; line-height: 1.5; }

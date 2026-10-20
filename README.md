@@ -269,9 +269,9 @@ node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
 
 节点正文只由**人**在这里编辑；模型要写正文必须先在对话里征得同意（见上面的「笔记属于你本人」）。
 
-图片 API 集成验证：`node --experimental-transform-types --test tests/note-images-api.integration.mjs`（需要支持该选项的 Node）。它验证同名并发上传、磁盘字节和取图接口；常规状态与图片辅助逻辑测试为 `tests/understanding.test.mjs` 和 `tests/note-images.test.mjs`。
+图片 API 集成验证：`node --experimental-transform-types --test tests/note-images-api.integration.mjs`（需要支持该选项的 Node）。它验证同名并发上传、磁盘字节和取图接口；常规状态与图片辅助逻辑测试为 `tests/understanding.test.mjs` 和 `tests/note-images.test.mjs`；原图预览的真实浏览器端到端测试为 `tests/note-images.browser.mjs`（需要 `KN_PROJECT` 指向 DSH 依赖仓库；宿主组件用严格照契约的替身注入模块表，组件本身由宿主仓库自己的测试覆盖）。
 
-图片编辑器样式随插件完整打包，图注与缩放控件按需显示。图片缩放高度转换为等比例宽度，让窄窗口按正文宽度收缩；保存仍使用 Markdown 的比例值与库内相对路径。普通 Markdown 节点首次保存时固化正式 ID，其理解标记同时保留。
+图片编辑器样式随插件完整打包，图注与缩放控件按需显示。图片缩放高度转换为等比例宽度，让窄窗口按正文宽度收缩；保存仍使用 Markdown 的比例值与库内相对路径。正文栏最宽 860px，面板里的宽图会被缩到约 40% 甚至更小，所以点一下图片会用**宿主共享的原图预览**（`@deepseek-ai/dsh-client-ui-primitives` 的 `ImageLightbox`，聊天与文档里的图片点开用的就是它）按窗口打开原图；它自己处理 Esc、点遮罩、× 关闭与焦点还原，并且用 `--dsh-frame-chrome-top` 避开 Windows 标题栏，右上角按钮不会被窗口控制按钮压住。代价是它按窗口等比缩放且不放大超过原图，没有 1:1 缩放（3200px 的图在 1920 窗口里约 48%，仍是正文 24% 的两倍）。普通 Markdown 节点首次保存时固化正式 ID，其理解标记同时保留。
 
 ## 节点对话
 

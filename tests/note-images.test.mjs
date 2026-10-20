@@ -1,15 +1,18 @@
 /**
- * **笔记图片存哪 / 怎么显示** ✓
+ * **笔记图片存哪 / 怎么显示 / 怎么放大看** ✓
  * （用户实测："我不知道图片插入到了当前PC中的什么位置"✗；
- * 要求"默认插入到 `.dsh_knowledge/image` 文件夹下，并且用户可以自己修改该路径"✓）。
+ * 要求"默认插入到 `.dsh_knowledge/image` 文件夹下，并且用户可以自己修改该路径"✓；
+ * 又实测"插入图片会变得很糊"✓）。
  *
- * 这一组测试盯三件事 ✓：
+ * 这一组测试盯四件事 ✓：
  * ① 目录默认值与"可配置"的解析（含穿越守卫 ✓）；
  * ② 文件名清洗（防穿越 + 防怪字符 ✓）；
- * ③ 库内相对路径 ⇄ 显示 URL、以及 `data:` URL 解析 ✓。
+ * ③ 库内相对路径 ⇄ 显示 URL、以及 `data:` URL 解析 ✓；
+ * ④ **点图片看原图**（用户实测"很糊"✗ —— 文件没坏 ✓，是正文栏把它压到 ~24% ✓；
+ *    最终**直接用宿主共享的 `ImageLightbox`** ✓ —— 见 `design/note-images-storage.md` 第九轮 ✓）。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -310,5 +313,147 @@ describe("`data:` URL 解析 ✓", () => {
     assert.equal(contentTypeForImage("", "a.svg"), "image/svg+xml");
     assert.equal(contentTypeForImage("", "a.jpg"), "image/jpeg");
     assert.equal(contentTypeForImage("", "a.bin"), "application/octet-stream");
+  });
+});
+
+
+/*
+ * ============================================================================
+ * **图片显示得很糊**（用户实测 2026-10-20 ✓）—— 以及为什么最后**直接用宿主的组件** ✓
+ * ============================================================================
+ *
+ * 第一轮定位：用户原话"在当前笔记中插入图片，会变得很糊"✓ —— 先钉死**不是文件被压坏了** ✗：
+ * 那张 `右旋圆极化示意图.png` 3200×1920 / 783375 字节，插进笔记后磁盘上那份
+ * 与原文件 **SHA256 一致** ✓，取图也是原字节 ✓。糊的是**显示**：
+ * 笔记正文栏最宽 860px ✓、面板里实际 ~770px ✓ ⇒ 3200px 的图只剩 **24%** ✓，
+ * 图里的小字**没有足够的像素** ✓ —— 不是过滤器/编码问题 ✗，是物理尺寸问题 ✓。
+ *
+ * 第二轮（用户实测截图 ✓）：第一版是**自绘**一个铺满视口的 `<dialog>` + 工具栏 ✓ ——
+ * 结果**右上角的按钮被 Windows 原生标题栏（窗口控制按钮）压住** ✗。
+ * 用户一句话点破："DSH 自己的这种图片查看方式就很好，为什么不直接用它的"✓。
+ *
+ * ⇒ 第九轮改成**直接复用宿主共享的 `ImageLightbox`** ✓：
+ * - 它就在基线模块 `@deepseek-ai/dsh-client-ui-primitives` 里 ✓
+ *   （`packages/client/ui-primitives/src/ImageLightbox.tsx` ✓；DSH 的聊天图片、文档图片点开就是它 ✓）；
+ * - 舞台是 `inset: var(--dsh-frame-chrome-top, 0px) 0 0` ✓ ⇒ **主动避开 Windows 标题栏** ✓
+ *   （这个 CSS 变量由宿主 AppFrame 设置 ✓）；关闭按钮在舞台里 ⇒ 不会再被窗口按钮压住 ✓；
+ * - Esc / 点遮罩 / × / 焦点还原 / portal 到 body 全是它自己的事 ✓ —— 插件这边只给
+ *   `src` + `alt` + 两条 labels + `onClose` ✓；
+ * - 代价（如实记 ✓）：宿主这个预览是**按窗口等比缩放**（`max-width: min(100%, 1600px)` ✓），
+ *   **没有 1:1 缩放** ✗ —— 3200px 的图在 1920 窗口里约 **48%** ✓，仍然是正文 24% 的两倍 ✓。
+ *
+ * 所以这组测试钉三件事：**不再自绘** ✗ / 打开与关闭的接线 ✓ / 文案与提示 ✓。
+ */
+describe("原图预览：直接用宿主自带的 ImageLightbox ✓（不再自绘 ✗）", () => {
+  const CLIENT_DIR = path.join(HERE, "..", "src", "client");
+  const editor = readFileSync(path.join(CLIENT_DIR, "MarkdownRichEditor.tsx"), "utf8");
+
+  it("从**基线模块**取宿主组件 ✓（`@deepseek-ai/dsh-client-ui-primitives` ✓，由宿主模块表提供 ✓）", () => {
+    assert.ok(
+      editor.includes('import { ImageLightbox } from "@deepseek-ai/dsh-client-ui-primitives";'),
+      "要用宿主共享的 `ImageLightbox` ✓（别自己画遮罩 ✗）",
+    );
+    assert.match(
+      editor,
+      /<ImageLightbox\s+src=\{lightbox\.src\}\s+alt=\{lightbox\.alt\}\s+labels=\{\{ dialog: t\("imageViewerTitle"\), close: t\("imageViewerClose"\) \}\}\s+onClose=\{closeLightbox\}/,
+      "要把 `src` / `alt` / 两条 labels / `onClose` 都交给宿主组件 ✓",
+    );
+  });
+
+  it("**自绘的那一套已经删干净** ✓（它的遮罩会被 Windows 标题栏压住 ✗）", () => {
+    assert.equal(existsSync(path.join(CLIENT_DIR, "note-image-viewer.ts")), false, "自绘查看器模块必须删掉 ✗");
+    for (const file of readdirSync(CLIENT_DIR)) {
+      if (!/\.(tsx?)$/.test(file)) continue;
+      const code = readFileSync(path.join(CLIENT_DIR, file), "utf8");
+      assert.ok(!code.includes("showModal("), `${file} 里还有自绘 modal ✗`);
+      assert.ok(!code.includes("knowledgenet-image-viewer-style"), `${file} 里还在注入自绘样式 ✗`);
+    }
+  });
+
+  it("产物里只剩**基线 external** ✓（宿主模块表解析 ✓，不是把宿主组件抄进来 ✗）", () => {
+    const bundle = readFileSync(path.join(HERE, "..", "client.js"), "utf8");
+    assert.ok(
+      bundle.includes('require("@deepseek-ai/dsh-client-ui-primitives")'),
+      "`client.js` 应当 require 这块基线模块 ✓（`selfcontained.test.mjs` 会校验它在宿主基线表里 ✓）",
+    );
+    assert.ok(!bundle.includes("knowledgenet-image-viewer-style"), "自绘查看器的样式字符串不该再进产物 ✗");
+  });
+
+  it("**关闭回调必须稳定** ✓（宿主把它当 effect 依赖 ✗，每次渲染换新函数会反复还原焦点 ✗）", () => {
+    assert.match(
+      editor,
+      /const closeLightbox = useCallback\(\(\): void => \{ setLightbox\(null\); \}, \[\]\);/,
+      "`closeLightbox` 要用 `useCallback(…, [])` ✓",
+    );
+    assert.match(editor, /const \[lightbox, setLightbox\] = useState<\{ src: string; alt: string \} \| null>\(null\)/, "预览状态只有 src/alt 两项 ✓");
+  });
+});
+
+describe("编辑器接线：点图片看原图 ✓（用户实测：插入的图片很糊 ✗）", () => {
+  const editor = readFileSync(path.join(HERE, "..", "src", "client", "MarkdownRichEditor.tsx"), "utf8");
+  const overrides = readFileSync(path.join(HERE, "..", "src", "client", "editor-overrides.css"), "utf8");
+
+  it("点图片才打开：**图注输入框 / 操作按钮 / 拖拽手柄都不算** ✓", () => {
+    assert.ok(editor.includes("setLightbox({ src, alt })"), "要真的打开预览 ✓");
+    assert.ok(
+      editor.includes('if (target.closest("input, button, .caption-input, .operation, .image-edit, .image-resize-handle") !== null) return;'),
+      "这些控件在图片块里，但不该触发预览 ✓（否则改图注/拖高度就弹窗 ✗）",
+    );
+    assert.ok(editor.includes('root.addEventListener("click", onImageClick, true)'), "用事件委托（Crepe 会重渲染节点 ✗）");
+  });
+
+  it("**选中态下点到的不是 `<img>`** ✗ ⇒ 必须从图片块里再找那张图 ✓（实测踩到 ✓）", () => {
+    assert.ok(
+      editor.includes('block.querySelector<HTMLImageElement>("img")'),
+      "`.selected > .image-wrapper::before`（没有 pointer-events:none ✗）会挡住 img ⇒ 从块里取图 ✓",
+    );
+    assert.ok(editor.includes('const block = target.closest<HTMLElement>(".milkdown-image-block")'), "限定在图片块里 ✓");
+  });
+
+  it("不抢 ProseMirror 的点击（选中/删除图片照旧 ✓）", () => {
+    const start = editor.indexOf("const onImageClick = (event: Event): void => {");
+    assert.notEqual(start, -1, "找不到 onImageClick");
+    const body = editor.slice(start, editor.indexOf("root.addEventListener(\"click\", onImageClick, true);") + 1);
+    assert.ok(!body.includes("preventDefault"), "不许 preventDefault ✗（否则图片选不中、删不掉 ✓）");
+    assert.ok(!body.includes("stopPropagation"), "不许 stopPropagation ✗（理由同上 ✓）");
+  });
+
+  it("复用**已经解码好**的那张图 ✓（不再下载 / 不再编码 ✓）", () => {
+    assert.ok(editor.includes("image.currentSrc"), "用 `currentSrc` ✓（就是我们 fetch 回来的 blob: ✓）");
+    assert.ok(editor.includes("naturalWidth"), "要自然尺寸 ✓（占位 / 未解码好的图不打开 ✓）");
+    assert.ok(editor.includes("captionInput?.value ?? image.alt"), "`alt` 取图注 ✓");
+    assert.ok(editor.includes('reportRef.current?.("image-viewer-open"'), "打开要留痕 ✓（下次说糊，能一眼看出正文里是 24% ✓）");
+  });
+
+  it("卸载时移除监听 ✓（预览本身是 React 组件，跟着卸载一起走 ✓）", () => {
+    assert.ok(editor.includes('root.removeEventListener("click", onImageClick, true)'), "监听要成对移除 ✓");
+  });
+
+  it("光标形状 + 悬停提示 ✓（**不往 node view 里塞外来按钮** ✗ —— 表入口那条口径 ✓）", () => {
+    assert.ok(editor.includes("imageViewerOpenHint"), "悬停要有一句「点击查看大图」✓（`title` 上 ✓）");
+    assert.ok(
+      /if \(zoomHint !== undefined && image\.title !== zoomHint\) image\.title = zoomHint;/.test(editor),
+      "`title` 只在值不同时写 ✓（避免每帧白写 ✗），而且不在观察器的 `src`/`style` 过滤里 ✓",
+    );
+    assert.ok(
+      /\.kn-root \.kn-editor-rich \.milkdown \.milkdown-image-block img \{ cursor: zoom-in; \}/.test(overrides),
+      "图片上要 `cursor: zoom-in` ✓",
+    );
+    assert.ok(!editor.includes("kn-image-zoom"), "不许往 Crepe 的图片块里塞按钮 ✗");
+  });
+
+  it("**中英词典都补上** ✓（英文界面不许漏中文 ✗）", () => {
+    const dict = readFileSync(path.join(HERE, "..", "src", "client", "index.ts"), "utf8");
+    const zh = dict.slice(dict.indexOf("const DICT_ZH"), dict.indexOf("const DICT_EN"));
+    const en = dict.slice(dict.indexOf("const DICT_EN"));
+    for (const key of ["imageViewerTitle", "imageViewerClose", "imageViewerOpenHint"]) {
+      assert.ok(new RegExp(`const IMAGE_VIEWER_LITERAL[^=]*=\\s*\\{[^}]*${key}:`, "m").test(editor) || editor.includes(`${key}: "`), `字面兜底里缺 ${key} ✗`);
+      assert.match(zh, new RegExp(`^\\s{2}${key}:`, "m"), `中文字典缺 ${key} ✗`);
+      assert.match(en, new RegExp(`^\\s{2}${key}:`, "m"), `英文字典缺 ${key} ✗（英文界面会漏出中文 ✓）`);
+    }
+    /* 自绘那版用不到的键必须清掉 ✗（留着就是死文案 ✓） */
+    for (const dead of ["imageViewerZoomIn", "imageViewerZoomOut", "imageViewerFit", "imageViewerActual", "imageViewerHint"]) {
+      assert.ok(!dict.includes(dead), `死文案 ${dead} 应当随自绘查看器一起删掉 ✗`);
+    }
   });
 });

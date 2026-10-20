@@ -64,6 +64,15 @@ import {
   decodeMermaidSource,
 } from "./mermaid-block.ts";
 import { MERMAID_PREVIEW_SELECTOR, createMermaidRenderer, mermaidSvgOf } from "./mermaid-renderer.ts";
+/*
+ * **宿主共享的「原图预览」** ✓（聊天 / 文档里点图片用的就是它 ✓）。
+ * **为什么直接用它** ✓：自绘一套的结果是右上角的按钮正好被 **Windows 原生标题栏**
+ * （窗口控制按钮）压住 ✗ —— 真实截图实测 ✓。宿主这个组件的舞台是
+ * `inset: var(--dsh-frame-chrome-top, 0px) 0 0` ✓（主动避开标题栏 ✓），
+ * 而且 Esc / 点遮罩 / × / 焦点还原都是现成的 ✓；它走 `@deepseek-ai/dsh-client-ui-primitives`
+ * 这块**基线模块** ✓（宿主模块表提供 ✓，`build.mjs` 的 `CLIENT_BASELINE` 已把它列为 external ✓）。
+ */
+import { ImageLightbox } from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   caretTargetForClick,
   caretTargetForSelection,
@@ -112,6 +121,20 @@ const CODE_BLOCK_LANGUAGES: LanguageDescription[] = [
     load: async () => undefined as never,
   }),
 ];
+
+/**
+ * **图片预览用到的三条文案** ✓：
+ * - `imageViewerTitle` / `imageViewerClose` ⇒ 传给宿主 `ImageLightbox` 的 `labels` ✓
+ *   （宿主组件自己不带语言 ✓，`dialog` / `close` 两条都是无障碍名称 ✓）；
+ * - `imageViewerOpenHint` ⇒ 正文图上的悬停提示 ✓（`applyImageSources` 写进 `title` ✓）。
+ *
+ * 键在中英两份词典里都有 ✓（`tests/plugin-locale.test.mjs` 的字面兜底扫描口径 ✓）。
+ */
+const IMAGE_VIEWER_LITERAL: Record<string, string> = {
+  imageViewerTitle: "查看大图",
+  imageViewerClose: "关闭",
+  imageViewerOpenHint: "点击查看大图",
+};
 
 /**
  * 收集一个表格块里的 **table 候选** ✓
@@ -391,9 +414,18 @@ function applyImageSources(
   cache: Map<string, string>,
   inflight: Set<string>,
   report: ((step: string, detail?: unknown) => void) | undefined,
+  /** 悬停提示 ✓（`点击查看大图` ✓；`undefined` = 不写 ✓）。见下面那段"很糊"的说明 ✓ */
+  zoomHint: string | undefined,
 ): void {
   for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
     fitNoteImage(image);
+    /*
+     * **悬停给一句提示** ✓（用户实测：插入的图片"会变得很糊"✗）：
+     * 正文栏只有 ~770px ✓，3200px 的图被压到 24% ✓ ⇒ 想看清得**点一下**（宿主原图预览 ✓）。
+     * 提示写在 `title` 上 ✓（不往 Crepe 的 node view 里塞外来按钮 ✗，理由见本文件表入口那条 ✓）；
+     * `title` 不在图片观察器的过滤范围里 ✓（只盯 `src` / `style` ✓）⇒ 不会自激 ✓。
+     */
+    if (zoomHint !== undefined && image.title !== zoomHint) image.title = zoomHint;
     const raw = image.getAttribute("data-kn-raw-src") ?? image.getAttribute("src");
     if (raw === null || !isLibraryRelativeImageSrc(raw)) continue;
     image.setAttribute("data-kn-raw-src", raw);
@@ -676,7 +708,12 @@ export function MarkdownRichEditor(props: {
   target?: unknown;
   t?: unknown;
 }): ReactNode {
-  const t = useMemo(() => makeTranslator(props.t, TABLE_LITERAL), [props.t]);
+  /*
+   * 字典 = 表格菜单的字面文案 ✓ + 图片预览的字面文案 ✓。
+   * 为什么要并进来 ✓：`makeTranslator` 的第三层就是这份 dict ✓ ——
+   * 宿主 `t` 与插件 `bind` 都取不到时，界面不能空着 ✓（复查口径 ✓）。
+   */
+  const t = useMemo(() => makeTranslator(props.t, { ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL }), [props.t]);
   /** 渲染器 / 事件处理里**现取**文案 ✓（locale 切换后不用重建编辑器 ✓） */
   const tRef = useRef(t);
   tRef.current = t;
@@ -696,6 +733,22 @@ export function MarkdownRichEditor(props: {
   const imageCacheRef = useRef<Map<string, string>>(new Map());
   /** 正在取图的 key ✓（防并发重复取 ✓） */
   const imageInflightRef = useRef<Set<string>>(new Set());
+  /**
+   * **原图预览要显示的那张图** ✓（`null` = 没开 ✓）。
+   *
+   * 渲染交给宿主的 `ImageLightbox` ✓（见文件顶部 import 那段说明 ✓）——
+   * 插件这边只负责"点什么 / 传哪张 / 什么时候关" ✓，不自己画遮罩、不自己管键盘 ✗。
+   */
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  /** 关掉预览 ✓（**必须是稳定的函数引用** ✓：宿主组件把它当 effect 依赖 ✗，每次渲染换一个新函数会反复还原焦点 ✗） */
+  const closeLightbox = useCallback((): void => { setLightbox(null); }, []);
+  /**
+   * 「点图片看原图」的入口 ✓ —— 经 ref 交给主 effect 里的事件委托 ✓。
+   *
+   * 为什么要 ref ✓：主 effect 只跑一次（依赖 `[]` ✓），直接闭包会抓住第一帧的函数 ✗；
+   * 而这个函数要用 `tRef` 现取文案 ✓（locale 切了也得对 ✓）⇒ 每次都刷新这个 ref ✓。
+   */
+  const openImageViewerRef = useRef<(image: HTMLImageElement) => void>(() => {});
   /**
    * 表格入口当前该在哪（`null` = 不显示 ✓）。
    * 只由**编辑器 selection** 决定 ✓（不靠鼠标悬停推断 ✗）。
@@ -783,6 +836,39 @@ export function MarkdownRichEditor(props: {
   readOnlyRef.current = props.readOnly;
 
   /**
+   * **点图片 ⇒ 打开「原图预览」** ✓（用户实测：插入的图片"会变得很糊"✗）。
+   *
+   * 为什么正文里就是糊 ✓：正文栏最宽 860px（`.kn-editor-rich` ✓），面板里实际 ~770px ✓ ⇒
+   * 3200×1920 的示意图在正文里只按 **24%** 渲染 ✓，图里的小字没有足够的像素 ✓。
+   * 而磁盘上的字节和插入前**逐字节相同** ✓（不是保存时被压坏了 ✗）。
+   * ⇒ 交给**宿主共享的 `ImageLightbox`** ✓：按窗口铺开（3200 的图在 1920 窗口里约 48% ✓，
+   * 正文的两倍 ✓），并且它用 `--dsh-frame-chrome-top` 主动避开 Windows 标题栏 ✓
+   * （自绘一个铺满视口的遮罩时，右上角按钮正好被窗口控制按钮压住 ✗ —— 用户真实截图 ✓）。
+   *
+   * @param image - 正文里那张已经解码好的 `<img>` ✓（直接复用它的 `currentSrc` ✓，
+   *   也就是我们 `fetch` 回来、已经换成 `blob:` 的那张 ✓ —— 不重新下载、不重新编码 ✓）。
+   */
+  openImageViewerRef.current = (image: HTMLImageElement): void => {
+    const naturalWidth = image.naturalWidth;
+    const naturalHeight = image.naturalHeight;
+    /* 还没解码好 / 还是那张 1×1 透明占位 ⇒ 打开也没意义 ✗（占位放大后就是一块白 ✓） */
+    const src = image.currentSrc || image.getAttribute("src") || "";
+    if (naturalWidth <= 0 || naturalHeight <= 0) return;
+    if (src === "" || src === IMAGE_PLACEHOLDER_SRC) return;
+    const raw = image.getAttribute("data-kn-raw-src") ?? "";
+    const captionInput = image.closest<HTMLElement>(".milkdown-image-block")?.querySelector<HTMLInputElement>(".caption-input");
+    const alt = (captionInput?.value ?? image.alt ?? "").trim();
+    setLightbox({ src, alt });
+    /* 正文里实际渲染宽度也报一条 ✓：下次再有人说"糊"，一眼能看出是 24% 还是真出错了 ✓ */
+    reportRef.current?.("image-viewer-open", {
+      path: raw,
+      naturalWidth,
+      naturalHeight,
+      displayWidth: Math.round(image.getBoundingClientRect().width),
+    });
+  };
+
+  /**
    * 报一次"编辑器把 `ingested` 渲染成了 `canonical`" ✓（只有**喂进去**的时候才报 ✗，
    * 用户敲字走 `onChange` ✓）。父面板拿它维护"编辑器侧的干净快照" ✓ ——
    * 否则宿主去掉末尾空白、编辑器补回末尾换行，一来一回就被当成"又有未保存修改" ✗。
@@ -836,6 +922,7 @@ export function MarkdownRichEditor(props: {
       imageCacheRef.current,
       imageInflightRef.current,
       (step, detail) => { reportRef.current?.(step, detail); },
+      tRef.current("imageViewerOpenHint"),
     );
 
     const context = readTableContext(view.state);
@@ -1698,6 +1785,37 @@ export function MarkdownRichEditor(props: {
     };
     root.addEventListener("click", onMermaidAction, true);
 
+    /**
+     * **点正文里的图片 ⇒ 打开「查看大图」** ✓（用户实测：插入的图片"会变得很糊"✗）。
+     *
+     * 判据只认两件事 ✓：
+     * ① 点在**图片块**上 ✓（图片块右上角的图注按钮、图注输入框、底部拖拽手柄都不算 ✗）；
+     * ② 在 `.milkdown-image-block` 里 ✓（代码块预览 / 别的图片不进这条 ✓）。
+     *
+     * ⚠️ **不能只认 `event.target` 是 `<img>`** ✗（实测踩到 ✓）：
+     * 图片块被选中时，Crepe 会在 `.image-wrapper` 上盖一层 `::before` 遮罩 ✓
+     * （`.milkdown-image-block.selected > .image-wrapper::before` ✓，而且**没有**
+     * `pointer-events: none` ✗）⇒ 点到的其实是 `.image-wrapper` 那个 div ✓，
+     * `target.closest("img")` 永远是 `null` ✗（只有一张图的笔记一打开就是选中态 ✓，
+     * 于是"点了没反应"✓）。所以：**从块里再找那张图** ✓。
+     *
+     * 为什么**不** `preventDefault` / 不 `stopPropagation` ✗：
+     * ProseMirror 照旧把这次点击处理成"选中图片节点"✓（要按 Del 删图、要看拖拽手柄都靠它 ✓）——
+     * 查看器只是**盖在上面**的一层 ✓，关掉之后编辑器的状态和点之前一样 ✓。
+     */
+    const onImageClick = (event: Event): void => {
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      /* 图注输入框 / 操作按钮 / 拖拽手柄不算 ✗（它们也在图片块里 ✓） */
+      if (target.closest("input, button, .caption-input, .operation, .image-edit, .image-resize-handle") !== null) return;
+      const block = target.closest<HTMLElement>(".milkdown-image-block");
+      if (block === null || !root.contains(block)) return;
+      const image = (target.closest<HTMLImageElement>("img") ?? block.querySelector<HTMLImageElement>("img"));
+      if (image === null) return;
+      openImageViewerRef.current(image);
+    };
+    root.addEventListener("click", onImageClick, true);
+
     /*
      * **点语言选择器里的搜索框，不许把弹窗关掉** ✓
      * （用户实测："只要我鼠标左键点击搜索框，这个弹窗就会消失"✗）。
@@ -1876,6 +1994,7 @@ export function MarkdownRichEditor(props: {
           imageCacheRef.current,
           imageInflightRef.current,
           (step, detail) => { reportRef.current?.(step, detail); },
+          tRef.current("imageViewerOpenHint"),
         );
       })
       : null;
@@ -2022,6 +2141,12 @@ export function MarkdownRichEditor(props: {
     root.removeEventListener("keydown", onSlashKey, true);
       root.removeEventListener("click", onCopyClick, true);
       root.removeEventListener("click", onMermaidAction, true);
+      root.removeEventListener("click", onImageClick, true);
+      /*
+       * 原图预览**不用在这里手动关** ✓：它是 React 组件（宿主 `ImageLightbox` ✓），
+       * 跟着本组件卸载一起卸载 ✓，宿主自己的 effect 会还原焦点 ✓ ——
+       * 上一版自绘的遮罩挂在 `document.body` 上 ✗，才需要显式 `close()` ✗。
+       */
       /* 丢掉还在飞的 Mermaid 渲染 ✓（别对已销毁的组件回填预览 ✗） */
       mermaid.dispose();
       root.removeEventListener("click", onClickInsideLanguagePicker);
@@ -2145,10 +2270,15 @@ export function MarkdownRichEditor(props: {
   }), [scheduleMenu]);
 
   /*
-   * 渲染：Milkdown 挂载点 + 表格**入口**（光标进表格才有 ✓）+ 点开后出现的**菜单** ✓。
-   * 两者都是**正文滚动容器的绝对定位子元素** ✓（`.kn-editor-body` 是 `position: relative` ✓）
+   * 渲染：Milkdown 挂载点 + 表格**入口**（光标进表格才有 ✓）+ 点开后出现的**菜单** ✓
+   * + 点图片才出现的**原图预览** ✓。
+   * 前两者都是**正文滚动容器的绝对定位子元素** ✓（`.kn-editor-body` 是 `position: relative` ✓）
    * ⇒ 与 ProseMirror 的 DOM 完全分离 ✗（不往 node view 里塞外来节点 ✓），
    * 也不占正文高度 ✓（复查要求"一个轻量入口，按需展开行列操作" ✓）。
+   *
+   * 原图预览用**宿主的 `ImageLightbox`** ✓：它自己 portal 到 `document.body` ✓、
+   * 自己处理 Esc / 点遮罩 / × / 焦点还原 / Windows 标题栏 ✓ —— 插件这边只在打开时给
+   * `src` + `alt` + 两条文案 ✓（见文件顶部 import 那段说明 ✓）。
    */
   return (
     <>
@@ -2163,6 +2293,14 @@ export function MarkdownRichEditor(props: {
           onDismiss={dismissMenu}
           disabledReasons={menu.disabledActions}
           nodeRef={menuNodeRef}
+        />
+      )}
+      {lightbox === null ? null : (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          labels={{ dialog: t("imageViewerTitle"), close: t("imageViewerClose") }}
+          onClose={closeLightbox}
         />
       )}
     </>
