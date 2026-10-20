@@ -30,6 +30,7 @@ const CLIENT_BASELINE = new Set([
 const manifest = JSON.parse(await readFile(path.join(PLUGIN, "package.json"), "utf8"));
 const host = await readFile(path.join(PLUGIN, "index.js"), "utf8");
 const client = await readFile(path.join(PLUGIN, "client.js"), "utf8");
+const mermaidRuntime = await readFile(path.join(PLUGIN, "client.mermaid.js"), "utf8");
 
 describe("插件清单", () => {
   it("声明了 bundle patch 与客户端半", () => {
@@ -37,6 +38,12 @@ describe("插件清单", () => {
     assert.equal(manifest.dsh?.client?.platform, "web");
     assert.equal(manifest.exports["./client"], "./client.js");
     assert.equal(manifest.exports["."], "./index.js");
+  });
+
+  it("发布文件里带上按需加载的 Mermaid 运行时（git/npm 安装不会漏）", () => {
+    assert.ok(manifest.files.includes("client.mermaid.js"), "files 里必须包含 client.mermaid.js（运行时文件）");
+    assert.ok(manifest.files.includes("client.js"));
+    assert.ok(manifest.files.includes("index.js"));
   });
 
   it("没有运行时依赖（一切内联，profile 安装不需要执行任何脚本）", () => {
@@ -64,7 +71,7 @@ describe("Client 半产物形态", () => {
   });
 
   it("只请求宿主基线模块表中的模块", () => {
-    const requests = [...client.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+    const requests = [...client.matchAll(/require\((["\'])([^"\']+)\1\)/g)].map((match) => match[2]);
     assert.ok(requests.length > 0, "客户端半应当引用 React");
     for (const request of new Set(requests)) {
       assert.ok(CLIENT_BASELINE.has(request), `客户端半请求了非基线模块：${request}`);
@@ -74,6 +81,28 @@ describe("Client 半产物形态", () => {
   it("内联了面板样式（Shadow Root 里要用）", () => {
     assert.match(client, /\.kn-root/);
     assert.match(client, /\.graph-scroll/);
+  });
+});
+
+describe("Mermaid 运行时（按需加载）", () => {
+  it("client.js 不再内联 mermaid：体积回到 ~8MB、只剩按需加载的入口", () => {
+    assert.ok(Buffer.byteLength(client, "utf8") < 9_000_000, `client.js 过大：${Buffer.byteLength(client, "utf8")}`);
+    assert.equal(client.includes("init_mermaid_core"), false, "client.js 不许内联 mermaid（应走 client.mermaid.js）");
+    assert.ok(client.includes("knowledgenet.mermaid.js"), "client.js 里要有按需运行时的路由常量");
+  });
+
+  it("client.mermaid.js 是自包含的浏览器 IIFE", () => {
+    const bytes = Buffer.byteLength(mermaidRuntime, "utf8");
+    assert.ok(bytes > 2_000_000 && bytes < 5_000_000, `运行时体积异常：${bytes} 字节（应为 minified ~3.4MB）`);
+    assert.ok(mermaidRuntime.includes("__KN_MERMAID__"), "运行时必须导出 window.__KN_MERMAID__");
+    assert.equal(mermaidRuntime.includes("require(\"util\")"), false, "运行时里不许有 require util");
+    assert.equal(/^\s*(?:import|export)\s/m.test(mermaidRuntime), false, "运行时不能是 ESM 模块（必须是 IIFE）");
+  });
+
+  it("Host 注册了按需运行时路由（重启 DSH 后可用）", () => {
+    assert.ok(host.includes("knowledgenet.mermaid.js"), "Host 半里要有运行时路由路径");
+    assert.ok(host.includes("import.meta.url"), "Host 用 import.meta.url 定位包根里的 client.mermaid.js");
+    assert.ok(host.includes("client.mermaid.js"), "Host 半里要有运行时文件名");
   });
 });
 

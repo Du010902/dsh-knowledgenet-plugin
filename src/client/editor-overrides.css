@@ -886,12 +886,30 @@
   display: flex;
   gap: 2px;
   opacity: 0;
+  /*
+   * ⚠️ **透明 ≠ 不可点** ✗：只写 `opacity:0` 的话按钮仍然占据点击区域 ✓
+   * ⇒ 用户点图右上角会误触「复制为代码 / 下载图像」✗（还会吞掉那次点击 ✗）。
+   * `pointer-events:none` 让隐藏时完全不参与命中测试 ✓；悬停 / 聚焦（含键盘 Tab）时恢复 ✓。
+   */
+  pointer-events: none;
   transition: opacity 0.15s ease;
 }
 
 .kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid):hover .kn-mermaid-actions,
 .kn-root .kn-editor-rich .milkdown .milkdown-code-block:has(.kn-mermaid):focus-within .kn-mermaid-actions {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/*
+ * **触屏 / 无悬停设备**：hover 永远不触发 ⇒ 按钮会完全不可见也点不到 ✗
+ * ⇒ 这类设备上常驻显示（但降低不透明度，不抢图的主体 ✓）。
+ */
+@media (hover: none) {
+  .kn-root .kn-editor-rich .milkdown .kn-mermaid-actions {
+    opacity: 0.75;
+    pointer-events: auto;
+  }
 }
 
 .kn-root .kn-editor-rich .milkdown .kn-mermaid-action {

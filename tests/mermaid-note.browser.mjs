@@ -106,7 +106,7 @@ async function buildFixture({ title, body }) {
  * 起一次"真实 client.js + /api/ + 页面"，返回 page 与收尾函数 ✓。
  * @param {{ title: string, body: string, viewport?: { width: number, height: number } }} options
  */
-async function startHarness({ title, body, viewport = { width: 1280, height: 980 } }) {
+async function startHarness({ title, body, viewport = { width: 1280, height: 980 }, mermaidRuntimeUnavailable = false }) {
   const fixture = await buildFixture({ title, body });
   const tooling = resolveTooling();
   const { rolldown } = await import(pathToFileURL(tooling.rolldownPath).href);
@@ -133,6 +133,7 @@ function App(){return React.createElement(window.plugin.GraphPanel,{sessionId:'c
   const output = await build.generate({ format: "iife" });
   await build.close();
   const app = output.output.find((item) => item.type === "chunk").code;
+  const mermaidRuntimeCode = await readFile(`${REPO}/client.mermaid.js`, "utf8");
   const compiled = (await readFile(`${REPO}/client.js`, "utf8")).replace(
     "exports.apply = apply;",
     "exports.apply = apply; exports.GraphPanel = GraphPanel;",
@@ -141,12 +142,26 @@ function App(){return React.createElement(window.plugin.GraphPanel,{sessionId:'c
 
   const state = new __internal.LearningState(3000);
   const ctx = { get: (name) => (name === "sessionPersistence" ? { stat: async (id) => (id === "chat" ? { header: { cwd: fixture.workspace } } : undefined) } : undefined) };
+  const apiBodies = [];
   const server = createServer(async (request, response) => {
     try {
+      /* 按需加载的 Mermaid 运行时（与真实宿主路由同路径 ✓） */
+      if (new URL(request.url, "http://localhost").pathname === "/api/knowledgenet.mermaid.js") {
+        if (mermaidRuntimeUnavailable) {
+          response.statusCode = 404;
+          response.end("mermaid runtime missing");
+          return;
+        }
+        response.setHeader("content-type", "text/javascript; charset=utf-8");
+        response.setHeader("cache-control", "public, max-age=31536000, immutable");
+        response.end(mermaidRuntimeCode);
+        return;
+      }
       if (request.url.startsWith("/api/")) {
         let bytes = "";
         for await (const chunk of request) bytes += chunk;
         const requestBody = bytes ? JSON.parse(bytes) : undefined;
+        if (requestBody !== undefined) apiBodies.push(requestBody);
         const result = await __internal.handleApiRequest(ctx, { focusLeaseMs: 3000 }, {
           url: `http://localhost${request.url}`,
           method: request.method,
@@ -199,7 +214,22 @@ function App(){return React.createElement(window.plugin.GraphPanel,{sessionId:'c
     state.dispose();
   }
 
-  return { page, openNote, close, pageErrors };
+  return { page, openNote, close, pageErrors, apiBodies };
+}
+
+/**
+ * 悬停到 mermaid 图块上，等右上角的动作按钮真正可点 ✓。
+ * （常态 `pointer-events:none` ⇒ Playwright 的 click 可操作性检查会一直等 ✗，必须先悬停 ✓。）
+ */
+async function hoverMermaidBlock(page) {
+  await page.locator(".milkdown-code-block").filter({ has: page.locator(".kn-mermaid") }).first().hover();
+  await page.waitForFunction(() => {
+    const actions = window.__knTest.deepAll(".kn-mermaid-actions")[0];
+    if (actions === undefined) return false;
+    const style = getComputedStyle(actions);
+    /* pointer-events 是瞬时的 ✓；opacity 有 0.15s 过渡 ⇒ 等它真正到 1 ✓ */
+    return style.pointerEvents === "auto" && style.opacity === "1";
+  }, undefined, { timeout: 10000 });
 }
 
 /** 等 mermaid 块里出现真正的图（不是「渲染中…」占位 ✓） */
@@ -238,8 +268,13 @@ function readRenderedFacts(page) {
 }
 
 /** 读剪贴板 ✓ */
-function readClipboard(page) {
-  return page.evaluate(() => navigator.clipboard.readText());
+async function readClipboard(page) {
+  try {
+    return await page.evaluate(() => navigator.clipboard.readText());
+  } catch {
+    /* 页面没聚焦 / 剪贴板为空时读失败 ⇒ 返回 null（调用方按"没读到"处理 ✓） */
+    return null;
+  }
 }
 
 /** 把焦点从 CodeMirror 挪走（点标题栏不会改正文 ✓） */
@@ -393,6 +428,7 @@ describe("Mermaid 图块（真实浏览器）", () => {
     try {
       await harness.openNote();
       await waitForMermaidSvg(harness.page);
+      await hoverMermaidBlock(harness.page);
       await harness.page.locator('[data-kn-mermaid-action="copy"]').first().click();
       await new Promise((done) => setTimeout(done, 150));
       const text = await readClipboard(harness.page);
@@ -411,6 +447,7 @@ describe("Mermaid 图块（真实浏览器）", () => {
     try {
       await harness.openNote();
       await waitForMermaidSvg(harness.page);
+      await hoverMermaidBlock(harness.page);
       const [download] = await Promise.all([
         harness.page.waitForEvent("download", { timeout: 30000 }),
         harness.page.locator('[data-kn-mermaid-action="download"]').first().click(),
@@ -538,6 +575,194 @@ describe("Mermaid 图块（真实浏览器）", () => {
         return host !== undefined && getComputedStyle(host).display !== "none" && host.getBoundingClientRect().height > 0;
       });
       assert.equal(visible, true, "失败后源码必须仍可编辑 ✓");
+      assert.deepEqual(harness.pageErrors, []);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("动作按钮：常态不可点、悬停后可点（透明 ≠ 可点）", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 按钮可点性",
+      body: ["## 可点性", "", "```mermaid", "graph TD; A[甲] --> B[乙]", "```", ""].join("\n"),
+    });
+    try {
+      await harness.openNote();
+      await waitForMermaidSvg(harness.page);
+      const readActions = () => harness.page.evaluate(() => {
+        const actions = window.__knTest.deepAll(".kn-mermaid-actions")[0];
+        if (actions === undefined) return null;
+        const style = getComputedStyle(actions);
+        return { opacity: style.opacity, pointerEvents: style.pointerEvents };
+      });
+      /* 常态：透明且**不参与命中测试** ✓（只写 opacity:0 的话点图右上角会误触按钮 ✗） */
+      const idle = await readActions();
+      assert.equal(idle?.pointerEvents, "none", "常态按钮不能吃点击 ✓");
+      assert.equal(idle?.opacity, "0", "常态按钮是隐藏的 ✓");
+      /* 悬停：按钮出现且可点 ✓ */
+      await hoverMermaidBlock(harness.page);
+      const hovered = await readActions();
+      assert.equal(hovered?.pointerEvents, "auto", "悬停后要可点 ✓");
+      assert.equal(hovered?.opacity, "1", "悬停后要显示 ✓");
+      /* 鼠标移开：又回到不可点 ✓ */
+      await harness.page.mouse.move(4, 4);
+      await harness.page.waitForFunction(() => {
+        const actions = window.__knTest.deepAll(".kn-mermaid-actions")[0];
+        return actions !== undefined && getComputedStyle(actions).pointerEvents === "none";
+      }, undefined, { timeout: 10000 });
+      assert.deepEqual(harness.pageErrors, []);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("下载按钮连点两次只下载一次", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 下载防抖",
+      body: ["## 防抖", "", "```mermaid", "graph TD; A[甲] --> B[乙]", "```", ""].join("\n"),
+    });
+    try {
+      await harness.openNote();
+      await waitForMermaidSvg(harness.page);
+      const downloads = [];
+      harness.page.on("download", (download) => downloads.push(download));
+      const button = harness.page.locator('[data-kn-mermaid-action="download"]').first();
+      /* 悬停让按钮可见（pointer-events 恢复）✓ */
+      await hoverMermaidBlock(harness.page);
+      await button.click();
+      await button.click();
+      await new Promise((done) => setTimeout(done, 2500));
+      assert.equal(downloads.length, 1, `连点两次只该下载一次，实际 ${downloads.length} 次 ✗`);
+      assert.deepEqual(harness.pageErrors, []);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("重新打开同一篇笔记命中渲染缓存（不重跑 mermaid）", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 缓存",
+      body: ["## 缓存", "", "```mermaid", "graph TD; A[甲] --> B[乙]", "```", ""].join("\n"),
+    });
+    try {
+      await harness.openNote();
+      await waitForMermaidSvg(harness.page);
+      /* 关掉再打开（没改过正文 ⇒ 不会弹保存确认 ✓） */
+      await harness.page.locator(".kn-editor-close").click();
+      await harness.page.locator(".kn-editor-title").waitFor({ state: "hidden", timeout: 20000 });
+      await harness.page.getByRole("button", { name: "编辑笔记", exact: true }).click();
+      await harness.page.locator(".ProseMirror").waitFor({ timeout: 20000 });
+      await waitForMermaidSvg(harness.page);
+      /* 宿主侧诊断里应当出现 mermaid-render-cache（说明第二次没有重跑 mermaid ✓） */
+      let cached = false;
+      for (let attempt = 0; attempt < 60 && !cached; attempt += 1) {
+        cached = harness.apiBodies.some(
+          (body) => body?.kind === "diag" && body?.outcome === "mermaid-render-cache",
+        );
+        if (!cached) await new Promise((done) => setTimeout(done, 100));
+      }
+      assert.equal(cached, true, "重开笔记应当命中渲染缓存（诊断里没有 mermaid-render-cache）✗");
+      assert.deepEqual(harness.pageErrors, []);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("frontmatter / 引号布尔配置不能绕过清洗（无外部请求、无 foreignObject）", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 安全",
+      body: [
+        "## 安全",
+        "",
+        "```mermaid",
+        "---",
+        "config:",
+        "  themeCSS: '.node rect{fill:url(https://evil.invalid/p.svg#p)}'",
+        "  htmlLabels: true",
+        "---",
+        '%%{init: {"htmlLabels": "true"}}%%',
+        "graph TD; A[甲] --> B[乙]",
+        "```",
+        "",
+      ].join("\n"),
+    });
+    const external = [];
+    await harness.page.route(/evil\.invalid/, (route) => {
+      external.push(route.request().url());
+      return route.abort();
+    });
+    try {
+      await harness.openNote();
+      await waitForMermaidSvg(harness.page);
+      /* 给可能的资源请求留一点时间（如果清洗失败它会真的发出去） */
+      await new Promise((done) => setTimeout(done, 600));
+      assert.equal(external.length, 0, `不应该发出外部请求：${external.join(", ")}`);
+      const facts = await harness.page.evaluate(() => {
+        const svg = window.__knTest.deepAll(".kn-mermaid svg")[0];
+        return {
+          errorCount: window.__knTest.deepAll(".kn-mermaid-error").length,
+          foreignObjects: svg?.querySelectorAll("foreignObject").length ?? -1,
+          style: svg?.querySelector("style")?.textContent ?? "",
+        };
+      });
+      assert.equal(facts.errorCount, 0, "清洗不能让图渲染失败 ✗");
+      assert.equal(facts.foreignObjects, 0, "引号形式的 htmlLabels:true 不能生效 ✗");
+      assert.equal(facts.style.includes("evil.invalid"), false, "themeCSS 里的外部 url 不能进 SVG ✗");
+      assert.deepEqual(harness.pageErrors, []);
+    } finally {
+      await harness.close();
+    }
+  });
+  it("从语言列表选 mermaid 能新建图（LanguageDescription 接线）", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 新建",
+      body: ["## 新建", "", "```", "```", ""].join("\n"),
+    });
+    try {
+      await harness.openNote();
+      /* 打开代码块的语言列表 → 搜索 → 选 mermaid */
+      await harness.page.locator(".language-button").first().click();
+      await harness.page.locator(".search-input").first().fill("mermaid");
+      await harness.page.locator(".language-list-item", { hasText: "mermaid" }).first().click();
+      const language = await harness.page.locator(".language-button").first().textContent();
+      assert.equal(language?.trim(), "mermaid", "语言列表里选得中 mermaid ✓");
+      /* 写一段合法源码 → 失焦 → 图出现 ✓ */
+      await harness.page.locator(".cm-content").first().click();
+      await harness.page.keyboard.insertText("graph TD; A[新建甲] --> B[新建乙]");
+      await blurEditor(harness.page);
+      await waitForMermaidSvg(harness.page);
+      const facts = await readRenderedFacts(harness.page);
+      assert.ok(facts?.svgText.includes("新建甲"), "新建的 mermaid 块应当渲染成图 ✓");
+    } finally {
+      await harness.close();
+    }
+  });
+  it("运行时加载失败：给出可读错误（提示重启/重装），不卡在「渲染中…」", async () => {
+    const harness = await startHarness({
+      title: "Mermaid 运行时缺失",
+      mermaidRuntimeUnavailable: true,
+      body: ["## 运行时缺失", "", "```mermaid", "graph TD; A[甲] --> B[乙]", "```", ""].join("\n"),
+    });
+    try {
+      await harness.openNote();
+      await harness.page.waitForFunction(
+        () => window.__knTest.deepAll(".kn-mermaid-error").length > 0,
+        undefined,
+        { timeout: 40000 },
+      );
+      const facts = await harness.page.evaluate(() => {
+        const error = window.__knTest.deepAll(".kn-mermaid-error")[0];
+        return { text: error?.textContent ?? "" };
+      });
+      assert.ok(facts.text.includes("运行时加载失败"), `错误文案不对：${facts.text}`);
+      assert.ok(facts.text.includes("重启 DSH") || facts.text.includes("重装插件"), `应提示怎么修：${facts.text}`);
+      /* 源码仍可编辑（错误面板不是死路 ✓） */
+      await harness.page.getByRole("button", { name: "编辑源码" }).first().click();
+      const sourceVisible = await harness.page.evaluate(() => {
+        const host = window.__knTest.deepAll(".codemirror-host")[0];
+        return host !== undefined && getComputedStyle(host).display !== "none";
+      });
+      assert.equal(sourceVisible, true, "运行时失败后源码仍要能编辑 ✓");
       assert.deepEqual(harness.pageErrors, []);
     } finally {
       await harness.close();

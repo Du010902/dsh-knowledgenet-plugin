@@ -29,12 +29,14 @@
  */
 import type { Mermaid } from "mermaid";
 
+import { MERMAID_RUNTIME_ROUTE } from "../shared/routes.ts";
 import {
   MERMAID_PREVIEW_CLASS,
   isMermaidLanguage,
   mermaidDownloadName,
   mermaidErrorMessage,
   mermaidErrorHtml,
+  createBoundedCache,
   mermaidPreviewHtml,
   mermaidTheme,
   sanitizeMermaidSource,
@@ -45,28 +47,114 @@ import {
 const RENDER_DEBOUNCE_MS = 180;
 
 /**
- * `mermaid` 用**动态 import** 加载 ✓（构建期仍然内联进同一个 client.js ✓）。
- *
- * 为什么不用顶层静态 import ✗：mermaid 是 6.5 MB 未压缩的大库 ✓，实测**模块求值要 550ms 左右** ✓
- * —— 插件客户端半是每个页面启动都要加载的 ✓ ⇒ 静态 import 等于所有会话启动都白付这笔钱 ✗。
- * 动态 import 被 `codeSplitting: false` 内联进同一文件后只是**推迟求值** ✓
- * （用户第一次真的遇到 Mermaid 图时再付 ✓），文件解析成本照付但小得多 ✓。
+ * **构建期注入的运行时内容 revision** ✓（`build.mjs` 把 `client.mermaid.js` 的 sha1-12 define 进来）。
+ * 加到 `<script src=…?v=…>` 上 ⇒ 重新构建换 URL ⇒ 宿主那条路由可以放心 `immutable` 缓存 ✓。
+ * 非构建环境（理论上不会跑到）下退化为空串 ✓。
  */
-let mermaidModule: Promise<Mermaid> | null = null;
+declare const __KN_MERMAID_RUNTIME_REV__: string;
+const RUNTIME_REV = typeof __KN_MERMAID_RUNTIME_REV__ === "string" ? __KN_MERMAID_RUNTIME_REV__ : "";
 
 /**
- * 取（并缓存）mermaid 实例 ✓。
+ * 运行时加载失败的**可识别标记** ✓：渲染器据此改用本地化文案提示"重启 DSH / 重装插件" ✓。
+ */
+const RUNTIME_UNAVAILABLE = "mermaid_runtime_unavailable";
+
+/** 这个错误是不是"运行时加载失败"✓ */
+function isRuntimeUnavailable(error: unknown): boolean {
+  return (error as { knCode?: unknown } | null | undefined)?.knCode === RUNTIME_UNAVAILABLE;
+}
+
+/** 加载失败时抛的错误（带标记 ✓，不缓存 ⇒ 下次还能重试 ✓） */
+function runtimeUnavailableError(cause: string): Error & { knCode?: string } {
+  const error = new Error(cause) as Error & { knCode?: string };
+  error.knCode = RUNTIME_UNAVAILABLE;
+  return error;
+}
+
+/**
+ * 加载运行时脚本（**同源 `<script src>`** ✓）。
+ *
+ * 为什么不 `import("mermaid")` ✗：那会把 mermaid 内联进 `client.js` ✓，而动态 import
+ * 只推迟"求值"、**省不了"解析"** ✗ —— 14.88 MB 的 client.js 让每次页面启动多付约 0.45 s ✗
+ * （实测见 `design/mermaid-note-blocks.md` §6）。拆成宿主路由按需加载后 client.js 回到 ~8.1 MB ✓，
+ * 只有真的打开含图笔记时才下载 / 执行这个运行时 ✓。
+ *
+ * 为什么是"同源 script"而不是别的 ✗：它天然带浏览器 cookie ✓、不带 Origin ✓，
+ * 正好穿过 DSH 的 `/api` 鉴权围栏 ✓（宿主路由见 `src/host/mermaid-runtime.ts` ✓）。
+ * @returns mermaid 实例 ✓。
+ */
+function loadRuntimeScript(): Promise<Mermaid> {
+  return new Promise<Mermaid>((resolve, reject) => {
+    if (typeof document === "undefined" || document.head === null) {
+      reject(runtimeUnavailableError("当前环境没有 DOM，无法加载 Mermaid 运行时"));
+      return;
+    }
+    const existing = (window as unknown as { __KN_MERMAID__?: Mermaid }).__KN_MERMAID__;
+    if (existing !== undefined) {
+      resolve(existing);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `${MERMAID_RUNTIME_ROUTE}?v=${encodeURIComponent(RUNTIME_REV)}`;
+    script.async = true;
+    script.onload = () => {
+      script.remove();
+      const value = (window as unknown as { __KN_MERMAID__?: Mermaid }).__KN_MERMAID__;
+      if (value === undefined) {
+        reject(runtimeUnavailableError("Mermaid 运行时已加载但没有导出（client 与运行时版本不匹配？）"));
+        return;
+      }
+      resolve(value);
+    };
+    script.onerror = () => {
+      script.remove();
+      reject(runtimeUnavailableError("Mermaid 运行时加载失败（宿主路由不可用：请重启 DSH 或重装插件）"));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+let mermaidModule: Mermaid | null = null;
+/** 正在加载的 promise ✓（并发渲染共用一次加载 ✓） */
+let mermaidLoading: Promise<Mermaid> | null = null;
+
+/**
+ * 取（并缓存）mermaid 实例 ✓（失败不缓存 ⇒ 本页下次遇到图还能重试一次 ✓）。
  * @returns mermaid 默认导出 ✓。
  */
 function loadMermaid(): Promise<Mermaid> {
-  if (mermaidModule === null) {
-    mermaidModule = import("mermaid").then((module) => module.default).catch((error: unknown) => {
-      /* 加载失败不要缓存 rejected promise ✗：本页后续再遇到图还能重试一次 ✓ */
-      mermaidModule = null;
+  if (mermaidModule !== null) return Promise.resolve(mermaidModule);
+  if (mermaidLoading === null) {
+    mermaidLoading = loadRuntimeScript().then((value) => {
+      mermaidModule = value;
+      mermaidLoading = null;
+      return value;
+    }).catch((error: unknown) => {
+      mermaidLoading = null;
       throw error;
     });
   }
-  return mermaidModule;
+  return mermaidLoading;
+}
+
+/**
+ * **渲染结果缓存** ✓（模块级 ✓：同一个页面里多个编辑器实例、关掉笔记再打开都能命中 ✓）。
+ *
+ * 为什么要缓存 ✗：Mermaid 渲染一次要 30–150 ms（首次还要等模块求值 ✓），
+ * 而"关掉笔记 → 再打开 / 切走再切回"是很常见的操作 ✓ —— 同一段源码 + 同一套主题
+ * 每次重跑一遍 mermaid 纯属浪费 ✗。
+ *
+ * 边界：
+ * - 键里带**主题变量 + 字体** ✓（主题一换就不能复用旧图 ✗）；
+ * - 只缓存**成功的 SVG** ✓（失败下次还应该重试 ✓）；
+ * - LRU 有双重上限（条目数 + 总字符数 ✓），单张特别大的图直接不缓存 ✓ ——
+ *   这些行为都在纯函数 `createBoundedCache` 里（`mermaid-block.ts`），可以离线单测 ✓。
+ */
+const renderCache = createBoundedCache(24, 2_000_000, 600_000);
+
+/** 缓存键：**主题签名 + 处理后的源码** ✓ */
+function renderCacheKey(theme: ReturnType<typeof readTheme>, preparedSource: string): string {
+  return `${JSON.stringify(theme.themeVariables)}\u0000${theme.fontFamily}\u0000${preparedSource}`;
 }
 
 /** 创建渲染器需要的上下文 ✓ */
@@ -111,9 +199,13 @@ export interface MermaidRenderer {
    * @param svg - 预览面板里**当前这份** SVG ✓。
    * @param source - 源码（只用于文件名 / 诊断 ✓）。
    * @param background - 渲染时记下的主题底色 ✓（不传就现读当前主题 ✓）。
-   * @returns 完成（失败也不抛 ✓，由调用方给用户提示 ✓）。
+   * @returns `{ ok, format }`：`ok=false` 表示两条路都没成功（调用方需要给用户提示 ✓，不能静默 ✗）。
    */
-  download: (svg: SVGSVGElement | null, source: string, background?: string) => Promise<void>;
+  download: (
+    svg: SVGSVGElement | null,
+    source: string,
+    background?: string,
+  ) => Promise<{ ok: boolean; format: "png" | "svg" | null }>;
   /** 卸载时调用 ✓：丢掉在飞的渲染结果 ✓ */
   dispose: () => void;
 }
@@ -480,8 +572,20 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
    * @returns SVG 文本 + **本次渲染用的主题底色** ✓（预览里记下来给下载用 ✓）。
    */
   const renderSvg = async (content: string): Promise<{ svg: string; background: string }> => {
-    const mermaid = await loadMermaid();
+    /*
+     * **先查缓存、再加载 mermaid** ✓：命中时连 `loadMermaid()`（首次要 550ms 求值）
+     * 都不需要 ✓ —— 只读一次主题（6 个 token 探针 + canvas 采样 ✓）。
+     */
     const theme = readTheme(options.root);
+    /* `%%{init}%%` 里的 themeCSS / htmlLabels 收窄（外部资源 / foreignObject ✓，见 mermaid-block 注释 ✓） */
+    const prepared = sanitizeMermaidSource(content);
+    const key = renderCacheKey(theme, prepared);
+    const cached = renderCache.get(key);
+    if (cached !== undefined) {
+      report("mermaid-render-cache", { chars: content.length, svgChars: cached.length });
+      return { svg: cached, background: theme.background };
+    }
+    const mermaid = await loadMermaid();
     /*
      * `theme: "base"` + 显式 themeVariables ✓：默认的 `default` / `dark` 两套配色
      * 不会跟随宿主的 token ✓ ⇒ 浅色面板里出现深色图、深色面板里出现浅色图 ✗。
@@ -507,8 +611,8 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
     } as never);
     renderSequence += 1;
     const id = `kn-mermaid-${renderSequence.toString(36)}`;
-    /* `%%{init}%%` 里的 themeCSS / htmlLabels 收窄（外部资源 / foreignObject ✓，见 mermaid-block 注释 ✓） */
-    const result = await mermaid.render(id, sanitizeMermaidSource(content));
+    const result = await mermaid.render(id, prepared);
+    renderCache.set(key, result.svg);
     return { svg: result.svg, background: theme.background };
   };
 
@@ -542,7 +646,7 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
           report("mermaid-render", { chars: content.length, ms: Date.now() - startedAt });
         } catch (error) {
           if (disposed) return;
-          const message = mermaidErrorMessage(error);
+          const message = isRuntimeUnavailable(error) ? options.labels().runtimeUnavailable : mermaidErrorMessage(error);
           html = mermaidErrorHtml({ message, labels: options.labels() });
           report("mermaid-render-failed", { message, ms: Date.now() - startedAt });
         }
@@ -588,11 +692,11 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
   };
 
   const download: MermaidRenderer["download"] = async (svg, source, background) => {
-    if (svg === null) return;
+    if (svg === null) return { ok: false, format: null };
     const startedAt = Date.now();
-    const theme = readTheme(options.root);
-    /* 底色取**渲染时**记下的那份 ✓（主题切换后下载也不会「深色图 + 浅色底」✗） */
-    const backdrop = background?.trim() || theme.background;
+    /* 底色取**渲染时**记下的那份 ✓（主题切换后下载也不会「深色图 + 浅色底」✗；
+       有记下的就不必再读一次主题 ✓） */
+    const backdrop = background?.trim() || readTheme(options.root).background;
     const documentRef = svg.ownerDocument;
     const baseName = mermaidDownloadName();
     try {
@@ -605,7 +709,7 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
         setTimeout(() => { URL.revokeObjectURL(href); }, 10_000);
       }
       report("mermaid-download", { format: "png", chars: source.length, ms: Date.now() - startedAt });
-      return;
+      return { ok: true, format: "png" };
     } catch (error) {
       /* PNG 画不出来（少见图元 / 浏览器限制 ✓）⇒ 退回 SVG ✓：至少图是完整的 ✓ */
       report("mermaid-download-fallback", { message: mermaidErrorMessage(error) });
@@ -619,8 +723,10 @@ export function createMermaidRenderer(options: MermaidRendererOptions): MermaidR
         setTimeout(() => { URL.revokeObjectURL(href); }, 10_000);
       }
       report("mermaid-download", { format: "svg", chars: source.length, ms: Date.now() - startedAt });
+      return { ok: true, format: "svg" };
     } catch (error) {
       report("mermaid-download-failed", { message: mermaidErrorMessage(error), chars: source.length });
+      return { ok: false, format: null };
     }
   };
 

@@ -141,4 +141,15 @@ it("共用辅助必须定义在使用之前（抽函数最容易造出跨作用�
     assert.notEqual(useAt, -1, "找不到 resolveWriteTarget 的定义");
     assert.ok(askAt < useAt, "ask 必须在 resolveWriteTarget 之前定义（否则跨作用域 ReferenceError）");
   });
+  it("ChatSelectionBar 的 document 级 selectionchange 监听必须成对移除（否则卸载即泄漏）", async () => {
+    const code = await readFile(join(CLIENT_DIR, "ChatSelectionBar.tsx"), "utf8");
+    const src = stripComments(code);
+    /*
+     * 真实事故 ✗：`document.addEventListener("selectionchange", …)` 加了，
+     * 但 effect 的 cleanup 只移除了 mouseup / pointerdown / mousedown ⇒
+     * 每次浮条卸载都会在 document 上泄漏一个监听 ✓。
+     */
+    assert.match(src, /document\.addEventListener\("selectionchange"/, "找不到 selectionchange 监听（测试锚点失效）");
+    assert.match(src, /document\.removeEventListener\("selectionchange"/, "selectionchange 监听必须在 cleanup 里移除");
+  });
 });

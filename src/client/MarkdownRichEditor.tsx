@@ -199,6 +199,25 @@ function flashCopied(button: HTMLElement): void {
   }, COPY_FEEDBACK_MS);
 }
 /**
+ * **动作失败时的短暂文字反馈** ✓（Mermaid 预览里那两个按钮用 ✓）。
+ *
+ * 为什么需要 ✗：超长源码的「复制为代码」、两条路都失败的「下载图像」原先都是**静默无反应** ✗
+ * ⇒ 用户只会以为按钮坏了 ✓。这里把按钮文字临时换成失败原因，1.5 s 后恢复 ✓。
+ * @param button - 被点的按钮 ✓。
+ * @param message - 本地化的失败文案 ✓。
+ */
+const ACTION_FAILURE_MS = 1500;
+function flashActionFailure(button: HTMLElement, message: string): void {
+  if (button.dataset.knFeedback === "true") return;
+  const original = button.innerHTML;
+  button.dataset.knFeedback = "true";
+  button.textContent = message;
+  window.setTimeout(() => {
+    button.innerHTML = original;
+    delete button.dataset.knFeedback;
+  }, ACTION_FAILURE_MS);
+}
+/**
  * **把插入的图片真的写到磁盘上** ✓
  * （用户实测："我不知道图片插入到了当前PC中的什么位置"✗ —— 因为 Crepe 默认给的是 `blob:` URL ✗，
  * 只在内存里，刷新即失效 ✓，磁盘上什么都没写 ✓）。
@@ -1251,6 +1270,7 @@ export function MarkdownRichEditor(props: {
         copy: tRef.current("mermaidCopyCode"),
         download: tRef.current("mermaidDownloadImage"),
         failed: tRef.current("mermaidRenderFailed"),
+        runtimeUnavailable: tRef.current("mermaidRuntimeUnavailable"),
       }),
       /*
        * **文档里现有的代码块清单** ✓：异步渲染回来时要确认"那一块现在还是 mermaid 吗" ✓
@@ -1630,7 +1650,12 @@ export function MarkdownRichEditor(props: {
       /* 渲染时的主题底色 ✓（主题切换后下载也不会「深色图 + 浅色底」✗） */
       const background = decodeMermaidSource(preview.getAttribute(MERMAID_BACKGROUND_ATTR));
       if (action === "copy") {
-        if (source === "") return;
+        if (source === "") {
+          /* 源码超过属性上限时预览里没有 source 属性 ⇒ 明确提示，不要静默无反应 ✗ */
+          flashActionFailure(button, tRef.current("mermaidCopyTooLarge"));
+          reportRef.current?.("mermaid-copy-unavailable", { reason: "source_too_large" });
+          return;
+        }
         /* 与代码块复制走**同一条**多格式剪贴板路径 ✓（裸代码 + HTML + 本插件载荷 ✓） */
         void writeCodeBlockClipboard({ language: "mermaid", code: source })
           .then(() => {
@@ -1638,11 +1663,37 @@ export function MarkdownRichEditor(props: {
             flashCopied(button);
             reportRef.current?.("mermaid-copy", { chars: source.length });
           })
-          .catch((error: unknown) => { reportRef.current?.("mermaid-copy-failed", String(error)); });
+          .catch((error: unknown) => {
+            flashActionFailure(button, tRef.current("mermaidActionFailed"));
+            reportRef.current?.("mermaid-copy-failed", String(error));
+          });
         return;
       }
       if (action === "download") {
-        void mermaid.download(mermaidSvgOf(preview), source, background);
+        /* 并发双击只发一次下载 ✓（否则会同时转两张图 / 触发两次保存） */
+        if (button.dataset.knBusy === "true") return;
+        button.dataset.knBusy = "true";
+        button.setAttribute("aria-busy", "true");
+        const downloadStartedAt = Date.now();
+        void mermaid.download(mermaidSvgOf(preview), source, background)
+          .then((result) => {
+            if (!result.ok) flashActionFailure(button, tRef.current("mermaidDownloadFailed"));
+          })
+          .catch((error: unknown) => {
+            flashActionFailure(button, tRef.current("mermaidDownloadFailed"));
+            reportRef.current?.("mermaid-download-failed", { message: String(error) });
+          })
+          .finally(() => {
+            /*
+             * **忙碌状态至少保持一小段时间** ✓：转 PNG 只要几十毫秒 ✓，
+             * 真实双击的两次 click 间隔 ~100ms ✗ —— 一做完就解锁的话第二次照样会再下载一份 ✗。
+             */
+            const remaining = Math.max(0, 600 - (Date.now() - downloadStartedAt));
+            window.setTimeout(() => {
+              delete button.dataset.knBusy;
+              button.removeAttribute("aria-busy");
+            }, remaining);
+          });
       }
     };
     root.addEventListener("click", onMermaidAction, true);

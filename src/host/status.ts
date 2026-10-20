@@ -26,6 +26,8 @@ export interface PromptStatus {
 
 export interface RuntimeStatus {
   api: ApiStatus;
+  /** 按需加载的 Mermaid 运行时路由（`/api/knowledgenet.mermaid.js`）注册结果 ✓ */
+  mermaidRuntime: ApiStatus;
   prompts: PromptStatus;
   /** 进程内启动时刻，用来判断宿主模块是不是刚重启过 */
   startedAt: number;
@@ -184,6 +186,7 @@ export function setRuntimeStatus(status: RuntimeStatus): void {
 export function patchRuntimeStatus(patch: Partial<RuntimeStatus>): void {
   current = {
     api: patch.api ?? current?.api ?? { path: "", registered: false },
+    mermaidRuntime: patch.mermaidRuntime ?? current?.mermaidRuntime ?? { path: "", registered: false },
     prompts: patch.prompts ?? current?.prompts ?? { section: false, perAgent: false },
     startedAt: patch.startedAt ?? current?.startedAt ?? Date.now(),
     probes: patch.probes ?? current?.probes ?? [],

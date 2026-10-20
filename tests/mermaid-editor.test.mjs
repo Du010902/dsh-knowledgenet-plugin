@@ -100,14 +100,19 @@ describe("预览 HTML 与样式", () => {
     assert.ok(blockSource.includes('export const MERMAID_SOURCE_ATTR = "data-kn-mermaid-source"'));
   });
 
-  it("中文 / 英文词典都有这三条文案（英文界面不落回中文 ✗）", () => {
+  it("中文 / 英文词典都有这些文案（英文界面不落回中文 ✗）", () => {
+    const keys = [
+      "mermaidCopyCode", "mermaidDownloadImage", "mermaidRenderFailed",
+      "mermaidActionFailed", "mermaidDownloadFailed", "mermaidCopyTooLarge", "mermaidRuntimeUnavailable",
+    ];
     for (const dict of [dictSource, tableDictSource]) {
-      for (const key of ["mermaidCopyCode", "mermaidDownloadImage", "mermaidRenderFailed"]) {
-        assert.ok(dict.includes(`${key}:`), `词典缺少 ${key}`);
-      }
+      for (const key of keys) assert.ok(dict.includes(`${key}:`), `词典缺少 ${key}`);
     }
     assert.ok(dictSource.includes("mermaidCopyCode: \"Copy as code\""), "DICT_EN 里要有英文 ✓");
     assert.ok(dictSource.includes("mermaidRenderFailed: \"Mermaid diagram failed to render\""));
+    assert.ok(dictSource.includes("mermaidDownloadFailed: \"Download failed\""));
+    assert.ok(dictSource.includes("mermaidCopyTooLarge: \"Source too large to copy\""));
+    assert.ok(dictSource.includes("mermaidRuntimeUnavailable: \"Mermaid runtime failed to load"));
   });
 });
 
@@ -124,11 +129,14 @@ describe("构建与产物", () => {
     assert.equal(clientSource.includes('require("util")'), false, "产物里不许残留 require(\"util\") ✗");
   });
 
-  it("产物里真的内联了 mermaid 与预览接线", () => {
+  it("产物接线正确：client.js 只剩预览接线，mermaid 在独立运行时里", async () => {
     assert.ok(clientSource.length > 0);
     for (const needle of ["kn-mermaid", "mermaid-diagram-", "mermaid-render"]) {
-      assert.ok(clientSource.includes(needle), `client.js 里应当有 ${needle}（说明 mermaid 已内联 ✓）`);
+      assert.ok(clientSource.includes(needle), `client.js 里应当有 ${needle}（预览接线 ✓）`);
     }
+    assert.equal(clientSource.includes("init_mermaid_core"), false, "client.js 里不该再有 mermaid 本体 ✗");
+    const runtime = await readFile(path.join(PLUGIN, "client.mermaid.js"), "utf8");
+    assert.ok(runtime.includes("__KN_MERMAID__"), "独立运行时必须导出 __KN_MERMAID__ ✓");
     assert.ok(clientSource.includes("@local/dsh-knowledgenet"));
   });
 
@@ -139,15 +147,50 @@ describe("构建与产物", () => {
     assert.equal(rendererSource.includes("flowchart: { htmlLabels"), false, "不要再写 flowchart.htmlLabels ✗");
   });
 
-  it("mermaid 用动态 import（推迟求值，但仍内联为单文件）", () => {
-    assert.ok(rendererSource.includes('import("mermaid")'), "要动态 import ✓");
-    assert.equal(/^import mermaid from "mermaid"/m.test(rendererSource), false, "不要顶层静态 import ✗");
+  it("mermaid 运行时按需加载（同源 <script src>，不再内联进 client.js）", () => {
+    assert.ok(rendererSource.includes("loadRuntimeScript"), "用脚本加载运行时 ✓");
+    assert.ok(rendererSource.includes("MERMAID_RUNTIME_ROUTE"), "路由常量来自 shared/routes ✓");
+    /* 注释里可能提到这句 ⇒ 先去掉注释再断言 ✓ */
+    const rendererCode = rendererSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n").map((line) => line.replace(/\/\/.*$/, "")).join("\n");
+    assert.equal(/import\("mermaid"\)/.test(rendererCode), false, "不许再 import(\"mermaid\")（会内联进 client.js ✗）");
+    assert.ok(rendererSource.includes("__KN_MERMAID_RUNTIME_REV__"), "URL 要带构建期内容 hash（immutable 缓存）✓");
+    assert.ok(rendererSource.includes("mermaidLoading = null"), "加载失败不缓存（下次还能重试）✓");
   });
 
-  it("下载优先 PNG，失败退回补了底色的 SVG", () => {
+  it("下载优先 PNG，失败退回补了底色的 SVG，并返回成功/失败给 UI", () => {
     assert.ok(rendererSource.includes('"image/png"'), "先试 PNG ✓");
     assert.ok(rendererSource.includes('"image/svg+xml;charset=utf-8"'), "失败退回 SVG ✓");
     assert.ok(rendererSource.includes("normalizedSvgClone"), "导出前要规范化（width/height/xmlns/去 max-width）✓");
     assert.ok(rendererSource.includes("fillRect"), "PNG 要铺主题底色 ✓");
+    assert.ok(rendererSource.includes("return { ok: false, format: null }"), "两条路都失败要如实返回 ✗（不能静默）");
+    assert.ok(rendererSource.includes("return { ok: true, format:"), "成功也要把格式返回 ✓");
+  });
+
+  it("渲染结果缓存：键含主题、LRU 有上限、只缓存成功结果", () => {
+    assert.ok(rendererSource.includes("renderCache"), "要有缓存 ✓");
+    assert.ok(rendererSource.includes("createBoundedCache(24"), "用有上限的 LRU（条目/字符双上限）✓");
+    assert.ok(rendererSource.includes("renderCacheKey(theme"), "键里要带主题签名（换主题不能复用旧图 ✗）");
+    assert.ok(rendererSource.includes('report("mermaid-render-cache"'), "缓存命中要留诊断 ✓");
+    assert.ok(rendererSource.includes("renderCache.set(key, result.svg)"), "只缓存成功渲染出的 SVG ✓");
+    /* 命中时**不应该**再加载 mermaid（首次求值要 ~550ms）✓ */
+    const cacheAt = rendererSource.indexOf("renderCache.get(key)");
+    const loadAt = rendererSource.indexOf("const mermaid = await loadMermaid()");
+    assert.ok(cacheAt > 0 && loadAt > cacheAt, "先查缓存、再 await loadMermaid() ✓");
+  });
+
+  it("UI 失败反馈与并发保护接线", () => {
+    assert.ok(editorSource.includes("flashActionFailure"), "失败要换成文字提示（不能静默 ✗）");
+    assert.ok(editorSource.includes('tRef.current("mermaidCopyTooLarge")'), "超长源码复制要提示 ✓");
+    assert.ok(editorSource.includes('tRef.current("mermaidDownloadFailed")'), "下载失败要提示 ✓");
+    assert.ok(editorSource.includes('button.dataset.knBusy === "true"'), "下载连点只发一次 ✓");
+    assert.ok(editorSource.includes('button.setAttribute("aria-busy", "true")'), "忙碌状态要可感知 ✓");
+  });
+
+  it("隐藏的动作按钮不吃点击（透明 ≠ 可点）", () => {
+    assert.ok(css.includes("pointer-events: none;"), "常态按钮不能参与命中测试 ✓");
+    assert.match(css, /:hover \.kn-mermaid-actions[\s\S]{0,200}pointer-events: auto/, "悬停要恢复可点 ✓");
+    assert.ok(css.includes("@media (hover: none)"), "触屏设备要常驻显示按钮（否则永远点不到 ✗）");
   });
 });

@@ -15,6 +15,7 @@ import {
   MERMAID_PREVIEW_CLASS,
   MERMAID_SOURCE_ATTR,
   MERMAID_SOURCE_LIMIT,
+  createBoundedCache,
   decodeMermaidSource,
   encodeMermaidSource,
   isMermaidLanguage,
@@ -206,6 +207,7 @@ describe("下载文件名", () => {
   });
 });
 
+
 describe("init 指令收窄（外部资源 / HTML 标签）", () => {
   it("themeCSS / htmlLabels 被替换成无害值，其它 init 配置保留", () => {
     const source = "%%{init: {'theme': 'dark', 'themeCSS': 'body{background:url(https://example.invalid/x)}', 'htmlLabels': true}}%%\ngraph TD; A-->B";
@@ -220,5 +222,69 @@ describe("init 指令收窄（外部资源 / HTML 标签）", () => {
   it("没有 init 指令时原样返回", () => {
     const source = "graph TD; A-->B";
     assert.equal(sanitizeMermaidSource(source), source);
+  });
+
+  it("YAML frontmatter 整段去掉（否则 config.themeCSS 能绕过清洗 ✗）", () => {
+    const source = [
+      "---",
+      "config:",
+      "  themeCSS: '.node rect{fill:url(https://evil.invalid/p.svg#p)}'",
+      "  htmlLabels: true",
+      "---",
+      "graph TD; A[甲] --> B[乙]",
+    ].join("\n");
+    const sanitized = sanitizeMermaidSource(source);
+    assert.equal(sanitized.includes("evil.invalid"), false, "frontmatter 里的外部 url 必须被清掉 ✗");
+    assert.equal(sanitized.includes("---"), false, "frontmatter 整段去掉 ✓");
+    assert.equal(sanitized.includes("htmlLabels"), false);
+    assert.ok(sanitized.includes("graph TD; A[甲] --> B[乙]"), "图本身的源码保留 ✓");
+  });
+
+  it("引号形式的布尔 htmlLabels 也要收窄", () => {
+    const source = '%%{init: {"htmlLabels": "true", "theme": "dark"}}%%\ngraph TD; A-->B';
+    const sanitized = sanitizeMermaidSource(source);
+    assert.match(sanitized, /"htmlLabels":\s*false/, "带引号的 true 一样要换掉 ✗");
+    assert.ok(sanitized.includes('"theme": "dark"'), "别的 init 配置保留 ✓");
+  });
+});
+
+describe("有上限的 LRU 缓存", () => {
+  it("命中会挪到最近使用；条目数上限会淘汰最久未用", () => {
+    const cache = createBoundedCache(3, 1000, 100);
+    cache.set("a", "1");
+    cache.set("b", "2");
+    cache.set("c", "3");
+    assert.equal(cache.size, 3);
+    assert.equal(cache.get("a"), "1");
+    cache.set("d", "4");
+    assert.equal(cache.get("b"), undefined, "最久未用的要被淘汰 ✓");
+    assert.equal(cache.get("a"), "1");
+    assert.equal(cache.get("d"), "4");
+    assert.equal(cache.size, 3);
+  });
+
+  it("总字符上限：写入条目时会连续淘汰", () => {
+    const cache = createBoundedCache(10, 10, 100);
+    cache.set("a", "12345");
+    cache.set("b", "12345");
+    assert.equal(cache.chars, 10);
+    cache.set("c", "12345");
+    assert.ok(cache.chars <= 10, `总字符超上限：${cache.chars}`);
+    assert.equal(cache.get("a"), undefined);
+    assert.equal(cache.get("c"), "12345");
+  });
+
+  it("单条超过上限不缓存；同键覆盖不重复记账", () => {
+    const cache = createBoundedCache(4, 100, 10);
+    cache.set("big", "x".repeat(11));
+    assert.equal(cache.get("big"), undefined);
+    cache.set("k", "1234567890");
+    cache.set("k", "12345");
+    assert.equal(cache.size, 1);
+    assert.equal(cache.chars, 5, "覆盖要减掉旧值长度 ✓");
+    assert.equal(cache.get("k"), "12345");
+    cache.clear();
+    assert.equal(cache.size, 0);
+    assert.equal(cache.chars, 0);
   });
 });

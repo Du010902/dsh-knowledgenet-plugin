@@ -74,7 +74,24 @@ describe("v3：工具（读）", () => {
     assert.equal(result.nodes.length, 2);
     assert.equal(result.edges.length, 1);
     const a = result.nodes.find((node) => node.title === "A");
-    assert.equal(a.path, "Nodes/A.md", "工具返回的节点字段是 path（与 v2 同形）");
+    /*
+     * **overview 是"元数据清单"** ✓（工具描述与 prompts 都这么写：标题 / 别名 / 理解标记 / 关系，
+     * 不含正文 ✓）⇒ 它**不带 path** 是刻意的 ✓，不再像 v2 那样返回文件路径 ✗。
+     * 这里断言它真正承诺的字段（而不是某个早就改掉的旧契约 ✗）。
+     */
+    assert.equal(typeof a.id, "string");
+    assert.deepEqual(a.aliases, []);
+    assert.equal(a.understood, false);
+    assert.equal(a.understandingMarked, false);
+    assert.equal(Object.hasOwn(a, "path"), false, "overview 不带 path（元数据清单）");
+    /* 真要文件路径时走 neighborhood（按节点读才有 path ✓） */
+    const near = await toolNamed("kn_list_graph").execute(
+      { mode: "neighborhood", rootId: a.id, direction: "both" },
+      execAt(fx.workspace),
+    );
+    assert.equal(near.ok, true);
+    const focus = near.nodes.find((node) => node.id === a.id);
+    assert.equal(focus.path, "Nodes/A.md", "neighborhood 的节点带实际相对路径 ✓");
   });
 
   it("kn_find_node / kn_read_node 能定位并读出正文（只读，不建点）", async () => {

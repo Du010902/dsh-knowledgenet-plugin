@@ -1,9 +1,11 @@
 import { patchCrepeSlashMenu } from "./scripts/slash-menu-patch.mjs";
 import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
 /**
- * 构建两个半：
+ * 构建四个产物：
  * - `index.js`   Host 半（Node ESM；内联 vendor 的 v2 引擎，external 只有宿主包与 Node 内建）
  * - `client.js`  Client 半（浏览器 CJS → DSH 的 `window.__ModuleLoader__.load({...})` 工厂形态）
+ * - `client.mermaid.js`  按需加载的 Mermaid 运行时（浏览器 IIFE + minify；不进 client.js ✓）
+ * - 布局 Worker 源码（内联进 client.js 的 Blob Worker ✓）
  *
  * 四个刻意的约束：
  * 1. **自包含**：构建结束会断言没有任何输入模块来自项目源码（`../src/**`）；
@@ -19,6 +21,7 @@ import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
  *
  * 用法：node build.mjs
  */
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { readdir, readFile, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
@@ -40,6 +43,8 @@ const UPSTREAM = path.join(PLUGIN, "src/vendor/upstream");
 const HOST_ENTRY = path.join(PLUGIN, "src/host/index.ts");
 const CLIENT_ENTRY = path.join(PLUGIN, "src/client/index.ts");
 const WORKER_ENTRY = path.join(UPSTREAM, "graph3d/layout.worker.ts");
+/** 按需加载的 Mermaid 运行时入口（单独 IIFE；不进 client.js ✓） */
+const MERMAID_RUNTIME_ENTRY = path.join(PLUGIN, "src/client/mermaid-runtime-entry.ts");
 const PACKAGE_NAME = "@local/dsh-knowledgenet";
 
 /** 上游 layoutClient.ts 里那条 Vite 专用 worker 构造表达式（补丁点） */
@@ -834,13 +839,15 @@ function browserUtilProbePatchPlugin() {
    * 变量名不固定 ✗：lodash 的几份副本分别叫 `freeModule$1` / `freeModule$2` / `freeModule2` … ✓
    * ⇒ 用**同名的反向引用**匹配 ✓，替换后必须一个 `require("util")` 都不剩 ✓（否则直接失败 ✓）。
    */
-  const UTIL_PROBE = /([A-Za-z_$][\w$]*) && \1\.require && \1\.require\("util"\)\.types/g;
+  /* 引号两种都要认 ✓：未压缩产物是双引号；**minify 之后可能变成单引号** ✗（运行时产物会踩到 ✓） */
+  const UTIL_PROBE = /([A-Za-z_$][\w$]*) && \1\.require && \1\.require\((["'])util\2\)\.types/g;
+  const hasUtilRequire = (source) => source.includes('require("util")') || source.includes("require('util')");
   return {
     name: "kn-browser-util-probe-patch",
     renderChunk(code) {
-      if (!code.includes('require("util")')) return null;
+      if (!hasUtilRequire(code)) return null;
       const patched = code.replace(UTIL_PROBE, "void 0");
-      if (patched.includes('require("util")')) {
+      if (hasUtilRequire(patched)) {
         throw new Error(
           "客户端产物里仍有 require(\"util\")（依赖里的 Node 专用探测换个形状又出现了）"
           + "：请在 build.mjs 的 browserUtilProbePatchPlugin 里补匹配，再重新构建。",
@@ -1231,6 +1238,13 @@ async function buildHost(rolldown) {
     assertSelfContained("Host 半", output);
     const chunk = output.find((item) => item.type === "chunk");
     if (chunk === undefined) throw new Error("Host 半没有产出 chunk");
+    /*
+     * `mermaid-runtime.ts` 用 `fileURLToPath(import.meta.url)` 找包根里的 `client.mermaid.js` ✓
+     * ⇒ 这条表达式必须原样活到 Host 产物里（被替换 / 摇掉的话运行时路由永远读不到文件 ✗）。
+     */
+    if (!chunk.code.includes("import.meta.url")) {
+      throw new Error("Host 半里丢了 import.meta.url（按需加载的 Mermaid 运行时找不到包根）✗");
+    }
     await writeFile(path.join(PLUGIN, "index.js"), chunk.code, "utf8");
     return { bytes: Buffer.byteLength(chunk.code, "utf8"), modules: modulesOf(chunk).length };
   } finally {
@@ -1276,7 +1290,68 @@ async function buildWorkerCode(rolldown) {
   }
 }
 
-async function buildClient(rolldown, css, workerSource) {
+/**
+ * 构建**按需加载的 Mermaid 运行时** ✓（`<包根>/client.mermaid.js`）。
+ *
+ * 为什么单独一个产物 ✗：mermaid 未压缩约 6.8 MB ✓，内联进 `client.js` 会让**每次页面启动**
+ * 都多付约 0.45 s 的解析/编译成本 ✗（实测见 `design/mermaid-note-blocks.md` §6）。
+ * 拆出去后 `client.js` 回到 ~8.1 MB ✓；只有真的打开含图笔记时，浏览器才用同源 `<script src>`
+ * 从宿主路由（`src/host/mermaid-runtime.ts`）取这个 3.4 MB 的 minified IIFE ✓。
+ *
+ * 几条硬要求：
+ * - **IIFE + minify + 单 chunk** ✓（不是模块，不依赖宿主模块表 ✓）；
+ * - **自包含** ✓（第三方包内联；不许有 `require("util")` ✓ —— 复用 client 那套补丁 ✓）；
+ * - 产物内容 hash 作为 `?v=` 写进 `client.js` ✓ ⇒ 同 URL 内容不变、可 `immutable` 缓存 ✓，
+ *   重新构建 URL 自动变化 ✓。
+ *
+ * @param rolldown - 打包器 ✓。
+ * @returns 字节数 + 内容 revision ✓。
+ */
+async function buildMermaidRuntime(rolldown) {
+  const bundle = await rolldown({
+    input: MERMAID_RUNTIME_ENTRY,
+    platform: "browser",
+    transform: { define: { "import.meta.env.DEV": "false" } },
+    plugins: [browserUtilProbePatchPlugin()],
+  });
+  try {
+    const { output } = await bundle.generate({
+      format: "iife",
+      minify: true,
+      codeSplitting: false,
+      entryFileNames: "client.mermaid.js",
+    });
+    assertSelfContained("Mermaid 运行时", output);
+    const chunks = output.filter((item) => item.type === "chunk");
+    if (chunks.length !== 1) {
+      throw new Error(`Mermaid 运行时应该只有一个 chunk，实际 ${chunks.length} 个`);
+    }
+    const code = chunks[0].code;
+    if (code.includes('require("util")') || code.includes("require('util')")) {
+      throw new Error("Mermaid 运行时里仍有 require(\"util\")：browserUtilProbePatchPlugin 没匹配上 ✗");
+    }
+    if (/^\s*(?:import|export)\s/m.test(code)) {
+      throw new Error("Mermaid 运行时必须是 IIFE：产物里出现了 ESM 的 import/export ✗");
+    }
+    if (!code.includes("__KN_MERMAID__")) {
+      throw new Error("Mermaid 运行时没有导出 __KN_MERMAID__（入口文件被 tree-shake 掉了？）✗");
+    }
+    const bytes = Buffer.byteLength(code, "utf8");
+    if (bytes < 2_000_000 || bytes > 5_000_000) {
+      throw new Error(
+        `Mermaid 运行时体积异常：${bytes} 字节（minified 预期约 3.4 MB）`
+        + " ⇒ 检查 minify 是否生效 / mermaid 是否被漏打包 ✗",
+      );
+    }
+    const rev = createHash("sha1").update(code).digest("hex").slice(0, 12);
+    await writeFile(path.join(PLUGIN, "client.mermaid.js"), code, "utf8");
+    return { bytes, rev };
+  } finally {
+    await bundle.close();
+  }
+}
+
+async function buildClient(rolldown, css, workerSource, mermaidRuntimeRev) {
   const bundle = await rolldown({
     input: CLIENT_ENTRY,
     platform: "browser",
@@ -1285,6 +1360,11 @@ async function buildClient(rolldown, css, workerSource) {
     transform: {
       define: {
         "import.meta.env.DEV": "false",
+        /*
+         * **Mermaid 运行时的内容 revision** ✓：client 用它拼 `<script src=…?v=…>` ✓，
+         * URL 随构建内容变化 ⇒ 宿主那条路由可以放心 `immutable` 缓存 ✓。
+         */
+        __KN_MERMAID_RUNTIME_REV__: JSON.stringify(mermaidRuntimeRev),
         /*
          * **Vue 的编译期特性开关**（用户实测：控制台里那条 `Feature flags __VUE_OPTIONS_API__ …` 警告 ✗）。
          *
@@ -1358,13 +1438,27 @@ async function buildClient(rolldown, css, workerSource) {
      * （`tests/selfcontained.test.mjs` 也断言这条 ✓ —— 这里提前失败，省得构建完才发现 ✓）。
      * 典型坑：第三方包里的 Node 专用探测（见上面 browserUtilProbePatchPlugin ✓）。
      */
-    const requests = [...code.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+    const requests = [...code.matchAll(/require\((["'])([^"']+)\1\)/g)].map((match) => match[2]);
     const unexpected = [...new Set(requests)].filter((id) => !CLIENT_BASELINE.includes(id));
     if (unexpected.length > 0) {
       throw new Error(
         `Client 半请求了宿主基线模块表之外的模块：${unexpected.join(", ")}`
         + " ⇒ 运行时会拿不到它（只能内联，不能 external 到别处）。",
       );
+    }
+    /*
+     * **mermaid 不许再内联进 client.js** ✗：它应该是独立运行时（按需加载 ✓）。
+     * 体积上限也钉住 —— 如果哪天打包方式回退，这里先红 ✓。
+     */
+    const clientBytes = Buffer.byteLength(code, "utf8");
+    if (code.includes("init_mermaid_core")) {
+      throw new Error("client.js 里仍然内联了 mermaid（应当走按需加载的 client.mermaid.js）✗");
+    }
+    if (clientBytes > 9_000_000) {
+      throw new Error(`client.js 体积 ${clientBytes} 字节，超过 9 MB 上限（mermaid 又被内联进来了？）✗`);
+    }
+    if (!code.includes("knowledgenet.mermaid.js")) {
+      throw new Error("client.js 里缺少按需运行时的路由（shared/routes.ts 常量没被引用？）✗");
     }
     await writeFile(path.join(PLUGIN, "client.js"), code, "utf8");
     return { bytes: Buffer.byteLength(code, "utf8"), modules: modulesOf(entry).length };
@@ -1622,17 +1716,20 @@ async function readEditorCss() {
 }
 
 /*
- * 三次构建都在「插件目录下临时挂了父项目 node_modules」的作用域里跑：
+ * 四次构建都在「插件目录下临时挂了父项目 node_modules」的作用域里跑：
  * 这样 `three` / `d3-force-3d` 由打包器**按原生规则**解析并内联，而不是被静默当成 external ✓。
  */
-const { host, workerCode, client } = await withProjectModules(async () => {
+const { host, workerCode, client, mermaidRuntime } = await withProjectModules(async () => {
   const hostHalf = await buildHost(rolldown);
   const workerSource = await buildWorkerCode(rolldown);
-  const clientHalf = await buildClient(rolldown, css, workerSource);
-  return { host: hostHalf, workerCode: workerSource, client: clientHalf };
+  /* 先建运行时 ✓：client 需要用它的内容 hash 做 `?v=`（immutable 缓存 ✓） */
+  const runtime = await buildMermaidRuntime(rolldown);
+  const clientHalf = await buildClient(rolldown, css, workerSource, runtime.rev);
+  return { host: hostHalf, workerCode: workerSource, client: clientHalf, mermaidRuntime: runtime };
 });
 
 console.log(`Host 半    index.js  ${host.bytes} 字节，${host.modules} 个模块`);
 console.log(`布局 Worker 源码      ${Buffer.byteLength(workerCode, "utf8")} 字节（内联为 Blob）`);
 console.log(`Client 半  client.js ${client.bytes} 字节，${client.modules} 个模块`);
+console.log(`Mermaid 运行时 client.mermaid.js ${mermaidRuntime.bytes} 字节（rev ${mermaidRuntime.rev}，按需加载）`);
 console.log("自包含检查通过：没有引用项目源码（第三方包已内联）");

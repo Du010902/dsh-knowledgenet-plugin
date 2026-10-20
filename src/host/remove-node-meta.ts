@@ -1,18 +1,18 @@
 /**
- * 「移除节点身份」的**纯文件系统实现**（轻量模块：只依赖 node:fs / node:path）。
+ * 节点删除的**纯文件系统实现**（轻量模块：只依赖 node:fs / node:path）。
  *
- * 为什么单独拆出来：`graph-edit.ts` 会连带导入 `node-vfs.ts`，而后者用了
- * TypeScript 参数属性（`constructor(readonly root: string)`），Node 的类型剥离模式不支持，
- * 单测里一导入就 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`。拆开后这个模块可以直接单测。
+ * 为什么单独拆出来：`graph-edit.ts` 会连带导入 `node-vfs.ts`（真实磁盘 VFS），
+ * 而这里只关心"删文件夹 / 搬备份"这几条文件系统语义 ✓ —— 拆开后可以单独单测 ✓。
  *
- * 语义（照库自己的实现，`src/data/repository.ts:12`）：
- * **只移除节点身份**——把节点的 `.meta/knowledgenet` **移动**到
- * `<root>/.knowledgenet/trash/node-metadata/<时间戳>-<节点名>/`；用户的文件夹与文件一个不动。
+ * 语义：**删除整个节点文件夹**（`Backup/` 备份或彻底删除 ✓）。
+ *
+ * 历史：v2 时代的「只移除节点身份（`.meta/knowledgenet` → 回收站）」已经不再被任何代码使用
+ * （v3 一节点一个 .md，没有独立元数据目录 ✓），那个函数已整体删除 ✓。
  */
 import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import { META_NS_DIR, NODE_FILE, TRASH_NODE_METADATA_DIR } from "../vendor/upstream/data/v2/paths.ts";
+import { META_NS_DIR, NODE_FILE } from "../vendor/upstream/data/v2/paths.ts";
 
 /**
  * 删除节点时"备份"的落点：**库根的 `Backup/`**（建库时就会创建）。
@@ -116,59 +116,6 @@ export async function removeNodeFolder(
     return {
       ok: false,
       error: { code: "backup_failed", message: error instanceof Error ? error.message : String(error) },
-    };
-  }
-}
-
-/** 结果 */
-export interface RemoveNodeMetadataResult {
-  ok: boolean;
-  /** 回收站里的相对路径（可恢复位置的凭据） */
-  trash?: string;
-  error?: { code: string; message: string };
-}
-
-/**
- * 移除某个节点的身份（元数据进回收站，用户文件保留）。
- *
- * @param input.root - 库根目录（绝对路径）。
- * @param input.relativePath - 节点相对库根的目录。
- * @param input.title - 节点标题（仅用于日志/回报，可空）。
- * @param now - 时间戳来源（可注入，便于测试）。
- * @returns 成功/失败（失败带可读原因）。
- */
-export async function removeNodeMetadata(
-  input: { root: string; relativePath: string; title?: string },
-  now: Date = new Date(),
-): Promise<RemoveNodeMetadataResult> {
-  const root = typeof input.root === "string" ? input.root : "";
-  const relativePath = typeof input.relativePath === "string" ? input.relativePath : "";
-  if (root === "" || relativePath === "") {
-    return { ok: false, error: { code: "node_path_required", message: "节点路径不完整，无法移除身份" } };
-  }
-  const metaAbs = join(root, relativePath, META_NS_DIR);
-  try {
-    const present = await stat(metaAbs).then(() => true).catch(() => false);
-    if (!present) {
-      return {
-        ok: false,
-        error: {
-          code: "node_metadata_missing",
-          message: "这个节点没有 .meta/knowledgenet 元数据，无法移除它的身份（文件不会被改动）",
-        },
-      };
-    }
-    const stamp = now.toISOString().replace(/[:.]/g, "-");
-    const name = relativePath.split(/[\\/]/).filter((part) => part !== "").pop() ?? "node";
-    const trashRel = `${TRASH_NODE_METADATA_DIR}/${stamp}-${name}`;
-    const trashAbs = join(root, trashRel);
-    await mkdir(dirname(trashAbs), { recursive: true });
-    await rename(metaAbs, trashAbs);
-    return { ok: true, trash: trashRel };
-  } catch (error) {
-    return {
-      ok: false,
-      error: { code: "remove_failed", message: error instanceof Error ? error.message : String(error) },
     };
   }
 }

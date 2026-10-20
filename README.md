@@ -135,6 +135,8 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   点「编辑源码」可改围栏内容 ✓。渲染失败时图的位置显示失败原因，源码照旧可编辑、可复制 ✓。
   语言列表里补了 `mermaid` 一项（没有语法高亮，纯文本编辑 ✓），新建块、粘贴含 mermaid 围栏的 Markdown 都可用 ✓。
   浅色 / 深色、中文字体跟随宿主主题 token 与正文 ✓；一页多张图各自渲染、互不串 ✓。
+  **渲染器本体是按需加载的**（`client.mermaid.js`，见下）：页面启动不再背 6.8 MB ✓，
+  第一次打开含图笔记时才从宿主路由取运行时 ✓；加载失败会明确提示「重启 DSH 或重装插件」✓。
   源码里的 `%%{init}%%` 中 `themeCSS` / `htmlLabels` 会被收窄（防止外部资源 / HTML 标签 ✓），
   其余 init 配置照旧生效 ✓。细节与实测见 [设计记录](design/mermaid-note-blocks.md)。
 - **打开有多快**：读正文**不再扫全库** ✓ —— 宿主按"节点身份 → 文件路径"的索引**只读目标文件**
@@ -205,12 +207,14 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
 
 profile 的 `cordis.patch.yml` 插入本插件（`@local/dsh-knowledgenet`）。
 插件零运行时依赖（第三方代码内联），安装时不执行任何脚本。
+发布产物：`index.js`（宿主）、`client.js`（客户端主包）、`client.mermaid.js`（按需加载的 Mermaid 运行时 ✓）、
+`cordis.patch.yml`、`icon.svg`、`locale/*.json`。
 
 ## 开发
 
 ```bash
-node build.mjs                 # 构建宿主 + 客户端两个半
-node --test "tests/*.test.mjs" # 全部测试
+node build.mjs                 # 构建宿主 + 客户端 + 布局 Worker + Mermaid 运行时（四个产物）
+node --test "tests/*.test.mjs" # 全部测试（当前 880 个，全绿）
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 
@@ -218,23 +222,31 @@ node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 
 
 ```powershell
 $env:KN_PROJECT='D:/AppInstallation/DSH/deepseek-harness'
-node --test tests/mermaid-note.browser.mjs   # Mermaid 图块（图 / 复制 / 下载 / 输入保护 / 失败路径）
+node --test tests/mermaid-note.browser.mjs   # Mermaid 图块（14 个：图 / 复制 / 下载 / 输入保护 / 缓存 / 安全 / 运行时缺失）
 node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
 ```
 
 - 上游（`src/vendor/upstream/**`）是**逐字节冻结**的开放格式实现：只读、不手改；
   需要改行为时用 `build.mjs` 的 needle 补丁，或写在自己模块里。
+- 单测直接用 `node --test` 跑 `.ts` 源码 ⇒ **只能用 Node 类型剥离模式支持的语法**（不要写构造参数属性 / enum /
+  namespace / `import =`）；`tests/node-strip-syntax.test.mjs` 会扫全仓拦下新增违规 ✓。
 - 类型体检：`node_modules/.bin/tsc --noEmit --ignoreDeprecations 6.0 -p tsconfig.json`。
   目前有约 85 条**既有**类型宽松（`never`、缺 `@types/node` 等）—— 建议当**棘轮**用：
   只看你这次改动有没有引入**新**错误（它抓过"本地函数漏定义"这类构建不报、运行时才炸的问题 ✓）。
 
 ## 已知取舍 / 尚未实现
 
-- **`client.js` 体积**：Mermaid 渲染器（`mermaid@11.17.2`）在构建期内联进客户端半 ✓（运行时零依赖 ✓），
-  实测 `client.js` 8.06 MB → **14.88 MB**（+6.82 MB，未压缩）。mermaid 的**顶层求值**用动态 import
-  推迟到第一次遇到图 ✓（首次渲染扣防抖约 75–90 ms），但 **6.8 MB 源码的解析/编译每次页面启动都要付** ✗
-  （实测启动约 +0.5 s；控制实验证明增量主要是解析，不是启动期执行 mermaid）。
-  "宿主路由按需加载"是后续优化方向，但它会打破"客户端单文件自包含"的既有约定，本次没有做。
+- **两个客户端产物**：`client.js` **8.12 MB**（回到加 Mermaid 之前的量级 ✓）
+  + 按需加载的 `client.mermaid.js` **3.43 MB**（minified，gzip 916 KB）。实测（headless Chrome，5 轮中位数）
+  页面启动相对旧产物 **+26.9 ms pluginReady / +14.7 ms 可交互**（拆分前是 +454.5 / +474.0 ✓）；
+  代价是**每页首次开图多 ~0.21 s**（运行时下载+求值），但「页面启动 → 第一张图」反而早 ~0.24 s ✓，
+  第二张图 / 再打开无差异，不开图的会话每页净赚约 0.43 s ✓。
+- **新增宿主路由要宿主半重新加载**（重启 DSH，或让插件重新 apply）：`client.mermaid.js` 由 Host 半注册的
+  `/api/knowledgenet.mermaid.js` 提供（同源 `<script>` + 浏览器 cookie 通过 `/api` 鉴权围栏 ✓）。
+  `node build.mjs` 之后：**客户端半刷新页面即可** ✓，**宿主半必须重启 DSH** ✓
+  （Host 模块走 ESM 缓存，重装插件不保证重新加载新模块 ✗；重启是可靠路径 ✓）；
+  没重启时图块会显示「Mermaid 渲染运行时加载失败（请重启 DSH 或重装插件）」，源码仍可编辑 ✓。
+  安装包已把 `client.mermaid.js` 列进 `package.json.files` ✓（git/npm 安装不会漏 ✓）。
 - **Mermaid 下载**：优先 PNG（2× 缩放、铺渲染时的主题底色 ✓）；个别图元 / 老浏览器画不出来时
   自动退回 `.svg` ✓。**先切主题再下载旧图**也没问题：底色用的是**渲染时**记下的那一份 ✓。
 - **正在编辑的 mermaid 块**：图在**失焦后**才刷新（编辑中先让路，否则异步预览回填会把源码藏起来、

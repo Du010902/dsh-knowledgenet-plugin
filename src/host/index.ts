@@ -42,6 +42,8 @@ import {
   MAX_PAYLOAD_BYTES,
 } from "./payload.ts";
 import { recordIsolation, runtimeStatus, patchRuntimeStatus, setRuntimeStatus } from "./status.ts";
+import { registerMermaidRuntime } from "./mermaid-runtime.ts";
+import { MERMAID_RUNTIME_API_PATH } from "../shared/routes.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation, registerAgentIsolation, __resetIsolationStatesForTest } from "./isolation-state.ts";
 
@@ -149,6 +151,7 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
   // 这样即使注册一直没发生，kn_status 也能说出原因，而不是留一句 not found。
   setRuntimeStatus({
     api: { path: GRAPH_API_PATH, registered: false, reason: "等待 connection 服务" },
+    mermaidRuntime: { path: MERMAID_RUNTIME_API_PATH, registered: false, reason: "等待 connection 服务" },
     prompts,
     startedAt,
     probes: [],
@@ -171,7 +174,10 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
   if (typeof ctx.inject === "function") {
     try {
       ctx.inject(["connection"], (scoped: unknown) => {
-        patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config, learningState) });
+        patchRuntimeStatus({
+          api: registerApi(scoped ?? ctx, config, learningState),
+          mermaidRuntime: registerMermaidRuntime(scoped ?? ctx),
+        });
       });
     } catch (error) {
       patchRuntimeStatus({
@@ -180,10 +186,18 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
           registered: false,
           reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`,
         },
+        mermaidRuntime: {
+          path: MERMAID_RUNTIME_API_PATH,
+          registered: false,
+          reason: "connection 服务注入失败",
+        },
       });
     }
   } else {
-    patchRuntimeStatus({ api: registerApi(ctx, config, learningState) });
+    patchRuntimeStatus({
+      api: registerApi(ctx, config, learningState),
+      mermaidRuntime: registerMermaidRuntime(ctx),
+    });
   }
 }
 
@@ -243,6 +257,7 @@ export const __internal = {
   graphApiPayload,
   handleApiRequest,
   registerApi,
+  registerMermaidRuntime,
   resolveRequestedRoot,
   clipGraph,
   clampMaxNodes,

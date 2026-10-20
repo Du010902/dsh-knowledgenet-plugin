@@ -3,6 +3,7 @@ import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } f
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 //#region src/vendor/upstream/data/errors.ts
 var RepositoryError = class extends Error {
 	code;
@@ -149,7 +150,7 @@ function findCycleIfLinked(ws, fromId, toId) {
 	}
 	const prev = /* @__PURE__ */ new Map();
 	const queue = [toId];
-	const seen = new Set([toId]);
+	const seen = /* @__PURE__ */ new Set([toId]);
 	while (queue.length > 0) {
 		const cur = queue.shift();
 		if (cur === fromId) {
@@ -567,9 +568,7 @@ function parseDocument(text) {
 			case "rev":
 				meta.rev = Number.parseInt(value, 10) || 0;
 				break;
-			default:
-				meta.extra[key] = value;
-				break;
+			default: meta.extra[key] = value;
 		}
 	}
 	return {
@@ -1163,7 +1162,7 @@ async function createLibrary$1(root, title, now = Date.now()) {
 		};
 	}
 	if (entries.length > 0) {
-		const ours = new Set([
+		const ours = /* @__PURE__ */ new Set([
 			V3_NODES_DIR,
 			V3_GRAPH_FILE,
 			"Backup",
@@ -1421,7 +1420,7 @@ async function addEdge$1(root, input, now = Date.now()) {
 		created: false
 	};
 	const reachable = (start, target) => {
-		const seen = new Set([start]);
+		const seen = /* @__PURE__ */ new Set([start]);
 		const queue = [start];
 		while (queue.length > 0) {
 			const current = queue.shift();
@@ -1511,7 +1510,8 @@ async function removeNode(root, input) {
 		code: "node_missing",
 		message: "没有找到这个知识点"
 	};
-	await unlink(join(base, node.relativePath)).catch(() => void 0);
+	const abs = join(base, node.relativePath);
+	await unlink(abs).catch(() => void 0);
 	invalidateNodeIndex(base, node.id);
 	const graph = await readGraph(base);
 	const edges = graph.edges.filter((edge) => edge.fromId !== node.id && edge.toId !== node.id);
@@ -1711,6 +1711,10 @@ function setRuntimeStatus(status) {
 function patchRuntimeStatus(patch) {
 	current = {
 		api: patch.api ?? current?.api ?? {
+			path: "",
+			registered: false
+		},
+		mermaidRuntime: patch.mermaidRuntime ?? current?.mermaidRuntime ?? {
 			path: "",
 			registered: false
 		},
@@ -2233,7 +2237,8 @@ function selectPlanItems(plan, selectedIds) {
 * @param plan - 计划。
 */
 async function savePlan(root, plan) {
-	await mkdir(join(root, PLANS_DIR), { recursive: true });
+	const dir = join(root, PLANS_DIR);
+	await mkdir(dir, { recursive: true });
 	const target = join(root, planRelPath(plan.id));
 	const temp = `${target}.tmp`;
 	await writeFile(temp, JSON.stringify(plan, null, 2), "utf8");
@@ -2303,7 +2308,7 @@ async function listPlans(root) {
 	return plans.sort((a, b) => b.createdAt - a.createdAt);
 }
 /** 兜底窗口：即使"轮"的边界没被识别到，也不会在短时间里无限新建 */
-const CREATION_WINDOW_MS = 600 * 1e3;
+const CREATION_WINDOW_MS = 6e5;
 /** 会话 → 最近新建节点的时间戳 */
 const creationLog = /* @__PURE__ */ new Map();
 /** 测试可调的上限（默认走 CREATION_QUOTA） */
@@ -2803,7 +2808,7 @@ function sha256Hex(text) {
 	let h5 = 2600822924;
 	let h6 = 528734635;
 	let h7 = 1541459225;
-	const w = new Uint32Array(64);
+	const w = /* @__PURE__ */ new Uint32Array(64);
 	for (let offset = 0; offset < total; offset += 64) {
 		for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
 		for (let i = 16; i < 64; i += 1) {
@@ -3724,6 +3729,16 @@ async function readNote(context, node, maxChars = 6e3) {
 const GRAPH_API_PATH = "/api/knowledgenet.graph";
 /** 浏览器侧使用的 document-relative 形式（走 Connection 的 HTTP 载体） */
 const GRAPH_API_ROUTE = GRAPH_API_PATH.slice(1);
+/**
+* **按需加载的 Mermaid 运行时**（宿主 exact Fetch 路由；浏览器侧用同源 `<script src>` 取 ✓）。
+*
+* 为什么单独一条路由 ✗：`mermaid` 未压缩约 6.8 MB（minified 3.4 MB）✓，
+* 内联进 `client.js` 会让**每次页面启动**都多付约 0.45 s 的解析/编译成本 ✗。
+* 拆出去之后 `client.js` 回到 ~8.1 MB ✓，只有真的打开含图的笔记时才加载这个运行时 ✓
+* （页面启动 → 第一张图反而更快 ✓，见 `design/mermaid-note-blocks.md` §6）。
+*/
+const MERMAID_RUNTIME_API_PATH = "/api/knowledgenet.mermaid.js";
+MERMAID_RUNTIME_API_PATH.slice(1);
 //#endregion
 //#region src/host/stack.ts
 function record(value) {
@@ -3882,11 +3897,11 @@ function libraryKey(root) {
 }
 /** One instance belongs to one plugin activation and is shared only by its API, prompts and tools. */
 var LearningState = class {
-	leaseMs;
-	now;
 	views = /* @__PURE__ */ new Map();
 	entries = /* @__PURE__ */ new Map();
 	order = 0;
+	leaseMs;
+	now;
 	constructor(leaseMs = 45e3, now = Date.now) {
 		this.leaseMs = leaseMs;
 		this.now = now;
@@ -5049,15 +5064,15 @@ async function refreshQuietly(root) {
 //#endregion
 //#region src/host/remove-node-meta.ts
 /**
-* 「移除节点身份」的**纯文件系统实现**（轻量模块：只依赖 node:fs / node:path）。
+* 节点删除的**纯文件系统实现**（轻量模块：只依赖 node:fs / node:path）。
 *
-* 为什么单独拆出来：`graph-edit.ts` 会连带导入 `node-vfs.ts`，而后者用了
-* TypeScript 参数属性（`constructor(readonly root: string)`），Node 的类型剥离模式不支持，
-* 单测里一导入就 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`。拆开后这个模块可以直接单测。
+* 为什么单独拆出来：`graph-edit.ts` 会连带导入 `node-vfs.ts`（真实磁盘 VFS），
+* 而这里只关心"删文件夹 / 搬备份"这几条文件系统语义 ✓ —— 拆开后可以单独单测 ✓。
 *
-* 语义（照库自己的实现，`src/data/repository.ts:12`）：
-* **只移除节点身份**——把节点的 `.meta/knowledgenet` **移动**到
-* `<root>/.knowledgenet/trash/node-metadata/<时间戳>-<节点名>/`；用户的文件夹与文件一个不动。
+* 语义：**删除整个节点文件夹**（`Backup/` 备份或彻底删除 ✓）。
+*
+* 历史：v2 时代的「只移除节点身份（`.meta/knowledgenet` → 回收站）」已经不再被任何代码使用
+* （v3 一节点一个 .md，没有独立元数据目录 ✓），那个函数已整体删除 ✓。
 */
 /**
 * 删除节点时"备份"的落点：**库根的 `Backup/`**（建库时就会创建）。
@@ -5720,7 +5735,7 @@ async function setUnderstanding(root, id, understood) {
 /** 默认图片目录（相对库根 ✓）：用户要的就是 `<library>/image/` ✓ */
 const DEFAULT_IMAGE_DIR = "image";
 /** 认得出的图片扩展名 ✓（其余一律当 `bin` ✗，但仍然允许存 ✓） */
-const IMAGE_EXTENSIONS = new Set([
+const IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([
 	"png",
 	"jpg",
 	"jpeg",
@@ -5820,7 +5835,7 @@ function parseDataUrl(value) {
 	const mime = (match[1] ?? "").trim().toLowerCase() || "image/png";
 	const meta = match[2] ?? "";
 	const payload = match[3] ?? "";
-	if (payload.length > Math.ceil(12582912 * 4 / 3) + 16) return null;
+	if (payload.length > Math.ceil(16777216) + 16) return null;
 	if (!meta.includes("base64")) try {
 		const text = decodeURIComponent(payload);
 		const bytes = new TextEncoder().encode(text);
@@ -6011,7 +6026,7 @@ async function createSubdirectory(input) {
 *
 * 512KB 远超正常笔记（几万字），但足以挡住"误把大文件塞进来"的情形 ✓。
 */
-const MAX_DOCUMENT_BYTES = 512 * 1024;
+const MAX_DOCUMENT_BYTES = 524288;
 /**
 * **正文口径**：读、写、返回三处必须完全一致 ✓。
 *
@@ -6705,7 +6720,8 @@ async function saveImageRequest(ctx, config, options) {
 	};
 	const extension = extensionFromMime(parsed.mime);
 	const wanted = sanitizeImageName(options.name, extension);
-	await mkdir(imageDirAbsolute(root, config.imageDir), { recursive: true });
+	const directory = imageDirAbsolute(root, config.imageDir);
+	await mkdir(directory, { recursive: true });
 	let target = resolveImageTarget(root, config.imageDir, wanted);
 	if (target === null) return {
 		status: 200,
@@ -7532,6 +7548,104 @@ function registerApi(ctx, config, learningState = new LearningState()) {
 	}
 }
 //#endregion
+//#region src/host/mermaid-runtime.ts
+/**
+* **按需加载的 Mermaid 运行时路由**（宿主侧 ✓）。
+*
+* 为什么要有这条路由 ✗：`mermaid` 未压缩约 6.8 MB ✓，内联进 `client.js` 会让**每次页面启动**
+* 都多付约 0.45 s 的解析/编译成本 ✗（实测见 `design/mermaid-note-blocks.md` §6）。
+* 拆出来之后：`client.js` 回到 ~8.1 MB ✓，只有真的打开含图笔记时才用同源 `<script src>` 取
+* `client.mermaid.js`（3.4 MB minified ✓）。
+*
+* 为什么用 `connection.fetch.register` 的 exact 路由 ✗：
+* - 它与面板数据走同一套 `/api` 载体与鉴权围栏 ✓（Host/Origin 检查 + 浏览器 cookie ✓）；
+* - 同源 `<script src>` 的 GET 会**带着 cookie**、**不带 Origin** ✓ ⇒ 正好穿过围栏 ✓
+*   （实测见 `tmp/lazy-proto/REPORT.md` §4；DSH 自己的所有客户端插件 bundle 也是同源 script ✓）；
+* - 浏览器 peer 的 principal 是 `owner` ✓ ⇒ exact 路由的 owner-only 检查放行 ✓。
+*
+* 缓存：URL 里带 `?v=<构建期内容 hash>` ✓ + `immutable` ✓ ⇒ 重新构建换 URL、旧 URL 自然失效 ✓。
+*/
+/** 宿主模块（index.js）所在目录 = 插件包根 ✓ —— 运行时文件与它同级 ✓ */
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
+const RUNTIME_FILE = "client.mermaid.js";
+/** 实际读文件的目录 ✓（默认包根；单测里由 `__setMermaidRuntimeDirForTest` 指向仓库根 ✓） */
+let runtimeDir = PLUGIN_DIR;
+/** 进程内缓存的运行时字节 ✓（只读一次；读失败不缓存 ⇒ 重装/重启后可重试 ✓） */
+let runtimeBytes = null;
+/**
+* 读运行时文件 ✓（进程内缓存 ✓）。
+* @returns 文件字节 ✓。
+*/
+function readRuntime() {
+	if (runtimeBytes === null) {
+		const pending = readFile(join(runtimeDir, RUNTIME_FILE)).catch((error) => {
+			runtimeBytes = null;
+			throw error;
+		});
+		runtimeBytes = pending;
+		return pending;
+	}
+	return runtimeBytes;
+}
+/**
+* 注册 `GET/HEAD /api/knowledgenet.mermaid.js` ✓。
+*
+* @param ctx - Cordis 作用域（与 `api.ts` 的 `registerApi` 同一套取法 ✓）。
+* @returns 注册结果 ✓（失败原因写清楚 ✓，`kn_status` 里能看到 ✓）。
+*/
+function registerMermaidRuntime(ctx) {
+	const registrar = ctx;
+	const register = (registrar?.get?.("connection") ?? registrar?.connection)?.fetch?.register;
+	if (typeof register !== "function") return {
+		path: MERMAID_RUNTIME_API_PATH,
+		registered: false,
+		reason: "看不到 connection.fetch.register（宿主组合里没有它？）"
+	};
+	const handler = async (request) => {
+		const head = request.method === "HEAD";
+		try {
+			const bytes = await readRuntime();
+			return new Response(head ? null : bytes, {
+				status: 200,
+				headers: {
+					"content-type": "text/javascript; charset=utf-8",
+					"cache-control": "public, max-age=31536000, immutable",
+					"x-content-type-options": "nosniff"
+				}
+			});
+		} catch (error) {
+			return new Response(JSON.stringify({
+				ok: false,
+				error: {
+					code: "mermaid_runtime_missing",
+					message: `${RUNTIME_FILE} 读取失败（插件安装不完整或宿主还没重启？）：` + (error instanceof Error ? error.message : String(error))
+				}
+			}), {
+				status: 404,
+				headers: { "content-type": "application/json; charset=utf-8" }
+			});
+		}
+	};
+	try {
+		register({
+			path: MERMAID_RUNTIME_API_PATH,
+			methods: ["GET", "HEAD"],
+			requestBody: "buffered",
+			fetch: handler
+		});
+		return {
+			path: MERMAID_RUNTIME_API_PATH,
+			registered: true
+		};
+	} catch (error) {
+		return {
+			path: MERMAID_RUNTIME_API_PATH,
+			registered: false,
+			reason: error instanceof Error ? error.message : String(error)
+		};
+	}
+}
+//#endregion
 //#region src/host/index.ts
 /**
 * KnowledgeNet × DSH —— 插件 Host 半入口。
@@ -7622,6 +7736,11 @@ function apply(ctx, config = {}) {
 			registered: false,
 			reason: "等待 connection 服务"
 		},
+		mermaidRuntime: {
+			path: MERMAID_RUNTIME_API_PATH,
+			registered: false,
+			reason: "等待 connection 服务"
+		},
 		prompts,
 		startedAt: Date.now(),
 		probes: [],
@@ -7639,16 +7758,29 @@ function apply(ctx, config = {}) {
 	});
 	if (typeof ctx.inject === "function") try {
 		ctx.inject(["connection"], (scoped) => {
-			patchRuntimeStatus({ api: registerApi(scoped ?? ctx, config, learningState) });
+			patchRuntimeStatus({
+				api: registerApi(scoped ?? ctx, config, learningState),
+				mermaidRuntime: registerMermaidRuntime(scoped ?? ctx)
+			});
 		});
 	} catch (error) {
-		patchRuntimeStatus({ api: {
-			path: GRAPH_API_PATH,
-			registered: false,
-			reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`
-		} });
+		patchRuntimeStatus({
+			api: {
+				path: GRAPH_API_PATH,
+				registered: false,
+				reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`
+			},
+			mermaidRuntime: {
+				path: MERMAID_RUNTIME_API_PATH,
+				registered: false,
+				reason: "connection 服务注入失败"
+			}
+		});
 	}
-	else patchRuntimeStatus({ api: registerApi(ctx, config, learningState) });
+	else patchRuntimeStatus({
+		api: registerApi(ctx, config, learningState),
+		mermaidRuntime: registerMermaidRuntime(ctx)
+	});
 }
 /**
 * 供插件自带测试直接调用（`Loader.unwrapExports` 取的是 `apply`/default，
@@ -7706,6 +7838,7 @@ const __internal = {
 	graphApiPayload,
 	handleApiRequest,
 	registerApi,
+	registerMermaidRuntime,
 	resolveRequestedRoot,
 	clipGraph,
 	clampMaxNodes,

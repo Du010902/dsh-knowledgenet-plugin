@@ -17,7 +17,17 @@ export class LearningState {
   private views = new Map<string, ViewFocus>();
   private entries = new Map<string, EntryHint>();
   private order = 0;
-  constructor(private readonly leaseMs = 45000, private readonly now = Date.now) {}
+  /*
+   * **不用 TypeScript 构造参数属性** ✓：`constructor(private readonly leaseMs = …)` 这种写法
+   * Node 25 的**类型剥离模式**不支持 ✗（`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`）——
+   * 单测直接 import 本文件时会在加载阶段就失败 ✗。显式字段 + 赋值等价 ✓。
+   */
+  private readonly leaseMs: number;
+  private readonly now: () => number;
+  constructor(leaseMs = 45000, now = Date.now) {
+    this.leaseMs = leaseMs;
+    this.now = now;
+  }
 
   /** Accept monotonic updates; inactive records prevent late packets reviving a closed view. */
   update(input: Omit<ViewFocus, "expires" | "order"> & { claim?: boolean }): void {

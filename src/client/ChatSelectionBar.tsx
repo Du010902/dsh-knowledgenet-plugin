@@ -1335,6 +1335,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     report("mounted", { ua: typeof navigator === "undefined" ? "" : String(navigator.platform ?? "").slice(0, 12) });
     return () => {
       window.clearInterval(scopeTimer);
+      /* **必须成对移除** ✗：漏掉 selectionchange 会让每次卸载都泄漏一个 document 级监听 ✓ */
+      document.removeEventListener("selectionchange", onSelectionChange);
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("pointerdown", onPressCapture, true);
       document.removeEventListener("mousedown", onPressCapture, true);

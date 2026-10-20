@@ -128,6 +128,11 @@ const DICT_ZH: Record<string, string> = {
   mermaidCopyCode: "复制为代码",
   mermaidDownloadImage: "下载图像",
   mermaidRenderFailed: "Mermaid 图渲染失败",
+  /* 两个动作的失败反馈 ✓（超长源码复制 / 下载两条路都失败；不能静默 ✗） */
+  mermaidActionFailed: "操作失败",
+  mermaidDownloadFailed: "下载失败",
+  mermaidCopyTooLarge: "源码过大，无法复制",
+  mermaidRuntimeUnavailable: "Mermaid 渲染运行时加载失败（请重启 DSH 或重装插件）",
   /* 图片块 ✓ */
   imageUploadButton: "插入图片",
   imageUploadPlaceholder: "或者粘贴图片链接…",
@@ -362,6 +367,10 @@ const DICT_EN: Record<string, string> = {
   mermaidCopyCode: "Copy as code",
   mermaidDownloadImage: "Download image",
   mermaidRenderFailed: "Mermaid diagram failed to render",
+  mermaidActionFailed: "Action failed",
+  mermaidDownloadFailed: "Download failed",
+  mermaidCopyTooLarge: "Source too large to copy",
+  mermaidRuntimeUnavailable: "Mermaid runtime failed to load (restart DSH or reinstall the plugin)",
   imageUploadButton: "Insert image",
   imageUploadPlaceholder: "or paste an image link…",
   imageCaptionPlaceholder: "Write a caption",

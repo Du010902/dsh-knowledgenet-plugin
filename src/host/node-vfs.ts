@@ -19,7 +19,15 @@ import { escapesLibrary, normalizeRel } from "../vendor/upstream/data/v2/paths.t
 let atomicSeq = 0;
 
 export class NodeVfs implements Vfs {
-  constructor(readonly root: string) {}
+  /*
+   * **不用 TypeScript 构造参数属性** ✓：`constructor(readonly root: string)` 这种写法
+   * Node 25 的类型剥离模式不支持 ✗（单测直接 import 本模块时会在加载期报
+   * `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`）。显式字段 + 赋值等价 ✓。
+   */
+  readonly root: string;
+  constructor(root: string) {
+    this.root = root;
+  }
 
   /** 相对路径 → 绝对路径。逃出知识库根的写法一律拒绝，而不是悄悄修正。 */
   absolute(rel: string): string {

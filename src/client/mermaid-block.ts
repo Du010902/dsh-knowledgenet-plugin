@@ -58,6 +58,8 @@ export interface MermaidLabels {
   download: string;
   /** 「Mermaid 图渲染失败」✓ */
   failed: string;
+  /** 运行时脚本加载失败（宿主路由不可用）✓ —— 提示要具体到"重启 DSH / 重装插件" ✗ */
+  runtimeUnavailable: string;
 }
 
 /** 当前编辑器主题里与图配色有关的 token ✓（由调用方从 computed style 现读 ✓） */
@@ -391,22 +393,29 @@ export function mermaidErrorHtml(input: { message: string; labels: MermaidLabels
 /**
  * 渲染前对 mermaid 源码做**最小安全处理** ✓。
  *
- * 威胁模型：笔记正文可能来自粘贴 / 导入（不完全可信 ✓）。mermaid 的 `%%{init: …}%%`
- * 指令可以改配置 ✓ —— 实测 `securityLevel` / `theme` 这类 secure key 改不动 ✓，
- * 但 `themeCSS` 能往 SVG `<style>` 里写任意 CSS（含 `url(https://…)` 外部请求 ✗）、
- * `htmlLabels` 能让图重新带 `<foreignObject>`（PNG 会退回 SVG ✓，但没必要 ✗）。
- * ⇒ 把这两个键的值替换成无害值 ✓；其余 init 配置保留 ✓（用户想改曲线 / 布局照旧 ✓）。
+ * 威胁模型：笔记正文可能来自粘贴 / 导入（不完全可信 ✓）。mermaid 有两条改配置的路：
+ * 1. `%%{init: …}%%` 指令 ✓ —— 实测 `securityLevel` / `theme` 这类 secure key 改不动 ✓，
+ *    但 `themeCSS` 能往 SVG `<style>` 里写任意 CSS（含 `url(https://…)` 外部请求 ✗）、
+ *    `htmlLabels` 能让图重新带 `<foreignObject>`（PNG 会退回 SVG ✓，但没必要 ✗）；
+ * 2. **YAML frontmatter 的 `config:`** ✗ —— 它由 mermaid 的 `processFrontmatter` 直接并进配置 ✓，
+ *    而它自己的清洗只挡 secure key ✓ ⇒ `themeCSS` / `htmlLabels` 从 frontmatter 走**完全绕过** ✗
+ *    （实测能真的发出外部请求 ✗）。笔记里的图几乎不用 frontmatter ✓ ⇒ **整段去掉**最稳 ✓。
+ * ⇒ init 指令里把这两个键的值替换成无害值 ✓（其余 init 配置保留 ✓，用户想改曲线 / 布局照旧 ✓）。
  *
  * 注意：这不是 XSS 防线 ✓（那由 DOMPurify 负责 ✓）；这里只收窄"外部资源 / HTML 标签"面 ✓。
  * @param source - mermaid 源码 ✓。
  * @returns 处理后的源码 ✓（没命中就原样返回 ✓）。
  */
 export function sanitizeMermaidSource(source: string): string {
-  if (!source.includes("%%{")) return source;
-  return source
-    /* 只换**值** ✓：键可以带引号（`'themeCSS': …`）✓，换完 init 语法仍然成立 ✓ */
+  let result = source;
+  /* 1) YAML frontmatter 整段去掉（`--- … ---` 只在源码最前面才算 frontmatter ✓） */
+  const frontmatter = /^\s*---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$)/.exec(result);
+  if (frontmatter !== null) result = result.slice(frontmatter[0].length);
+  if (!result.includes("%%{")) return result;
+  /* 2) init 指令里只换**值** ✓：键可以带引号（`'themeCSS': …`）✓，换完 init 语法仍然成立 ✓ */
+  return result
     .replace(/(['"]?themeCSS['"]?\s*:\s*)(['"])(?:\\.|(?!\2)[^\\])*\2/gi, "$1' '")
-    .replace(/(['"]?htmlLabels['"]?\s*:\s*)(?:true|false)/gi, "$1false");
+    .replace(/(['"]?htmlLabels['"]?\s*:\s*)(?:true|false|"true"|"false"|'true'|'false')/gi, "$1false");
 }
 
 /**
@@ -434,4 +443,72 @@ export function mermaidErrorMessage(error: unknown): string {
   const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() ?? "";
   if (firstLine === "") return "unknown error";
   return firstLine.length > 240 ? `${firstLine.slice(0, 240)}…` : firstLine;
+}
+
+/** 有上限的 LRU 缓存接口 ✓（纯逻辑，便于单测 ✓） */
+export interface BoundedCache {
+  /** 取一条；命中会把该条挪到"最近使用" ✓ */
+  get(key: string): string | undefined;
+  /** 写一条；超上限时淘汰最久未用的 ✓ */
+  set(key: string, value: string): void;
+  /** 当前条目数 ✓ */
+  readonly size: number;
+  /** 当前总字符数 ✓ */
+  readonly chars: number;
+  /** 清空 ✓ */
+  clear(): void;
+}
+
+/**
+ * 建一个**有双重上限的 LRU 缓存** ✓（Mermaid 渲染结果用 ✓）。
+ *
+ * - `maxEntries` / `maxChars` 两个上限谁先到就淘汰谁 ✓；
+ * - **单条超过 `maxItemChars` 不缓存** ✗（一张特别大的图不该把整个预算吃掉 ✓）；
+ * - Map 的插入顺序当 LRU 队列 ✓（命中时删了再塞回末尾 ✓）。
+ *
+ * 为什么抽成纯函数 ✗：淘汰 / 记账 / 超大图跳过这些行为值得单测 ✓，
+ * 而真正用它的渲染器碰 DOM、只能在浏览器里测 ✓。
+ * @param maxEntries - 条目数上限 ✓。
+ * @param maxChars - 总字符数上限 ✓。
+ * @param maxItemChars - 单条字符数上限 ✓。
+ * @returns 缓存对象 ✓。
+ */
+export function createBoundedCache(maxEntries: number, maxChars: number, maxItemChars: number): BoundedCache {
+  const entries = new Map<string, string>();
+  let totalChars = 0;
+  return {
+    get(key) {
+      const hit = entries.get(key);
+      if (hit === undefined) return undefined;
+      entries.delete(key);
+      entries.set(key, hit);
+      return hit;
+    },
+    set(key, value) {
+      if (value.length > maxItemChars) return;
+      const previous = entries.get(key);
+      if (previous !== undefined) {
+        totalChars -= previous.length;
+        entries.delete(key);
+      }
+      entries.set(key, value);
+      totalChars += value.length;
+      while (entries.size > maxEntries || totalChars > maxChars) {
+        const oldest = entries.keys().next().value;
+        if (oldest === undefined) break;
+        totalChars -= entries.get(oldest)?.length ?? 0;
+        entries.delete(oldest);
+      }
+    },
+    get size() {
+      return entries.size;
+    },
+    get chars() {
+      return totalChars;
+    },
+    clear() {
+      entries.clear();
+      totalChars = 0;
+    },
+  };
 }
