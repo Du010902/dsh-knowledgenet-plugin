@@ -106,6 +106,30 @@ const DICT_ZH: Record<string, string> = {
   tableMoveHeader: "表头行不参与移动",
   /* 表头行上方没有可插入的位置 ✓（用户实测 ✓） */
   tableRowBeforeHeader: "第一行是表头，上面没有位置可插入（Markdown 表格的第一行就是表头）",
+  /*
+   * 块插入菜单（`design/editor-block-menu-redesign.md` ✓）：
+   * 触发方式是**右键**与 **＋ 块手柄** ✓（不再靠输入 `/` ✓）；条目 key 与 Crepe 的 buildMenu 一一对应 ✓。
+   */
+  blockMenuLabel: "插入内容",
+  blockMenuGroupInsert: "插入",
+  blockMenuGroupText: "文本",
+  blockMenuGroupList: "列表",
+  blockMenuText: "正文",
+  blockMenuH1: "标题 1",
+  blockMenuH2: "标题 2",
+  blockMenuH3: "标题 3",
+  blockMenuH4: "标题 4",
+  blockMenuH5: "标题 5",
+  blockMenuH6: "标题 6",
+  blockMenuQuote: "引用",
+  blockMenuDivider: "分隔线",
+  blockMenuBulletList: "无序列表",
+  blockMenuOrderedList: "有序列表",
+  blockMenuTaskList: "任务列表",
+  blockMenuImage: "图片",
+  blockMenuCode: "代码块",
+  blockMenuTable: "表格",
+  blockMenuMath: "公式块",
   /* 关系面板（`NoteRelations` ✓）—— 之前是硬编码中文 ✗，英文界面下不会跟着变 ✓ */
   relPre: "前置 {count}",
   relDepend: "被依赖 {count}",
@@ -354,6 +378,27 @@ const DICT_EN: Record<string, string> = {
   tableMoveHeader: "The header row does not move",
   /* There is no position above the header row ✓ */
   tableRowBeforeHeader: "The first row is the header — Markdown has no position above it",
+  /* Block insert menu (design/editor-block-menu-redesign.md; opened by right-click / + handle) */
+  blockMenuLabel: "Insert",
+  blockMenuGroupInsert: "Insert",
+  blockMenuGroupText: "Text",
+  blockMenuGroupList: "List",
+  blockMenuText: "Text",
+  blockMenuH1: "Heading 1",
+  blockMenuH2: "Heading 2",
+  blockMenuH3: "Heading 3",
+  blockMenuH4: "Heading 4",
+  blockMenuH5: "Heading 5",
+  blockMenuH6: "Heading 6",
+  blockMenuQuote: "Quote",
+  blockMenuDivider: "Divider",
+  blockMenuBulletList: "Bullet list",
+  blockMenuOrderedList: "Ordered list",
+  blockMenuTaskList: "Task list",
+  blockMenuImage: "Image",
+  blockMenuCode: "Code block",
+  blockMenuTable: "Table",
+  blockMenuMath: "Formula",
   /* Relations panel ✓ */
   relPre: "Prerequisites {count}",
   relDepend: "Dependents {count}",

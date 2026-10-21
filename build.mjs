@@ -1,4 +1,4 @@
-import { patchCrepeSlashMenu } from "./scripts/slash-menu-patch.mjs";
+import { patchCrepeBlockMenu } from "./scripts/slash-menu-patch.mjs";
 import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
 /**
  * 构建四个产物：
@@ -814,16 +814,16 @@ function panelCssPlugin(css) {
  * 找不到这段就**构建失败**（依赖升级后要么更新补丁、要么确认它已消失 ✓），
  * 与仓库里其它上游补丁一个规矩 ✓。
  */
-function slashMenuPatchPlugin() {
+function blockMenuPatchPlugin() {
   let patched = false;
   return {
-    name: "kn-crepe-slash-menu",
+    name: "kn-crepe-block-menu",
     transform(code, id) {
       if (!id.replace(/\\/g, "/").endsWith("/@milkdown/crepe/lib/esm/index.js")) return null;
       patched = true;
-      return { code: patchCrepeSlashMenu(code), map: null };
+      return { code: patchCrepeBlockMenu(code), map: null };
     },
-    buildEnd(error) { if (!error && !patched) throw Error("Crepe slash menu was not patched."); },
+    buildEnd(error) { if (!error && !patched) throw Error("Crepe block menu was not patched."); },
   };
 }
 
@@ -1392,7 +1392,7 @@ async function buildClient(rolldown, css, workerSource, mermaidRuntimeRev) {
       atAliasPlugin(),
       /* 浏览器产物里清掉 lodash 的 Node 专用探测（它不是宿主基线模块，见插件注释 ✓） */
       browserUtilProbePatchPlugin(),
-      slashMenuPatchPlugin(),
+      blockMenuPatchPlugin(),
     ],
   });
   try {

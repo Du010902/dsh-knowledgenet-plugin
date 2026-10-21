@@ -56,7 +56,15 @@ import {
   parseCodeBlockPayload,
 } from "./code-block-clipboard.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
-import { SLASH_MENU_SLICE, readSlashMenuApi, shouldOpenSlashMenu, prepareSlashInsertion, type SlashMenuApi } from "./slash-menu.ts";
+import { BlockInsertMenu } from "./BlockInsertMenu.tsx";
+import {
+  BLOCK_MENU_LITERAL,
+  prepareAfterBlockInsertion,
+  prepareContextInsertion,
+  readBlockMenuGroups,
+  type BlockMenuItemData,
+  type BlockMenuGroupData,
+} from "./block-insert.ts";
 import {
   MERMAID_ACTION_ATTR,
   MERMAID_BACKGROUND_ATTR,
@@ -675,6 +683,26 @@ interface TableMenuAnchor {
 }
 
 /**
+ * **右键块插入菜单的打开状态** ✓（`design/editor-block-menu-redesign.md` ✓）。
+ *
+ * 三样东西缺一不可：
+ * - `x` / `y`：宿主 Menu 的 portal 定位坐标（视口坐标 = 右键落点 / ＋ 手柄右侧 ✓）；
+ * - `anchor`：文档里准备插入的位置 ✓（选中条目时才真正动文档 ✗ —— 直接 Esc 取消不能改正文 ✓）；
+ * - `mode`：`context` = 右键（能拆段落就拆 ✓）、`after` = ＋ 手柄（总在这一块后面插 ✓）。
+ * `groups` 是打开那一刻的 Crepe 条目快照 ✓（菜单渲染期间不会变 ✓）。
+ */
+interface BlockMenuBlockState {
+  x: number;
+  y: number;
+  anchor: number;
+  mode: "context" | "after";
+  groups: BlockMenuGroupData[];
+}
+
+/** 菜单关闭时的空快照 ✓（常量复用 ⇒ 不因每次渲染新建数组触发菜单重算 ✓） */
+const EMPTY_BLOCK_MENU_GROUPS: BlockMenuGroupData[] = [];
+
+/**
  * 渲染富文本编辑区。
  * @param props.markdown - 初始正文（**只在挂载时**使用 ✓，之后由用户编辑或 syncToken 驱动 ✓）。
  * @param props.onChange - **用户**改动后的 Markdown（初始化/外部同步不会触发 ✓）。
@@ -709,11 +737,11 @@ export function MarkdownRichEditor(props: {
   t?: unknown;
 }): ReactNode {
   /*
-   * 字典 = 表格菜单的字面文案 ✓ + 图片预览的字面文案 ✓。
+   * 字典 = 表格菜单的字面文案 ✓ + 图片预览的字面文案 ✓ + 块插入菜单的字面文案 ✓。
    * 为什么要并进来 ✓：`makeTranslator` 的第三层就是这份 dict ✓ ——
    * 宿主 `t` 与插件 `bind` 都取不到时，界面不能空着 ✓（复查口径 ✓）。
    */
-  const t = useMemo(() => makeTranslator(props.t, { ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL }), [props.t]);
+  const t = useMemo(() => makeTranslator(props.t, { ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL, ...BLOCK_MENU_LITERAL }), [props.t]);
   /** 渲染器 / 事件处理里**现取**文案 ✓（locale 切换后不用重建编辑器 ✓） */
   const tRef = useRef(t);
   tRef.current = t;
@@ -722,11 +750,17 @@ export function MarkdownRichEditor(props: {
   /** ProseMirror 视图（表格命令与"光标在不在表格里"都要用它 ✓） */
   const viewRef = useRef<ProseMirrorView | null>(null);
   /**
-   * Crepe 的**块菜单 API**（`/` 菜单 ✓；拿不到就是 `null` ✓，一切照旧 ✓）。
-   * 见 `slash-menu.ts`：它自带的触发条件在我们的布局里没走到，所以我们**显式叫它** ✓。
+   * Crepe 的**块菜单构建器快照** ✓（右键菜单的条目 / 图标 / 命令都来自它 ✓）。
+   *
+   * 来源是 Crepe 官方配置项 `buildMenu` ✓（见下面 `new Crepe({ featureConfigs })` ✓）；
+   * 上游斜杠 UI 本身被构建补丁关掉 ✗（`scripts/slash-menu-patch.mjs` ✓），
+   * 但这个 builder 仍会在编辑器挂载时被调用一次 ✓ ⇒ 拿到即用 ✓。
    */
-  const slashAnchorRef = useRef<number | null>(null);
-  const slashMenuRef = useRef<SlashMenuApi | null>(null);
+  const blockMenuBuilderRef = useRef<unknown>(null);
+  /** 右键 / ＋ 手柄打开的块菜单（`null` = 没开 ✓） */
+  const [blockMenu, setBlockMenu] = useState<BlockMenuBlockState | null>(null);
+  /** 关闭块菜单是不是因为"点了编辑器外面"✓ —— 决定要不要把焦点抢回正文 ✗（用户可能去点别的面板 ✓） */
+  const blockMenuOutsideRef = useRef(false);
   /** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
   const baselineRef = useRef<((markdown: string) => void) | null>(null);
   /** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
@@ -1139,56 +1173,77 @@ export function MarkdownRichEditor(props: {
     return true;
   }, []);
 
-  /** Open Crepe’s block menu at the current command boundary. */
-  const openSlashMenu = useCallback((pos: number): boolean => {
-    const api = slashMenuRef.current;
-    if (api === null || typeof api.show !== "function") {
-      reportRef.current?.("slash-menu-open", { via: "key", api: "missing" });
-      return false;
+  /**
+   * **关掉块菜单** ✓（Esc / 点外面 / 插入完成都会走这里 ✓）。
+   *
+   * 焦点策略：只有"还留在编辑器里"的关闭才把焦点还给正文 ✓ ——
+   * 点了别的面板（例如右上角设置）时**不许**抢回来 ✗（`blockMenuOutsideRef` 在捕获阶段记下来源 ✓）。
+   */
+  const closeBlockMenu = useCallback((): void => {
+    setBlockMenu(null);
+    if (blockMenuOutsideRef.current) {
+      blockMenuOutsideRef.current = false;
+      return;
     }
-    try {
-      api.show(pos);
-    } catch {
-      reportRef.current?.("slash-menu-open", { via: "key", api: "threw" });
-      return false;
-    }
-    reportRef.current?.("slash-menu-open", { via: "key", api: "shown" });
-    return true;
+    viewRef.current?.focus();
   }, []);
 
   /**
-   * 叫完菜单之后**采一次现场**（诊断用 ✓）：菜单元素在不在、`data-show` 是什么、落在哪、
-   * 有没有落在正文视口里 ✓（不含任何正文 ✗）。
+   * **选中块菜单的一项 ⇒ 准备空段落 ⇒ 执行 Crepe 的同源命令** ✓。
    *
-   * 为什么要有：用户报的是"敲 `/` 没反应"，而"没弹出来"可能是**没叫**、也可能是**叫了但
-   * 被裁在视口外**（我们这里是 Shadow DOM + 滚动容器，位置算错的概率不低 ✓）。
-   * 这两种的修法完全不同 ⇒ 先取一次证据 ✓（`kn_status` 的 `clientDiag` 里能看到 ✓）。
+   * 顺序不能反 ✗：`prepareAfterBlockInsertion` / `prepareContextInsertion` 会派发一次选区事务，
+   * 命令（`setBlockTypeCommand` / `addBlockTypeCommand` …）作用在刚准备好的空段落上 ✓。
    */
-  const probeSlashMenu = useCallback((view: ProseMirrorView): void => {
-    window.setTimeout(() => {
-      const root = hostRef.current;
-      if (root === null) return;
-      const element = root.querySelector<HTMLElement>(".milkdown-slash-menu");
-      if (element === null) {
-        reportRef.current?.("slash-menu-probe", { found: false });
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      const body = root.closest<HTMLElement>(".kn-editor-body") ?? root;
-      const bodyRect = body.getBoundingClientRect();
-      const inView = rect.width > 0 && rect.height > 0
-        && rect.bottom > bodyRect.top && rect.top < bodyRect.bottom
-        && rect.right > bodyRect.left && rect.left < bodyRect.right;
-      reportRef.current?.("slash-menu-probe", {
-        found: true,
-        show: element.dataset.show ?? "",
-        w: Math.round(rect.width),
-        h: Math.round(rect.height),
-        inView,
-        focused: view.hasFocus(),
-      });
-    }, 250);
-  }, []);
+  const runBlockMenuItem = useCallback((key: string): void => {
+    const view = viewRef.current;
+    const crepe = crepeRef.current;
+    const current = blockMenu;
+    setBlockMenu(null);
+    if (view === null || crepe === null || current === null) return;
+    let item: BlockMenuItemData | undefined;
+    for (const group of current.groups) {
+      item = group.items.find((entry) => entry.key === key);
+      if (item !== undefined) break;
+    }
+    if (item === undefined) {
+      reportRef.current?.("block-menu-missing-item", { key });
+      return;
+    }
+    const prepared = current.mode === "after"
+      ? prepareAfterBlockInsertion(view, current.anchor)
+      : prepareContextInsertion(view, current.anchor);
+    if (!prepared) {
+      reportRef.current?.("block-menu-prepare-failed", { key, mode: current.mode });
+      return;
+    }
+    try {
+      crepe.editor.action((ctx: Ctx) => { item.onRun?.(ctx); });
+      reportRef.current?.("block-menu-insert", { key, mode: current.mode });
+    } catch (error) {
+      reportRef.current?.("block-menu-insert-failed", { key, error: String(error) });
+    }
+    if (!view.hasFocus()) view.focus();
+    scheduleMenu();
+  }, [blockMenu, scheduleMenu]);
+
+  /**
+   * 块菜单开着时**记下这次 pointerdown 落在哪** ✓（捕获阶段，早于宿主 Menu 自己的"点外面关掉"✓）。
+   * 宿主菜单 portal 在 body ⇒ 用 `composedPath()` 判"编辑器 / 菜单"最可靠 ✓
+   * （与 `design/table-menu-shadow-dom-review.md` 同一个坑 ✓）。
+   */
+  useEffect(() => {
+    if (blockMenu === null) return undefined;
+    blockMenuOutsideRef.current = false;
+    const onPointerDown = (event: PointerEvent): void => {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const host = hostRef.current;
+      const insideEditor = host !== null && path.includes(host);
+      const insideMenu = path.some((node) => node instanceof Element && node.getAttribute("role") === "menu");
+      blockMenuOutsideRef.current = !insideEditor && !insideMenu;
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => { document.removeEventListener("pointerdown", onPointerDown, true); };
+  }, [blockMenu]);
 
   /**
    * **普通单击 → 直接落下合法文字位置** ✓（`design/table-click-jitter-and-caret-analysis.md` ✓）。
@@ -1405,17 +1460,16 @@ export function MarkdownRichEditor(props: {
        */
       featureConfigs: {
         [CrepeFeature.BlockEdit]: {
+          /*
+           * **块菜单条目来源** ✓（`design/editor-block-menu-redesign.md` ✓）。
+           *
+           * `buildMenu` 是 Crepe 的官方扩展点 ✓；这里只把 builder 快照留下来 ✓ ——
+           * 右键菜单直接复用它的 label / icon /命令（`onRun`）✓，命令行为与旧斜杠菜单完全同源 ✓。
+           * Crepe 自己的斜杠 UI 由构建补丁关掉 ✗（`scripts/slash-menu-patch.mjs` ✓）——
+           * 用户反馈输入 `/` 会误判，所以触发入口只保留**右键**与 **＋ 手柄** ✓。
+           */
           buildMenu: (builder) => {
-            for (const group of builder.build()) for (const item of group.items) {
-              const run = item.onRun;
-              if (!run) continue;
-              item.onRun = (ctx) => {
-                const anchor = slashAnchorRef.current;
-                slashAnchorRef.current = null;
-                if (anchor !== null && !prepareSlashInsertion(ctx.get(editorViewCtx), anchor)) return;
-                run(ctx);
-              };
-            }
+            blockMenuBuilderRef.current = builder;
           },
         },
         [CrepeFeature.CodeMirror]: {
@@ -1650,38 +1704,98 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("click", onBlankAreaFallback);
 
     /*
-     * **`/` 叫出块菜单**（用户实测那条 ✗）：捕获阶段接住 ⇒ 这个按键不再落进正文 ✓。
-     * 段首和文字分隔处唤起；选择菜单项后才分出插入段落，保留已有文字。
+     * **右键 ⇒ 块插入菜单** ✓（用户要求：把 `/` 触发改成右键弹窗 ✓，
+     * `design/editor-block-menu-redesign.md` ✓）。
+     *
+     * 这些位置**不接管** ✓（保留用户熟悉的原有菜单）：
+     * - 表格单元格：表格自己的行列操作菜单（`onTableContext` ✓，README 承诺过 ✓）；
+     * - 代码块 / 图片块：浏览器原生菜单（复制源码、保存图片 ✓）；
+     * - 编辑器里的浮动工具（工具栏 / 链接预览 / 语言选择 / 表格菜单 / 块手柄 ✓）；
+     * - 已有**非空文字选区**：多半是想"复制" ✓；
+     * - 只读 / 初始化中 / 失败 / 条目快照没拿到 ✓（宁可让原生菜单出现，也不弹空菜单 ✗）。
      */
-    const onSlashKey = (event: KeyboardEvent): void => {
-      if (event.key === "Enter") { slashAnchorRef.current = null; return; }
-      if (event.key === "Escape") { slashAnchorRef.current = null; slashMenuRef.current?.hide?.(); return; }
-      if (event.isComposing || props.readOnly || viewRef.current?.composing) return;
-      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+    const onBlockMenuContext = (event: MouseEvent): void => {
       const view = viewRef.current;
-      if (view === null || !readyRef.current || failedRef.current || !view.editable || !view.hasFocus()) return;
-      // Capture runs before ProseMirror's key handler flushes the native caret.
-      const domRoot = view.dom.getRootNode() as Document | (ShadowRoot & { getSelection?: () => Selection | null });
-      const native = domRoot.getSelection?.() ?? view.dom.ownerDocument.getSelection();
-      if (native?.anchorNode && native.focusNode && view.dom.contains(native.anchorNode) && view.dom.contains(native.focusNode)) {
-        const from = view.posAtDOM(native.anchorNode, native.anchorOffset);
-        const to = view.posAtDOM(native.focusNode, native.focusOffset);
-        if (from !== view.state.selection.anchor || to !== view.state.selection.head) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)));
+      if (view === null || !readyRef.current || failedRef.current || readOnlyRef.current) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target === null) return;
+      if (target.closest("td, th")) return;
+      if (target.closest("pre, .milkdown-code-block, .milkdown-image-block, .milkdown-toolbar, .milkdown-link-preview, .milkdown-link-edit, .language-picker, .search-box, .language-list, .milkdown-block-handle, .kn-table-menu")) return;
+      if (!view.state.selection.empty) return;
+      const groups = readBlockMenuGroups(blockMenuBuilderRef.current);
+      if (groups.length === 0) { reportRef.current?.("block-menu-unavailable", { reason: "no-build-menu" }); return; }
+      let anchor = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? null;
+      /*
+       * **正文下方那块空白** ✓：与左键点击同一套「末尾空段落」兜底 ✓
+       * （`trailingParagraphTarget` ✓）—— 那里 `posAtCoords` 给不到可靠位置 ✗。
+       */
+      const last = view.dom.lastElementChild as HTMLElement | null;
+      const lastRect = last === null ? null : last.getBoundingClientRect();
+      if (lastRect !== null && event.clientY > lastRect.bottom) {
+        const trailing = trailingParagraphTarget(view.state);
+        if (trailing !== null) anchor = trailing.pos;
       }
-      const pos = shouldOpenSlashMenu(view.state);
-      if (pos === null) return;
-      if (openSlashMenu(pos)) {
-        slashAnchorRef.current = pos;
-        event.preventDefault();
-        event.stopPropagation();
-        probeSlashMenu(view);
+      if (anchor === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setBlockMenu({ x: event.clientX, y: event.clientY, anchor, mode: "context", groups });
+      reportRef.current?.("block-menu-open", { via: "context", anchor });
+    };
+    root.addEventListener("contextmenu", onBlockMenuContext, true);
+
+    /*
+     * **`＋` 块手柄 ⇒ 同一个块菜单** ✓（`design/editor-block-menu-redesign.md` ✓）。
+     *
+     * 上游的加号按钮原本会"插空段落 → 打开自己的斜杠菜单" ✗；斜杠菜单已被构建补丁关掉 ✓
+     * ⇒ 这里在**捕获阶段**拦下它 ✓（Vue 的处理器挂在按钮自己身上 ✓），改成
+     * "在悬停的顶层块之后插入 + 我们的菜单" ✓。
+     * 第二个 `.operation-item` 是拖拽手柄 ⇒ 不拦 ✓（拖动改顺序照旧 ✓）。
+     */
+    const addButtonOf = (target: EventTarget | null): HTMLElement | null => {
+      if (!(target instanceof Element)) return null;
+      const item = target.closest<HTMLElement>(".milkdown-block-handle .operation-item");
+      if (item === null) return null;
+      const first = item.parentElement?.querySelector<HTMLElement>(".operation-item") ?? null;
+      return first === item ? item : null;
+    };
+    const onBlockHandlePointerDown = (event: PointerEvent): void => {
+      if (readOnlyRef.current || addButtonOf(event.target) === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const onBlockHandlePointerUp = (event: PointerEvent): void => {
+      const button = addButtonOf(event.target);
+      if (button === null || readOnlyRef.current) return;
+      const view = viewRef.current;
+      if (view === null || !readyRef.current || failedRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const groups = readBlockMenuGroups(blockMenuBuilderRef.current);
+      if (groups.length === 0) return;
+      /*
+       * 悬停块 = **垂直中心离手柄最近**的那个顶层块 ✓
+       * （手柄是 floating-ui 贴在那块左边的 ✓，不依赖我们自己的命中算法 ✓）。
+       */
+      const handleRect = button.getBoundingClientRect();
+      const centerY = handleRect.top + handleRect.height / 2;
+      let closest: Element | null = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (const child of Array.from(view.dom.children)) {
+        if (!(child instanceof HTMLElement)) continue;
+        const rect = child.getBoundingClientRect();
+        if (rect.height <= 0) continue;
+        const distance = Math.abs((rect.top + rect.bottom) / 2 - centerY);
+        if (distance < closestDistance) { closest = child; closestDistance = distance; }
       }
+      let anchor = view.state.selection.from;
+      if (closest !== null) {
+        try { anchor = view.posAtDOM(closest, 0); } catch { /* 落回当前选区 ✓ */ }
+      }
+      setBlockMenu({ x: Math.round(handleRect.right + 6), y: Math.round(handleRect.top), anchor, mode: "after", groups });
+      reportRef.current?.("block-menu-open", { via: "handle", anchor });
     };
-    const dismissSlashAnchor = (event: PointerEvent): void => {
-      if (!(event.target instanceof Element) || !event.target.closest(".milkdown-slash-menu")) slashAnchorRef.current = null;
-    };
-    root.addEventListener("pointerdown", dismissSlashAnchor, true);
-    root.addEventListener("keydown", onSlashKey, true);
+    root.addEventListener("pointerdown", onBlockHandlePointerDown, true);
+    root.addEventListener("pointerup", onBlockHandlePointerUp, true);
 
     /*
      * **代码块"复制"改写成多格式剪贴板** ✓
@@ -2015,11 +2129,9 @@ export function MarkdownRichEditor(props: {
         const view = crepe.editor.action((ctx: Ctx) => ctx.get(editorViewCtx) as ProseMirrorView);
         viewRef.current = view;
         /*
-         * 顺手把 **Crepe 的块菜单 API** 拿在手里 ✓（`/` 要显式叫它，理由见 `slash-menu.ts` ✓）。
-         * 拿不到也不影响别的功能 ✓（只是 `/` 菜单继续弹不出来 ✓），所以这里只留痕、不报错 ✓。
+         * 块菜单条目的来源是配置项 `buildMenu` ✓（块菜单打开时从 `blockMenuBuilderRef` 读快照 ✓）——
+         * 这里不用再取任何内部 API ✓（斜杠菜单本身已被构建补丁关掉 ✓）。
          */
-        slashMenuRef.current = crepe.editor.action((ctx: Ctx) => readSlashMenuApi(ctx));
-        reportRef.current?.("slash-menu-api", { found: slashMenuRef.current !== null });
         /*
          * **接在自己的 `handleClick` 上** ✓（`design/table-click-jitter-and-caret-analysis.md`
          * 的建议 1 ✓）：普通单击在 ProseMirror 默认的 `selectClickedLeaf` **之前**就被处理成文字选区 ✓
@@ -2034,7 +2146,7 @@ export function MarkdownRichEditor(props: {
             if (previousClick !== undefined && previousClick.call(view.props, targetView, targetPos, clickEvent) === true) {
               return true;
             }
-            /* 正文下方那块空白：落到末尾的空段落 ✓（`/` 命令在那儿也能用 ✓） */
+            /* 正文下方那块空白：落到末尾的空段落 ✓（右键在那里也能插块 ✓） */
             if (placeTrailingCaret(targetView, clickEvent)) return true;
             return placeTableCaret(targetView, clickEvent);
           },
@@ -2137,8 +2249,9 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
       root.removeEventListener("click", onBlankAreaFallback);
-      root.removeEventListener("pointerdown", dismissSlashAnchor, true);
-    root.removeEventListener("keydown", onSlashKey, true);
+      root.removeEventListener("contextmenu", onBlockMenuContext, true);
+      root.removeEventListener("pointerdown", onBlockHandlePointerDown, true);
+      root.removeEventListener("pointerup", onBlockHandlePointerUp, true);
       root.removeEventListener("click", onCopyClick, true);
       root.removeEventListener("click", onMermaidAction, true);
       root.removeEventListener("click", onImageClick, true);
@@ -2295,6 +2408,19 @@ export function MarkdownRichEditor(props: {
           nodeRef={menuNodeRef}
         />
       )}
+      {/*
+       * **右键 / ＋ 手柄的块插入菜单** ✓：宿主的 `Menu` 自己 portal 到 body、
+       * 自己处理 Esc / 点外面 / 键盘行走 / 视口边缘 ✓ —— 这里只给坐标与条目 ✓。
+       */}
+      <BlockInsertMenu
+        open={blockMenu !== null}
+        x={blockMenu?.x ?? 0}
+        y={blockMenu?.y ?? 0}
+        groups={blockMenu?.groups ?? EMPTY_BLOCK_MENU_GROUPS}
+        t={t}
+        onSelect={runBlockMenuItem}
+        onClose={closeBlockMenu}
+      />
       {lightbox === null ? null : (
         <ImageLightbox
           src={lightbox.src}

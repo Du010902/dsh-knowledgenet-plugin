@@ -33,4 +33,71 @@ declare module "@deepseek-ai/dsh-client-ui-primitives" {
     labels: ImageLightboxLabels;
     onClose: () => void;
   }): any;
+
+  /*
+   * **宿主共享的 Menu** ✓（`packages/client/ui-primitives/src/Menu.tsx` ✓）。
+   *
+   * 本插件只用到"在视口坐标弹一个受控菜单"这一种形态 ✓：`portal` + `getAnchorRect` ✓。
+   * 声明照抄宿主当前实现（安装包 0.2.1-rc.2 的 primitives 导出核对过 ✓），
+   * 类型里出现 `any` 是为了不引入 React 类型依赖 ✓（本仓库 tsconfig 没有 @types/react ✓）。
+   */
+  export interface DshMenuShortcut {
+    keys: readonly string[];
+    aria?: string | undefined;
+  }
+
+  /** 一个可选条目 ✓（`label` / `icon` 是 ReactNode ✓） */
+  export interface DshMenuItemEntry {
+    id: string;
+    label?: any;
+    icon?: any;
+    disabled?: boolean;
+    danger?: boolean;
+    shortcut?: DshMenuShortcut;
+    submenu?: readonly DshMenuItemEntry[];
+  }
+
+  /** 分组标题行（不可选 ✓） */
+  export interface DshMenuLabelEntry {
+    type: "label";
+    id: string;
+    text: string;
+  }
+
+  /** 分隔线（不可选 ✓） */
+  export interface DshMenuSeparatorEntry {
+    type: "separator";
+    id: string;
+  }
+
+  /** 菜单的一行：可选条目 / 标题行 / 分隔线 ✓ */
+  export type DshMenuEntry = DshMenuItemEntry | DshMenuLabelEntry | DshMenuSeparatorEntry;
+
+  /**
+   * 宿主受控菜单 ✓（portal 到 body，`position: fixed` 由宿主算 ✓）。
+   *
+   * 这里只声明插件真正用到的 props ✓：`open` / `anchor` / `items` / `onSelect` / `onClose` +
+   * portal 定位（`portal` / `getAnchorRect` / `side` / `align`）+ 键盘与尺寸（`autoFocus` / `dense`）✓。
+   */
+  export function Menu(props: {
+    open: boolean;
+    anchor: any;
+    items?: readonly DshMenuEntry[];
+    children?: any;
+    footer?: readonly DshMenuEntry[];
+    selectedId?: string | undefined;
+    selectedIds?: readonly string[] | undefined;
+    onSelect?: ((id: string) => void) | undefined;
+    onClose: () => void;
+    align?: "start" | "end";
+    side?: "bottom" | "top" | "right";
+    portal?: boolean;
+    autoFocus?: boolean;
+    dense?: boolean;
+    compact?: boolean;
+    selection?: "check" | "fill";
+    getAnchorRect?: (() => DOMRect | null) | undefined;
+    className?: string | undefined;
+    listClassName?: string | undefined;
+  }): any;
 }

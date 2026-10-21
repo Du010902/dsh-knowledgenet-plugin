@@ -1266,7 +1266,6 @@
 .kn-editor-rich .milkdown-toolbar,
 .kn-editor-rich .milkdown-link-preview,
 .kn-editor-rich .milkdown-link-edit,
-.kn-editor-rich .milkdown-slash-menu,
 .kn-editor-rich .milkdown-block-handle {
   z-index: 5;
 }
