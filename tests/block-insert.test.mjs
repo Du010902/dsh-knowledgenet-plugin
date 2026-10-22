@@ -92,12 +92,17 @@ test('readBlockMenuGroups：合法快照保留分组/键/标签/图标/onRun，�
   assert.deepEqual(readBlockMenuGroups({build:()=>[{key:'text',items:[{key:'h1'}]}]}),[{key:'text',label:'text',items:[{key:'h1',label:'h1',icon:'',onRun:undefined}]}],'缺字段要用 key / 空串兜底');
   for(const bad of [null,undefined,42,'builder',{},{build:()=>'no'},{build(){throw Error('changed')}}])assert.deepEqual(readBlockMenuGroups(bad),[],String(bad)+' 应返回空数组');
 });
-test('文案 key：16 个条目 + 3 个分组全覆盖，未知 key 为 null',()=>{
+test('文案 key：块菜单 16 个条目 + 3 个分组全覆盖；未知/inline-* key 为 null',()=>{
   const texts={text:'blockMenuText',h1:'blockMenuH1',h2:'blockMenuH2',h3:'blockMenuH3',h4:'blockMenuH4',h5:'blockMenuH5',h6:'blockMenuH6',quote:'blockMenuQuote',divider:'blockMenuDivider','bullet-list':'blockMenuBulletList','ordered-list':'blockMenuOrderedList','task-list':'blockMenuTaskList',image:'blockMenuImage',code:'blockMenuCode',table:'blockMenuTable',math:'blockMenuMath'};
   assert.equal(Object.keys(texts).length,16);
   for(const [key,expected] of Object.entries(texts)){assert.equal(blockMenuTextKey(key),expected,'条目 '+key);assert.ok(BLOCK_MENU_LITERAL[expected],'字面兜底缺少 '+expected);}
   for(const [key,expected] of Object.entries({advanced:'blockMenuGroupInsert',text:'blockMenuGroupText',list:'blockMenuGroupList'}))assert.equal(blockMenuGroupTextKey(key),expected,'分组 '+key);
   for(const key of ['unknown','','h7','heading']){assert.equal(blockMenuTextKey(key),null);assert.equal(blockMenuGroupTextKey(key),null);}
+  /* 第四轮：行内格式组从右键菜单删掉 ⇒ 这些 key 不再映射（否则菜单里又会出现一遍）✓ */
+  for(const key of ['inline-bold','inline-italic','inline-strike','inline-code','inline-math','inline-link','inline-clear'])assert.equal(blockMenuTextKey(key),null,'行内格式条目不该再进右键菜单：'+key);
+  assert.equal(blockMenuGroupTextKey('inline'),null,'行内格式分组不该再进右键菜单');
+  /* 但浮动工具栏的标签仍用 BLOCK_MENU_LITERAL 的 inline* 文案 ⇒ 这些兜底不能删 ✓ */
+  for(const key of ['inlineFormat','inlineBold','inlineItalic','inlineStrike','inlineCode','inlineMath','inlineLink','inlineClear'])assert.ok(BLOCK_MENU_LITERAL[key],'工具栏标签兜底不能删：'+key);
 });
 test('themeBlockMenuIcon：给 <svg 补 fill="currentColor"，已有 fill 不重复加',()=>{
   assert.equal(themeBlockMenuIcon(''),'');

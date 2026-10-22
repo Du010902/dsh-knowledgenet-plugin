@@ -131,12 +131,12 @@ function ensureStyle(): void {
     "  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
     "  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
     /*
-     * **浮条与笔记编辑器里的「＋ 添加前置节点」用同一套外观** ✓
+     * **浮条与笔记编辑器里的关系面板按钮用同一套外观** ✓
      * （用户实测要求："添加节点（浮条）的 UI 风格，修改成与文档编辑中添加前置节点一致"✓）。
      *
-     * 参照物 = 编辑区里那颗浮在选区上方的按钮 ✓
-     * （`NoteRelations` 的 `.kn-note-selection` ✓，样式在 `panel.css` 的
-     * `.kn-note-relations button` / `.kn-note-relations .kn-note-selection` ✓）：
+     * 参照物 = `NoteRelations` 里的按钮 ✓（样式在 `panel.css` 的 `.kn-note-relations button` ✓）。
+     * 注：以前那颗"贴着选区的浮钮"（`.kn-note-selection`）已并进编辑器浮动工具栏 ✗ ——
+     * 两块浮层会互相遮挡（用户截图 ✓），`panel.css` 里不再有那条样式 ✓。
      * 圆角**矩形**（不是 999px 胶囊 ✗）、`bg-layer-1` 底、`border-l2` 细边、
      * 更柔的投影（`0 3px 12px 12%` ✗ 不是 `0 6px 20px 28%`）、12px 字、`5px 8px` 内边距 ✓。
      * 数值两边保持一致 ✓（`tests/selection-action-style.test.mjs` 会逐项比对 ✗ 防止再次跑偏 ✓）。

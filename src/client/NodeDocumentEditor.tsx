@@ -110,6 +110,14 @@ export function NodeDocumentEditor(props: {
   const [confirmAdopt, setConfirmAdopt] = useState(false);
   /** 复制草稿的反馈（null = 还没复制过 ✓） */
   const [noteSelection, setNoteSelection] = useState<{ text: string; top: number; left: number } | null>(null);
+  /**
+   * **「选中文字 ⇒ 浮动工具栏 ⇒ ＋ 添加前置节点」的请求** ✓（`design/inline-format-fix.md` §2.6 ✓）。
+   *
+   * 为什么不用"贴着选区的浮钮" ✗：它和格式化工具栏互相遮挡（用户截图 ✓）⇒ 功能并进同一个工具栏 ✓，
+   * 这里用 `nonce` 把"要打开添加前置面板 + 选中原文"传给 `NoteRelations` ✓。
+   */
+  const [addPrerequisiteRequest, setAddPrerequisiteRequest] = useState<{ text: string; nonce: number } | null>(null);
+  const addPrerequisiteNonceRef = useRef(0);
   const [copyState, setCopyState] = useState<"done" | "failed" | null>(null);
   /**
    * **当下这份状态**（每次渲染都刷新 ✓）。
@@ -797,7 +805,7 @@ export function NodeDocumentEditor(props: {
         </h2>
         {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
         {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
-        <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} />
+        <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>
@@ -986,6 +994,16 @@ export function NodeDocumentEditor(props: {
                  * 下面那条提示里就给一个"作为代码块插入"的一键补救 ✓（可撤销 ✓）。
                  */
                 onSelectionText={setNoteSelection}
+                /*
+                 * **选中文字 ⇒ 浮动工具栏的「＋ 添加前置节点」** ✓：把选中原文与一次 nonce 交给关系面板 ✓
+                 * （工具栏和选区浮钮以前会互相遮挡 ✗ —— 现在只有一个工具栏 ✓）。
+                 */
+                onAddPrerequisite={(text) => {
+                  const trimmed = text.trim();
+                  if (trimmed === "") return;
+                  addPrerequisiteNonceRef.current += 1;
+                  setAddPrerequisiteRequest({ text: trimmed, nonce: addPrerequisiteNonceRef.current });
+                }}
                 onPasteText={(text) => { setLastPaste(text); }}
                 t={props.t}
                 /*

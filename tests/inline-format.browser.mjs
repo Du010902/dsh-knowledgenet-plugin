@@ -1,10 +1,14 @@
 /**
  * **行内格式（真实面板）浏览器 E2E** —— `design/inline-format-fix.md`。
  *
- * 旧版 `inline-format.browser.mjs` 只直接调命令（命令本身能跑通，但用户实测"UI 里没反应" ✗）。
- * 这里改成**真实面板级**驱动（骨架同 `tests/note-images.browser.mjs`）：
+ * 第四轮用户反馈之后：右键菜单里的「行内格式」组已删掉（和"选中文字后的浮动工具栏"重复 ✗），
+ * 行内格式只走**划词选中 → 浮动工具栏**（8 个按钮 = 加粗/斜体/删除线/行内代码/行内公式/链接/
+ * 清除格式/＋添加前置节点）+ 快捷键；右键菜单恢复成纯块插入 ✓。
+ *
+ * 这里用**真实面板级**驱动（骨架同 `tests/note-images.browser.mjs`）：
  * 造 v3 库 → 真实 `GraphPanel` + 假 `/api/` → 搜索节点 → 「编辑笔记」→ 在**真实编辑器 UI** 上
- * 右键/工具栏/种子输入，再用 Ctrl+S 的**保存请求正文**核对 Markdown。
+ * 划词、点工具栏、填链接，再用 Ctrl+S 的**保存请求正文**核对 Markdown；最后反向断言
+ * 右键菜单里**不再**出现行内格式组/条目（仍是图片/代码块/表格/公式块…）。
  *
  * 宿主 `@deepseek-ai/dsh-client-ui-primitives` 的两件组件由模块表注入替身：
  * - `Menu`：portal 到 body、role=menu/menuitem、Esc / 点外面 onClose、getAnchorRect（定位夹进视口）；
@@ -304,7 +308,6 @@ async function diagnostics(harness, error) {
       editor: window.__knTest.deepOne('.kn-editor-rich .ProseMirror')?.innerText,
       html: window.__knTest.deepOne('.kn-editor-rich .ProseMirror')?.innerHTML.slice(0, 1200),
       menu: window.__knTest.deepOne('[data-kn-block-menu]')?.innerText ?? null,
-      hint: window.__knTest.deepOne('.kn-inline-hint')?.innerText ?? null,
       toolbar: window.__knTest.deepOne('.milkdown-toolbar')?.innerText ?? null,
       latex: window.__knTest.deepOne('.milkdown-latex-inline-edit')?.dataset.show ?? null,
       linkEdit: window.__knTest.deepOne('.milkdown-link-edit')?.innerText ?? null,
@@ -314,164 +317,250 @@ async function diagnostics(harness, error) {
   throw error;
 }
 
-describe('行内格式（真实面板 UI）', () => {
-  it('a. 光标处右键 ⇒ 「行内格式」组 + 7 个中文条目，且不拆段落', async () => {
+describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', () => {
+  it('a. 划词选中文字 ⇒ 浮动工具栏 8 个按钮（中文 title，含 clear 与「添加前置节点」）', async () => {
     const harness = await startHarness();
     try {
       await harness.openNote();
-      const box = await harness.paragraph().boundingBox();
-      assert.notEqual(box, null, '正文段落要有布局盒子');
-      const point = {x: box.x + Math.min(12, box.width / 3), y: box.y + box.height / 2};
-      await harness.page.mouse.click(point.x, point.y);
-      await harness.page.waitForTimeout(80);
-      await harness.page.mouse.click(point.x, point.y, {button: 'right'});
-      await harness.menu.waitFor({state: 'visible', timeout: 8000});
-
-      const text = await harness.menu.innerText();
-      assert.ok(text.includes('行内格式'), `菜单要有「行内格式」分组标题：${JSON.stringify(text)}`);
-      const items = await harness.menu.locator('[role="menuitem"]').allTextContents();
-      assert.deepEqual(
-        items.slice(0, 7),
-        ['加粗', '斜体', '删除线', '行内代码', '行内公式', '链接', '清除文字格式'],
-        `行内格式组应排最前且 7 项齐全（实际 ${JSON.stringify(items)}）`,
-      );
-      const editorText = await harness.editor().innerText();
-      assert.equal(editorText, BODY, '打开菜单不能改正文');
-      assert.equal(await harness.editor().evaluate(el => el.children.length), 1, '行内菜单不能拆段落（body 仍是一个 p）');
-      assert.deepEqual(harness.pageErrors, []);
-    } catch (error) { await diagnostics(harness, error); }
-    finally { await harness.close(); }
-  });
-
-  it('b. 点「加粗」⇒ 短提示 + 输入 X 得到 <strong>X</strong>，保存的 Markdown 含 **X**', async () => {
-    const harness = await startHarness();
-    try {
-      await harness.openNote();
-      await harness.rightClickInParagraph();
-      await harness.clickMenuItem('加粗');
-      const hint = harness.page.locator('.kn-inline-hint');
-      await hint.waitFor({state: 'visible', timeout: 3000});
-      assert.match(await hint.innerText(), /已开启加粗/, '空光标加粗要给短提示');
-      await harness.page.keyboard.type('X');
-      await harness.page.waitForFunction(() =>
-        window.__knTest.deepOne('.kn-editor-rich .ProseMirror strong')?.textContent === 'X', undefined, {timeout: 5000});
-      const saved = await harness.saveNow();
-      assert.ok(saved.includes('**X**'), `保存的 Markdown 要含 **X**：${JSON.stringify(saved)}`);
-      await harness.reloadEditor();
-      assert.equal(await harness.editor().locator('strong').textContent(), 'X', '重新载入后加粗标记仍在');
-      assert.deepEqual(harness.pageErrors, []);
-    } catch (error) { await diagnostics(harness, error); }
-    finally { await harness.close(); }
-  });
-
-  it('c. 点「行内代码」⇒ 占位 <code>代码</code>，连续键入 YZ 后整段都在 code 里，Markdown 含 `YZ`', async () => {
-    const harness = await startHarness();
-    try {
-      await harness.openNote();
-      await harness.rightClickInParagraph();
-      await harness.clickMenuItem('行内代码');
-      const code = harness.editor().locator('code');
-      await code.waitFor({state: 'visible', timeout: 5000});
-      assert.equal(await code.textContent(), '代码', '空光标要插入被选中的占位文字');
-      /* 连敲两个字符：`inlineCode` 是 inclusive:false，第二字会落在标记右边界外 ✗ ——
-         插件用"光标没挪开就继续带标记插入"补上了，这里就是钉这条（verify 复核建议 ✓）。*/
-      await harness.page.keyboard.type('YZ');
-      await harness.page.waitForFunction(() =>
-        window.__knTest.deepOne('.kn-editor-rich .ProseMirror code')?.textContent === 'YZ', undefined, {timeout: 5000});
-      const saved = await harness.saveNow();
-      assert.ok(saved.includes('`YZ`'), `保存的 Markdown 要含 \`YZ\`：${JSON.stringify(saved)}`);
-      assert.deepEqual(harness.pageErrors, []);
-    } catch (error) { await diagnostics(harness, error); }
-    finally { await harness.close(); }
-  });
-
-  it('d. 点「行内公式」⇒ 编辑框出现且已聚焦；输入 x^2 + Enter，保存含 $x^2$，重载后仍在', async () => {
-    const harness = await startHarness();
-    try {
-      await harness.openNote();
-      await harness.rightClickInParagraph();
-      await harness.clickMenuItem('行内公式');
-      const latex = harness.page.locator('.milkdown-latex-inline-edit[data-show="true"]');
-      await latex.waitFor({state: 'visible', timeout: 8000});
-      const focused = await harness.page.evaluate(() => {
-        const inner = window.__knTest.deepOne('.milkdown-latex-inline-edit .ProseMirror');
-        return inner !== null && inner === inner.getRootNode().activeElement;
-      });
-      assert.equal(focused, true, '插入空公式后编辑框要自动获得焦点');
-      await harness.page.keyboard.type('x^2');
-      await harness.page.keyboard.press('Enter');
-      await harness.page.waitForTimeout(300);
-      const saved = await harness.saveNow();
-      assert.match(saved, /\$x\^2\$/, `保存的 Markdown 要含 $x^2$：${JSON.stringify(saved)}`);
-      await harness.reloadEditor();
-      await harness.page.locator('.kn-editor-rich .katex, .kn-editor-rich [data-type="math_inline"]').first().waitFor({state: 'visible', timeout: 8000});
-      assert.deepEqual(harness.pageErrors, []);
-    } catch (error) { await diagnostics(harness, error); }
-    finally { await harness.close(); }
-  });
-
-  it('e. 点「链接」⇒ 输入框占位符是中文「粘贴链接…」，输入 URL + Enter 落成链接', async () => {
-    const harness = await startHarness();
-    try {
-      await harness.openNote();
-      await harness.rightClickInParagraph();
-      await harness.clickMenuItem('链接');
-      const input = harness.page.locator('.milkdown-link-edit .input-area');
-      await input.waitFor({state: 'visible', timeout: 8000});
-      assert.equal(await input.getAttribute('placeholder'), '粘贴链接…', '链接输入框占位符要中文');
-      await input.fill('https://example.com');
-      await input.press('Enter');
-      await harness.page.waitForTimeout(300);
-      const saved = await harness.saveNow();
-      assert.ok(saved.includes('https://example.com'), `保存的 Markdown 要含链接地址：${JSON.stringify(saved)}`);
-      assert.deepEqual(harness.pageErrors, []);
-    } catch (error) { await diagnostics(harness, error); }
-    finally { await harness.close(); }
-  });
-
-  it('f. 选中文字 ⇒ 悬浮工具栏 7 个中文 title（含 clear）；点 clear 去掉 strong', async () => {
-    const harness = await startHarness();
-    try {
-      await harness.openNote();
-      await selectAll(harness);
-      const toolbar = harness.page.locator('.milkdown-toolbar[data-show="true"]');
-      await toolbar.waitFor({state: 'visible', timeout: 8000});
+      const toolbar = await showToolbar(harness);
       const buttons = toolbar.locator('button[data-toolbar-item]');
-      assert.equal(await buttons.count(), 7, '工具栏要有 7 个按钮（加粗/斜体/删除线/行内代码/行内公式/链接/清除格式）');
-      const titles = await buttons.evaluateAll(els => els.map(el => el.getAttribute('title') ?? ''));
-      for (const title of titles) assert.ok(/[\u4e00-\u9fff]/.test(title), `按钮 title 要是中文：${JSON.stringify(title)}`);
-      for (const want of ['加粗', '斜体', '删除线', '行内代码', '行内公式', '链接', '清除文字格式']) {
-        assert.ok(titles.some(title => title.startsWith(want)), `工具栏缺中文 title「${want}」：${JSON.stringify(titles)}`);
-      }
+      assert.equal(await buttons.count(), 8, '工具栏要有 8 个按钮（加粗/斜体/删除线/行内代码/行内公式/链接/清除格式/添加前置节点）');
       assert.deepEqual(
         await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-toolbar-item'))),
-        ['bold', 'italic', 'strikethrough', 'code', 'latex', 'link', 'clear'],
-        '工具栏 7 个按钮（含 clear）',
+        ['bold', 'italic', 'strikethrough', 'code', 'latex', 'link', 'clear', 'add-prerequisite'],
+        '工具栏 8 个按钮（含 clear 与 add-prerequisite）',
       );
-      await toolbar.locator('button[data-toolbar-item="bold"]').click();
-      await harness.page.waitForTimeout(200);
-      assert.equal(await harness.editor().locator('strong').first().textContent(), BODY, '点加粗要给整段加 <strong>');
+      const titles = await buttons.evaluateAll(els => els.map(el => el.getAttribute('title') ?? ''));
+      for (const title of titles) assert.ok(/[\u4e00-\u9fff]/.test(title), `按钮 title 要是中文：${JSON.stringify(title)}`);
+      for (const want of ['加粗', '斜体', '删除线', '行内代码', '行内公式', '链接', '清除文字格式', '添加前置节点']) {
+        assert.ok(titles.some(title => title.includes(want)), `工具栏缺中文 title「${want}」：${JSON.stringify(titles)}`);
+      }
+      assert.equal(await harness.page.locator('.kn-note-selection').count(), 0, '选区旁不许再有独立的旧浮钮（已并进工具栏）');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('b. 工具栏「加粗 / 清除格式」：选区加粗落盘 **，clear 后去掉且 Markdown 同步', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      const before = await editorShape(harness);
+      await clickToolbar(harness, 'bold');
+      assert.equal(await harness.editor().locator('strong').first().textContent(), BODY, '选中文字加粗 ⇒ <strong>前文后文</strong>');
+      assert.deepEqual(await editorShape(harness), before, '点工具栏按钮不能插入多余空段落 / 不能改正文结构');
       const boldSaved = await harness.saveNow();
       assert.ok(boldSaved.includes('**'), `加粗后保存的 Markdown 要含 **：${JSON.stringify(boldSaved)}`);
-      if (!(await harness.page.locator('.milkdown-toolbar[data-show="true"]').isVisible().catch(() => false))) {
-        await selectAll(harness);
-        await harness.page.locator('.milkdown-toolbar[data-show="true"]').waitFor({state: 'visible', timeout: 8000});
-      }
-      await harness.page.locator('.milkdown-toolbar[data-show="true"] button[data-toolbar-item="clear"]').click();
-      await harness.page.waitForTimeout(200);
+
+      const toolbar = await showToolbar(harness);
+      await toolbar.locator('button[data-toolbar-item="clear"]').click();
+      await harness.page.waitForTimeout(250);
       assert.equal(await harness.editor().locator('strong').count(), 0, '点 clear 要把选中文字的 strong 去掉');
+      assert.deepEqual(await editorShape(harness), before, 'clear 之后文档结构仍是原来的单段');
       const clearedSaved = await harness.saveNow();
       assert.ok(!clearedSaved.includes('**'), `清除格式后保存的 Markdown 不能还有 **：${JSON.stringify(clearedSaved)}`);
       assert.deepEqual(harness.pageErrors, []);
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }
   });
+
+  it('c. 工具栏「行内代码」：选中文字 ⇒ <code>前文后文</code>，保存 Markdown 含反引号', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      const before = await editorShape(harness);
+      await clickToolbar(harness, 'code');
+      const code = harness.editor().locator('code');
+      await code.waitFor({state: 'visible', timeout: 5000});
+      assert.equal(await code.textContent(), BODY, '选中文字应整段变成行内代码');
+      assert.deepEqual(await editorShape(harness), before, '点「行内代码」不能插入多余空段落');
+      const saved = await harness.saveNow();
+      assert.ok(saved.includes('`' + BODY + '`'), `保存的 Markdown 要含 \`前文后文\`：${JSON.stringify(saved)}`);
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('d. 工具栏「行内公式」：选中文字 ⇒ 转 inline math，保存 Markdown 含 $前文后文$', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      const before = await editorShape(harness);
+      await clickToolbar(harness, 'latex');
+      await harness.page.waitForTimeout(500);
+      const after = await editorShape(harness);
+      assert.equal(after.blocks, before.blocks, '点「行内公式」不能插入多余空段落（块数不变）');
+      const math = await harness.page.evaluate(() => ({
+        nodes: window.__knTest.deepAll('.kn-editor-rich [data-type="math_inline"]').length,
+        katex: window.__knTest.deepAll('.kn-editor-rich .katex').length,
+      }));
+      assert.ok(math.nodes >= 1 || math.katex >= 1, `选区应转成行内公式：${JSON.stringify(math)}`);
+      const saved = await harness.saveNow();
+      assert.ok(saved.includes('$' + BODY + '$'), `保存的 Markdown 要含 $前文后文$：${JSON.stringify(saved)}`);
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('d2. 行内公式编辑小浮窗：确认按钮自适应宽度、文字不换行（用户截图回归）', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      await clickToolbar(harness, 'latex');
+      await harness.page.waitForTimeout(500);
+      /* 点刚转出来的行内公式 ⇒ Crepe 的行内编辑小浮窗出现（真实面板 + shadow DOM 穿透 ✓） */
+      const math = harness.page.locator('.kn-editor-rich [data-type="math_inline"]').first();
+      await math.click();
+      await harness.page.waitForTimeout(400);
+      const metrics = await harness.page.evaluate(() => {
+        const tip = window.__knTest.deepOne('.kn-editor-rich .milkdown-latex-inline-edit[data-show="true"]');
+        if (tip === null) return null;
+        const button = tip.querySelector('.container button');
+        if (button === null) return null;
+        const rect = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return {
+          text: button.textContent,
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          whiteSpace: style.whiteSpace,
+          scrollHeight: button.scrollHeight,
+          clientHeight: button.clientHeight,
+        };
+      });
+      assert.notEqual(metrics, null, '行内公式编辑小浮窗要出现（否则无法验证按钮布局）');
+      assert.equal(metrics.text, '完成', '确认按钮文案是「完成」');
+      /*
+       * 用户截图：Crepe 主题把按钮写死 24×24（图标位）⇒ 中文被挤成竖排 ✗。
+       * 现在应是正常文字按钮：自适应宽度（≥40）、文字单行（nowrap、scrollHeight 不超过 clientHeight）✓。
+       */
+      assert.ok(metrics.width >= 40, `确认按钮要自适应宽度（≥40px）：${JSON.stringify(metrics)}`);
+      assert.ok(metrics.height >= 22 && metrics.height <= 32, `确认按钮高度要正常（22–32px）：${JSON.stringify(metrics)}`);
+      assert.equal(metrics.whiteSpace, 'nowrap', '确认按钮文字不能换行');
+      assert.ok(metrics.scrollHeight <= metrics.clientHeight + 1, `「完成」不能折成两行：${JSON.stringify(metrics)}`);
+      /*
+       * 用户要求：点「完成」后小浮窗要**消失** ✓（Crepe 自己只更新公式值、不隐藏浮窗 ✗）。
+       * 插件在确认后把选区挪到公式后面 ⇒ 浮窗收起、焦点回正文 ✓。
+       */
+      const confirm = harness.page.locator('.kn-editor-rich .milkdown-latex-inline-edit .container button').first();
+      await confirm.click();
+      await harness.page.waitForTimeout(400);
+      const dismissed = await harness.page.evaluate(() => {
+        const tip = window.__knTest.deepOne('.kn-editor-rich .milkdown-latex-inline-edit');
+        if (tip === null) return null;
+        /* 面板在 shadow DOM 里：焦点要按"编辑器所在文档树的 activeElement"判断 ✓ */
+        const editor = window.__knTest.deepOne('.kn-editor-rich .ProseMirror');
+        const focusRoot = editor === null ? null : editor.getRootNode();
+        return {
+          show: tip.getAttribute('data-show'),
+          display: getComputedStyle(tip).display,
+          focused: editor !== null && focusRoot !== null && focusRoot.activeElement === editor,
+        };
+      });
+      assert.notEqual(dismissed, null, '小浮窗节点应仍在 DOM 里（只是隐藏）');
+      assert.notEqual(dismissed.show, 'true', '点「完成」后小浮窗必须收起（data-show 不能还是 true）');
+      assert.equal(dismissed.display, 'none', '点「完成」后小浮窗必须隐藏（display none）');
+      assert.equal(dismissed.focused, true, '点「完成」后焦点要回到正文，方便继续输入');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('e. 工具栏「链接」：输入框中文占位 + URL 落盘，选中文字成为链接文字', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      const before = await editorShape(harness);
+      await clickToolbar(harness, 'link');
+      await harness.page.waitForTimeout(300);
+      const input = harness.page.locator('.milkdown-link-edit .input-area');
+      /* Lead 已修「点工具栏被当成点下方空白」⇒ 输入框必须一直可见、文档不能多出空段落 ✓ */
+      await input.waitFor({state: 'visible', timeout: 8000});
+      assert.equal(await input.isVisible(), true, '链接输入框不能一闪而过（点工具栏不该被当成点正文下方空白）');
+      assert.equal(await input.getAttribute('placeholder'), '粘贴链接…', '链接输入框占位符要中文');
+      assert.deepEqual(await editorShape(harness), before, '点「链接」不能插入多余空段落 / 不能改正文');
+      await input.fill('https://example.com');
+      await input.press('Enter');
+      await harness.page.waitForTimeout(300);
+      const saved = await harness.saveNow();
+      assert.ok(saved.includes('https://example.com'), `保存的 Markdown 要含链接地址：${JSON.stringify(saved)}`);
+      assert.ok(saved.includes('前文后文'), '选中文字要成为链接文字');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('f. 工具栏「＋ 添加前置节点」：打开关系面板并预填选中原文', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      const before = await editorShape(harness);
+      await clickToolbar(harness, 'add-prerequisite');
+      const popover = harness.page.locator('.kn-note-relations-popover');
+      await popover.waitFor({state: 'visible', timeout: 8000});
+      assert.ok((await popover.innerText()).includes('添加前置'), '关系面板要切到「添加前置」✓');
+      assert.equal(await popover.locator('input').inputValue(), BODY, '标题要预填**选中的原文** ✓');
+      assert.deepEqual(await editorShape(harness), before, '点「添加前置节点」不能插入多余空段落');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('g. 右键菜单反向断言：不再有「行内格式」组/条目，仍是纯块插入菜单', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      await rightClickBlockMenu(harness);
+      const menuText = await harness.menu.innerText();
+      for (const gone of ['行内格式', '加粗', '斜体', '删除线', '行内代码', '行内公式', '清除文字格式']) {
+        assert.ok(!menuText.includes(gone), `右键菜单不该再有行内格式内容「${gone}」：${JSON.stringify(menuText)}`);
+      }
+      const items = await harness.menu.locator('[role="menuitem"]').allTextContents();
+      for (const want of ['图片', '代码块', '表格', '公式块']) {
+        assert.ok(items.includes(want), `右键菜单仍应是块插入菜单（缺「${want}」）：${JSON.stringify(items)}`);
+      }
+      for (const group of ['插入', '文本', '列表']) assert.ok(menuText.includes(group), `块菜单分组「${group}」要保留：${JSON.stringify(menuText)}`);
+      assert.equal(await harness.editor().evaluate(el => el.children.length), 1, '块菜单不能拆段落');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
 });
 
-/** 选中正文整段（Home → Shift+End）⇒ 触发 Crepe 悬浮工具栏 */
-async function selectAll(harness) {
+/** 编辑器块结构（块数 + 文本）：钉住"点工具栏不会插入多余空段落" ✓（忽略 Crepe 的 placeholder 装饰节点 ✓） */
+async function editorShape(harness) {
+  return harness.editor().evaluate(el => {
+    const blocks = [...el.children].filter(child => !child.classList.contains('crepe-placeholder'));
+    return {blocks: blocks.length, text: blocks.map(child => child.textContent).join('\n').trim()};
+  });
+}
+
+/** 划词选中正文整段并等浮动工具栏出现（click 后等 300ms 避开既有选区时序 flake ✓） */
+async function showToolbar(harness) {
   await harness.paragraph().click();
+  await harness.page.waitForTimeout(300);
   await harness.page.keyboard.press('Home');
   await harness.page.keyboard.press('Shift+End');
   await harness.page.waitForTimeout(150);
+  const toolbar = harness.page.locator('.milkdown-toolbar[data-show="true"]');
+  await toolbar.waitFor({state: 'visible', timeout: 8000});
+  return toolbar;
+}
+
+/** 划词 + 点工具栏某一项（命令只作用于选区 ✓） */
+async function clickToolbar(harness, item) {
+  const toolbar = await showToolbar(harness);
+  await toolbar.locator('button[data-toolbar-item="' + item + '"]').click();
+  await harness.page.waitForTimeout(250);
+}
+
+/** 光标收进段落（无选区）后右键 ⇒ 块插入菜单 */
+async function rightClickBlockMenu(harness) {
+  const box = await harness.paragraph().boundingBox();
+  assert.notEqual(box, null, '正文段落要有布局盒子');
+  const point = {x: box.x + Math.min(12, box.width / 3), y: box.y + box.height / 2};
+  await harness.page.mouse.click(point.x, point.y);
+  await harness.page.waitForTimeout(300);
+  await harness.page.mouse.click(point.x, point.y, {button: 'right'});
+  await harness.menu.waitFor({state: 'visible', timeout: 8000});
 }

@@ -21,9 +21,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import {
   INLINE_FORMAT_LITERAL,
-  inlineFormatGroup,
-  prepareInlineFormat,
-  resolveInlineAnchorPos,
+  clearInlineFormat,
 } from "./inline-format.ts";
 import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
@@ -40,7 +38,7 @@ import {
 import { deleteColumn, deleteRow, deleteTable } from "@milkdown/kit/prose/tables";
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
 import type { Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
-import { TextSelection } from "@milkdown/kit/prose/state";
+import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { replaceAll } from "@milkdown/kit/utils";
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
@@ -57,10 +55,13 @@ import {
   codeBlockHtml,
   encodeCodeBlockPayload,
   codeBlockFromClipboardHtml,
+  codeBlockFromPlainText,
+  codeBlockFromRichHtml,
   formulaFromPlainText,
   insideCodeBlock,
   parseCodeBlockPayload,
 } from "./code-block-clipboard.ts";
+import { unwrapBlockquoteTransaction } from "./blockquote-escape.ts";
 import { TableEntry, TableMenu } from "./TableMenu.tsx";
 import { BlockInsertMenu } from "./BlockInsertMenu.tsx";
 import {
@@ -549,6 +550,35 @@ function insertCodeBlockNode(view: ProseMirrorView, payload: { language: string;
   if (type === undefined) return;
   const text = payload.code === "" ? undefined : view.state.schema.text(payload.code);
   const node = type.create(payload.language === "" ? null : { language: payload.language }, text);
+  /*
+   * **在表格里粘贴代码块** ⇒ 插到**整张表之后** ✓。
+   *
+   * 为什么不能直接 `replaceSelectionWith` ✗：表格单元格里放不下块级节点 ⇒ ProseMirror 会把
+   * **整张表拆成两半**（实测：表头 + 前半行、代码块、后半张表 ✗ —— 用户粘代码时最怕这种结构破坏 ✗）。
+   * 与块插入菜单"表格这类拆不开的块 ⇒ 插到这一块之后"同一条口径 ✓（`design/editor-block-menu-redesign.md`）。
+   */
+  const tableBlock = selectionTableBlock(view);
+  if (tableBlock !== null) {
+    let tablePos = view.posAtDOM(tableBlock, 0);
+    let tableNode = view.state.doc.nodeAt(tablePos);
+    if (tableNode === null || tableNode.type.name !== "table") {
+      tablePos -= 1;
+      tableNode = view.state.doc.nodeAt(tablePos);
+    }
+    if (tableNode === null) {
+      /* 正常路径拿不到表格节点（防御性回退）⇒ 插到文档末尾，也不能走 `replaceSelectionWith` 把表拆开 ✗ */
+      const end = view.state.doc.content.size;
+      const fallback = view.state.tr.insert(end, node);
+      fallback.setSelection(TextSelection.near(fallback.doc.resolve(end + 1)));
+      view.dispatch(fallback.scrollIntoView());
+      return;
+    }
+    const after = tablePos + tableNode.nodeSize;
+    const transaction = view.state.tr.insert(after, node);
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(Math.min(after + 1, transaction.doc.content.size))));
+    view.dispatch(transaction.scrollIntoView());
+    return;
+  }
   view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
 }
 
@@ -703,16 +733,35 @@ interface BlockMenuBlockState {
   anchor: number;
   mode: "context" | "after";
   groups: BlockMenuGroupData[];
-  /**
-   * **行内动作的合法位置** ✓：右键落点可能落在块边界（段落左右留白 / 空行末尾），
-   * 那里 `doc.resolve(pos).parent` 是 `doc` 而不是段落 ✗ ⇒ 行内命令会 prepare 失败、
-   * 看起来"点了没反应" ✓。打开菜单时用 `resolveInlineAnchorPos` 另算一份并存在这里 ✓。
-   */
-  inlineAnchor?: number;
 }
 
 /** 菜单关闭时的空快照 ✓（常量复用 ⇒ 不因每次渲染新建数组触发菜单重算 ✓） */
 const EMPTY_BLOCK_MENU_GROUPS: BlockMenuGroupData[] = [];
+
+/**
+ * **编辑器自己的浮动 UI / 菜单 / 手柄** ✓（点它们不算"点正文" ✓）。
+ *
+ * 用途：
+ * - 右键菜单不接管这些位置 ✓（保留原生 / 它们自己的菜单 ✓）；
+ * - "点正文下方空白 ⇒ 落到末尾空段落"不接管这些位置 ✓；
+ * - `pointerdown` 时记下"这次按下是不是落在浮动 UI 上"✓ —— 用来处理
+ *   "点了工具栏按钮 ⇒ 工具栏随即隐藏 ⇒ 同一坐标的 click 落到空白上"的时序 ✗
+ *   （实测会把链接输入框一闪关掉 ✗，见 `design/inline-format-fix.md` §8.5 ✓）。
+ */
+const EDITOR_FLOATING_UI_SELECTOR = [
+  ".milkdown-toolbar",
+  ".milkdown-link-edit",
+  ".milkdown-link-preview",
+  ".milkdown-latex-inline-edit",
+  ".language-picker",
+  ".search-box",
+  ".language-list",
+  ".milkdown-block-handle",
+  ".kn-table-menu",
+  ".kn-block-menu",
+  "[data-kn-block-menu]",
+  ".milkdown-slash-menu",
+].join(", ");
 
 /**
  * 渲染富文本编辑区。
@@ -742,6 +791,14 @@ export function MarkdownRichEditor(props: {
    * 万一被拆成段落 + `Text` 块（截图那样 ✓），提示条上还能一键"作为代码块插入"✓。
    */
   onSelectionText?: (selection: { text: string; top: number; left: number } | null) => void;
+  /**
+   * **「＋ 添加前置节点」从浮动工具栏触发** ✓（`design/inline-format-fix.md` §2.6 ✓）。
+   *
+   * 以前这是贴着选区的单独浮钮（`.kn-note-selection`）✗ —— 和格式化工具栏都浮在选区上方，
+   * **两块互相遮挡**（用户截图 ✓）。现在并进同一个工具栏 ✓：这里只把**选中原文**交给父面板 ✓，
+   * 由 `NoteRelations` 打开"添加前置"面板 ✓。
+   */
+  onAddPrerequisite?: ((selectionText: string) => void) | undefined;
   onPasteText?: ((text: string) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
   /** 当前库目标 ✓（图片落盘要和笔记读写用同一个库 ✗） */
@@ -774,27 +831,12 @@ export function MarkdownRichEditor(props: {
   /** 关闭块菜单是不是因为"点了编辑器外面"✓ —— 决定要不要把焦点抢回正文 ✗（用户可能去点别的面板 ✓） */
   const blockMenuOutsideRef = useRef(false);
   /**
-   * **行内格式的短提示** ✓（`design/inline-format-fix.md` ✓）。
-   *
-   * 为什么需要 ✗：加粗 / 斜体 / 删除线 / 清除格式作用在**空光标**上时只改"接下来输入的文字" ✓，
-   * 文档里一个像素都不会变 ⇒ 用户会以为"点了没反应" ✗。这里在光标上方给一条 1.6s 的短提示 ✓，
-   * 让"已生效、继续输入"这件事**看得见** ✓（不写进正文、不打断输入 ✓）。
+   * **行内格式只在"选中文字 → 浮动工具栏"里出现** ✓（用户第四轮反馈：右键菜单再列一遍就是重复 ✗）。
+   * 这里不再有提示、占位、锚点归一化那套"空光标行内格式"的接线 ✓（都随右键行内组一起删掉了 ✓）。
    */
-  const [inlineHint, setInlineHint] = useState<{ text: string; left: number; top: number } | null>(null);
-  const inlineHintTimerRef = useRef<number | null>(null);
-  /**
-   * **等待"第一次输入"覆盖掉行内代码占位** ✓（`insertInlineCodeAtCaret` 插入的占位文字是被选中的 ✓）。
-   * 浏览器默认替换会丢掉 `<code>` 标记 ✗ ⇒ 由 `handleTextInput` 接住这一次输入、显式带 code 标记插入 ✓。
-   * `null` = 没有等输入的占位 ✓。
-   */
-  const pendingInlineCodeRef = useRef<{ from: number; to: number } | null>(null);
-  /**
-   * **连续输入时保持行内代码标记** ✓：`inlineCode` 是 `inclusive: false` ✗ ⇒ 第一段文字插进去之后，
-   * 光标正好在 code 标记右边界，浏览器/ProseMirror 再输入的下一个字符**不带标记** ✗。
-   * 这里记住"刚刚那段代码的结束位置"：只要接下来还是在这个位置连续打字，就继续显式带 mark 插入 ✓；
-   * 光标一挪（位置对不上）就清掉、交回默认输入 ✓。
-   */
-  const inlineCodeCaretRef = useRef<number | null>(null);
+  /** 「＋ 添加前置节点」回调现取 ✓（工具栏配置只在建编辑器时读一次 ✗ ⇒ 走 ref ✓） */
+  const onAddPrerequisiteRef = useRef(props.onAddPrerequisite);
+  onAddPrerequisiteRef.current = props.onAddPrerequisite;
   /** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
   const baselineRef = useRef<((markdown: string) => void) | null>(null);
   /** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
@@ -1182,6 +1224,17 @@ export function MarkdownRichEditor(props: {
    */
   const placeTrailingCaret = useCallback((view: ProseMirrorView, event: MouseEvent): boolean => {
     if (!isPlainClick(event)) return false;
+    /*
+     * **点编辑器自己的浮动 UI 不算"点正文下方空白"** ✗。
+     *
+     * 为什么需要 ✗：工具栏（`.milkdown-toolbar`）是 `.milkdown` 的子节点、但**在 `.ProseMirror` 外面**
+     * ✓；它在选区**下方**（空间不够时 Crepe 会翻到下面）时，点击坐标落点 > 最后一个块 bottom ✓
+     * ⇒ 这条"空白兜底"会插一个空段落并移动选区 ✗ —— 实测会把链接输入框当场关掉
+     * （Crepe 的 LinkEditTooltip 发现选区被改 ⇒ `_reset()` 隐藏 ✗），其它按钮也会顺手加空段 ✗。
+     * 这里一律排除编辑器里的浮动 UI / 菜单 / 手柄 ✓（点它们就该只执行它们自己的动作 ✓）。
+     */
+    const clicked = event.target instanceof Element ? event.target : null;
+    if (clicked !== null && clicked.closest(EDITOR_FLOATING_UI_SELECTOR) !== null) return false;
     /* 一次点击只处理一次 ✓（`handleClick` 主路径处理过之后，root 上的兜底监听不该再来一遍 ✓） */
     const marked = event as MouseEvent & { knTrailingHandled?: boolean };
     if (marked.knTrailingHandled === true) return true;
@@ -1208,6 +1261,25 @@ export function MarkdownRichEditor(props: {
   }, []);
 
   /**
+   * **点行内公式小浮窗的「完成」⇒ 收起浮窗** ✓。
+   *
+   * 为什么需要额外做一步 ✗：Crepe 的确认按钮只在 pointerdown 里更新数学值（`updateValue`），
+   * 它自己**不隐藏**浮窗 ✗ —— 浮窗的显示条件是"选区是 math_inline 节点选择" ✓，
+   * 而按钮的 pointerdown 被 `preventDefault` 了 ⇒ 选区不变 ⇒ 浮窗一直挂着 ✗（用户实测反馈 ✓）。
+   * 这里在 Crepe 更新完值之后（0ms 定时器，晚于它同步的 pointerdown 处理器 ✓）把选区挪到公式**后面**
+   * 的文字位置 ⇒ 选区不再是节点选择 ⇒ 浮窗自然收起 ✓，焦点也回到正文继续输入 ✓。
+   */
+  const dismissLatexInlineEditor = useCallback((): void => {
+    const view = viewRef.current;
+    if (view === null) return;
+    const { state } = view;
+    const selection = state.selection;
+    if (!(selection instanceof NodeSelection) || selection.node.type.name !== "math_inline") return;
+    view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, selection.to)));
+    if (!view.hasFocus()) view.focus();
+  }, []);
+
+  /**
    * **关掉块菜单** ✓（Esc / 点外面 / 插入完成都会走这里 ✓）。
    *
    * 焦点策略：只有"还留在编辑器里"的关闭才把焦点还给正文 ✓ ——
@@ -1223,56 +1295,10 @@ export function MarkdownRichEditor(props: {
   }, []);
 
   /**
-   * **行内格式的短提示** ✓：`text` 是已本地化的句子；位置贴着当前光标上方 ✓
-   * （相对 `.kn-editor-body` 内容坐标，和表格菜单同一套坐标系 ✓）。
-   */
-  const showInlineHint = useCallback((text: string): void => {
-    const view = viewRef.current;
-    const host = hostRef.current;
-    if (view === null || host === null) return;
-    let left = 8;
-    let top = 8;
-    try {
-      const caret = view.coordsAtPos(view.state.selection.from);
-      const body = host.closest<HTMLElement>(".kn-editor-body");
-      const bodyRect = body?.getBoundingClientRect() ?? { left: 0, top: 0 };
-      left = Math.max(8, caret.left - bodyRect.left);
-      top = Math.max(8, caret.top - bodyRect.top - 36 + (body?.scrollTop ?? 0));
-    } catch {
-      /* 取不到坐标就不显示（提示是锦上添花 ✓，不能影响编辑 ✓） */
-      return;
-    }
-    setInlineHint({ text, left, top });
-    if (inlineHintTimerRef.current !== null) window.clearTimeout(inlineHintTimerRef.current);
-    inlineHintTimerRef.current = window.setTimeout(() => {
-      inlineHintTimerRef.current = null;
-      setInlineHint(null);
-    }, 1600);
-  }, []);
-
-  /**
-   * 插入内联公式后把焦点送进 Crepe 的公式编辑框 ✓（它异步出现 ⇒ 用几次 rAF/定时重试 ✓）。
-   * 不这样做的话用户得先点一下那个小框才能输入 —— 体验上像"没反应" ✗。
-   */
-  const focusInlineMathEditor = useCallback((attempt = 0): void => {
-    const root = hostRef.current;
-    if (root === null) return;
-    const editor = root.querySelector<HTMLElement>(".milkdown-latex-inline-edit .ProseMirror");
-    if (editor !== null && editor.isConnected) {
-      editor.focus({ preventScroll: true });
-      return;
-    }
-    if (attempt < 10) window.setTimeout(() => { focusInlineMathEditor(attempt + 1); }, 40);
-  }, []);
-
-  /**
    * **选中块菜单的一项 ⇒ 准备空段落 ⇒ 执行 Crepe 的同源命令** ✓。
    *
    * 顺序不能反 ✗：`prepareAfterBlockInsertion` / `prepareContextInsertion` 会派发一次选区事务，
    * 命令（`setBlockTypeCommand` / `addBlockTypeCommand` …）作用在刚准备好的空段落上 ✓。
-   * 行内动作只改选区/标记（绝不拆段落 ✓），并且：
-   * - 内联公式 ⇒ 把焦点送进 Crepe 的公式编辑框 ✓；
-   * - 空光标上的加粗 / 斜体 / 删除线 / 清除格式 ⇒ 给一条短提示 ✓（正文本身不会有可见变化 ✗）。
    */
   const runBlockMenuItem = useCallback((key: string): void => {
     const view = viewRef.current;
@@ -1289,9 +1315,7 @@ export function MarkdownRichEditor(props: {
       reportRef.current?.("block-menu-missing-item", { key });
       return;
     }
-    const prepared = key.startsWith("inline-")
-      ? prepareInlineFormat(view, current.inlineAnchor ?? current.anchor)
-      : current.mode === "after"
+    const prepared = current.mode === "after"
       ? prepareAfterBlockInsertion(view, current.anchor)
       : prepareContextInsertion(view, current.anchor);
     if (!prepared) {
@@ -1305,30 +1329,8 @@ export function MarkdownRichEditor(props: {
       reportRef.current?.("block-menu-insert-failed", { key, error: String(error) });
     }
     if (!view.hasFocus()) view.focus();
-    if (key === "inline-code") {
-      /*
-       * 插入的占位文字现在**整段被选中** ✓ ⇒ 把范围记下来：
-       * 用户敲第一个字时由 `handleTextInput` 显式带上 inlineCode 标记替换它 ✓
-       * （浏览器默认替换会把 `<code>` 标记吃掉 ✗ —— 实测 main 里只剩纯文字 ✓）。
-       */
-      const selection = view.state.selection;
-      inlineCodeCaretRef.current = null;
-      pendingInlineCodeRef.current = selection instanceof TextSelection && !selection.empty
-        ? { from: selection.from, to: selection.to }
-        : null;
-    } else if (key === "inline-math") {
-      window.setTimeout(() => { focusInlineMathEditor(); }, 40);
-    } else if (key === "inline-bold") {
-      showInlineHint(tRef.current("inlineBoldOn"));
-    } else if (key === "inline-italic") {
-      showInlineHint(tRef.current("inlineItalicOn"));
-    } else if (key === "inline-strike") {
-      showInlineHint(tRef.current("inlineStrikeOn"));
-    } else if (key === "inline-clear") {
-      showInlineHint(tRef.current("inlineCleared"));
-    }
     scheduleMenu();
-  }, [blockMenu, focusInlineMathEditor, scheduleMenu, showInlineHint]);
+  }, [blockMenu, scheduleMenu]);
 
   /**
    * 块菜单开着时**记下这次 pointerdown 落在哪** ✓（捕获阶段，早于宿主 Menu 自己的"点外面关掉"✓）。
@@ -1575,12 +1577,29 @@ export function MarkdownRichEditor(props: {
           strikethroughLabel: t("inlineStrike"), codeLabel: t("inlineCode"),
           latexLabel: t("inlineMath"), linkLabel: t("inlineLink"),
           buildToolbar: (builder) => {
-            const clear = inlineFormatGroup().items.find((item) => item.key === "inline-clear")!;
             builder.addGroup("kn-format", t("inlineFormat")).addItem("clear", {
               label: t("inlineClear"),
               icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="m16.2 3.3 4.5 4.5a2 2 0 0 1 0 2.8l-8 8H21v2H8.6l-5.3-5.3a2 2 0 0 1 0-2.8l10-9.2a2 2 0 0 1 2.9 0ZM10 9l-5.3 5 4.6 4.6h.7l4.6-4.6L10 9Z"/></svg>',
               active: () => false,
-              onRun: (ctx) => { clear.onRun?.(ctx); },
+              onRun: (ctx) => { clearInlineFormat(ctx.get(editorViewCtx) as ProseMirrorView); },
+            });
+            /*
+             * **「＋ 添加前置节点」并进同一个工具栏** ✓（`design/inline-format-fix.md` §2.6 ✓）：
+             * 它以前是贴着选区的单独浮钮 ✗ ⇒ 和这条格式化工具栏互相遮挡（用户截图 ✓）。
+             * 只有父面板给了回调才加这一项 ✓（独立挂编辑器的测试里不会多出一个死按钮 ✗）。
+             */
+            if (onAddPrerequisiteRef.current === undefined) return;
+            builder.addGroup("kn-relation", t("relAddFromSelection")).addItem("add-prerequisite", {
+              label: t("relAddFromSelection"),
+              icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M13 3h2v6h6v2h-6v6h-2v-6H7v-2h6V3ZM5 19h14v2H5v-2Z"/></svg>',
+              active: () => false,
+              onRun: (ctx) => {
+                const view = ctx.get(editorViewCtx) as ProseMirrorView;
+                const { from, to } = view.state.selection;
+                if (from === to) return;
+                const text = view.state.doc.textBetween(from, to, " ").trim();
+                if (text !== "") onAddPrerequisiteRef.current?.(text);
+              },
             });
           },
         },
@@ -1821,7 +1840,26 @@ export function MarkdownRichEditor(props: {
      * 它只对**落在可编辑元素里**的点击生效；万一那块空白不在 `.ProseMirror` 内（高度没撑满 / 浏览器差异 ✓），
      * 这里再兜一次 ✓。`placeTrailingCaret` 自带"一次点击只处理一次"的标记 ⇒ 不会重复落光标 ✓。
      */
+    /**
+     * **"这一次按下是不是从编辑器浮动 UI 开始的"** ✓。
+     *
+     * 为什么 click 时看 target 不够 ✗：点工具栏「链接」⇒ 命令把焦点给输入框 ⇒ Crepe 工具栏
+     * 在 pointerup/click 之前就隐藏了 ✗ ⇒ 同一坐标的 click 落在工具栏原本盖住的空白上，
+     * target 已经不是工具栏 ✓ ⇒ 会被误当成"点正文下方空白"、插空段落并关掉链接输入框 ✗
+     * （实测 show 后 ~13ms 就关，用户看到一闪而过 ✓）。
+     * 所以在**按下那一刻**（target 还准确）记下来，click 兜底看到标记就不再动作 ✓。
+     */
+    let pressedFloatingUi = false;
+    const onRootPointerDownTrack = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      pressedFloatingUi = target !== null && target.closest(EDITOR_FLOATING_UI_SELECTOR) !== null;
+    };
+    root.addEventListener("pointerdown", onRootPointerDownTrack, true);
     const onBlankAreaFallback = (event: MouseEvent): void => {
+      if (pressedFloatingUi) {
+        pressedFloatingUi = false;
+        return;
+      }
       const view = viewRef.current;
       if (view === null || !readyRef.current || failedRef.current) return;
       placeTrailingCaret(view, event);
@@ -1845,7 +1883,8 @@ export function MarkdownRichEditor(props: {
       const target = event.target instanceof Element ? event.target : null;
       if (target === null) return;
       if (target.closest("td, th")) return;
-      if (target.closest("pre, .milkdown-code-block, .milkdown-image-block, .milkdown-toolbar, .milkdown-link-preview, .milkdown-link-edit, .language-picker, .search-box, .language-list, .milkdown-block-handle, .kn-table-menu")) return;
+      if (target.closest("pre, .milkdown-code-block, .milkdown-image-block") !== null) return;
+      if (target.closest(EDITOR_FLOATING_UI_SELECTOR) !== null) return;
       // Keep native copy/cut for text selections; the floating toolbar provides formatting.
       if (!view.state.selection.empty) return;
       const groups = readBlockMenuGroups(blockMenuBuilderRef.current);
@@ -1864,20 +1903,10 @@ export function MarkdownRichEditor(props: {
       if (anchor === null) return;
       event.preventDefault();
       event.stopPropagation();
-      /*
-       * **行内动作的位置单独归一化** ✓：右键落在段落左右留白 / 空行末尾时，`posAtCoords`
-       * 给到的位置解析出来是 `doc`（depth 0）⇒ 行内命令会 prepare 失败、像"点了没反应" ✗。
-       * `resolveInlineAnchorPos` 会把位置收进最近的段落/标题内容里 ✓（块动作仍用原 anchor ✓）。
-       */
-      const inlineAnchor = resolveInlineAnchorPos(view.state.doc, anchor);
-      const menuGroups = inlineAnchor === null
-        ? groups
-        : [inlineFormatGroup(true, { codePlaceholder: tRef.current("inlineCodePlaceholder") }), ...groups];
       setBlockMenu({
-        x: event.clientX, y: event.clientY, anchor, mode: "context", groups: menuGroups,
-        ...(inlineAnchor === null ? {} : { inlineAnchor }),
+        x: event.clientX, y: event.clientY, anchor, mode: "context", groups,
       });
-      reportRef.current?.("block-menu-open", { via: "context", anchor, inline: inlineAnchor !== null });
+      reportRef.current?.("block-menu-open", { via: "context", anchor });
     };
     root.addEventListener("contextmenu", onBlockMenuContext, true);
 
@@ -1936,16 +1965,6 @@ export function MarkdownRichEditor(props: {
     root.addEventListener("pointerup", onBlockHandlePointerUp, true);
 
     /*
-     * **行内代码占位的"等待输入"状态** ✓：只要用户把指针按到正文别处，就取消这次接管 ✓
-     * —— 否则下一次在恰好同一位置输入的文字会被误套上 code 标记 ✗（`inclusive:false` 的连续输入补偿 ✓）。
-     */
-    const clearPendingInlineCode = (): void => {
-      pendingInlineCodeRef.current = null;
-      inlineCodeCaretRef.current = null;
-    };
-    root.addEventListener("pointerdown", clearPendingInlineCode, true);
-
-    /*
      * **代码块"复制"改写成多格式剪贴板** ✓
      * （`design/code-block-copy-paste-analysis.md` ✓）。
      *
@@ -1977,6 +1996,23 @@ export function MarkdownRichEditor(props: {
         .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
     };
     root.addEventListener("click", onCopyClick, true);
+
+    /*
+     * **行内公式小浮窗：点「完成」后收起** ✓（用户实测要求 ✓）。
+     *
+     * Crepe 的确认按钮只在 pointerdown 里更新公式值、**不隐藏浮窗** ✗（按钮 preventDefault 了焦点变化 ⇒
+     * 选区仍是 math_inline 节点选择 ⇒ 浮窗的显示条件一直成立 ✗）。这里在 Crepe 处理完之后
+     * （0ms 定时器 ✓）把选区挪到公式后面，浮窗自然收起 ✓；pointerdown 与键盘触发的 click 都监听 ✓
+     * （同一次操作最多跑两次，`dismissLatexInlineEditor` 在选区已不是节点选择时直接返回 ✓）。
+     */
+    const onLatexInlineConfirm = (event: Event): void => {
+      const target = event.target as Element | null;
+      if (target === null || typeof target.closest !== "function") return;
+      if (target.closest(".milkdown-latex-inline-edit .container button") === null) return;
+      window.setTimeout(() => { dismissLatexInlineEditor(); }, 0);
+    };
+    root.addEventListener("pointerdown", onLatexInlineConfirm, true);
+    root.addEventListener("click", onLatexInlineConfirm, true);
 
     /*
      * **Mermaid 预览里的两个动作** ✓（复制为代码 / 下载图像 ✓，`design/mermaid-note-blocks.md`）。
@@ -2120,31 +2156,46 @@ export function MarkdownRichEditor(props: {
        * ① 本插件载荷（自定义格式 ✓）⇒ 最可靠 ✓；
        * ② 没有载荷（浏览器拒了多格式、或粘贴来自别的应用 ✓）⇒ 看 `text/html`：
        *    整段就是 `<pre><code class="language-…">` 时照样能还原 ✓（复查方案里写的就是这条降级 ✓）。
+       * ③ **外部应用的纯文本代码** ✓：从浏览器 / 聊天窗口复制代码时剪贴板常常只有
+       *    `text/plain`（或只有一层 div/span 包装 ✗）⇒ milkdown 会把它当 **Markdown** 解析 ✗
+       *    （`#include<iostream>` 变原始 HTML、空行分段、缩进变代码块，最后整篇被踢进纯文本 ✓
+       *    —— 用户截图里那一串 ✗）。所以先做一次**保守**的"这看起来是代码"识别 ✓，
+       *    命中就用事务插入完整代码块 ✓（一字不改、也不产生 HTML 节点 ✓）。
        */
+      const html = clip.getData("text/html");
       const plain = clip.getData("text/plain");
       // 系统可能保留 HTML 却移除语言信息；刚复制的原文匹配优先于 HTML 降级。
       const remembered = lastCopiedBlock !== null
         && (plain === lastCopiedBlock.code || (lastCopiedBlock.language.toLowerCase() === "latex"
           && plain === "$$\n" + lastCopiedBlock.code + "\n$$")) ? lastCopiedBlock : null;
+      const strictHtml = codeBlockFromClipboardHtml(html);
+      const formula = formulaFromPlainText(plain);
+      const richHtml = strictHtml === null && !remembered && formula === null
+        ? codeBlockFromRichHtml(html, plain)
+        : null;
+      const plainCode = strictHtml === null && !remembered && formula === null && richHtml === null
+        ? codeBlockFromPlainText(plain)
+        : null;
       const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
         ?? remembered
-        ?? codeBlockFromClipboardHtml(clip.getData("text/html"))
-        /*
-         * **最后一道**：剪贴板文本本身就是一整块 `$$…$$` ✓ ⇒ 它就是个公式块 ✓
-         * （用户实测：这个兜底之前没有 ⇒ 语言一丢就变成 `Text` 代码块 ✗）。
-         * 不依赖"记住上次复制的块" ✗ —— 那个判断会被剪贴板把 `\n` 换成 `\r\n` 打掉 ✓。
-         */
-        ?? formulaFromPlainText(plain);
+        ?? strictHtml
+        ?? formula
+        ?? richHtml
+        ?? plainCode;
       if (payload === null) {
         /* 没命中载荷 ⇒ **不拦** ✓，只把纯文本记下来（万一被 Markdown 拆散，提示条上还能一键补救 ✓） */
-        const plain = clip.getData("text/plain");
         if (plain !== "") props.onPasteText?.(plain);
         return;
       }
       event.preventDefault();
       event.stopImmediatePropagation();
       insertCodeBlockNode(view, payload);
-      reportRef.current?.("code-block-paste", { language: payload.language, chars: payload.code.length, viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === "" });
+      reportRef.current?.("code-block-paste", {
+        language: payload.language,
+        chars: payload.code.length,
+        via: plainCode !== null ? "plain-code" : richHtml !== null ? "rich-html" : formula !== null ? "formula" : strictHtml !== null ? "html" : "payload",
+        viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === "",
+      });
     };
     root.addEventListener("paste", onPastePayload, true);
     const onTableContext = (event: Event): void => {
@@ -2289,8 +2340,8 @@ export function MarkdownRichEditor(props: {
          * 上游本来也有 `handleClick` 的话先让它跑，它处理了就不抢 ✓（当前 Crepe 没有这一项，属防御 ✓）。
          */
         const previousClick = view.props.handleClick;
-        const previousTextInput = view.props.handleTextInput as unknown as
-          | ((v: ProseMirrorView, from: number, to: number, text: string) => boolean | void)
+        const previousKeyDown = view.props.handleKeyDown as unknown as
+          | ((this: unknown, v: ProseMirrorView, event: KeyboardEvent) => boolean | void)
           | undefined;
         view.setProps({
           handleClick: (targetView, targetPos, clickEvent) => {
@@ -2302,43 +2353,24 @@ export function MarkdownRichEditor(props: {
             return placeTableCaret(targetView, clickEvent);
           },
           /*
-           * **行内代码占位：第一次输入时显式带标记替换** ✓
-           * （只认"占位仍被整段选中"的那一次 ✓；位置对不上 / 用户先点了别处 ⇒ 清掉、交回默认行为 ✓）。
-           * 普通输入、粘贴、输入法组合都不受影响 ✗（返回 false 时 ProseMirror 原样处理 ✓）。
+           * **引用块边缘：Backspace / Delete 退出引用** ✓
+           * （用户实测：引用里的文字删光后剩下一条竖条、怎么按都清不掉 ✗）。
+           *
+           * 上游 `blockquoteKeymap` 只有"包进引用"、没有"退出引用" ✗ ⇒ 我们补一条保守规则
+           * （空引用整块删掉 / 单段落引用拆壳保留文字 ✓，多块等复杂结构不接管 ✓）。
+           * 带修饰键的 Backspace 不拦 ✓（比如 Ctrl/⌘+Backspace 的删词要保留原生行为 ✓）。
            */
-          handleTextInput: (targetView, from, to, text) => {
-            if (previousTextInput !== undefined && previousTextInput.call(view.props, targetView, from, to, text) === true) {
+          handleKeyDown: (targetView, event) => {
+            if (previousKeyDown !== undefined && previousKeyDown.call(view.props, targetView, event) === true) {
               return true;
             }
-            const pending = pendingInlineCodeRef.current;
-            const caretAt = inlineCodeCaretRef.current;
-            if (pending === null && caretAt === null) return false;
-            const mark = targetView.state.schema.marks.inlineCode;
-            if (mark === undefined) {
-              pendingInlineCodeRef.current = null;
-              inlineCodeCaretRef.current = null;
-              return false;
-            }
-            let replaceFrom = from;
-            if (pending !== null) {
-              if (from !== pending.from || to !== pending.to) {
-                pendingInlineCodeRef.current = null;
-                inlineCodeCaretRef.current = null;
-                return false;
-              }
-              pendingInlineCodeRef.current = null;
-            } else if (caretAt !== null) {
-              /* 只在"光标没挪开"时继续接管 ✓（inclusive:false 的边界由我们补上标记 ✓） */
-              if (from !== caretAt || to !== caretAt) {
-                inlineCodeCaretRef.current = null;
-                return false;
-              }
-              replaceFrom = caretAt;
-            }
-            const tr = targetView.state.tr.replaceWith(replaceFrom, to, targetView.state.schema.text(text, [mark.create()]));
-            tr.setSelection(TextSelection.create(tr.doc, replaceFrom + text.length));
-            inlineCodeCaretRef.current = replaceFrom + text.length;
-            targetView.dispatch(tr);
+            if (!targetView.editable || event.isComposing || event.keyCode === 229) return false;
+            if (event.key !== "Backspace" && event.key !== "Delete") return false;
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+            const transaction = unwrapBlockquoteTransaction(targetView.state, event.key === "Backspace" ? "back" : "forward");
+            if (transaction === null) return false;
+            event.preventDefault();
+            targetView.dispatch(transaction.scrollIntoView());
             return true;
           },
         });
@@ -2428,10 +2460,6 @@ export function MarkdownRichEditor(props: {
       }
       setMenu(null);
       setMenuOpen(false);
-      if (inlineHintTimerRef.current !== null) {
-        window.clearTimeout(inlineHintTimerRef.current);
-        inlineHintTimerRef.current = null;
-      }
       root.removeEventListener("compositionstart", onCompositionStart, true);
       root.removeEventListener("compositionend", onCompositionEnd, true);
       root.removeEventListener("pointerup", onSelectionChanged, true);
@@ -2444,11 +2472,13 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("mousedown", onPointerDownRecord, true);
       root.removeEventListener("mouseup", onMouseUpFallback, true);
       root.removeEventListener("click", onBlankAreaFallback);
+      root.removeEventListener("pointerdown", onRootPointerDownTrack, true);
       root.removeEventListener("contextmenu", onBlockMenuContext, true);
       root.removeEventListener("pointerdown", onBlockHandlePointerDown, true);
       root.removeEventListener("pointerup", onBlockHandlePointerUp, true);
-      root.removeEventListener("pointerdown", clearPendingInlineCode, true);
       root.removeEventListener("click", onCopyClick, true);
+      root.removeEventListener("pointerdown", onLatexInlineConfirm, true);
+      root.removeEventListener("click", onLatexInlineConfirm, true);
       root.removeEventListener("click", onMermaidAction, true);
       root.removeEventListener("click", onImageClick, true);
       /*
@@ -2607,16 +2637,8 @@ export function MarkdownRichEditor(props: {
       {/*
        * **右键 / ＋ 手柄的块插入菜单** ✓：宿主的 `Menu` 自己 portal 到 body、
        * 自己处理 Esc / 点外面 / 键盘行走 / 视口边缘 ✓ —— 这里只给坐标与条目 ✓。
+       * 行内格式**不在这个菜单里** ✓（用户第四轮反馈重复：选中文字后的浮动工具栏已经有一整套 ✓）。
        */}
-      {/*
-       * **行内格式的短提示** ✓：空光标上加粗/斜体/删除线/清除格式只影响"接下来输入的文字" ✓，
-       * 正文本身看不出变化 ⇒ 用一条 1.6s 的浮条说明"已生效、继续输入" ✓（不写进正文 ✓）。
-       */}
-      {inlineHint === null ? null : (
-        <div className="kn-inline-hint" style={{ left: `${inlineHint.left}px`, top: `${inlineHint.top}px` }}>
-          {inlineHint.text}
-        </div>
-      )}
       <BlockInsertMenu
         open={blockMenu !== null}
         x={blockMenu?.x ?? 0}

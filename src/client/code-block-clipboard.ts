@@ -196,3 +196,115 @@ export function formulaFromPlainText(text: unknown): CodeBlockPayload | null {
   /* 公式块在 Markdown 里的语言就是 `LaTeX` ✓（`$$` 输入规则写的也是它 ✓） */
   return { language: "LaTeX", code };
 }
+
+/* --------------------------- 外部复制的"纯文本代码" --------------------------- */
+
+/**
+ * 一行文字像不像**代码** ✓（保守；只用于"外部应用复制过来的纯文本"识别）。
+ *
+ * 为什么需要 ✗：从浏览器 / 聊天窗口 / 文档里复制代码时，剪贴板常常只有 `text/plain` ✓
+ * （或者 HTML 里只有一层 div/span 包装 ✗）—— milkdown 的剪贴板插件会把它当 **Markdown** 解析 ✗，
+ * 于是 `#include<iostream>` 变成原始 HTML 节点、空行分段、缩进变代码块，
+ * 最后还可能因为"原始 HTML 标签"整篇被踢进纯文本模式 ✓（用户截图里就是这一串 ✗）。
+ * 这里只做**低误报**的判断：宁可漏判（交回原有粘贴 ✓），也不要把普通文字当代码 ✗。
+ */
+const CODE_LINE_PATTERNS: readonly RegExp[] = [
+  /* 缩进（代码最常见的特征） */
+  /^\s{2,}\S/,
+  /^\t+\S/,
+  /* 语句结尾的分号 / 花括号 */
+  /[;{}]\s*$/,
+  /* 运算符与常见记号 */
+  /=>|->|::|\/\/|\/\*|\*\/|<!--/,
+  /* 常见语言的关键字 / 预处理 / 函数调用 */
+  /^\s*(?:#include\b|#define\b|#pragma\b|import\s|from\s+\S+\s+import\s|def\s+\w+\s*\(|class\s+\w+|function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|return\b|using\s+namespace\b|namespace\s+\w+|public\s|private\s|protected\s|static\s|void\s+\w+\s*\(|if\s*\(|for\s*\(|while\s*\(|switch\s*\(|case\s|SELECT\s|INSERT\s|UPDATE\s|CREATE\s+TABLE\b|<\?|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s|>|\/>))/i,
+];
+
+/** Markdown 结构行的开头（`#` / `-` / `1.` / `>` / 围栏）⇒ 交给原有 Markdown 粘贴 ✓ */
+const MARKDOWN_STRUCTURE_HEAD = /^\s*(?:```|~~~|#{1,6}\s|[-*+]\s|\d+[.)]\s|>)/;
+
+/**
+ * **强特征**：光靠"缩进 / 分号结尾 / `->`"**不算**代码 ✓。
+ *
+ * 为什么 ✗：复核实测这三类普通文字也会命中 —— 4 行缩进的中文（引用/聊天记录常见 ✓）、
+ * `输入 -> 输出` 三行、`第一句;` 三行 —— 单独看纯文本层面与代码不可区分 ✗，
+ * 一律插成代码块属于误判 ✓。强特征只留**明显不是自然语言**的记号：
+ * 花括号行、`=>` / `::`、预处理/关键字开头、HTML 标签、行首注释 ✓。
+ * 缩进 / 分号 / `->` 仍算"弱特征"、参与 50% 比例判断 ✓（不单独触发 ✓）。
+ */
+const STRONG_CODE_PATTERNS: readonly RegExp[] = [
+  /* 块开始 / 结束 / 箭头函数 / 作用域 */
+  /[{}]\s*$/,
+  /=>|::/,
+  /* 预处理、关键字、标签、SQL 等"代码语言标志" */
+  /^\s*(?:#include\b|#define\b|#pragma\b|import\s|from\s+\S+\s+import\s|def\s+\w+\s*\(|class\s+\w+|function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|return\b|using\s+namespace\b|namespace\s+\w+|public\s|private\s|protected\s|static\s|void\s+\w+\s*\(|if\s*\(|for\s*\(|while\s*\(|switch\s*\(|case\s|SELECT\s|INSERT\s|UPDATE\s|CREATE\s+TABLE\b|<\?)/i,
+  /* HTML / XML 标签（3 行 HTML 源码也要认出来 ✓ —— 否则又会变成原始 HTML 节点 ✗） */
+  /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s|>|\/>)/,
+  /* 行首注释（URL 里的 `://` 不算 ✗） */
+  /^\s*\/\//,
+  /\/\*|\*\//,
+];
+
+/**
+ * 从**外部复制的纯文本**里认出"这本来是一段代码" ✓。
+ *
+ * 判定（保守、可单测 ✓）：
+ * 1. 至少 3 行非空（两行的短句太容易误判 ✗）；
+ * 2. 首行不是 Markdown 结构（围栏 / 标题 / 列表 / 引用 —— 那些交给原有粘贴 ✓）；
+ * 3. ≥50% 的非空行命中**弱特征**（缩进 / `;` `{}` 结尾 / `=>` / `->` / 关键字 / 标签…）✓；
+ * 4. 至少 1 行命中**强特征**（花括号行 / `=>` / `::` / 预处理或关键字开头 / HTML 标签 / 注释 ✓）——
+ *    只靠缩进或分号结尾的普通文字**不接管** ✗（复核实测的误判样本 ✓）。
+ *
+ * @param text - 剪贴板 `text/plain` ✓。
+ * @returns 代码载荷（语言留空，由用户在代码块里选 ✓）；不像代码 ⇒ `null` ✓。
+ */
+export function codeBlockFromPlainText(text: unknown): CodeBlockPayload | null {
+  if (typeof text !== "string") return null;
+  if (text.length > KN_CODE_BLOCK_MAX_CHARS) return null;
+  const normalized = text.replace(/\r\n?/g, "\n");
+  /* 复制来的代码常带一个结尾换行 ✓ —— 去掉首尾空行，正文里不留多余空行 ✓ */
+  const code = normalized.replace(/^\n+|\n+$/g, "");
+  if (code.trim() === "") return null;
+  const lines = code.split("\n").filter((line) => line.trim() !== "");
+  if (lines.length < 3) return null;
+  if (MARKDOWN_STRUCTURE_HEAD.test(lines[0] ?? "")) return null;
+  const codeLines = lines.filter((line) => CODE_LINE_PATTERNS.some((pattern) => pattern.test(line))).length;
+  if (codeLines / lines.length < 0.5) return null;
+  const strongLines = lines.filter((line) => STRONG_CODE_PATTERNS.some((pattern) => pattern.test(line))).length;
+  if (strongLines === 0) return null;
+  return { language: "", code };
+}
+
+/**
+ * 从**富 HTML 剪贴板**里认出"这本来是一段代码" ✓（比 `codeBlockFromClipboardHtml` 宽一点）。
+ *
+ * 为什么需要它 ✗：从网页 / 聊天界面复制代码时，整段 HTML 常常是
+ * `<div class="highlight"><pre><code><span>…#include…</span></code></pre></div>` ✗ ——
+ * 严格版只认"整段就是 `<pre><code>`" ✓ ⇒ 这里退一步：找一个 `<pre>`，
+ * 先把标签剥掉再与剪贴板纯文本比长度，**只有 pre 基本覆盖整份纯文本时**才当代码块 ✓
+ * （避免把一整页网页正文里的一小段代码当成全部内容 ✗）。
+ *
+ * @param html - 剪贴板 `text/html` ✓。
+ * @param plainText - 剪贴板 `text/plain` ✓（用来防止"网页里一小段代码"被放大成全部内容 ✓）。
+ * @returns 代码载荷；认不出 ⇒ `null` ✓。
+ */
+export function codeBlockFromRichHtml(html: unknown, plainText: unknown): CodeBlockPayload | null {
+  const strict = codeBlockFromClipboardHtml(html);
+  if (strict !== null) return strict;
+  if (typeof html !== "string" || html.trim() === "") return null;
+  if (html.length > KN_CODE_BLOCK_MAX_CHARS * 4) return null;
+  const preMatch = /<pre\b[^>]*>([\s\S]*?)<\/pre>/i.exec(html);
+  if (preMatch === null) return null;
+  const inner = preMatch[1] ?? "";
+  const code = unescapeHtml(inner.replace(/<[^>]*>/g, ""))
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\n+|\n+$/g, "");
+  if (code.trim() === "" || code.length > KN_CODE_BLOCK_MAX_CHARS) return null;
+  const plain = typeof plainText === "string"
+    ? plainText.replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "")
+    : "";
+  if (plain !== "" && code.length < plain.length * 0.8) return null;
+  const languageMatch = /<code\b[^>]*class\s*=\s*(["'])[^"']*language-([A-Za-z0-9+#._-]+)/i.exec(inner)
+    ?? /<(?:pre|code)\b[^>]*class\s*=\s*(["'])[^"']*(?:language-|lang-)([A-Za-z0-9+#._-]+)/i.exec(preMatch[0]);
+  return { language: safeLanguage(languageMatch?.[2] ?? ""), code };
+}

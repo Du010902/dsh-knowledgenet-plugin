@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 import type { DocumentTarget } from "./node-document-client.ts";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
@@ -61,13 +61,39 @@ export function NoteRelations(props: {
   /** 宿主 / 插件的翻译函数 ✓（缺席时用本文件的中文字面文案 ✓） */
   t?: unknown;
   selection?: { text: string; top: number; left: number } | null;
+  /**
+   * **选中文字 → 浮动工具栏的「＋ 添加前置节点」** ✓。
+   *
+   * 为什么不再用"贴着选区的浮钮" ✗（原 `.kn-note-selection`）：它和编辑器自己的
+   * 格式化工具栏都浮在选区上方，**两块会互相遮挡** ✗（用户截图实测 ✓）。
+   * 现在「添加前置节点」并进**同一个格式化工具栏** ✓（见 `MarkdownRichEditor` 的 `buildToolbar`），
+   * 选区旁只剩一条工具栏 ✓；这里用 `nonce` 接收"要打开添加前置"的请求 ✓。
+   */
+  addRequest?: { text: string; nonce: number } | null;
 }): ReactNode {
   /* `useMemo` 固化引用 ✓（否则每次渲染都是新函数，进依赖会引发自激效应 ✗ —— 有测试盯着 ✓） */
   const t = useMemo(() => makeTranslator(props.t, LITERAL), [props.t]);
   const [mode, setMode] = useState<"pre" | "depend" | "add" | null>(null);
   const [title, setTitle] = useState("");
+  /** 本次"从选区添加"的原文 ✓（作为 snippet 上报给宿主工具 ✓ —— 与标题分开存 ✓） */
+  const [snippet, setSnippet] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const lastAddNonceRef = useRef(-1);
+  /*
+   * 工具栏点「＋ 添加前置节点」⇒ 打开添加面板，并把**选中原文**填进标题 ✓。
+   * 用 `nonce` 而不是"内容变了就打开"✗：同一段文字反复触发也要能再次打开 ✓。
+   */
+  useEffect(() => {
+    const request = props.addRequest;
+    if (request === undefined || request === null) return;
+    if (request.nonce === lastAddNonceRef.current) return;
+    lastAddNonceRef.current = request.nonce;
+    setTitle(request.text.slice(0, 120));
+    setSnippet(request.text);
+    setError("");
+    setMode("add");
+  }, [props.addRequest]);
   const graph = props.graph;
   const pre = graph?.edges.filter(e => e.fromId === props.nodeId) ?? [];
   const depend = graph?.edges.filter(e => e.toId === props.nodeId) ?? [];
@@ -77,20 +103,25 @@ export function NoteRelations(props: {
     if (busy || name.trim() === "") return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(GRAPH_API_ROUTE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "add-prerequisite", ...props.target, fromId: props.nodeId, title: name.trim(), create, snippet: props.selection?.text }) });
+      const response = await fetch(GRAPH_API_ROUTE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "add-prerequisite", ...props.target, fromId: props.nodeId, title: name.trim(), create, snippet: snippet || props.selection?.text }) });
       const result = await response.json();
       if (!response.ok || result.ok !== true) throw new Error(result.error?.message ?? t("relFailed"));
-      props.onChanged?.(); setMode("pre"); setTitle("");
+      props.onChanged?.(); setMode("pre"); setTitle(""); setSnippet("");
     } catch (e) { setError(e instanceof Error ? e.message : t("relFailed")); }
     finally { setBusy(false); }
   };
   return <div className="kn-note-relations">
     <button type="button" onClick={() => { setMode(mode === "pre" ? null : "pre"); setError(""); }}>{t("relPre", { count: pre.length })}</button>
     <button type="button" onClick={() => { setMode(mode === "depend" ? null : "depend"); setError(""); }}>{t("relDepend", { count: depend.length })}</button>
-    <button type="button" onClick={() => { setMode("add"); setTitle(""); setError(""); }}>{t("relAdd")}</button>
-    {props.selection && !mode ? <button type="button" className="kn-note-selection" style={{ top: props.selection.top, left: props.selection.left }} onPointerDown={e => e.preventDefault()} onClick={() => { setTitle(props.selection?.text.slice(0, 120) ?? ""); setMode("add"); }}>{t("relAddFromSelection")}</button> : null}
+    <button type="button" onClick={() => { setMode("add"); setTitle(""); setSnippet(""); setError(""); }}>{t("relAdd")}</button>
+    {/*
+     * 旧的"贴着选区的浮钮"（`.kn-note-selection`）已删除 ✗ —— 它和格式化工具栏互相遮挡（用户截图 ✓）；
+     * 功能并进浮动工具栏的「＋ 添加前置节点」✓（`addRequest` prop 接收请求 ✓）。
+     * snippet 的取用顺序：本次"从选区添加"的原文 ✓ → 当前选区的原文（主按钮的既有行为 ✓）；
+     * 关闭/成功后清空 ✓，不会把上一次请求的原文带到下一次 ✓。
+     */}
     {mode ? <div className="kn-note-relations-popover">
-      <div className="kn-note-relations-head"><strong>{mode === "add" ? t("relAddTitle") : mode === "pre" ? t("relPreTitle") : t("relDependTitle")}</strong><button type="button" onClick={() => setMode(null)} aria-label={t("relClose")}>×</button></div>
+      <div className="kn-note-relations-head"><strong>{mode === "add" ? t("relAddTitle") : mode === "pre" ? t("relPreTitle") : t("relDependTitle")}</strong><button type="button" onClick={() => { setMode(null); setSnippet(""); }} aria-label={t("relClose")}>×</button></div>
       {mode === "add" ? <>
         <input aria-label={t("relSearchLabel")} placeholder={t("relSearchPlaceholder")} value={title} disabled={busy} onChange={e => setTitle(e.target.value)} />
         {candidates.map(n => <button type="button" key={n.id} disabled={busy} onClick={() => { void add(n.title, false); }}>{n.title}</button>)}

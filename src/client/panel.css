@@ -1064,27 +1064,6 @@
   box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
 }
 
-/*
- * **行内格式的短提示** ✓：空光标上加粗 / 斜体 / 删除线 / 清除格式只影响"接下来输入的文字" ✓，
- * 正文一个像素都不变 ⇒ 用一条 1.6s 的浮条说明"已生效、继续输入" ✓（不写进正文 ✓，不吃点击 ✓）。
- * 坐标是 `.kn-editor-body` 内容坐标（与表格菜单同一套 ✓）。
- */
-.kn-inline-hint {
-  position: absolute;
-  z-index: 6;
-  max-width: 240px;
-  padding: 4px 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-overlay);
-  box-shadow: 0 3px 12px rgb(0 0 0 / 12%);
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
 .kn-table-menu-sep {
   height: 1px;
   margin: 3px 4px;
@@ -1726,7 +1705,6 @@
   border-radius: 50%;
   background: #167346;
 }
-.kn-note-relations .kn-note-selection { position: fixed; z-index: 40; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 @container (max-width: 480px) { .kn-note-relations { gap: 0; } .kn-note-relations button { padding: 5px; font-size: 11px; } }
 
 .kn-understanding-control { display: inline-flex; align-items: center; gap: 6px; flex: none; }
@@ -1740,7 +1718,7 @@
 .kn-note-relations { flex-shrink: 0; }
 .kn-note-relations > button { white-space: nowrap; }
 .kn-table-menu { box-sizing: border-box; max-width: calc(100% - 16px); max-height: min(264px, calc(100% - 16px)); }
-.kn-note-relations .kn-note-selection { border-radius: 8px; padding: 7px 10px; color: var(--dsw-alias-label-primary); }
+
 
 .kn-understanding-button[aria-pressed="true"] { color: #167346; }
 

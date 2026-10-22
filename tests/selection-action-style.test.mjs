@@ -56,20 +56,18 @@ describe("浮条与「＋ 添加前置节点」外观一致 ✓", () => {
   it("编辑区那颗（参照物）仍在，而且数值就是上面这套 ✓", () => {
     const relationsAt = css.indexOf(".kn-note-relations button {");
     assert.notEqual(relationsAt, -1, "参照物样式要在 panel.css 里 ✓");
-    const relations = css.slice(relationsAt, relationsAt + 220);
+    const relations = css.slice(relationsAt, relationsAt + 500);
     for (const token of ["border-radius: 6px", "padding: 5px 8px", "font-size: 12px"]) {
       assert.ok(relations.includes(token), `参照物要有 ${token} ✓`);
     }
-    const selectionAt = css.indexOf(".kn-note-relations .kn-note-selection {");
-    assert.notEqual(selectionAt, -1, "选区浮钮那条要在 ✓");
-    const selection = css.slice(selectionAt, selectionAt + 260);
-    for (const token of [
-      "background: var(--dsw-alias-bg-layer-1)",
-      "border: 1px solid var(--dsw-alias-border-l2)",
-      "box-shadow: 0 3px 12px rgb(0 0 0 / 12%)",
-    ]) {
-      assert.ok(selection.includes(token), `参照物要有 ${token} ✓`);
-    }
+    /*
+     * **选区浮钮已并入编辑器浮动工具栏** ✓（用户截图：它和格式化工具栏互相遮挡 ✗）：
+     * 样式与渲染都删掉了 —— 这里反过来钉住"别再长回来"，避免又出现两块浮层 ✓。
+     */
+    assert.equal(css.includes(".kn-note-selection"), false, "选区浮钮样式应已删除（已并入浮动工具栏）✓");
+    const relationsSource = readFileSync(path.join(CLIENT, "NoteRelations.tsx"), "utf8");
+    assert.equal(relationsSource.includes('className="kn-note-selection"'), false, "NoteRelations 不应再渲染选区浮钮 ✗");
+    assert.ok(relationsSource.includes("addRequest"), "功能要改走 addRequest（浮动工具栏触发）✓");
   });
 
   it("浮条仍然挂在选区上方、并不吃选区 ✓（改的是外观，不是行为 ✗）", () => {

@@ -22,6 +22,8 @@ import {
   KN_CODE_BLOCK_MIME,
   KN_CODE_BLOCK_VERSION,
   codeBlockFromClipboardHtml,
+  codeBlockFromPlainText,
+  codeBlockFromRichHtml,
   codeBlockHtml,
   encodeCodeBlockPayload,
   escapeHtml,
@@ -209,7 +211,8 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
     /*
      * 富文本编辑器的回落字典现在是**四份并起来** ✓：
      * `{ ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL, ...BLOCK_MENU_LITERAL, ...INLINE_FORMAT_LITERAL }` ✓
-     * （最后一份给右键菜单的「行内格式」组 + 链接输入框占位符 ✓；行内代码占位也走它 ✓）。
+     * （最后一份只剩「链接输入框占位」+ 工具栏里的「添加前置节点」两个 key ✓；
+     *   工具栏其它按钮的标签仍走 BLOCK_MENU_LITERAL 的 inline* 文案 ✓）。
      */
     const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !(key in BLOCK_MENU_LITERAL) && !(key in INLINE_FORMAT_LITERAL) && !richExtra.has(key));
     assert.deepEqual(richMissing, [], `MarkdownRichEditor 缺回落文案 ✗：${richMissing.join(", ")}`);
@@ -274,9 +277,17 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
 
   it("**HTML 降级**也要接进粘贴路径 ✓（自定义格式被浏览器拒时靠它）", () => {
     assert.ok(
-      richSource.includes('?? codeBlockFromClipboardHtml(clip.getData("text/html"))'),
+      richSource.includes('const html = clip.getData("text/html");')
+        && richSource.includes("const strictHtml = codeBlockFromClipboardHtml(html);"),
       "载荷不在时要看 text/html ✓",
     );
+    assert.ok(
+      richSource.includes("codeBlockFromRichHtml(html, plain)") && richSource.includes("codeBlockFromPlainText(plain)"),
+      "网页 <pre> 与外部纯文本代码的识别要接进粘贴路径 ✓",
+    );
+    const payloadChain = /const payload = parseCodeBlockPayload\(clip\.getData\(KN_CODE_BLOCK_MIME\)\)[\s\S]{0,200}?\?\? strictHtml[\s\S]{0,200}?\?\? richHtml[\s\S]{0,200}?\?\? plainCode;/.exec(richSource);
+    assert.notEqual(payloadChain, null, "检测链顺序：载荷 → 记忆 → 严格 HTML → 公式 → 富 HTML → 纯文本代码 ✓");
+    assert.ok(richSource.includes('via: plainCode !== null ? "plain-code" : richHtml !== null ? "rich-html"'), "上报里要能区分来源 ✓");
     assert.ok(richSource.includes("viaHtml:"), "上报里要能区分是走 HTML 还原的 ✓");
   });
 
@@ -292,5 +303,84 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
       assert.ok(en.includes(`${key}:`), `英文词典要有 ${key} ✓`);
     }
     assert.ok(!zh.includes("unsupportedNoticeRich") || !/unsupportedNoticeRich: "[^"]*已自动改用纯文本/.test(zh), "正文模式那句不许说已切换 ✗");
+  });
+});
+
+/* ------------------------- 外部复制的代码识别（用户第三轮反馈 ✓） ------------------------- */
+
+/** 用户截图里的 C++ 样本：尖括号、空行、缩进都要逐字保留 ✓ */
+const EXTERNAL_CPP = [
+  "#include<iostream>",
+  "using namespace std;",
+  "",
+  "int main() {",
+  "    int a, b;",
+  "    cin >> a >> b;",
+  "    cout << a + b << endl;",
+  "    return 0;",
+  "}",
+].join("\n");
+
+describe("外部复制的纯文本代码（codeBlockFromPlainText）", () => {
+  it("C++ 样本命中：原文逐字保留（缩进 / 尖括号 / 空行），去掉尾部换行", () => {
+    const result = codeBlockFromPlainText(`${EXTERNAL_CPP}\n`);
+    assert.deepEqual(result, { language: "", code: EXTERNAL_CPP });
+    assert.ok(result.code.includes("#include<iostream>"), "尖括号原样保留（不是 HTML 节点）✓");
+    assert.ok(result.code.includes("\n\n"), "内部空行保留 ✓");
+    assert.ok(result.code.includes("    cin"), "缩进保留 ✓");
+  });
+
+  it("误报样本一律 null：普通中文多行 / 2 行 / 列表 / 围栏 / 公式 / 空白 / 超长", () => {
+    for (const text of [
+      "第一段\n\n第二段",
+      "这是第一段说明文字。\n这是第二段说明文字，也很普通。\n这是第三段。",
+      "a = 1;\nb = 2;",
+      "- 第一项\n- 第二项\n- 第三项",
+      "```\nint main() {\n  return 0;\n}\n```",
+      "$$x^2$$",
+      "  ",
+    ]) assert.equal(codeBlockFromPlainText(text), null, JSON.stringify(text.slice(0, 40)));
+    assert.equal(codeBlockFromPlainText("x;\n".repeat(KN_CODE_BLOCK_MAX_CHARS)), null, "超长不接管");
+  });
+
+  it("CRLF 归一化、首尾空行去掉", () => {
+    const result = codeBlockFromPlainText(`\r\n\r\n${EXTERNAL_CPP.replace(/\n/g, "\r\n")}\r\n\r\n`);
+    assert.deepEqual(result, { language: "", code: EXTERNAL_CPP });
+  });
+
+  it("误判收紧：纯缩进中文 / `->` / 分号结尾不接管；3 行 HTML 源码能认出来", () => {
+    /* verify 复核实测的误判样本 ✓：单看纯文本与代码不可区分 ⇒ 强特征不足时不许插成代码块 ✗ */
+    for (const text of [
+      "    第一行普通文字\n    第二行普通文字\n    第三行普通文字\n    第四行普通文字",
+      "输入 -> 输出\n输入 -> 输出\n输入 -> 输出",
+      "第一句;\n第二句;\n第三句;",
+    ]) assert.equal(codeBlockFromPlainText(text), null, `不该把普通文字当代码：${JSON.stringify(text.slice(0, 30))}`);
+    /* 3 行 HTML 源码要能认出来 ✓（否则又会在正文里变成原始 HTML 节点 ✗） */
+    const html = "<div>\n  <p>hi</p>\n</div>";
+    assert.deepEqual(codeBlockFromPlainText(html), { language: "", code: html });
+  });
+});
+
+describe("外部复制的富 HTML 代码（codeBlockFromRichHtml）", () => {
+  const escaped = escapeHtml(EXTERNAL_CPP);
+  const wrap = (attrs) => `<div class="highlight"><pre class="code"><code ${attrs}>${escaped}</code></pre></div>`;
+
+  it("嵌套 div > pre > code（language-cpp / lang-cpp）命中：剥标签 + 反转义并提取语言", () => {
+    assert.deepEqual(codeBlockFromRichHtml(wrap('class="language-cpp"'), EXTERNAL_CPP), { language: "cpp", code: EXTERNAL_CPP });
+    assert.deepEqual(codeBlockFromRichHtml(wrap('class="lang-cpp"'), EXTERNAL_CPP), { language: "cpp", code: EXTERNAL_CPP });
+  });
+
+  it("pre 只占整页 HTML 一小段 ⇒ null（不许把网页局部代码放大成全部内容）", () => {
+    const pageText = "网页正文".repeat(80);
+    assert.equal(codeBlockFromRichHtml(`<div>${pageText}</div>${wrap('class="language-cpp"')}`, `${pageText}\n${EXTERNAL_CPP}`), null);
+  });
+
+  it("严格版 pre>code 仍走原函数（无 span 包裹）；没有 pre / 空输入 ⇒ null", () => {
+    assert.deepEqual(
+      codeBlockFromRichHtml('<pre><code class="language-js">const a = 1;</code></pre>', "const a = 1;"),
+      { language: "js", code: "const a = 1;" },
+    );
+    assert.equal(codeBlockFromRichHtml("<div>普通网页</div>", "普通网页"), null);
+    assert.equal(codeBlockFromRichHtml("", "x"), null);
   });
 });

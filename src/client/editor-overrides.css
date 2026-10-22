@@ -976,3 +976,98 @@
  */
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block img { cursor: zoom-in; }
 .kn-root .kn-editor-rich .milkdown .milkdown-image-block .caption-input { color: var(--dsw-alias-label-secondary); font-size: .875em; text-align: center; line-height: 1.5; }
+
+/*
+ * **浮动工具栏（选中文字后出现）的可读性与主题化** ✓（用户截图实测：图标几乎看不见 ✗）。
+ *
+ * Crepe 的默认工具条把图标色设成 `--crepe-color-outline` ✓，而本插件把它映射到了
+ * `--dsw-alias-border-l2`（边框色）✗ ⇒ 白底上只剩一道浅灰，像"禁用状态" ✓。
+ * 这里改成主题的**次级文字色** ✓、悬停/聚焦用主文字色 ✓、激活态用品牌色 ✓（沿用 Crepe 的 `.active` 类 ✓）。
+ * 同时给卡片补 1px 细边 + 主题底（原来只有阴影，和正文底色混在一起 ✗）。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar {
+  background: var(--dsw-alias-bg-overlay);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item svg {
+  color: var(--dsw-alias-label-secondary);
+  fill: var(--dsw-alias-label-secondary);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item:hover svg,
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item:focus-visible svg {
+  color: var(--dsw-alias-label-primary);
+  fill: var(--dsw-alias-label-primary);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item.active svg {
+  color: var(--dsw-alias-brand-primary);
+  fill: var(--dsw-alias-brand-primary);
+}
+
+/*
+ * **行内公式的编辑小浮窗**（Crepe `LatexInlineTooltip`）✓。
+ *
+ * 用户截图反馈：确认按钮是个 24×24 的小圆块，中文「完成」两个字被挤成竖排 ✗ ——
+ * 因为 Crepe 主题把 `.milkdown-latex-inline-edit .container button` 写死成图标尺寸
+ * （`width: 24px; height: 24px`，原本渲染的是一个 ✓ SVG 图标 ✓），
+ * 而我们把 `inlineEditConfirm` 换成了文案「完成」✗ ⇒ 文字只能折行 ✗（实测 button scrollHeight 34 > 24 ✓）。
+ *
+ * 修法：把确认按钮改成**正常的文字按钮**（自适应宽度、不换行、主题色 + 细边 + 悬停反馈 ✓），
+ * 浮窗本体也换成主题底 / 细边 / 更清楚的圆角与阴影 ✓；公式输入区补一点内边距与字号 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit {
+  box-sizing: border-box;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-overlay);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 14%);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .container {
+  gap: 8px;
+  align-items: center;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .container button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 44px;
+  height: 26px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .container button:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .container button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .container button .milkdown-icon {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-latex-inline-edit .ProseMirror {
+  min-width: 200px;
+  max-width: 320px;
+  padding: 3px 4px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}

@@ -39,20 +39,16 @@ export interface BlockMenuGroupData {
  * 菜单分组的**展示顺序**：右键菜单是"插入块"入口 ✓ ⇒ 把高级块（代码 / 公式 / 表格 / 图片）放最前 ✓，
  * 文本与列表随后 ✓（与旧斜杠菜单的组内顺序一致 ✓，只调整组顺序 ✓）。
  */
-export const BLOCK_MENU_GROUP_ORDER: readonly string[] = ["inline", "advanced", "text", "list"];
+export const BLOCK_MENU_GROUP_ORDER: readonly string[] = ["advanced", "text", "list"];
 
 /**
  * 插件词典里的**条目文案 key** ✓（`index.ts` 的中英两份字典都按这些 key 补齐 ✓）。
  * `null` = Crepe 新加了条目而我们还没翻译 ✓ ⇒ 调用方用 Crepe 英文 label 兜底 ✓（不崩 ✓）。
+ *
+ * 注：`inline-*` 这些 key **不在右键菜单里**了 ✓ —— 行内格式统一走选中文字后的浮动工具栏
+ * （用户第四轮反馈：右键菜单里再列一遍是重复 ✗，见 `design/inline-format-fix.md` §8 ✓）。
  */
 const BLOCK_MENU_TEXT_KEYS: Record<string, string> = {
-  "inline-bold": "inlineBold",
-  "inline-italic": "inlineItalic",
-  "inline-strike": "inlineStrike",
-  "inline-code": "inlineCode",
-  "inline-math": "inlineMath",
-  "inline-link": "inlineLink",
-  "inline-clear": "inlineClear",
   text: "blockMenuText",
   h1: "blockMenuH1",
   h2: "blockMenuH2",
@@ -73,7 +69,6 @@ const BLOCK_MENU_TEXT_KEYS: Record<string, string> = {
 
 /** 分组文案 key ✓（分组 label 也走插件词典 ✓） */
 const BLOCK_MENU_GROUP_KEYS: Record<string, string> = {
-  inline: "inlineFormat",
   advanced: "blockMenuGroupInsert",
   text: "blockMenuGroupText",
   list: "blockMenuGroupList",
