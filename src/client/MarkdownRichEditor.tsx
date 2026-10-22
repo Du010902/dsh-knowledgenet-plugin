@@ -944,6 +944,15 @@ export function MarkdownRichEditor(props: {
   onBaselineRef.current = props.onBaseline;
   const readOnlyRef = useRef(props.readOnly);
   readOnlyRef.current = props.readOnly;
+  /**
+   * **保存期间变只读前，编辑器是否有焦点** ✓。
+   *
+   * 用户实测：编辑后按 `Ctrl/⌘+S` 保存，光标竖线消失、想继续输入得用鼠标重新点一下 ✗ ——
+   * 保存会把编辑器切到 `contenteditable=false`（只读）✓，浏览器因此把焦点移走 ✓；
+   * 保存结束再切回来时**焦点不会自己回来** ✗。这里记下来、保存结束后还给正文 ✓
+   * （前提是用户没在保存期间把焦点点到别处 ✓）。
+   */
+  const hadFocusBeforeReadOnlyRef = useRef(false);
 
   /**
    * **点图片 ⇒ 打开「原图预览」** ✓（用户实测：插入的图片"会变得很糊"✗）。
@@ -2513,10 +2522,35 @@ export function MarkdownRichEditor(props: {
 
   /* 只读开关：保存期间**整块**不可编辑 ✓（不是只禁用工具栏 ✗）⇒ 菜单收起、入口保留但禁用 ✓ */
   useEffect(() => {
-    crepeRef.current?.setReadonly(props.readOnly);
-    if (props.readOnly) setMenuOpen(false);
-    /* 只读 / 非只读都要重算一次：入口的状态（禁用 / 可用）跟着变 ✓ */
+    const view = viewRef.current;
+    if (props.readOnly) {
+      /* 先记焦点再切只读 ✓（切完浏览器就把焦点移走了 ✗） */
+      hadFocusBeforeReadOnlyRef.current = view !== null && view.hasFocus();
+      crepeRef.current?.setReadonly(true);
+      setMenuOpen(false);
+      scheduleMenu();
+      return;
+    }
+    const restore = hadFocusBeforeReadOnlyRef.current;
+    hadFocusBeforeReadOnlyRef.current = false;
+    crepeRef.current?.setReadonly(false);
     scheduleMenu();
+    if (!restore || view === null) return;
+    /*
+     * **保存结束把焦点还给正文** ✓（用户要求：保存后竖线/光标位置还在，不用重新点 ✓）。
+     * 等一拍再还：刚切回 contenteditable 的同一帧里 focus 可能被浏览器重新收走 ✗。
+     * 只在"焦点落空"时还 ✓ —— 保存期间用户主动点了别的控件就不抢焦点 ✗。
+     */
+    window.setTimeout(() => {
+      const current = viewRef.current;
+      if (current === null) return;
+      const root = current.dom.getRootNode() as Document | (ShadowRoot & { activeElement?: Element | null });
+      const active = ("activeElement" in root ? root.activeElement : null) ?? document.activeElement;
+      const lost = active === null || active === document.body || active === document.documentElement
+        || active === (root as ShadowRoot).host || active === current.dom;
+      if (lost && !current.hasFocus()) current.focus();
+    }, 0);
+    /* 只读 / 非只读都要重算一次：入口的状态（禁用 / 可用）跟着变 ✓ */
   }, [props.readOnly, scheduleMenu]);
 
   /*

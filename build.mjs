@@ -1,6 +1,7 @@
 import { patchLatexInlineTooltip } from "./scripts/latex-inline-tooltip-patch.mjs";
 import { patchCrepeBlockMenu } from "./scripts/slash-menu-patch.mjs";
 import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
+import { patchCodeBlockPreview } from "./scripts/code-block-preview-patch.mjs";
 /**
  * 构建四个产物：
  * - `index.js`   Host 半（Node ESM；内联 vendor 的 v2 引擎，external 只有宿主包与 Node 内建）
@@ -829,6 +830,26 @@ function blockMenuPatchPlugin() {
   };
 }
 
+/**
+ * **公式块 / 预览型代码块：首次输入时不要把编辑源码界面收起来** ✓（`scripts/code-block-preview-patch.mjs` ✓）。
+ *
+ * 上游组件在"空块没有预览 ⇒ CodeMirror 可见 ⇒ 输入第一个字符 ⇒ 预览出现 ⇒ 按默认预览态把编辑器藏起来"，
+ * 用户看到的是"第一个字符一输入，编辑框就关了" ✗。补丁在预览更新后、若焦点还在 CodeMirror 里，
+ * 就把 `previewOnlyMode` 压回 false ✓。匹配不到目标 ⇒ 构建失败 ✓（与其它上游补丁同一规矩 ✓）。
+ */
+function codeBlockPreviewPatchPlugin() {
+  let patched = false;
+  return {
+    name: "kn-code-block-preview",
+    transform(code, id) {
+      if (!id.replace(/\\/g, "/").endsWith("/@milkdown/components/lib/code-block/index.js")) return null;
+      patched = true;
+      return { code: patchCodeBlockPreview(code), map: null };
+    },
+    buildEnd(error) { if (!error && !patched) throw Error("Code-block preview patch was not applied (formula block first-keystroke)."); },
+  };
+}
+
 function browserUtilProbePatchPlugin() {
   /*
    * lodash（含 Crepe / mermaid 各自内联的那几份）里有一段 **Node 专用探测** ✓：
@@ -1395,6 +1416,7 @@ async function buildClient(rolldown, css, workerSource, mermaidRuntimeRev) {
       /* 浏览器产物里清掉 lodash 的 Node 专用探测（它不是宿主基线模块，见插件注释 ✓） */
       browserUtilProbePatchPlugin(),
       blockMenuPatchPlugin(),
+      codeBlockPreviewPatchPlugin(),
     ],
   });
   try {

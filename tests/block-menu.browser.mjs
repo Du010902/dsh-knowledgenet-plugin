@@ -125,6 +125,30 @@ try{
   const inserted=await flush();
   if(!inserted.includes('```'))throw Error('插入代码块后 Markdown 缺 ```：'+JSON.stringify(inserted));
   if(!inserted.includes('普通')||!inserted.includes('正文'))throw Error('插入代码块损坏原文：'+JSON.stringify(inserted));
+  step='b2';/* b2. 右键插「公式块」⇒ 首次输入源码时编辑区不能自动收起来（用户实测 bug 回归） */
+  await mount('普通正文');
+  await rightClick(page.locator('.ProseMirror p').first());
+  await menu.getByRole('menuitem',{name:'公式块',exact:true}).click();
+  await page.waitForTimeout(700);
+  if(await page.locator('.milkdown-code-block').count()===0)throw Error('右键插入公式块失败');
+  const formulaEditor=page.locator('.milkdown-code-block .codemirror-host .cm-content').first();
+  await formulaEditor.click();
+  await page.waitForTimeout(250);
+  await page.keyboard.type('e');
+  await page.waitForTimeout(500);
+  const editing=await page.evaluate(()=>{
+    const host=document.querySelector('.milkdown-code-block .codemirror-host');
+    if(host===null)return null;
+    return {hidden:host.classList.contains('hidden')||getComputedStyle(host).display==='none'};
+  });
+  if(editing===null)throw Error('公式块的源码编辑区不存在');
+  if(editing.hidden)throw Error('公式块第一次输入后「编辑源码」界面被关掉了（用户实测 bug）：'+JSON.stringify(editing));
+  const firstFormula=await flush();
+  if(!firstFormula.includes('$$\ne\n$$'))throw Error('公式块 Markdown 不符合预期：'+JSON.stringify(firstFormula));
+  await page.keyboard.type('=mc^2');
+  await page.waitForTimeout(300);
+  const moreFormula=await flush();
+  if(!moreFormula.includes('e=mc^2'))throw Error('公式块后续输入丢失：'+JSON.stringify(moreFormula));
   step='c';/* c. Esc 关闭菜单且文档不变 */
   await mount('正文');
   await rightClick(page.locator('.ProseMirror p').first());
@@ -206,7 +230,7 @@ try{
   if(selectionText!=='选中这段文字')throw Error('已有文字选区时右键改动了正文：'+JSON.stringify(selectionText));
   step='j';/* j. 无 pageerror */
   if(errors.length)throw Error(errors.join('\n'));
-  console.log('浏览器通过：段落右键弹中文块菜单并插入代码块；Esc 不改正文；输入 / 不再弹菜单；空白处右键插到末尾；表格/代码块右键不弹块菜单；＋手柄插在悬停段之后；有选区右键不弹块菜单；无运行时异常。');
+  console.log('浏览器通过：段落右键弹中文块菜单并插入代码块；公式块首次输入不收编辑区；Esc 不改正文；输入 / 不再弹菜单；空白处右键插到末尾；表格/代码块右键不弹块菜单；＋手柄插在悬停段之后；有选区右键不弹块菜单；无运行时异常。');
 }catch(error){
   if(page)await page.evaluate(()=>({markdown:window.handle?.current?.flush?.(),reports:window.reports?.slice(-12),menus:[...document.querySelectorAll('[data-kn-block-menu],[role="menu"]')].map(e=>({cls:e.className,text:e.innerText.slice(0,200)})),body:document.body.innerHTML.slice(0,300)})).then(diagnostics=>console.error('诊断：'+JSON.stringify({...diagnostics,pageErrors:errors}))).catch(()=>{});
   throw error;

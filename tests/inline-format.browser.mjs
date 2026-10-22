@@ -525,6 +525,128 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }
   });
+
+  it('h. 公式块（shadow DOM 真实面板）：右键插入后首次输入不会把源码编辑区收起来', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      await rightClickBlockMenu(harness);
+      await harness.clickMenuItem('公式块');
+      await harness.page.waitForTimeout(700);
+      const editorArea = harness.page.locator('.kn-editor-rich .milkdown-code-block .codemirror-host .cm-content').first();
+      await editorArea.waitFor({state: 'visible', timeout: 8000});
+      await editorArea.click();
+      await harness.page.waitForTimeout(250);
+      await harness.page.keyboard.type('E');
+      await harness.page.waitForTimeout(500);
+      /*
+       * 用户第九/十轮实测：公式块第一次输入后「编辑源码」界面被自动收起 ✗。
+       * 面板内容在 shadow DOM 里 ⇒ `document.activeElement` 只是 shadow host ✗，
+       * 补丁必须看 `getRootNode().activeElement` 才能判断"焦点还在 CodeMirror 里"✓。
+       */
+      const editing = await harness.page.evaluate(() => {
+        const host = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .codemirror-host');
+        if (host === null) return null;
+        return {hidden: host.classList.contains('hidden') || getComputedStyle(host).display === 'none'};
+      });
+      assert.notEqual(editing, null, '公式块的源码编辑区要存在');
+      assert.equal(editing.hidden, false, '公式块第一次输入后编辑源码界面不能自动收起');
+      await harness.page.keyboard.type('=mc^2');
+      await harness.page.waitForTimeout(300);
+      const saved = await harness.saveNow();
+      assert.ok(saved.includes('E=mc^2'), `公式块内容要完整落盘：${JSON.stringify(saved)}`);
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('i. Ctrl+S 保存后焦点与光标位置仍在（不用鼠标重开才能继续写）', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      await harness.paragraph().click();
+      await harness.page.waitForTimeout(300);
+      await harness.page.keyboard.press('End');
+      await harness.page.keyboard.type('X');
+      await harness.page.waitForTimeout(350);
+      /* 保存期间编辑器会切只读（contenteditable=false ⇒ 浏览器会把焦点移走 ✗） */
+      await harness.saveNow();
+      /* 等保存完成 + 焦点恢复（补丁在 readOnly 结束时把焦点还给正文 ✓） */
+      await harness.page.waitForFunction(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .ProseMirror');
+        if (editor === null) return false;
+        const root = editor.getRootNode();
+        return root !== null && root.activeElement === editor;
+      }, undefined, {timeout: 8000}).catch(() => {});
+      const focus = await harness.page.evaluate(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .ProseMirror');
+        if (editor === null) return null;
+        const root = editor.getRootNode();
+        return {focused: root !== null && root.activeElement === editor, text: editor.innerText};
+      });
+      assert.notEqual(focus, null, '编辑器要存在');
+      assert.equal(focus.focused, true, '保存后焦点要回到正文（光标竖线还在）');
+      /* 不点鼠标、直接接着输入 ⇒ 应该落在保存时的位置后面 ✓ */
+      await harness.page.keyboard.type('Y');
+      await harness.page.waitForTimeout(350);
+      const text = await harness.editor().innerText();
+      assert.ok(text.includes('XY'), `保存后不用点击就能接着输入（光标位置没丢）：${JSON.stringify(text)}`);
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('j. 代码块/公式块上下留白收紧：公式块工具条浮层化、块高度明显变小', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      /* 插入公式块并输入一个字符（进入有预览的编辑态） */
+      await rightClickBlockMenu(harness);
+      await harness.clickMenuItem('公式块');
+      await harness.page.waitForTimeout(700);
+      const formulaEditor = harness.page.locator('.kn-editor-rich .milkdown-code-block .codemirror-host .cm-content').first();
+      await formulaEditor.click();
+      await harness.page.waitForTimeout(250);
+      await harness.page.keyboard.type('E');
+      await harness.page.waitForTimeout(400);
+      /* 悬停露出浮层工具条 ⇒ 点「只看结果」切预览态 */
+      await harness.page.locator('.kn-editor-rich .milkdown-code-block').first().hover();
+      await harness.page.waitForTimeout(250);
+      await harness.page.locator('.kn-editor-rich .milkdown-code-block .preview-toggle-button').first().click();
+      await harness.page.waitForTimeout(400);
+      /* 再插一个普通代码块，量通用块 ✓ */
+      await rightClickBlockMenu(harness);
+      await harness.clickMenuItem('代码块');
+      await harness.page.waitForTimeout(600);
+      const blocks = await harness.page.evaluate(() => window.__knTest.deepAll('.kn-editor-rich .milkdown-code-block').map(block => {
+        const rect = block.getBoundingClientRect();
+        const style = getComputedStyle(block);
+        const tools = block.querySelector(':scope > .tools');
+        const formula = block.querySelector('.preview .katex-display') !== null;
+        return {
+          formula,
+          height: Math.round(rect.height),
+          marginTop: style.marginTop,
+          toolsPosition: tools === null ? null : getComputedStyle(tools).position,
+          toolsHeight: tools === null ? null : Math.round(tools.getBoundingClientRect().height),
+        };
+      }));
+      const formulaBlock = blocks.find(block => block.formula);
+      const codeBlock = blocks.find(block => !block.formula);
+      assert.notEqual(formulaBlock, undefined, '公式块要存在');
+      assert.notEqual(codeBlock, undefined, '普通代码块要存在');
+      /* 公式块：工具条必须脱离文档流（不再常驻占一行）、块高明显变小、外边距 8px ✓ */
+      assert.equal(formulaBlock.toolsPosition, 'absolute', '公式块工具条要浮层化（不占排版高度）');
+      assert.ok(formulaBlock.height <= 60, `公式块高度应收紧（≤60px）：${JSON.stringify(formulaBlock)}`);
+      assert.equal(formulaBlock.marginTop, '8px', '公式块上下外边距要 8px');
+      /* 通用代码块：工具条 ≤26px、块高 ≤70px、外边距 8px ✓ */
+      assert.ok(codeBlock.toolsHeight <= 26, `代码块工具条高度要收紧（≤26px）：${JSON.stringify(codeBlock)}`);
+      assert.ok(codeBlock.height <= 70, `普通代码块高度要收紧（≤70px）：${JSON.stringify(codeBlock)}`);
+      assert.equal(codeBlock.marginTop, '8px', '代码块上下外边距要 8px');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
 });
 
 /** 编辑器块结构（块数 + 文本）：钉住"点工具栏不会插入多余空段落" ✓（忽略 Crepe 的 placeholder 装饰节点 ✓） */

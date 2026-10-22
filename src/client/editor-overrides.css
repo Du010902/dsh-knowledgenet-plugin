@@ -1071,3 +1071,64 @@
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* ------------- ⑫ 代码块 / 公式块：收紧上下留白（用户实测"占据的上下宽度太宽" ✓） ------------- */
+
+/* 通用代码块：外边距 10→8、工具条 30→26、源码区上下留白 6/8→4/6（视觉更紧凑 ✓） */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block {
+  margin: 8px 0;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block > .tools {
+  height: 26px;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .codemirror-host {
+  padding: 4px 10px 6px;
+}
+
+/*
+ * 公式块：工具条（复制 / 只看结果 / 编辑源码）改成**右上角浮层** ✓ ——
+ * 之前它常驻占一行（20–26px）✗，空公式块看起来上下特别空 ✗。
+ * 现在它不参与排版高度 ✓：悬停 / 聚焦时才浮出来 ✓，点它依旧可用 ✓。
+ * 结果区上下留白也收紧（8/12 → 2/4）✓，KaTeX 默认 1em 外边距清掉 ✓（块自身的 8px margin 负责间距 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)) {
+  position: relative;
+  margin: 8px 0;
+}
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  > .tools {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  z-index: 3;
+  height: 22px;
+  padding: 0 4px;
+  border-bottom: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 88%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)):hover
+  > .tools,
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display)):focus-within
+  > .tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .preview {
+  padding: 2px 4px 4px;
+}
+.kn-root .kn-editor-rich .milkdown
+  .milkdown-code-block:is(:has(.cm-content[data-language="stex" i]), :has(.preview .katex-display))
+  .katex-display {
+  margin: 0;
+  padding: 1px 0;
+}
