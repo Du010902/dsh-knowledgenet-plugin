@@ -107,11 +107,14 @@ try{
   await page.locator('[role="menu"]').first().waitFor({state:'visible',timeout:5000});
   if(await menu.count()!==1)throw Error('段落右键没有弹出块菜单');
   await requireOptions(['代码块','公式块','表格','图片','标题 1','无序列表']);
-  const expectedOrder=['图片','代码块','表格','公式块','正文','标题 1','标题 2','标题 3','标题 4','标题 5','标题 6','引用','分隔线','无序列表','有序列表','任务列表'];
+  /* 光标在正文里右键 ⇒ 菜单第一组是「行内格式」✓（`design/inline-format-fix.md` ✓），
+     之后才是 Crepe 的块条目（顺序保持源顺序 ✓）。*/
+  const inlineOrder=['加粗','斜体','删除线','行内代码','行内公式','链接','清除文字格式'];
+  const expectedOrder=[...inlineOrder,'图片','代码块','表格','公式块','正文','标题 1','标题 2','标题 3','标题 4','标题 5','标题 6','引用','分隔线','无序列表','有序列表','任务列表'];
   const labels=await options();
-  if(JSON.stringify(labels)!==JSON.stringify(expectedOrder))throw Error('菜单条目/顺序不符合 Crepe 源顺序：'+JSON.stringify(labels));
+  if(JSON.stringify(labels)!==JSON.stringify(expectedOrder))throw Error('菜单条目/顺序不符合预期（行内组 + Crepe 源顺序）：'+JSON.stringify(labels));
   const groupText=await menu.innerText();
-  for(const group of ['插入','文本','列表'])if(!groupText.includes(group))throw Error('菜单缺少分组「'+group+'」：'+JSON.stringify(groupText));
+  for(const group of ['行内格式','插入','文本','列表'])if(!groupText.includes(group))throw Error('菜单缺少分组「'+group+'」：'+JSON.stringify(groupText));
   const popup=await menu.evaluate(element=>{const rect=element.getBoundingClientRect();return{left:rect.left,top:rect.top};});
   if(Math.abs(popup.left-point.x)>8||Math.abs(popup.top-point.y)>8)throw Error('菜单没弹在右键坐标附近：'+JSON.stringify({point,popup}));
   await page.keyboard.press('Escape');

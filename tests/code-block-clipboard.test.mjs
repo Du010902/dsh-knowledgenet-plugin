@@ -33,6 +33,8 @@ import {
 } from "../src/client/code-block-clipboard.ts";
 import { EDITOR_LITERAL } from "../src/client/node-document-state.ts";
 import { TABLE_LITERAL } from "../src/client/table-menu.ts";
+import { BLOCK_MENU_LITERAL } from "../src/client/block-insert.ts";
+import { INLINE_FORMAT_LITERAL } from "../src/client/inline-format.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, "..", "src", "client");
@@ -205,10 +207,11 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
     assert.deepEqual(editorMissing, [], `NodeDocumentEditor 缺回落文案 ✗：${editorMissing.join(", ")}`);
     const richUsed = keysOf(richSource);
     /*
-     * 富文本编辑器的回落字典现在是**两份并起来** ✓：
-     * `{ ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL }` ✓（后者给宿主 `ImageLightbox` 的两条 labels ✓）。
+     * 富文本编辑器的回落字典现在是**四份并起来** ✓：
+     * `{ ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL, ...BLOCK_MENU_LITERAL, ...INLINE_FORMAT_LITERAL }` ✓
+     * （最后一份给右键菜单的「行内格式」组 + 链接输入框占位符 ✓；行内代码占位也走它 ✓）。
      */
-    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !richExtra.has(key));
+    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !(key in BLOCK_MENU_LITERAL) && !(key in INLINE_FORMAT_LITERAL) && !richExtra.has(key));
     assert.deepEqual(richMissing, [], `MarkdownRichEditor 缺回落文案 ✗：${richMissing.join(", ")}`);
     assert.ok(richExtra.size >= 3, `编辑器第二份回落字典要能扫到（实际 ${richExtra.size} 个 ✓）`);
     assert.ok("unsupportedNoticeRich" in EDITOR_LITERAL, "正文模式那句必须在这份字典里 ✓");

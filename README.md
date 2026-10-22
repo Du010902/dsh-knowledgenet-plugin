@@ -125,6 +125,15 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   **输入 `/` 一律是普通字符** ✓，不再唤起菜单（Crepe 自带的斜杠触发已在构建期关掉 ✓，详见 [块菜单改版](design/editor-block-menu-redesign.md)）。
   **插入项后保留光标前后的原文** ✓：正文 / 标题里在右键处拆出中间的空段落、命令只改它，两侧文字与列表 / 引用结构都保留 ✓；
   代码块 / 图片 / 表格这类拆不开的块则在**这一块之后**插空段落 ✓。
+  **行内格式**（2026-10-21 修复：旧实现看起来"没生效" ✗，详见 [行内格式修复](design/inline-format-fix.md)）：
+  光标处右键的菜单第一组是「行内格式」✓（加粗 / 斜体 / 删除线 / 行内代码 / 行内公式 / 链接 / 清除文字格式 ✓），
+  **这些动作绝不拆开段落** ✓、两侧文字原样保留 ✓；空光标上的加粗 / 斜体 / 删除线 / 清除格式只影响**接下来输入的文字**，
+  所以会浮出一条 1.6 秒的短提示（"已开启加粗，继续输入即可" ✓）—— 不再"点了没反应"✗。
+  行内代码会插入一段**选中的占位文字**（`代码` ✓），直接打字就替换成代码 ✓；
+  行内公式会插入公式节点并**弹出编辑框、自动聚焦** ✓（输入 `x^2` 回车 ⇒ `$x^2$` ✓）；
+  链接弹的是中文输入框（"粘贴链接…" ✓），粘贴 / 输入 URL 回车即插入 ✓。
+  **选中文字后**：浮动工具栏的中文名称已补齐（加粗 / 斜体 / 删除线 / 行内代码 / 行内公式 / 链接 ✓），
+  并新增「清除文字格式」✓；选中文字时右键仍保留浏览器原生的复制 / 剪切菜单 ✓。
   **没有保存按钮**：改完按 `Ctrl / ⌘ + S` 保存（提示挂在标题栏悬停里）；
   未保存时节点名右上角有个 `*`，保存中转成「正在保存…」，保存失败与冲突另有提示条与重试入口 ✓。
   正文里若有富编辑器保不住的语法（原始 HTML、脚注、指令等）**自动改用纯文本**编辑、原文一字不动 ✓；
@@ -220,7 +229,7 @@ profile 的 `cordis.patch.yml` 插入本插件（`@local/dsh-knowledgenet`）。
 
 ```bash
 node build.mjs                 # 构建宿主 + 客户端 + 布局 Worker + Mermaid 运行时（四个产物）
-node --test "tests/*.test.mjs" # 全部测试（当前 898 个，全绿）
+node --test "tests/*.test.mjs" # 全部测试（当前 908 个，全绿）
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 
@@ -231,6 +240,7 @@ $env:KN_PROJECT='D:/AppInstallation/DSH/deepseek-harness'
 node --test tests/mermaid-note.browser.mjs   # Mermaid 图块（14 个：图 / 复制 / 下载 / 输入保护 / 缓存 / 安全 / 运行时缺失）
 node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
 node --test tests/block-menu.browser.mjs   # 右键块菜单（真 client.js + 宿主 Menu 契约替身）
+node --test tests/inline-format.browser.mjs   # 行内格式（真实面板 UI：右键行内组 / 公式编辑框 / 行内代码占位 / 工具栏中文名 + clear）
 ```
 
 - 上游（`src/vendor/upstream/**`）是**逐字节冻结**的开放格式实现：只读、不手改；

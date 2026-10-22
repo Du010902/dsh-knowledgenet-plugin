@@ -1,3 +1,4 @@
+import { patchLatexInlineTooltip } from "./scripts/latex-inline-tooltip-patch.mjs";
 import { patchCrepeBlockMenu } from "./scripts/slash-menu-patch.mjs";
 import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
 /**
@@ -821,9 +822,10 @@ function blockMenuPatchPlugin() {
     transform(code, id) {
       if (!id.replace(/\\/g, "/").endsWith("/@milkdown/crepe/lib/esm/index.js")) return null;
       patched = true;
-      return { code: patchCrepeBlockMenu(code), map: null };
+      /* Crepe 同一个产物文件上的两处补丁：斜杠菜单关闭 + 内联公式编辑框空值守卫 ✓ */
+      return { code: patchLatexInlineTooltip(patchCrepeBlockMenu(code)), map: null };
     },
-    buildEnd(error) { if (!error && !patched) throw Error("Crepe block menu was not patched."); },
+    buildEnd(error) { if (!error && !patched) throw Error("Crepe patches were not applied (block menu / latex inline tooltip)."); },
   };
 }
 
