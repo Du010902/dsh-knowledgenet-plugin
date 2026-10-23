@@ -712,8 +712,18 @@ export function scanUnsupportedSyntax(markdown: string): UnsupportedScan {
    * 不放行任意 HTML ✗，也不对正文做全局字符串替换 ✗（编辑器自己原样保留 ✓）。
    */
   const textWithoutBreaks = stripped.replace(/<br\s*\/?>/gi, " ");
+  /*
+   * **反斜杠转义的尖括号是文本、不是原始 HTML** ✓（用户实测反馈 ✓）。
+   *
+   * 场景：在代码块里"手动选中复制"纯文本 → 粘进正文 ⇒ ProseMirror 序列化会把文本里的 `<`
+   * 转义成 `\<`（例如 `#include\<iostream>` ✓），重新解析回来仍是同一段文本 ✓ ——
+   * 但旧扫描器仍按 `<...>` 正则把它当成"原始 HTML 标签" ✗ ⇒ 明明能原样往返的纯文本被误报，
+   * 顶部出现"正文编辑器无法原样保留的语法"提示 ✗。
+   * 这里只在**检测用副本**里把 `\<` 换成 `&lt;` ✓（不动原文 ✓；真正未转义的 `<div>` 照旧命中 ✓）。
+   */
+  const textWithoutEscapedAngles = textWithoutBreaks.replace(/\\</g, "&lt;");
   /* HTML 注释与"非 br"的标签 ✗ */
-  if (/<!--[\s\S]*?-->/.test(textWithoutBreaks) || /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/.test(textWithoutBreaks)) {
+  if (/<!--[\s\S]*?-->/.test(textWithoutEscapedAngles) || /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/.test(textWithoutEscapedAngles)) {
     reasons.push("原始 HTML 标签");
   }
   /* 指令 / MDX 容器：`:::note`、`::youtube`、MDX 注释写法之类 ✗ */

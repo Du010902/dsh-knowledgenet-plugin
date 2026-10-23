@@ -199866,8 +199866,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const test = (pattern, reason) => {
 				if (pattern.test(stripped) && !reasons.includes(reason)) reasons.push(reason);
 			};
-			const textWithoutBreaks = stripped.replace(/<br\s*\/?>/gi, " ");
-			if (/<!--[\s\S]*?-->/.test(textWithoutBreaks) || /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/.test(textWithoutBreaks)) reasons.push("原始 HTML 标签");
+			const textWithoutEscapedAngles = stripped.replace(/<br\s*\/?>/gi, " ").replace(/\\</g, "&lt;");
+			if (/<!--[\s\S]*?-->/.test(textWithoutEscapedAngles) || /<\/?[A-Za-z][A-Za-z0-9-]*(\s[^>\n]*)?\/?>/.test(textWithoutEscapedAngles)) reasons.push("原始 HTML 标签");
 			test(/^\s*:::{1,3}/m, "自定义指令（:::）");
 			test(/^\s*\{/m, "模板 / MDX 语法");
 			test(/^\[\^[^\]]+\]:/m, "脚注定义");

@@ -621,6 +621,15 @@ describe("与设计稿对应的部件与入口", () => {
     assert.equal(canOpenRich("Setext 标题\n---\n\n正文"), true, "Setext 标题下划线也不能误判 ✓");
     assert.equal(canOpenRich("| a | b |\n| --- | --- |\n| 1 | 2 |"), true, "表格分隔行不能误判 ✓");
     assert.equal(canOpenRich("左\n\n***\n\n右"), true, "另一种分隔线写法也不能误判 ✓");
+    /*
+     * **反斜杠转义的尖括号是文本、不是原始 HTML** ✓（用户实测反馈 ✓）：
+     * 在代码块里手动选中复制纯文本 → 粘进正文后，序列化会把 `<iostream>` 写成 `\<iostream>`；
+     * 旧扫描器仍按 `<...>` 正则命中 ⇒ 误报"原始 HTML 标签" ✗。转义后的尖括号不能触发提示 ✓；
+     * 未转义的真 HTML 照旧命中 ✓。
+     */
+    assert.equal(canOpenRich("正文\n\n#include\\<iostream>\nusing namespace std;"), true, "转义的 <iostream> 不能误报原始 HTML");
+    assert.equal(canOpenRich("文本 \\<div\\> 结束"), true, "转义后的 <div> 也是文本 ✓");
+    assert.equal(canOpenRich("正文 <div>真 HTML</div>"), false, "未转义的 HTML 仍然要命中 ✓");
     const cases = [
       ["<div class=\"x\">块级 HTML</div>", "原始 HTML 标签"],
       ["正文\n<!-- 注释 -->\n正文", "原始 HTML 标签"],

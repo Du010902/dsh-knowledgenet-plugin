@@ -775,6 +775,16 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
       await harness.page.keyboard.press('Control+V');
       await harness.page.waitForTimeout(900);
       assert.equal(await blocks.count(), before, '同一剪贴板第二次粘贴也不许还原成代码块（块数仍不变）');
+      /*
+       * 用户实测回归：纯文本粘贴里的尖括号（如 `#include<iostream>`）由序列化转义成 `\<iostream>` ✓，
+       * 不能被语法嗅探误报成"原始 HTML 标签"、冒出"正文编辑器无法原样保留的语法"提示 ✗。
+       */
+      const notices = await harness.page.evaluate(() =>
+        window.__knTest.deepAll('.kn-editor-notice').map(element => element.innerText));
+      assert.ok(
+        !notices.some(text => text.includes('无法原样保留')),
+        `纯文本粘贴不应触发"无法原样保留"提示：${JSON.stringify(notices)}`,
+      );
       assert.deepEqual(harness.pageErrors, []);
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }
