@@ -125,6 +125,16 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   代码块 / 图片、编辑器里的浮动工具（工具栏 / 语言选择 / 表格菜单）以及**已选中文字**上不接管右键
   ⇒ 保留浏览器原生菜单（复制源码 / 保存图片 / 复制文字 ✓）；只读、初始化中也照旧给原生菜单 ✓。
   **输入 `/` 一律是普通字符** ✓，不再唤起菜单（Crepe 自带的斜杠触发已在构建期关掉 ✓，详见 [块菜单改版](design/editor-block-menu-redesign.md)）。
+  **其余正文排版也跟随 DSH 的 Markdown 渲染** ✓（标题字号/字重/32-16px 外边距、段落 16px、列表间距与 marker、
+  链接颜色/字重/无下划线、分隔线 0.5px + 32px、加粗 600、图片圆角、首个/末个块外边距）✓；\n  列表序号/圆点与正文垂直居中（标记盒行高 = DSH base line-height ✓）。
+  字号/行高走 DSH 的 `--dsw-font-markdown-*` token（跟随 DSH 内容字号设置 ✓）。
+  **表格与代码块保留插件自己的设计** ✓（表头可辨识、代码块工具条；理由见 [正文排版对齐](design/editor-markdown-dsh-alignment.md)）。
+  **打开笔记不再"一闪而逝"** ✓：富编辑器的过渡首帧（代码块/公式还没换成正式渲染时就先画一遍 ✗）
+  在渲染稳定前**隐藏**，稳定后再淡入 ✓；加载提示会一直显示到内容真正就绪 ✓
+  （详见 [首帧渲染](design/editor-first-paint-flash.md)）。
+  **引用块样式与 DSH 的 Markdown 渲染对齐** ✓：2px 细竖线（`--dsw-alias-label-caption`）+ 14px 左内边距 + 正常正文色 ✓
+  （原来是 3px 粗线 + 整块文字变淡 ✗，用户实测"有点丑"✗；**Crepe 自带的 4px 伪元素竖线已隐藏 ✓**，只保留 DSH 这一条 ✓）；空段落 / 空引用的输入提示也改成中文「输入内容…」✓
+  （Crepe 默认英文 "Please enter..." ✗，详见 [引用块与输入提示](design/editor-blockquote-and-placeholder.md)）。
   **插入项后保留光标前后的原文** ✓：正文 / 标题里在右键处拆出中间的空段落、命令只改它，两侧文字与列表 / 引用结构都保留 ✓；
   代码块 / 图片 / 表格这类拆不开的块则在**这一块之后**插空段落 ✓。
   **行内格式**（2026-10-21 修复"看起来没生效" ✗；2026-10-22 第四轮按"和浮动工具栏重复"**从右键菜单里删掉** ✓，
@@ -255,7 +265,7 @@ profile 的 `cordis.patch.yml` 插入本插件（`@local/dsh-knowledgenet`）。
 
 ```bash
 node build.mjs                 # 构建宿主 + 客户端 + 布局 Worker + Mermaid 运行时（四个产物）
-node --test "tests/*.test.mjs" # 全部测试（当前 893 个，全绿）
+node --test "tests/*.test.mjs" # 全部测试（当前 894 个，全绿）
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 

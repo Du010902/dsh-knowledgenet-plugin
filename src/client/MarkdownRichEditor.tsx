@@ -911,6 +911,16 @@ export function MarkdownRichEditor(props: {
   const [menu, setMenu] = useState<TableMenuAnchor | null>(null);
   /** 完整动作菜单是否展开（**点开才出现** ✓；复查要求"一个轻量入口，按需展开" ✓） */
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+   * **首帧先隐藏、就绪后再淡入** ✓（用户第二十二轮：打开笔记时"界面一闪而逝" ✗）。
+   *
+   * Crepe 的 `create()` 还没完成时，`defaultValue` 会先按**默认 schema** 画一遍：
+   * 代码块/公式块还没换成正式 NodeView（代码露成纯文本、公式没渲染 ✗）——
+   * 正好被用户看到，然后又被正式渲染覆盖 ✗。
+   * 所以 `.kn-editor-rich` 初始带 `data-pending`（CSS 里 visibility:hidden ✓），
+   * `create()` 成功后才摘掉属性、淡入 ✓；失败时保持隐藏（父面板会切回纯文本 ✓）。
+   */
+  const [firstPaintReady, setFirstPaintReady] = useState(false);
   /** rAF 合并：选区变化会连续触发，没必要每条都重算 ✓ */
   const menuFrameRef = useRef<number | null>(null);
   /**
@@ -1618,6 +1628,13 @@ export function MarkdownRichEditor(props: {
        * （文档明确要求：能用配置就用配置 ✓）。
        */
       featureConfigs: {
+        /*
+         * **空段落 / 空引用的输入提示** ✓（用户实测：引用块里只显示英文 "Please enter..." ✗）。
+         * 用 Crepe 官方 `Placeholder` 配置项换成中文 ✓（`mode` 默认 block：任意空文本块都提示 ✓）。
+         */
+        [CrepeFeature.Placeholder]: {
+          text: t("editorPlaceholder"),
+        },
         /*
          * **链接输入框的文案** ✓：原来点「链接」后弹的是英文 "Paste link..." ✗ ——
          * 与工具栏中文名不一致 ✓（用户要求"补齐中文名称" ✓）；用 Crepe 官方配置项换掉 ✓。
@@ -2424,6 +2441,56 @@ export function MarkdownRichEditor(props: {
       : null;
     imageObserver?.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "style"] });
 
+    /*
+     * **首帧渲染稳定后才显示** ✓（配合 `.kn-editor-rich[data-pending]` ✓）。
+     *
+     * Crepe `create()` 刚完成时可能还是"默认 schema 的过渡渲染"（代码块/公式块还没换成
+     * 正式 NodeView ✗）—— 实测 DOM 从 ~13KB 涨到 ~38KB 要再晚 100ms 左右 ✓；
+     * 这里等**连续 200ms 无 DOM 变化**（最多 1.5s 兜底）再淡入，并同时把 ready 上报给父面板 ✓
+     * ⇒ "正在准备编辑器"不会提前消失、用户看不到过渡界面 ✓。
+     */
+    let revealObserver: MutationObserver | null = null;
+    let revealFrame: number | null = null;
+    const revealEditorWhenSettled = (): void => {
+      if (cancelled || disposedRef.current) return;
+      if (typeof MutationObserver !== "function") {
+        setFirstPaintReady(true);
+        emitStatus();
+        return;
+      }
+      const started = Date.now();
+      let lastChange = started;
+      revealObserver?.disconnect();
+      revealObserver = new MutationObserver(() => { lastChange = Date.now(); });
+      revealObserver.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+      const reveal = (): void => {
+        revealObserver?.disconnect();
+        revealObserver = null;
+        if (revealFrame !== null) {
+          cancelAnimationFrame(revealFrame);
+          revealFrame = null;
+        }
+        if (cancelled || disposedRef.current) return;
+        setFirstPaintReady(true);
+        emitStatus();
+      };
+      const tick = (): void => {
+        revealFrame = null;
+        if (cancelled || disposedRef.current) {
+          revealObserver?.disconnect();
+          revealObserver = null;
+          return;
+        }
+        const now = Date.now();
+        if (now - lastChange >= 200 || now - started >= 1500) {
+          reveal();
+          return;
+        }
+        revealFrame = requestAnimationFrame(tick);
+      };
+      revealFrame = requestAnimationFrame(tick);
+    };
+
     syncingRef.current = true;
     void crepe.create().then(
       () => {
@@ -2545,8 +2612,17 @@ export function MarkdownRichEditor(props: {
          * 父面板据此把"编辑器快照"对齐到编辑器自己的写法 ✗（不是用户修改 ✓）。
          */
         reportBaseline(pending);
-        emitStatus();
         scheduleMenu();
+        /*
+         * **等首帧渲染稳定再显示** ✓（用户第二十二轮："打开笔记时界面一闪而逝" ✗）。
+         *
+         * `create()` 刚完成时 Crepe 的 DOM 还可能是**默认 schema 的过渡渲染**：
+         * 代码块/公式块的正式 NodeView 要再晚一两帧才挂上（实测 13KB → 38KB ✓）——
+         * 这段窗口必须继续隐藏，否则用户看到的还是"过渡界面" ✗。
+         * 这里等到**连续 200ms 没有 DOM 变化**（最多 1.5s 兜底）再摘掉 `data-pending` 并淡入 ✓；
+         * `emitStatus()` 也一起延迟到那时 ⇒ 父面板的"正在准备编辑器"不会提前消失 ✓。
+         */
+        revealEditorWhenSettled();
         reportRef.current?.("markdown-editor-ready", { bytes: pending.length });
       },
       (error: unknown) => {
@@ -2613,6 +2689,12 @@ export function MarkdownRichEditor(props: {
       resizeObserver?.disconnect();
       languageObserver?.disconnect();
       imageObserver?.disconnect();
+      revealObserver?.disconnect();
+      revealObserver = null;
+      if (revealFrame !== null) {
+        cancelAnimationFrame(revealFrame);
+        revealFrame = null;
+      }
       for (const url of imageCacheRef.current.values()) URL.revokeObjectURL(url);
       imageCacheRef.current.clear();
       imageInflightRef.current.clear();
@@ -2758,7 +2840,7 @@ export function MarkdownRichEditor(props: {
    */
   return (
     <>
-      <div className="kn-editor-rich" ref={hostRef} data-testid="kn-markdown-rich" />
+      <div className="kn-editor-rich" ref={hostRef} data-testid="kn-markdown-rich" data-pending={firstPaintReady ? undefined : "true"} />
       {menu === null || !menuOpen ? null : (
         <TableMenu
           top={menu.popover.top}

@@ -180,6 +180,7 @@ const DICT_ZH: Record<string, string> = {
   imageViewerClose: "关闭",
   imageViewerOpenHint: "点击查看大图",
   editorResultOnly: "只看结果",
+  editorPlaceholder: "输入内容…",
   /* 划词浮条 / 收集弹窗（`ChatSelectionBar` ✓）—— 之前是硬编码中文默认值 ✗ */
   addNode: "添加节点",
   nothingSelected: "没有选中文字",
@@ -454,6 +455,7 @@ const DICT_EN: Record<string, string> = {
   imageViewerClose: "Close",
   imageViewerOpenHint: "Click to view larger",
   editorResultOnly: "Result only",
+  editorPlaceholder: "Type something…",
   /* Chat selection bar / collection dialog ✓ */
   addNode: "Add node",
   nothingSelected: "Nothing selected",

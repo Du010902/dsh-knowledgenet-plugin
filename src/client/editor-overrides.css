@@ -1149,3 +1149,206 @@
   margin: 0;
   padding: 1px 0;
 }
+
+/* ------------------- ⑬ 引用块：与 DSH 的 Markdown 渲染对齐（用户实测"还是有点丑" ✓） ------------------- */
+
+/*
+ * DSH 基准（`ui-primitives/src/markdown/MarkdownText.module.css` 的 `.markdown blockquote`）：
+ * `border-left: 2px solid var(--dsw-alias-label-caption); margin: 16px 0 0; padding-left: 14px;`，
+ * **正文颜色不变淡**（不额外加 `label-secondary`）✓。
+ * 编辑区段距用的是 0.65em（不是 16px）⇒ 引用块外边距沿用段落节奏 ✓，其余照 DSH ✓：
+ * 2px 细竖线 + 14px 左内边距 + 正常正文色 ✓（之前是 3px 粗线 + 12px + 整块变淡 ✗，看起来更重 ✗）。
+ */
+.kn-root .kn-editor-rich .milkdown blockquote {
+  margin: 0.65em 0;
+  padding: 2px 0 2px 14px;
+  /* 长写边框：颜色 token 不许带兜底（测试口径 ✓）；token 缺失时颜色落回 currentColor，宽度/样式仍生效 ✓ */
+  border-left-width: 2px;
+  border-left-style: solid;
+  border-left-color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-primary);
+}
+
+/*
+ * **Crepe 自带的第二条竖线要删掉** ✗（用户截图："左边细长、右边粗短，两条竖线" ✓）。
+ *
+ * Crepe `reset.css` 给 `.ProseMirror blockquote::before` 画了一条 **4px 圆角伪元素竖线**
+ * （`top/bottom: 4px`，颜色 `--crepe-color-selected`），而插件又按 DSH 加了 `border-left: 2px` ✗
+ * ⇒ 两条线叠在一起：伪元素更短（上下各缩 4px）、插件边框更长 ✓ —— 正是截图里看到的两条 ✗。
+ * DSH 的引用块只有**一条** 2px 竖线 ✓ ⇒ 这里把伪元素关掉，只留 DSH 那条边框 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .ProseMirror blockquote::before {
+  display: none;
+}
+
+/* ------------------- ⑭ 正文排版：与 DSH 的 Markdown 渲染对齐（用户第二十轮 ✓） ------------------- */
+
+/*
+ * 评估（dsh-reuse-first）：DSH 的 `MarkdownText` 是**只读渲染组件**，编辑区需要可编辑的
+ * ProseMirror ✗ ⇒ 不能直接复用组件；可复用的是它背后的**样式规则 + 主题 token** ✓
+ * （`ui-primitives/src/markdown/MarkdownText.module.css`，本段逐项对齐）。
+ * 表格 / 代码块保留插件自己更严格的设计（表头可辨识、代码块工具条）✓；
+ * 引用块、行内代码已在上面几节对齐 ✓。字体 token（`--dsw-font-*`）属几何类 ⇒ 允许字面兜底 ✓。
+ */
+
+/* 正文基准：DSH `.markdown { font: var(--dsw-font-markdown-base) }` */
+.kn-root .kn-editor-rich .milkdown .ProseMirror {
+  font-size: var(--dsw-font-markdown-base-font-size, 15px);
+  line-height: var(--dsw-font-markdown-base-line-height, 1.7);
+}
+
+/* 加粗：DSH 600 ✓ */
+.kn-root .kn-editor-rich .milkdown strong { font-weight: 600; }
+
+/* 段落：上下 16px ✓（DSH `.markdown p { margin: 16px 0; }`） */
+.kn-root .kn-editor-rich .milkdown p { margin: 16px 0; padding: 0; }
+
+/* 表格单元格里的段落不能被段距撑高 ✗（既有口径 ✓） */
+.kn-root .kn-editor-rich .milkdown th p,
+.kn-root .kn-editor-rich .milkdown td p,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block th p,
+.kn-root .kn-editor-rich .milkdown .milkdown-table-block td p {
+  margin: 0;
+}
+
+/*
+ * 标题：DSH 的 font token（h1 21/30 700、h2 19/28 700、h3 18/26 700、h4-h6 14/24 600）
+ * + 32/16 外边距（h4-h6 为 16/16）✓；token 缺失时用 DSH 默认值兜底 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown h1 {
+  font-size: var(--dsw-font-markdown-h1-font-size, 21px);
+  font-weight: var(--dsw-font-markdown-h1-font-weight, 700);
+  line-height: var(--dsw-font-markdown-h1-line-height, 30px);
+  margin: 32px 0 16px;
+}
+.kn-root .kn-editor-rich .milkdown h2 {
+  font-size: var(--dsw-font-markdown-h2-font-size, 19px);
+  font-weight: var(--dsw-font-markdown-h2-font-weight, 700);
+  line-height: var(--dsw-font-markdown-h2-line-height, 28px);
+  margin: 32px 0 16px;
+}
+.kn-root .kn-editor-rich .milkdown h3 {
+  font-size: var(--dsw-font-markdown-h3-font-size, 18px);
+  font-weight: var(--dsw-font-markdown-h3-font-weight, 700);
+  line-height: var(--dsw-font-markdown-h3-line-height, 26px);
+  margin: 32px 0 16px;
+}
+.kn-root .kn-editor-rich .milkdown h4 {
+  font-size: var(--dsw-font-markdown-h4-font-size, 14px);
+  font-weight: var(--dsw-font-markdown-h4-font-weight, 600);
+  line-height: var(--dsw-font-markdown-h4-line-height, 24px);
+  margin: 16px 0;
+}
+.kn-root .kn-editor-rich .milkdown h5,
+.kn-root .kn-editor-rich .milkdown h6 {
+  font-size: var(--dsw-font-markdown-base-strong-font-size, 14px);
+  font-weight: var(--dsw-font-markdown-base-strong-font-weight, 600);
+  line-height: var(--dsw-font-markdown-base-strong-line-height, 24px);
+  margin: 16px 0;
+}
+.kn-root .kn-editor-rich .milkdown :is(h1, h2, h3, h4, h5, h6) strong { font-weight: inherit; }
+
+/* 列表：DSH `.markdown :where(ul, ol)` / `li` / `li::marker` ✓（Crepe 的列表 NodeView 仍负责缩进 ✓） */
+.kn-root .kn-editor-rich .milkdown :where(ul, ol) { margin: 16px 0; padding-left: 18px; }
+.kn-root .kn-editor-rich .milkdown li:not(:first-child) { margin-top: 6px; }
+.kn-root .kn-editor-rich .milkdown li > :where(ul, ol) { margin-top: 4px; }
+.kn-root .kn-editor-rich .milkdown li::marker { color: var(--dsw-alias-label-secondary); }
+.kn-root .kn-editor-rich .milkdown li > p { margin: 8px 0; }
+.kn-root .kn-editor-rich .milkdown li > :first-child { margin-top: 0; }
+.kn-root .kn-editor-rich .milkdown li > :last-child { margin-bottom: 0; }
+
+/* 链接：DSH 的 link 色 / 字重 500 / 默认无下划线 / hover+focus 点状下划线 ✓ */
+.kn-root .kn-editor-rich .milkdown a {
+  color: var(--dsw-alias-link);
+  font-weight: 500;
+  text-decoration: none;
+}
+.kn-root .kn-editor-rich .milkdown a:hover,
+.kn-root .kn-editor-rich .milkdown a:focus {
+  text-decoration: underline dotted var(--dsw-alias-link);
+  text-underline-offset: 3px;
+}
+
+/* 分隔线：DSH 0.5px + 32px 外边距（Crepe 默认是 13px 高的粗条 ✗）✓ */
+.kn-root .kn-editor-rich .milkdown hr {
+  display: block;
+  border: none;
+  height: 0.5px;
+  margin: 32px 0;
+  padding: 0;
+  background: var(--dsw-alias-border-l2);
+}
+.kn-root .kn-editor-rich .milkdown hr.ProseMirror-selectednode { background-color: var(--dsw-alias-border-l1); }
+.kn-root .kn-editor-rich .milkdown hr.ProseMirror-selectednode::before { content: none; }
+
+/* 任务列表复选框：DSH ✓ */
+.kn-root .kn-editor-rich .milkdown input[type="checkbox"] {
+  margin: 0 8px 0 0;
+  accent-color: var(--dsw-alias-label-secondary);
+}
+
+/* 图片：DSH `.image` 的圆角 + 自适应 ✓ */
+.kn-root .kn-editor-rich .milkdown .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--dsw-radius-md, 8px);
+}
+
+/* 首尾外边距：与 DSH `.markdown > *:first-child / last-child` 一致 ✓ */
+.kn-root .kn-editor-rich .milkdown .ProseMirror > :first-child { margin-top: 0; }
+.kn-root .kn-editor-rich .milkdown .ProseMirror > :last-child { margin-bottom: 0; }
+/*
+ * **列表的 NodeView 适配** ✓（Crepe 的列表不是原生 `ul > li`：
+ * DOM 是 `ul > div.milkdown-list-item-block > li.list-item > label-wrapper + children` ✗）
+ * ⇒ 上面按 DSH 写的 `li` 规则压不到它的项间距 / 段落 / 缩进，这里按真实 DOM 再补一条 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown :where(ul, ol) { padding-left: 0; }
+.kn-root .kn-editor-rich .milkdown :where(ul, ol) :where(ul, ol) { padding-left: 18px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block:not(:first-child) { margin-top: 6px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li { gap: 0; }
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li .label-wrapper { width: 24px; height: 32px; }
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li .label-wrapper,
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li .label-wrapper svg { color: var(--dsw-alias-label-secondary); fill: var(--dsw-alias-label-secondary); }
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li p,
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block .content-dom > p { margin: 0; }
+
+/*
+ * **列表序号 / 圆点与正文第一行的垂直对齐** ✓（用户第二十一轮："前面的符号和后面的文字高度似乎不一致" ✗）。
+ *
+ * Crepe 的标记项是固定高度 32px 的 `.label-wrapper`（SVG 圆点居中 ⇒ 中心在 16px 处）✗，
+ * 而正文行高是 DSH 的 24px（第一行中心在 12px 处）✗ ⇒ 符号比文字低 4px，看起来"错位" ✓。
+ * 这里把标记盒高度/行高都改成 DSH 的行高 token ⇒ 中心与正文第一行一致 ✓。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li .label-wrapper {
+  height: var(--dsw-font-markdown-base-line-height, 24px);
+  align-items: center;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: var(--dsw-font-markdown-base-line-height, 24px);
+  padding: 0;
+  line-height: var(--dsw-font-markdown-base-line-height, 24px);
+}
+/* 段落行高跟随 DSH 的 base line-height ✓（Crepe 默认 1.5 会把列表标记的垂直居中挤偏 ✗） */
+.kn-root .kn-editor-rich .milkdown p {
+  line-height: var(--dsw-font-markdown-base-line-height, 24px);
+}
+
+/*
+ * **富编辑器首帧先隐藏、就绪后再淡入** ✓（用户第二十二轮："打开笔记时界面一闪而逝" ✗）。
+ *
+ * Crepe 的 `create()` 完成前，`defaultValue` 会先按**默认 schema** 画一遍：
+ * 代码块/公式块还没换成正式 NodeView（代码露成纯文本、公式未渲染 ✗）——
+ * 这一帧被用户看到后才被正式渲染覆盖 ✗。`data-pending` 在 create 成功前一直存在 ✓，
+ * 隐藏用 `visibility`（仍占布局 ⇒ 不产生高度跳动 ✓），成功后淡入 120ms ✓。
+ */
+.kn-root .kn-editor-rich {
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+.kn-root .kn-editor-rich[data-pending="true"] {
+  visibility: hidden;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kn-root .kn-editor-rich { transition: none; }
+}

@@ -826,6 +826,201 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }
   });
+
+  it('k. 引用块与 DSH 渲染对齐；空引用提示是中文', async () => {
+    const harness = await startHarness('> 引用测试\n\n正文');
+    try {
+      await harness.openNote();
+      /* DSH `.markdown blockquote`：2px 细竖线 + 14px 左内边距 + 正文色（不整块变淡）✓ */
+      const style = await harness.page.evaluate(() => {
+        const quote = window.__knTest.deepOne('.kn-editor-rich .ProseMirror blockquote');
+        const paragraph = window.__knTest.deepOne('.kn-editor-rich .ProseMirror p');
+        if (quote === null || paragraph === null) return null;
+        const quoteStyle = getComputedStyle(quote);
+        const pseudo = getComputedStyle(quote, '::before');
+        return {
+          borderLeftWidth: quoteStyle.borderLeftWidth,
+          paddingLeft: quoteStyle.paddingLeft,
+          color: quoteStyle.color,
+          paragraphColor: getComputedStyle(paragraph).color,
+          pseudoDisplay: pseudo.display,
+        };
+      });
+      assert.notEqual(style, null, '引用块要存在（夹具正文第一段是 > 引用）');
+      assert.equal(style.borderLeftWidth, '2px', '引用竖线要 2px（DSH 基准）');
+      /* Crepe 自带的 4px 伪元素竖线必须关掉：否则和 DSH 边框叠成"两条竖线"✗（用户截图 ✓） */
+      assert.equal(style.pseudoDisplay, 'none', 'Crepe 自带的第二条竖线（::before）要隐藏');
+      assert.equal(style.paddingLeft, '14px', '引用左内边距要 14px（DSH 基准）');
+      assert.equal(style.color, style.paragraphColor, '引用正文不许整块变淡（DSH 基准）');
+      /*
+       * 空段落 / 空引用的输入提示必须是中文 ✓（Crepe 默认英文 "Please enter..." ✗）。
+       * 用"在正文末尾回车出一个空段落"来触发，比"删光引用文字"稳定 ✓
+       * （后者会先碰到"段首 Backspace 退出引用"的既有行为 ✓）。
+       */
+      const lastParagraph = harness.page.locator('.kn-editor-rich .ProseMirror p').last();
+      await lastParagraph.click();
+      await harness.page.waitForTimeout(350);
+      await harness.page.keyboard.press('End');
+      await harness.page.waitForTimeout(120);
+      await harness.page.keyboard.press('Enter');
+      await harness.page.waitForTimeout(500);
+      const placeholder = await harness.page.evaluate(() =>
+        window.__knTest.deepOne('.kn-editor-rich .ProseMirror .crepe-placeholder')?.getAttribute('data-placeholder') ?? null);
+      assert.equal(placeholder, '输入内容…', '空段落的输入提示要中文');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('l. 其余正文排版与 DSH 的 Markdown 渲染对齐（段落/标题/列表/链接/分隔线/加粗）', async () => {
+    const body = [
+      '# 一级标题', '', '## 二级标题', '', '### 三级标题', '',
+      '正文段落一。', '',
+      '正文段落二，含 **加粗** 和 [链接文字](https://example.com) 以及 `行内代码`。', '',
+      '---', '',
+      '- 无序列表一', '- 无序列表二', '',
+      '1. 有序列表一', '2. 有序列表二', '',
+    ].join('\n');
+    const harness = await startHarness(body);
+    try {
+      await harness.openNote();
+      const style = await harness.page.evaluate(() => {
+        const one = (selector) => window.__knTest.deepOne('.kn-editor-rich .ProseMirror ' + selector);
+        const all = (selector) => window.__knTest.deepAll('.kn-editor-rich .ProseMirror ' + selector);
+        const pick = (element, keys) => {
+          if (element === null) return null;
+          const computed = getComputedStyle(element);
+          return Object.fromEntries(keys.map(key => [key, computed[key]]));
+        };
+        return {
+          p: pick(one('p'), ['marginTop', 'marginBottom', 'fontSize']),
+          h1: pick(one('h1'), ['fontSize', 'fontWeight', 'lineHeight', 'marginTop', 'marginBottom']),
+          h2: pick(one('h2'), ['fontSize', 'fontWeight', 'lineHeight', 'marginTop']),
+          h3: pick(one('h3'), ['fontSize', 'fontWeight']),
+          hr: pick(one('hr'), ['height', 'marginTop', 'marginBottom']),
+          link: pick(one('a'), ['fontWeight', 'textDecorationLine']),
+          strong: pick(one('strong'), ['fontWeight']),
+          ul: pick(one('ul'), ['marginTop', 'marginBottom', 'paddingLeft']),
+          item: pick(all('.milkdown-list-item-block')[1] ?? null, ['marginTop']),
+          itemParagraph: pick(one('.milkdown-list-item-block li p'), ['marginTop', 'marginBottom', 'lineHeight']),
+          markerAligns: all('.milkdown-list-item-block').map(item => {
+            const wrapper = item.querySelector('.label-wrapper');
+            const paragraph = item.querySelector('.content-dom p') ?? item.querySelector('p');
+            if (wrapper === null || paragraph === null) return null;
+            const marker = wrapper.getBoundingClientRect();
+            const text = paragraph.getBoundingClientRect();
+            return {
+              diff: (marker.top + marker.height / 2) - (text.top + text.height / 2),
+              markerHeight: marker.height,
+              textHeight: text.height,
+            };
+          }),
+        };
+      });
+      /* 段落：DSH `.markdown p { margin: 16px 0; }` */
+      assert.equal(style.p.marginTop, '16px', '段落上外边距要 16px（DSH）');
+      assert.equal(style.p.marginBottom, '16px', '段落下外边距要 16px（DSH）');
+      /* 标题：DSH h1 21/30 700、h2 19/28 700、h3 18/26 700；h1 首个块上边距为 0 */
+      assert.equal(style.h1.fontSize, '21px', 'h1 字号 21px（DSH）');
+      assert.equal(style.h1.fontWeight, '700', 'h1 字重 700（DSH）');
+      assert.equal(style.h1.marginTop, '0px', '首个标题上边距 0（DSH 首块规则）');
+      assert.equal(style.h1.marginBottom, '16px', 'h1 下边距 16px（DSH）');
+      assert.equal(style.h2.fontSize, '19px', 'h2 字号 19px（DSH）');
+      assert.equal(style.h2.marginTop, '32px', 'h2 上边距 32px（DSH）');
+      assert.equal(style.h3.fontSize, '18px', 'h3 字号 18px（DSH）');
+      /* 分隔线：DSH 0.5px + 32px 上下 */
+      assert.equal(style.hr.height, '0.5px', '分隔线要 0.5px（DSH）');
+      assert.equal(style.hr.marginTop, '32px', '分隔线上边距 32px（DSH）');
+      assert.equal(style.hr.marginBottom, '32px', '分隔线下边距 32px（DSH）');
+      /* 链接 / 加粗 */
+      assert.equal(style.link.fontWeight, '500', '链接字重 500（DSH）');
+      assert.equal(style.link.textDecorationLine, 'none', '链接默认无下划线（DSH）');
+      assert.equal(style.strong.fontWeight, '600', '加粗 600（DSH）');
+      /* 列表：DSH 外边距 16px；Crepe NodeView 的项间距 6px、项内段落 0 外边距 */
+      assert.equal(style.ul.marginTop, '16px', '列表上外边距 16px（DSH）');
+      assert.equal(style.ul.marginBottom, '16px', '列表下外边距 16px（DSH）');
+      assert.equal(style.item.marginTop, '6px', '列表项之间 6px（DSH，Crepe NodeView 补）');
+      assert.equal(style.itemParagraph.marginTop, '0px', '列表项内段落不许被段距撑开');
+      assert.equal(style.itemParagraph.marginBottom, '0px', '列表项内段落不许被段距撑开');
+      /* 序号 / 圆点要与正文第一行垂直居中 ✓（用户第二十一轮："符号和文字高度不一致" ✗） */
+      assert.equal(style.itemParagraph.lineHeight, '24px', '列表段落行高跟随 DSH base line-height ✓');
+      for (const align of style.markerAligns) {
+        assert.notEqual(align, null, '每个列表项都要能测到标记与正文');
+        assert.equal(align.markerHeight, align.textHeight, '标记盒与正文行高要一致');
+        assert.ok(Math.abs(align.diff) <= 1, `标记与正文垂直居中对齐（误差 ${align.diff}px ✓）`);
+      }
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('m. 打开笔记先隐藏首帧，编辑器渲染稳定后才显示（不再"一闪而逝"）', async () => {
+    /* 带代码块 / 公式块 / 引用块：Crepe 首帧会先按默认 schema 画一遍，正好用来抓"过渡渲染" ✗ */
+    const body = [
+      '永远永远 $e = \\frac{1}{2}mc^2 + 2$', '',
+      '> fbfbf', '>', '> ```C++', '> #include<iostream>', '> using namespace std;', '>', '> int main() {', '> ```', '>', '> $$', '> E = MC^2', '> $$', '',
+      '在这里插入一段代码 `cout << "hello world" << endl;`', '',
+      '$$', 'E = MC^2', '$$', '', 'HHHHHH', '',
+    ].join('\n');
+    const harness = await startHarness(body);
+    try {
+      await harness.page.getByRole('searchbox').waitFor({timeout: 20000});
+      await harness.page.getByRole('searchbox').fill(TITLE);
+      await harness.page.getByRole('option', {name: TITLE, exact: true}).click({timeout: 20000});
+      await harness.page.getByRole('button', {name: '编辑笔记', exact: true}).waitFor({timeout: 20000});
+      /* 在点"编辑笔记"之前开始逐帧采样：覆盖"读取正文 → 准备编辑器 → 显示"全过程 ✓ */
+      await harness.page.evaluate(() => {
+        window.__knOpenSamples = [];
+        const started = performance.now();
+        const tick = () => {
+          const rich = window.__knTest ? window.__knTest.deepOne('.kn-editor-rich') : null;
+          const dim = window.__knTest ? window.__knTest.deepOne('.kn-editor-dim') : null;
+          const computed = rich ? getComputedStyle(rich) : null;
+          window.__knOpenSamples.push({
+            t: Math.round(performance.now() - started),
+            mounted: rich !== null,
+            visibility: computed ? computed.visibility : 'none',
+            opacity: computed ? Number(computed.opacity) : 0,
+            htmlLength: rich ? (rich.innerHTML || '').length : 0,
+            loading: dim ? (dim.innerText || '').trim().slice(0, 16) : '',
+          });
+          if (performance.now() - started < 2500) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      await harness.page.getByRole('button', {name: '编辑笔记', exact: true}).click();
+      await harness.page.waitForTimeout(2600);
+      const report = await harness.page.evaluate(() => {
+        const samples = window.__knOpenSamples;
+        /*
+         * "过渡渲染可见" = 还有加载提示时，编辑器却已经可见且有内容 ✗
+         * （隐藏窗口里 innerHTML 其实已经画出来了 ✓，但只要 visibility:hidden 就看不到 ✓）。
+         */
+        const visibleWhileLoading = samples.filter((sample) =>
+          sample.loading !== '' && sample.visibility === 'visible' && sample.htmlLength > 0);
+        const hiddenSamples = samples.filter((sample) => sample.mounted && sample.visibility === 'hidden');
+        const finalSample = samples[samples.length - 1];
+        return {
+          total: samples.length,
+          visibleWhileLoading,
+          maxHiddenHtml: Math.max(0, ...hiddenSamples.map((sample) => sample.htmlLength)),
+          hiddenCount: hiddenSamples.length,
+          firstVisible: samples.find((sample) => sample.visibility === 'visible' && sample.htmlLength > 0) ?? null,
+          finalSample,
+        };
+      });
+      assert.ok(report.total > 20, `采样帧数要够（实际 ${report.total} ✓）`);
+      assert.ok(report.hiddenCount > 0, '首帧窗口里编辑器必须处于隐藏状态');
+      assert.ok(report.maxHiddenHtml > 5000, '隐藏的是已经画出来的 DOM（不是空壳）');
+      assert.deepEqual(report.visibleWhileLoading, [], '加载提示还在时，编辑器不许已经可见（否则又会闪 ✗）');
+      assert.equal(report.firstVisible?.loading, '', '第一次可见时必须已经用正式渲染（加载提示已消失）');
+      assert.equal(report.finalSample.loading, '', '打开完成后加载提示要消失');
+      assert.equal(report.finalSample.visibility, 'visible', '打开完成后编辑器要可见');
+      assert.ok(report.finalSample.htmlLength > 5000, '打开完成后要渲染出正文 DOM');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
 });
 
 /** 编辑器块结构（块数 + 文本）：钉住"点工具栏不会插入多余空段落" ✓（忽略 Crepe 的 placeholder 装饰节点 ✓） */
