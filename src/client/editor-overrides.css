@@ -1343,7 +1343,7 @@
  */
 .kn-root .kn-editor-rich {
   opacity: 1;
-  transition: opacity 120ms ease;
+  transition: opacity 80ms ease;
 }
 .kn-root .kn-editor-rich[data-pending="true"] {
   visibility: hidden;
@@ -1351,4 +1351,32 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .kn-root .kn-editor-rich { transition: none; }
+}
+
+/*
+ * **代码 / 公式源码区的两个 CodeMirror 默认行为要收掉** ✓（用户第二十四轮 ✓）：
+ * ① 活动行 `cm-activeLine` 在失焦后仍会保留灰色横条 ✗ ⇒ 只有 `.cm-focused` 时才显示 ✓；
+ * ② 选中文本时 `highlightSelectionMatches` 会在其它相同文字上铺默认亮绿色 ✗
+ *    （截图 `return` 行左侧的绿色小方块 ✓）⇒ 全透明 ✓。
+ * 主题里已经写了同样规则（`KN_CODE_THEME` ✓）；这里再按样式兜底 ✓
+ * （选择器权重高于 CodeMirror 运行时注入的样式 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-editor:not(.cm-focused) .cm-activeLine {
+  background-color: transparent;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-selectionMatch {
+  background-color: transparent;
+  outline: none;
+}
+
+/*
+ * **代码 / 公式块的选中状态收口** ✓（用户第二十五轮 ✓）：
+ * ① 正在选中文字时，活动行灰条要消失 ✓（CodeMirror 的 `cm-activeLine` 不会自己让位 ✗）；
+ * ② 失焦后 CodeMirror 默认仍把选区画成灰色块 ✗ ⇒ 不画 ✓（JS 那侧还会把选区折叠成光标 ✓）。
+ */
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-editor:has(.cm-selectionBackground) .cm-activeLine {
+  background-color: transparent;
+}
+.kn-root .kn-editor-rich .milkdown .milkdown-code-block .cm-editor:not(.cm-focused) .cm-selectionBackground {
+  background-color: transparent;
 }

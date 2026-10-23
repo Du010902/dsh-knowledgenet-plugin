@@ -1021,6 +1021,125 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }
   });
+
+  it('n. 代码块活动行只在聚焦时显示；选中匹配不再画绿色小方块', async () => {
+    const body = [
+      '正文', '', '```C++', '#include<iostream>', 'using namespace std;', '',
+      'int main() {', '', '  return 0;', '', '  return 0;', '}', '```', '',
+    ].join('\n');
+    const harness = await startHarness(body);
+    try {
+      await harness.openNote();
+      /* 主题里的 color-mix 要真实 token 才解析（探针页没有宿主主题 ✓） */
+      await harness.page.evaluate(() => {
+        const el = window.__knTest.deepOne('.kn-editor-rich');
+        const root = el.getRootNode();
+        const style = document.createElement('style');
+        style.textContent = `.kn-root {
+          --dsw-alias-label-primary: rgb(20,22,26);
+          --dsw-alias-label-secondary: rgb(97,102,107);
+          --dsw-alias-brand-primary: rgb(64,96,220);
+          --dsw-alias-border-l1: rgba(0,0,0,.1);
+          --dsw-alias-border-l2: rgba(0,0,0,.1);
+          --dsw-alias-bg-layer-1: #fff;
+          --dsw-alias-bg-layer-2: #f5f5f5;
+        }`;
+        root.appendChild(style);
+      });
+      const content = harness.page.locator('.kn-editor-rich .milkdown-code-block .cm-content').first();
+      await content.click();
+      await harness.page.waitForTimeout(350);
+      const focused = await harness.page.evaluate(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor');
+        return {
+          focused: editor.classList.contains('cm-focused'),
+          activeLineBackgrounds: [...editor.querySelectorAll('.cm-activeLine')]
+            .map((line) => getComputedStyle(line).backgroundColor),
+        };
+      });
+      assert.equal(focused.focused, true, '点进代码块后 CodeMirror 应聚焦');
+      assert.ok(
+        focused.activeLineBackgrounds.some((background) => background !== 'rgba(0, 0, 0, 0)'),
+        `聚焦时活动行要有轻微底色（实际 ${JSON.stringify(focused.activeLineBackgrounds)} ✓）`,
+      );
+      /* 选中文字时活动行灰条必须让位 ✓（用户第二十五轮：选中时还有灰条 ✗） */
+      await harness.page.keyboard.press('Control+Home');
+      await harness.page.waitForTimeout(120);
+      await harness.page.keyboard.press('Shift+ArrowDown');
+      await harness.page.keyboard.press('Shift+ArrowDown');
+      await harness.page.waitForTimeout(350);
+      const selecting = await harness.page.evaluate(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor');
+        return {
+          selectionBackgrounds: editor.querySelectorAll('.cm-selectionBackground').length,
+          activeLineBackgrounds: [...editor.querySelectorAll('.cm-activeLine')]
+            .map((line) => getComputedStyle(line).backgroundColor),
+        };
+      });
+      assert.ok(selecting.selectionBackgrounds > 0, '场景要真的选中一段代码');
+      assert.deepEqual(selecting.activeLineBackgrounds, selecting.activeLineBackgrounds.map(() => 'rgba(0, 0, 0, 0)'), '选中文字时活动行不许再显示灰条');
+      /* 点块外空白 ⇒ 失焦：灰条消失 + 蓝色选区也要消失（不许变成灰色块） ✓ */
+      await harness.paragraph().click();
+      await harness.page.waitForTimeout(450);
+      const unfocused = await harness.page.evaluate(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor');
+        return {
+          focused: editor.classList.contains('cm-focused'),
+          activeLineBackgrounds: [...editor.querySelectorAll('.cm-activeLine')]
+            .map((line) => getComputedStyle(line).backgroundColor),
+          selectionBackgrounds: editor.querySelectorAll('.cm-selectionBackground').length,
+        };
+      });
+      assert.equal(unfocused.focused, false, '点块外空白后 CodeMirror 应失去焦点');
+      assert.deepEqual(unfocused.activeLineBackgrounds, unfocused.activeLineBackgrounds.map(() => 'rgba(0, 0, 0, 0)'), '失焦后活动行不许再显示灰色横条');
+      assert.equal(unfocused.selectionBackgrounds, 0, '点块外空白后选区要折叠（不许留下灰色块）');
+      /*
+       * 再选一次、改点**不可聚焦**的标题区域 ✓：焦点不一定移动，但选区也必须消失 ✓
+       * （这条专门钉 `pointerdown` 兜底：只靠 focusout 的话这里会留着灰色块 ✗）。
+       */
+      await content.click();
+      await harness.page.waitForTimeout(250);
+      await harness.page.keyboard.press('Control+a');
+      await harness.page.waitForTimeout(300);
+      const reselected = await harness.page.evaluate(() =>
+        window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor').querySelectorAll('.cm-selectionBackground').length);
+      assert.ok(reselected > 0, '再次选中代码');
+      await harness.page.locator('.kn-editor-title').first().click();
+      await harness.page.waitForTimeout(450);
+      const afterHeaderClick = await harness.page.evaluate(() =>
+        window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor').querySelectorAll('.cm-selectionBackground').length);
+      assert.equal(afterHeaderClick, 0, '点不可聚焦的标题区域后选区也要折叠（不许留下灰色块）');
+      /*
+       * **选中匹配绿块** ✗（用户截图 `return` 行左侧的小绿方块 ✓）：
+       * 双击一个在别处重复出现的词 ⇒ CodeMirror 会挂 `.cm-selectionMatch` 装饰 ✓，
+       * 但插件必须把它画成透明 ✓（不能出现默认亮绿色 ✗）。
+       */
+      const lineBox = await harness.page.evaluate(() => {
+        const block = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block');
+        const line = [...block.querySelectorAll('.cm-line')].find((candidate) => (candidate.textContent ?? '').includes('return'));
+        if (line === null || line === undefined) return null;
+        const rect = line.getBoundingClientRect();
+        return {x: rect.x + 24, y: rect.y + Math.max(1, rect.height / 2)};
+      });
+      assert.notEqual(lineBox, null, '要找到含 return 的代码行');
+      await harness.page.mouse.dblclick(lineBox.x, lineBox.y);
+      await harness.page.waitForTimeout(450);
+      const matches = await harness.page.evaluate(() => {
+        const editor = window.__knTest.deepOne('.kn-editor-rich .milkdown-code-block .cm-editor');
+        return [...editor.querySelectorAll('.cm-selectionMatch')].map((match) => {
+          const computed = getComputedStyle(match);
+          return {background: computed.backgroundColor, outline: computed.outlineStyle};
+        });
+      });
+      assert.ok(matches.length > 0, '重复词被选中时 CodeMirror 会挂选中匹配装饰（场景要真的成立 ✓）');
+      for (const match of matches) {
+        assert.equal(match.background, 'rgba(0, 0, 0, 0)', '选中匹配不许有绿色底色');
+        assert.equal(match.outline, 'none', '选中匹配不许画绿色描边');
+      }
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
 });
 
 /** 编辑器块结构（块数 + 文本）：钉住"点工具栏不会插入多余空段落" ✓（忽略 Crepe 的 placeholder 装饰节点 ✓） */

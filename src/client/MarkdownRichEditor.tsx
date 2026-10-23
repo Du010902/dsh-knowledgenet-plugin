@@ -708,11 +708,19 @@ const KN_CODE_THEME = EditorView.theme({
   ".cm-content": { padding: "6px 0", caretColor: "var(--dsw-alias-label-primary)" },
   /* 默认关行号 ✓（也顺手去掉截图里那个深色行号方块 ✗） */
   ".cm-gutters": { display: "none", border: "none", backgroundColor: "transparent" },
-  /* 活动行只给一点点反馈 ✓（不再整块变色 ✓） */
-  ".cm-activeLine": {
+  /* 活动行只在**聚焦时**给一点点反馈 ✓（用户第二十四轮：点块外空白后灰条还在 ✗）；
+     失焦时完全透明 ✓ —— CodeMirror 的 `.cm-activeLine` 不管焦点都会画，必须按焦点区分 ✓ */
+  ".cm-activeLine": { backgroundColor: "transparent" },
+  "&.cm-focused .cm-activeLine": {
     backgroundColor: "color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)",
   },
   ".cm-activeLineGutter": { backgroundColor: "transparent" },
+  /*
+   * **别画 CodeMirror 的"选中匹配"绿块** ✗（用户第二十四轮截图：选中代码时 `return` 行左侧
+   * 出现一个绿色小方块 ✓）。`basicSetup` 自带 `highlightSelectionMatches`，选中文本后
+   * 会在**其它相同文字**上铺一层默认亮绿色（`#99ff7780`）✗ —— 写笔记不需要 IDE 式匹配高亮 ✓。
+   */
+  ".cm-selectionMatch": { backgroundColor: "transparent", outline: "none" },
   ".cm-selectionBackground, .cm-content ::selection": {
     backgroundColor: "color-mix(in srgb, var(--dsw-alias-brand-primary) 26%, transparent)",
   },
@@ -821,6 +829,20 @@ const EDITOR_FLOATING_UI_SELECTOR = [
  * @param props.t - 宿主 locale 函数（表格菜单文案用 ✓）。
  * @returns 编辑区容器。
  */
+/*
+ * **数一下 Markdown 里有多少公式** ✓（打开笔记时的"渲染完成"判定用 ✓）。
+ *
+ * 为什么要数：Crepe 的首帧只画默认 schema 的过渡内容，公式/code-block 的正式 NodeView
+ * 要再晚几帧才挂上 ✗ —— 与其固定等 200ms，不如**等到这些节点真的出现**再显示 ✓
+ * （没有公式/代码的纯文字笔记就能立刻显示 ✓，打开更快 ✓）。
+ * 数多/数少都不影响正确性：数多 ⇒ 永远等不齐 ⇒ 走原来的 200ms 兜底 ✓。
+ */
+function countMarkdownMath(markdown: string): number {
+  const display = (markdown.match(/\$\$/g) ?? []).length;
+  const inline = (markdown.replace(/\$\$/g, "").match(/\$/g) ?? []).length;
+  return Math.floor(display / 2) + Math.floor(inline / 2);
+}
+
 export function MarkdownRichEditor(props: {
   markdown: string;
   onChange: (markdown: string) => void;
@@ -1822,6 +1844,43 @@ export function MarkdownRichEditor(props: {
     const onSelectionChanged = (): void => { scheduleMenu(); };
     root.addEventListener("pointerup", onSelectionChanged, true);
     root.addEventListener("keyup", onSelectionChanged, true);
+    /*
+     * **离开代码 / 公式块时折叠选区** ✓（用户第二十五轮："点旁边任意区域，蓝色选中区域应该消失，
+     * 而不是变成灰色区域" ✗）。CodeMirror 默认在失焦后仍把选区画出来（还会变灰 ✗）——
+     * 这里在 focusout（焦点真的离开这个 CodeMirror 实例）时把选区收成光标 ✓，
+     * 于是块外的任何点击都不会留下选中高亮 ✓；CSS 再兜一层"失焦不画选区" ✓。
+     */
+    const onCodeMirrorFocusOut = (event: FocusEvent): void => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const editorElement = target?.closest?.(".cm-editor") as HTMLElement | null;
+      if (editorElement === null || editorElement === undefined) return;
+      const next = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+      if (next !== null && editorElement.contains(next)) return;
+      const codeMirrorView = EditorView.findFromDOM(editorElement);
+      if (codeMirrorView === null) return;
+      const main = codeMirrorView.state.selection.main;
+      if (main.empty) return;
+      codeMirrorView.dispatch({ selection: { anchor: main.head }, scrollIntoView: false });
+    };
+    /*
+     * 为什么还要 pointerdown ✗：点面板标题、空白容器这类**不可聚焦**元素时焦点未必移动，
+     * 只靠 focusout 选区还会留着 ✗ ⇒ root 捕获 pointerdown：除"点在同一个 CodeMirror 里"外，
+     * 把每个块里的非空选区都收成光标 ✓（点在块内继续正常拖选 ✓）。
+     */
+    const onOutsideCodeMirrorPointerDown = (event: PointerEvent): void => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const insideEditor = target?.closest?.(".cm-editor") as HTMLElement | null;
+      for (const editorElement of root.querySelectorAll<HTMLElement>(".cm-editor")) {
+        if (editorElement === insideEditor) continue;
+        const codeMirrorView = EditorView.findFromDOM(editorElement);
+        if (codeMirrorView === null) continue;
+        const main = codeMirrorView.state.selection.main;
+        if (main.empty) continue;
+        codeMirrorView.dispatch({ selection: { anchor: main.head }, scrollIntoView: false });
+      }
+    };
+    root.addEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+    root.addEventListener("focusout", onCodeMirrorFocusOut, true);
     root.addEventListener("focusin", onSelectionChanged, true);
     root.addEventListener("compositionend", onSelectionChanged, true);
     document.addEventListener("selectionchange", onSelectionChanged);
@@ -2451,6 +2510,13 @@ export function MarkdownRichEditor(props: {
      */
     let revealObserver: MutationObserver | null = null;
     let revealFrame: number | null = null;
+    /*
+     * "渲染完成"的判定目标 ✓：
+     * - 代码块数量直接数 ProseMirror 文档里的 `code_block` 节点（最准 ✓）；
+     * - 公式数量从 Markdown 里数（公式 NodeView 会产出 `.katex` ✓）。
+     */
+    let expectedCodeBlocks = 0;
+    const expectedMath = countMarkdownMath(initialRef.current);
     const revealEditorWhenSettled = (): void => {
       if (cancelled || disposedRef.current) return;
       if (typeof MutationObserver !== "function") {
@@ -2482,7 +2548,15 @@ export function MarkdownRichEditor(props: {
           return;
         }
         const now = Date.now();
-        if (now - lastChange >= 200 || now - started >= 1500) {
+        const domCodeBlocks = root.querySelectorAll(".milkdown-code-block").length;
+        const domMath = root.querySelectorAll(".katex").length;
+        /*
+         * 正式 NodeView / KaTeX 都挂上了 ⇒ 只需要 80ms 的安静窗口（等最后一笔布局 ✓）；
+         * 还没挂齐 ⇒ 保持原来的 200ms 兜底（防止漏掉慢一拍的分层渲染 ✗）。
+         */
+        const featuresReady = domCodeBlocks >= expectedCodeBlocks && domMath >= expectedMath;
+        const quietMs = featuresReady ? 60 : 200;
+        if (now - lastChange >= quietMs || now - started >= 1500) {
           reveal();
           return;
         }
@@ -2505,6 +2579,12 @@ export function MarkdownRichEditor(props: {
         /* 拿住 ProseMirror 视图：表格菜单要按它的 selection 判断显隐与定位 ✓ */
         const view = crepe.editor.action((ctx: Ctx) => ctx.get(editorViewCtx) as ProseMirrorView);
         viewRef.current = view;
+        /* 数一遍正式渲染的目标（见 `revealEditorWhenSettled` 的判定 ✓） */
+        expectedCodeBlocks = 0;
+        view.state.doc.descendants((node) => {
+          if (node.type.name === "code_block") expectedCodeBlocks += 1;
+          return true;
+        });
         /*
          * 块菜单条目的来源是配置项 `buildMenu` ✓（块菜单打开时从 `blockMenuBuilderRef` 读快照 ✓）——
          * 这里不用再取任何内部 API ✓（斜杠菜单本身已被构建补丁关掉 ✓）。
@@ -2651,6 +2731,9 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("compositionend", onCompositionEnd, true);
       root.removeEventListener("pointerup", onSelectionChanged, true);
       root.removeEventListener("keyup", onSelectionChanged, true);
+      root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+      root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+      root.removeEventListener("focusout", onCodeMirrorFocusOut, true);
       root.removeEventListener("focusin", onSelectionChanged, true);
       root.removeEventListener("compositionend", onSelectionChanged, true);
       root.removeEventListener("pointerover", onPointerOver, true);

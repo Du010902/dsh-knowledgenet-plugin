@@ -129,6 +129,8 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   链接颜色/字重/无下划线、分隔线 0.5px + 32px、加粗 600、图片圆角、首个/末个块外边距）✓；\n  列表序号/圆点与正文垂直居中（标记盒行高 = DSH base line-height ✓）。
   字号/行高走 DSH 的 `--dsw-font-markdown-*` token（跟随 DSH 内容字号设置 ✓）。
   **表格与代码块保留插件自己的设计** ✓（表头可辨识、代码块工具条；理由见 [正文排版对齐](design/editor-markdown-dsh-alignment.md)）。
+  **打开笔记更快了** ✓：不再固定等 200ms，而是按"代码块/公式 NodeView 真的渲染出来"判定，
+  纯文字笔记从 ~580ms 降到 ~307ms、含代码/公式从 ~590ms 降到 ~508ms（详见 [打开速度优化](design/editor-open-speed.md)）；
   **打开笔记不再"一闪而逝"** ✓：富编辑器的过渡首帧（代码块/公式还没换成正式渲染时就先画一遍 ✗）
   在渲染稳定前**隐藏**，稳定后再淡入 ✓；加载提示会一直显示到内容真正就绪 ✓
   （详见 [首帧渲染](design/editor-first-paint-flash.md)）。
@@ -169,6 +171,10 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   **从别的应用复制代码粘进来**（剪贴板只有纯文本 / 网页 `<pre>` 的情况）也会**自动插成完整代码块** ✓，
   不再被当成 Markdown 拆散（`#include<iostream>` 不再变原始 HTML、不会因此整篇被踢进纯文本 ✗，
   详见 [粘贴与引用块健壮性](design/editor-paste-quote-robustness.md)）。
+  **代码 / 公式块不再像 IDE** ✓：活动行浅底只在**聚焦时**显示（点块外空白即消失 ✓）；
+  选中文字时活动行灰条让位、点旁边任意区域（包括不可聚焦的标题区）选区都会折叠消失 ✓；
+  选中文字时也不会再出现 CodeMirror 默认的绿色"选中匹配"方块 ✓
+  （详见 [代码块活动行与选中匹配](design/code-block-active-line-and-selection-match.md)）。
   **引用块能退出** ✓：光标在引用段落最前面按 Backspace（或最末尾按 Delete）⇒ 空引用直接删掉、
   单段落引用拆掉引用壳但**保留文字** ✓（不再有一条清不掉的竖条 ✗）。
 - **Mermaid 图块**：正文里的 ` ```mermaid ` 围栏渲染成图（文件里仍只有围栏源码，**不落 SVG / HTML** ✓）。
