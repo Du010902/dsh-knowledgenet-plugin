@@ -112,109 +112,6 @@
   visibility: hidden;
 }
 
-/* ---------------- 右下角实时截面小地图（用户手绘那张图的界面版） ---------------- */
-
-/*
- * 位置：**右下角**（上游状态灯在上右、提示在下左，这里不撞）✓。
- * `pointer-events: none` 是关键：它只是"仪表"，绝不能吃掉画布上的拖动/滚轮 ✗。
- */
-.kn-minimap {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 5;
-  pointer-events: none;
-  opacity: 0.9;
-}
-
-.kn-minimap svg {
-  display: block;
-}
-
-/* 两张正交位置图并排（共享球心与比例尺 ✓） */
-.kn-minimap-row {
-  display: flex;
-  gap: 4px;
-}
-
-/* 每张图的纵轴记号（↑↓ / ↔） */
-.kn-minimap-glyph {
-  fill: var(--dsw-alias-state-idle-primary);
-  font-size: 8px;
-}
-
-/* 朝向箭头：固定参考里的真实视线方向 ✓ */
-.kn-minimap-arrow {
-  stroke: var(--dsw-alias-label-primary);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-}
-
-/* 视线垂直于本图平面时改用「朝内 ⊗ / 朝外 ⊙」符号 ✓ */
-.kn-minimap-outward {
-  stroke: var(--dsw-alias-state-idle-primary);
-  stroke-width: 0.9;
-  fill: none;
-}
-
-.kn-minimap-outward-dot {
-  fill: var(--dsw-alias-state-idle-primary);
-  stroke: none;
-}
-
-/* 操作包围球 */
-.kn-minimap-ball {
-  fill: none;
-  stroke: var(--dsw-alias-border-l2);
-  stroke-width: 1;
-}
-
-/* 过球心的基线（读出"深入了多少"） */
-.kn-minimap-axis {
-  stroke: var(--dsw-alias-border-l1);
-  stroke-width: 0.7;
-  stroke-dasharray: 2 3;
-}
-
-/* 固定转动中心（黑点） */
-.kn-minimap-center {
-  fill: var(--dsw-alias-label-primary);
-}
-
-/* 走过的路径 */
-.kn-minimap-trail {
-  fill: var(--dsw-alias-state-idle-primary);
-}
-
-/* 视角当前位置：一只朝球里看的眼睛 */
-.kn-minimap-eye-outline {
-  fill: var(--dsw-alias-bg-layer-1);
-  stroke: var(--dsw-alias-label-primary);
-  stroke-width: 1.1;
-}
-
-.kn-minimap-pupil {
-  fill: var(--dsw-alias-label-primary);
-}
-
-/* 被夹到框边（真实位置还在更外面）时套一圈虚线 ✓ */
-.kn-minimap-clamped {
-  fill: none;
-  stroke: var(--dsw-alias-state-idle-primary);
-  stroke-width: 0.8;
-  stroke-dasharray: 2 2;
-}
-
-/* 到球心的距离读数（单位 = 操作球半径；球外读数带 ↗，表示图上半径经过压缩 ✓） */
-.kn-minimap-distance {
-  margin-top: 2px;
-  fill: var(--dsw-alias-state-idle-primary);
-  color: var(--dsw-alias-state-idle-primary);
-  font-size: 8px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 /* 图里没有节点时的空态：与上游 .graph-empty 并存，只补一层包裹 */
 .kn-graph > .graph-empty {
   height: 100%;
@@ -675,7 +572,6 @@
 }
 
 .kn-graph:has(.kn-editor) .kn-graph-stage,
-.kn-graph:has(.kn-editor) .kn-minimap,
 .kn-graph:has(.kn-editor) .universe-status,
 .kn-graph:has(.kn-editor) .universe-hint,
 .kn-graph:has(.kn-editor) .kn-sel {
@@ -1725,3 +1621,15 @@
 .kn-node-conversations .kn-note-relation-item { display: flex; flex-direction: column; gap: 3px; }
 .kn-node-conversations small, .kn-node-chat-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .kn-node-conversations .kn-note-relations-popover { max-height: min(360px, 60vh); overflow-y: auto; }
+
+/*
+ * **「＋ 添加前置」入口放进「前置」弹窗** ✓（用户第十三轮要求：标题栏那颗使用频率不高 ✓）。
+ * 与列表之间用一条细分割线隔开 ✓，仍沿用关系面板的基础按钮外观 ✓。
+ */
+.kn-note-relations-popover .kn-note-relations-add {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 0;
+  color: var(--dsw-alias-label-primary);
+}

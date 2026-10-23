@@ -150,14 +150,14 @@ describe("Host 半产物形态", () => {
   it("空间视图用内部导航（固定球心 + 抓取点投影约束），旧轨道补丁已清掉", () => {
     /*
      * 模型已按 `design/knowledgenet-interior-navigation.md` 换成：
-     * 固定球心 C + 相机位置 P + 视角 Q + 图谱旋转 S；滚轮只推相机、拖动只转图谱。
+     * 固定球心 C + 相机位置 P + 视角 Q + 图谱旋转 S；拖动只转图谱。
      * 于是"绕 target 环绕 + 欧拉角/四元数姿态补丁"那套整体退场 ✓——
      * 上游 `navigation.ts` 已无人引用（被 tree-shake），连带 `trackballStep` 也不在产物里 ✓。
      */
     assert.ok(!client.includes("clampPitch"), "限位不该留在产物里");
     assert.ok(!client.includes("this.camera.angle -= dx"), "欧拉角拖拽应已退场");
     assert.ok(!/zoomToCursor|zoomFloor|reanchorToCursor/.test(client), "旧的「朝光标缩放 / 重设轴心」补丁必须清掉");
-    for (const needle of ["dragAnchorTo", "effectiveBasis", "wheelTravel", "knInterior"]) {
+    for (const needle of ["dragAnchorTo", "effectiveBasis", "spinStep", "knInterior"]) {
       assert.ok(client.includes(needle), `内部导航实现应在产物里：${needle}`);
     }
     for (const needle of ["freeBasis", "quatFromAxisAngle", "rotateVec"]) {

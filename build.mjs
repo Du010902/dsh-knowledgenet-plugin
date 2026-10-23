@@ -298,7 +298,7 @@ const TRACKBALL_IMPORT =  'import { freeBasis as knFreeBasis, trackballStep as k
  *
  * 只换实现、不换接口：`camera` / `basis()` / `command()` / `fitAll()` / `setFrameContext()` /
  * `update()` / `cancelPointer()` / `dispose()` 全部照旧，引擎侧一行都不用改 ✓。
- * 滚轮（只推相机、可穿过球心）与拖动（抓取点投影约束求解）都在控制器里，
+ * 拖动（抓取点投影约束求解）等相机逻辑都在控制器里，
  * 所以上游 `navigation.ts` 的滚轮/按下补丁**已经全部移除** ✓
  * （`ContextHit` 仍从上游取，但那只是类型，编译期就擦除了 ✓）。
  */
@@ -341,6 +341,22 @@ const UNIVERSE_ENGINE_PATCHED = [
   "        host,",
   "        libraryKey: libraryKey ?? \"\",",
 ].join("\n");
+
+/**
+ * 画布提示文案与读屏标签（补丁点）：滚轮前进后退已删除 ⇒ 不能再教用户「滚轮靠近」✗。
+ *
+ * `GraphUniverse.tsx` 是 vendor 副本、**逐字节冻结**（`scripts/sync-vendor.mjs --check`
+ * 会核对哈希），所以只能在这道构建期补丁里改 ✓；匹配不到就构建失败，不会悄悄漏改 ✓。
+ */
+const UNIVERSE_HINT_NEEDLE =
+  "拖动旋转 · 滚轮靠近 · 单击选择节点或关系 · 右键连线可断开 · 双击或 F 定位选中节点";
+const UNIVERSE_HINT_PATCHED =
+  "拖动旋转 · 单击选择节点或关系 · 右键连线可断开 · 双击或 F 定位选中节点";
+
+const UNIVERSE_ARIA_NEEDLE =
+  "aria-label=\"三维知识图：拖动旋转、滚轮靠近远离、Shift 加左键拖动平移；右侧列表、详情与工具栏同样可以定位节点\"";
+const UNIVERSE_ARIA_PATCHED =
+  "aria-label=\"三维知识图：拖动旋转、Shift 加左键拖动平移；右侧列表、详情与工具栏同样可以定位节点\"";
 
 /**
  * 兜底页：**去掉"回到二维聚焦"**（补丁点）。
@@ -1045,6 +1061,8 @@ function freeRotationPatchPlugin() {
           [UNIVERSE_PROPS_NEEDLE, "props 定义"],
           [UNIVERSE_DESTRUCTURE_NEEDLE, "props 解构"],
           [UNIVERSE_ENGINE_NEEDLE, "引擎构造"],
+          [UNIVERSE_ARIA_NEEDLE, "画布读屏标签"],
+          [UNIVERSE_HINT_NEEDLE, "画布提示文案"],
           [FALLBACK_LOST_NEEDLE, "兜底页失败分类"],
           [FALLBACK_TITLE_NEEDLE, "兜底页标题"],
           [FALLBACK_COPY_NEEDLE, "兜底页文案"],
@@ -1063,6 +1081,8 @@ function freeRotationPatchPlugin() {
             .replace(UNIVERSE_PROPS_NEEDLE, UNIVERSE_PROPS_PATCHED)
             .replace(UNIVERSE_DESTRUCTURE_NEEDLE, UNIVERSE_DESTRUCTURE_PATCHED)
             .replace(UNIVERSE_ENGINE_NEEDLE, UNIVERSE_ENGINE_PATCHED)
+            .replace(UNIVERSE_ARIA_NEEDLE, UNIVERSE_ARIA_PATCHED)
+            .replace(UNIVERSE_HINT_NEEDLE, UNIVERSE_HINT_PATCHED)
             .replace(FALLBACK_LOST_NEEDLE, FALLBACK_LOST_PATCHED)
             .replace(FALLBACK_TITLE_NEEDLE, FALLBACK_TITLE_PATCHED)
             .replace(FALLBACK_COPY_NEEDLE, FALLBACK_COPY_PATCHED)

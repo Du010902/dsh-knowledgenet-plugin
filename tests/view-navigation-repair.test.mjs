@@ -3,7 +3,7 @@
  *
  * 每组对应文档里的一条缺陷，断言的是**修复后的行为**；多数用例在旧实现上会失败：
  * 球面求交返回 null ✗、动画提前提交终点 ✗、重排不重设球心 ✗、
- * 一端在身后的边点不中 ✗、小地图侧向符号跳变 ✗、缓存不分库 ✗。
+ * 一端在身后的边点不中 ✗、缓存不分库 ✗。
  *
  * 文档要求"新的回归测试必须驱动插件实际使用的控制器及构建接线" ✓ ——
  * 所以这里一律用 `InteriorNavigation` 与真实产物接线，不碰上游 `SpaceNavigation` ✓。
@@ -19,10 +19,7 @@ import {
   anchorFromRay,
   displayBasis,
   effectiveBasis,
-  minimapAxesFrom,
-  minimapComponents,
   radiusAbout,
-  trailSampleStep,
 } from "../src/client/interior-navigation.ts";
 import { clippedEdgeSegment, pickClippedEdge } from "../src/client/edge-picking.ts";
 import {
@@ -39,7 +36,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const buildSource = await readFile(path.join(HERE, "..", "build.mjs"), "utf8");
 const bundle = await readFile(path.join(HERE, "..", "client.js"), "utf8");
 const panelSource = await readFile(path.join(HERE, "..", "src", "client", "GraphPanel.tsx"), "utf8");
-const minimapSource = await readFile(path.join(HERE, "..", "src", "client", "InteriorMinimap.tsx"), "utf8");
 const controllerSource = await readFile(path.join(HERE, "..", "src", "client", "interior-controller.ts"), "utf8");
 const navigationSource = await readFile(path.join(HERE, "..", "src", "client", "interior-navigation.ts"), "utf8");
 const edgePickingSource = await readFile(path.join(HERE, "..", "src", "client", "edge-picking.ts"), "utf8");
@@ -134,8 +130,11 @@ describe("P1 视图缓存：按知识库身份分区", () => {
   it("两个控制器各持自己的身份：重排事件只影响对应那一个", () => {
     const a = makeNavigation({ libraryKey: "id:A" });
     const b = makeNavigation({ libraryKey: "id:B" });
-    a.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
-    b.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    /* 两边都先拖动一次 ⇒ 球心冻结（否则 B 的首次收敛取景会按规则采一次球心 ✓） */
+    for (const target of [a, b]) {
+      target.element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
+      target.element.emit("pointermove", { pointerId: 1, clientX: 460, clientY: 300 });
+    }
     const bCenterBefore = [...b.navigation.camera.knInterior.center];
     /* 只给 A 发重排请求（走 A 自己的事件通道 ✓） */
     dispatchRelayoutForKey(a.handlers, "id:A");
@@ -242,7 +241,8 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
     assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 50) < 1e-6, "前置：旧球心 50");
     /* ② 用户操作过 ⇒ 球心冻结 ✓ */
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
+    element.emit("pointermove", { pointerId: 1, clientX: 460, clientY: 300 });
 
     /* ③ 按钮：广播重排请求，并**立刻**发一次取景（仍旧坐标） */
     dispatchRelayoutForKey(globals.windowHandlers, "");
@@ -295,7 +295,6 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
      */
     const { navigation, element, handlers } = makeNavigation();
     navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
     dispatchRelayoutForKey(handlers, "");
     navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "command");
     /* 用户在重排期间又操作了一次 ⇒ 结算时不该再取景 ✓ */
@@ -314,9 +313,8 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
   });
 
   it("**引擎链路**（无用户干预）：结算通知真的会把球心采成新布局中心", () => {
-    const { navigation, element, handlers } = makeNavigation();
+    const { navigation, handlers } = makeNavigation();
     navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "initial");
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
     dispatchRelayoutForKey(handlers, "");
     navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "command");
     navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
@@ -361,7 +359,7 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
       "换中心不许让画面跳 ✗",
     );
     assert.deepEqual([...navigation.basis().right], axesBefore, "朝向也不许跳 ✗");
-    /* ③ 半径按新中心量：max|X − C| = 100 ✓（操作球/取景/小地图共用它 ✓） */
+    /* ③ 半径按新中心量：max|X − C| = 100 ✓（操作球 / 取景共用它 ✓） */
     assert.ok(
       Math.abs(navigation.camera.knInterior.radius - 100) < 1e-6,
       `半径要以新 C 为准，实际 ${navigation.camera.knInterior.radius}`,
@@ -425,14 +423,18 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     const fresh = makeNavigation();
     fresh.navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "initial");
     assert.ok(Math.abs(fresh.navigation.camera.knInterior.center[0] - 150) < 1e-6, "初次进入按布局中心采一次");
-    fresh.element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    /* 用户拖动过 ⇒ 球心冻结 ✓ */
+    fresh.element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
+    fresh.element.emit("pointermove", { pointerId: 1, clientX: 460, clientY: 300 });
     fresh.navigation.fitAll(positionsOf([[500, 0, 0], [600, 0, 0]]), 2, true, "initial");
     assert.ok(Math.abs(fresh.navigation.camera.knInterior.center[0] - 150) < 1e-6, "操作过之后 initial 也不许再挪 ✗");
   });
 
   it("普通适应窗口（command）**不动**已冻结的球心", () => {
     const { navigation, element } = makeNavigation();
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    /* 先拖动一次 ⇒ 球心冻结（用户操作过）✓ */
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
+    element.emit("pointermove", { pointerId: 1, clientX: 460, clientY: 300 });
     const before = [...navigation.camera.knInterior.center];
     navigation.fitAll(positionsOf([[500, 0, 0], [600, 0, 0]]), 2, true, "command");
     assert.deepEqual(navigation.camera.knInterior.center, before, "没按重新整理就不该挪球心");
@@ -440,7 +442,6 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
 
   it("重排期间用户又操作了 ⇒ 球心照旧复位，但不再自动取景覆盖他的视角", () => {
     const { navigation, element, handlers } = makeNavigation();
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
     dispatchRelayoutForKey(handlers, "");
     element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
     element.emit("pointermove", { pointerId: 1, clientX: 470, clientY: 300 });
@@ -488,16 +489,17 @@ describe("P2 定位动画：命令之后、首帧之前状态仍在出发点", (
     assert.ok(Math.hypot(end[0] - 500, end[1], end[2] - 104) < 1.5, `最终应停在目标前方，实际 ${end}`);
   });
 
-  it("命令后立刻滚轮取消动画 ⇒ 不会从终点开始", () => {
+  it("命令后立刻按下鼠标取消动画 ⇒ 不会从终点开始", () => {
     const { navigation, element } = makeNavigation({ reducedMotion: false });
     const start = [...displayBasisOf(navigation).position];
     navigation.command(focusCommand, 0, positionsOf([[500, 0, 0]]), 1);
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
+    /* 按下即取消进行中的动画（与拖动同一语义），状态必须仍停在出发前 ✓ */
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
     const after = [...displayBasisOf(navigation).position];
     const toTarget = Math.hypot(after[0] - 500, after[1], after[2] - 104);
     const moved = Math.hypot(after[0] - start[0], after[1] - start[1], after[2] - start[2]);
     assert.ok(toTarget > 300, `旧实现会从终点附近开始（离目标很近），实际距离 ${toTarget.toFixed(1)}`);
-    assert.ok(moved < 60, `应只在出发点附近稍作推进，实际位移 ${moved.toFixed(1)}`);
+    assert.ok(moved < 1e-9, `按下只取消动画、不该挪相机，实际位移 ${moved.toFixed(1)}`);
   });
 
   it("减少动态效果 ⇒ 立即同步到位且不留待执行动画", () => {
@@ -555,19 +557,9 @@ describe("P2 线段拾取：一端在相机后面也要能点中", () => {
   });
 });
 
-/* ==================== P2：小地图（已由位置图方案取代） ==================== */
+/* ==================== 开发备注：对外姿态与基向量一致 ==================== */
 
-/*
- * 这里的旧断言（"侧向只取 up 分量"、"shouldSampleTrail"）对应的是**上一版**小地图契约 ✗。
- * 那一版虽然去掉了侧向符号翻转，却仍把第三轴丢掉、并对球外做硬限幅
- * （`design/minimap-position-continuity-analysis.md` 指出的空间误差 ✓）。
- * 现在换成"固定参考轴 + 两张正交位置图 + 严格单调压缩"，
- * 相应测试全部搬到 [interior-minimap.test.mjs](./interior-minimap.test.mjs) ✓。
- */
-
-/* ==================== 开发备注：两项一致性 ==================== */
-
-describe("开发备注：对外姿态与基向量一致 / 推进沿视线截断", () => {
+describe("开发备注：对外姿态与基向量一致", () => {
   it("camera.q 与 basis() 是同一个姿态（旧实现用 scene×view，与渲染不一致 ✗）", () => {
     const { navigation, element } = makeNavigation();
     element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
@@ -582,22 +574,6 @@ describe("开发备注：对外姿态与基向量一致 / 推进沿视线截断"
       }
     }
   });
-
-  it("推进超过范围时沿视线截断，不产生横向漂移", () => {
-    const { navigation, element } = makeNavigation({ initial: cameraAt([0, 0, 1000]) });
-    const before = [...displayBasisOf(navigation).position];
-    const forward = [...displayBasisOf(navigation).forward];
-    for (let i = 0; i < 40; i += 1) element.emit("wheel", { deltaY: -1000, deltaMode: 0 });
-    const after = [...displayBasisOf(navigation).position];
-    const delta = [after[0] - before[0], after[1] - before[1], after[2] - before[2]];
-    const cross = [
-      delta[1] * forward[2] - delta[2] * forward[1],
-      delta[2] * forward[0] - delta[0] * forward[2],
-      delta[0] * forward[1] - delta[1] * forward[0],
-    ];
-    assert.ok(Math.hypot(...cross) < 1e-6, `位移必须沿视线，实际叉积 ${Math.hypot(...cross)}`);
-    assert.ok(Math.hypot(after[0], after[1], after[2]) <= 1200 + 1e-6, "不该越界");
-  });
 });
 
 /* ------------------------------ 测试脚手架 ------------------------------ */
@@ -606,35 +582,23 @@ let globals = null;
 
 function installGlobals(reducedMotion) {
   const windowHandlers = new Map();
-  const dispatched = [];
   const previous = {
     window: globalThis.window,
     document: globalThis.document,
     matchMedia: globalThis.matchMedia,
-    CustomEvent: globalThis.CustomEvent,
-  };
-  globalThis.CustomEvent = class {
-    constructor(type, init) { this.type = type; this.detail = init?.detail; }
   };
   globalThis.window = {
     addEventListener: (type, handler) => { windowHandlers.set(type, handler); },
     removeEventListener: (type) => { windowHandlers.delete(type); },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
-    dispatchEvent: (event) => {
-      dispatched.push(event);
-      const handler = windowHandlers.get(event.type);
-      if (handler !== undefined) handler(event);
-      return true;
-    },
   };
   globalThis.document = { hidden: false, activeElement: null, addEventListener: () => {}, removeEventListener: () => {} };
   globalThis.matchMedia = () => ({ matches: reducedMotion });
-  return { windowHandlers, dispatched, restore() {
+  return { windowHandlers, restore() {
     globalThis.window = previous.window;
     globalThis.document = previous.document;
     globalThis.matchMedia = previous.matchMedia;
-    globalThis.CustomEvent = previous.CustomEvent;
   } };
 }
 
@@ -689,17 +653,15 @@ function makeNavigation(options = {}) {
   return { navigation, element, calls, handlers: globals.windowHandlers };
 }
 
-/** 从控制器广播的状态事件里取当前相机几何（state 是私有的，事件是官方出口 ✓） */
+/** 取当前相机几何：`interiorSnapshot()` 是控制器公开的只读出口 ✓ */
 function displayBasisOf(navigation) {
-  void navigation;
-  const event = [...globals.dispatched].reverse().find((item) => item.type === "kn-interior-state");
-  assert.ok(event !== undefined, "控制器应当已经广播过状态");
+  const snapshot = navigation.interiorSnapshot();
   return {
-    position: event.detail.eye,
-    forward: event.detail.forward,
-    up: event.detail.up,
-    center: event.detail.center,
-    radius: event.detail.radius,
+    position: snapshot.eye,
+    forward: rotateVec(snapshot.view, [0, 0, -1]),
+    up: rotateVec(snapshot.view, [0, 1, 0]),
+    center: snapshot.center,
+    radius: snapshot.radius,
   };
 }
 

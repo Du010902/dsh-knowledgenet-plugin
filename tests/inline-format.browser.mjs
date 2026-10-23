@@ -37,8 +37,15 @@ const DEPS = REPO + '/.tmp-build-deps';
 const CHROME = process.env.KN_CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const TITLE = '行内格式';
 const BODY = '前文后文';
+/** 带代码块的夹具：i3（复制按钮=结构化）/ i4（选中复制=纯文本）用 ✓ */
+const CODE_BODY = [
+  '正文', '', '```js', '#include<iostream>', 'using namespace std;', '',
+  'int main() {', '    cout << "hi" << endl;', '    return 0;', '}', '```',
+].join('\n');
 const VIEWPORT = {width: 1920, height: 1080};
 const PANEL_WIDTH = 900;
+/** 行内代码样式（i2）：CSSOM 读含 var() 的简写会得到空串 ✗ ⇒ 直接读源码里的那条规则 ✓ */
+const EDITOR_OVERRIDES_CSS = readFileSync(new URL('../src/client/editor-overrides.css', import.meta.url), 'utf8');
 
 after(async () => {
   await cleanupFixtures();
@@ -139,10 +146,10 @@ window.__ModuleLoader__ = {load: ({factory}) => {
 }};
 `;
 
-async function startHarness() {
+async function startHarness(body = BODY) {
   const fixture = await makeV3Fixture({nodes: [TITLE]});
   const nodeId = fixture.nodes[TITLE].id;
-  const written = await writeNote(fixture.root, {id: nodeId, text: BODY});
+  const written = await writeNote(fixture.root, {id: nodeId, text: body});
   if (written.ok !== true) throw new Error(`写夹具正文失败：${written.code} ${written.message}`);
 
   const tooling = resolveTooling();
@@ -222,7 +229,8 @@ window.mountGraph = () => {
   await new Promise(done => server.listen(0, '127.0.0.1', done));
 
   const browser = await chromium.launch({executablePath: CHROME, headless: true});
-  const context = await browser.newContext({viewport: VIEWPORT});
+  /* i3/i4 需要真实剪贴板读写（复制按钮 / 手动选中复制 / Ctrl+V）✓ */
+  const context = await browser.newContext({viewport: VIEWPORT, permissions: ['clipboard-read', 'clipboard-write']});
   const page = await context.newPage();
   await page.addInitScript(installPageHelpers);
   const pageErrors = [];
@@ -245,7 +253,7 @@ window.mountGraph = () => {
     await page.getByRole('button', {name: '编辑笔记', exact: true}).click({timeout: 20000});
     await page.locator('.kn-editor-title').filter({hasText: TITLE}).waitFor({timeout: 20000});
     await editor().waitFor({timeout: 30000});
-    await page.waitForFunction(() => window.__knTest.deepOne('.kn-editor-rich .ProseMirror')?.innerText.includes('文后文'), undefined, {timeout: 30000});
+    await page.waitForFunction(() => (window.__knTest.deepOne('.kn-editor-rich .ProseMirror')?.innerText ?? '').trim().length > 0, undefined, {timeout: 30000});
     await page.waitForTimeout(300);
   }
 
@@ -643,6 +651,167 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
       assert.ok(codeBlock.toolsHeight <= 26, `代码块工具条高度要收紧（≤26px）：${JSON.stringify(codeBlock)}`);
       assert.ok(codeBlock.height <= 70, `普通代码块高度要收紧（≤70px）：${JSON.stringify(codeBlock)}`);
       assert.equal(codeBlock.marginTop, '8px', '代码块上下外边距要 8px');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('i2. 行内代码样式跟随 DSH：inline-flex / 0.5px 边 / 0.875em / 5px 内边距', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      await clickToolbar(harness, 'code');
+      await harness.page.locator('.kn-editor-rich .ProseMirror code').first().waitFor({state: 'visible', timeout: 5000});
+      const style = await harness.page.evaluate(() => {
+        const code = window.__knTest.deepOne('.kn-editor-rich .ProseMirror code');
+        const paragraph = window.__knTest.deepOne('.kn-editor-rich .ProseMirror p');
+        if (code === null || paragraph === null) return null;
+        const cs = getComputedStyle(code);
+        const ps = getComputedStyle(paragraph);
+        return {
+          display: cs.display,
+          borderWidth: parseFloat(cs.borderTopWidth),
+          borderRadius: cs.borderTopLeftRadius,
+          paddingLeft: cs.paddingLeft,
+          fontSize: parseFloat(cs.fontSize),
+          paragraphFontSize: parseFloat(ps.fontSize),
+        };
+      });
+      assert.notEqual(style, null, '行内代码元素要存在');
+      /* 计算样式：规则真的生效 ✓（Chrome 的 border used value 会把 0.5px 取整成 1px，
+         所以 0.5px 那条从下面的源码声明断言 ✓） */
+      assert.equal(style.display, 'inline-flex', '行内代码要 inline-flex（DSH 同款）');
+      assert.equal(style.paddingLeft, '5px', '左右内边距要是 5px');
+      assert.ok(style.borderWidth > 0 && style.borderWidth <= 1, `边框要细（used value ${style.borderWidth}px）`);
+      assert.notEqual(style.borderRadius, '0px', '圆角要走 --dsw-radius-sm（不是直角）');
+      const expectedFontSize = style.paragraphFontSize * 0.875;
+      assert.ok(Math.abs(style.fontSize - expectedFontSize) <= 0.5, `字号 ≈ 正文 0.875（正文 ${style.paragraphFontSize}px，代码 ${style.fontSize}px）`);
+      /* 声明本身要是 DSH 同款 ✓（简写里含 var() 时 CSSOM 取到空串 ✗ ⇒ 读源码规则块 ✓） */
+      const ruleAt = EDITOR_OVERRIDES_CSS.indexOf('.kn-root .kn-editor-rich .milkdown :not(pre) > code {');
+      assert.notEqual(ruleAt, -1, '样式表里要有行内代码那条规则');
+      const ruleBlock = EDITOR_OVERRIDES_CSS.slice(ruleAt, ruleAt + 900);
+      for (const part of [
+        'display: inline-flex',
+        'font-size: 0.875em',
+        'padding: 0 5px',
+        'border-width: 0.5px',
+        'border-style: solid',
+        'border-radius: var(--dsw-radius-sm',
+        'background: var(--dsw-alias-markdown-inline-code)',
+      ]) {
+        assert.ok(ruleBlock.includes(part), `行内代码样式要有 ${part} ✓`);
+      }
+      assert.ok(!/border-color:\s*var\([^)]*,/.test(ruleBlock), '颜色 token 不许再带硬编码兜底 ✗');
+      assert.ok(!/color:\s*#[0-9a-f]{6}/i.test(ruleBlock), '行内代码不许再用硬编码红色文字 ✗');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('i3. 右上角「复制」按钮 = 结构化复制：粘贴还原成完整代码块（数量 +1）', async () => {
+    const harness = await startHarness(CODE_BODY);
+    try {
+      await harness.openNote();
+      const blocks = harness.page.locator('.kn-editor-rich .milkdown-code-block');
+      const before = await blocks.count();
+      assert.ok(before >= 1, '夹具里要有代码块');
+      const first = blocks.first();
+      await first.hover();
+      await harness.page.waitForTimeout(250);
+      await first.locator('.copy-button').first().click({force: true});
+      await harness.page.waitForTimeout(700);
+      /* 点正文段落末尾 ⇒ Ctrl+V ⇒ 多出一个完整代码块 ✓ */
+      await harness.paragraph().click();
+      await harness.page.waitForTimeout(300);
+      await harness.page.keyboard.press('End');
+      await harness.page.keyboard.press('Control+V');
+      await harness.page.waitForTimeout(900);
+      assert.equal(await blocks.count(), before + 1, '复制按钮的剪贴板粘贴后要还原成完整代码块（块数 +1）');
+      assert.ok((await harness.editor().innerText()).includes('cout'), '原代码块内容保留');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('i4. 手动选中复制 = 纯文本粘贴（不还原成块），且「复制按钮」记忆不串', async () => {
+    const harness = await startHarness(CODE_BODY);
+    try {
+      await harness.openNote();
+      const blocks = harness.page.locator('.kn-editor-rich .milkdown-code-block');
+      const before = await blocks.count();
+      /* 先点一次「复制」按钮（结构化，留下"刚复制块"记忆） */
+      const first = blocks.first();
+      await first.hover();
+      await harness.page.waitForTimeout(250);
+      await first.locator('.copy-button').first().click({force: true});
+      await harness.page.waitForTimeout(600);
+      /* 再在代码块里手动全选复制（应覆盖记忆、只写纯文本） */
+      const cmContent = harness.page.locator('.kn-editor-rich .milkdown-code-block .cm-content').first();
+      await cmContent.click();
+      await harness.page.waitForTimeout(300);
+      await harness.page.keyboard.press('Control+A');
+      await harness.page.keyboard.press('Control+C');
+      await harness.page.waitForTimeout(400);
+      const clipboard = await harness.page.evaluate(async () => {
+        try {
+          const items = await navigator.clipboard.read();
+          return {types: [...new Set(items.flatMap(item => item.types))], text: await navigator.clipboard.readText()};
+        } catch (error) { return {error: String(error)}; }
+      });
+      if (!('error' in clipboard)) {
+        assert.ok(clipboard.types.includes('text/plain'), '手动选中复制至少要写 text/plain');
+        assert.ok(!clipboard.types.some(type => type.startsWith('web ') || type.includes('kn-code-block')), `手动选中复制不许写结构化载荷：${JSON.stringify(clipboard.types)}`);
+        assert.ok(clipboard.text.includes('cout'), '剪贴板纯文本要含选中的代码');
+      }
+      /* 粘贴到正文段落末 ⇒ 纯文本、不新增代码块 ✓ */
+      await harness.paragraph().click();
+      await harness.page.waitForTimeout(300);
+      await harness.page.keyboard.press('End');
+      await harness.page.keyboard.press('Control+V');
+      await harness.page.waitForTimeout(900);
+      assert.equal(await blocks.count(), before, '手动选中复制的粘贴不许还原成代码块（块数不变）');
+      assert.ok((await harness.editor().innerText()).includes('cout'), '代码内容要按纯文本插入');
+      /* 复核查出的边界：同一段"手动选中复制"连续粘贴第二次也必须还是纯文本 ✓（标记不被粘贴消费 ✓） */
+      await harness.page.keyboard.press('Control+V');
+      await harness.page.waitForTimeout(900);
+      assert.equal(await blocks.count(), before, '同一剪贴板第二次粘贴也不许还原成代码块（块数仍不变）');
+      assert.deepEqual(harness.pageErrors, []);
+    } catch (error) { await diagnostics(harness, error); }
+    finally { await harness.close(); }
+  });
+
+  it('j2. 「＋ 添加前置」移进「前置」弹窗；点旁边空白 / Esc ⇒ 关闭', async () => {
+    const harness = await startHarness();
+    try {
+      await harness.openNote();
+      /* 标题栏里有两个 `.kn-note-relations`（对话入口 + 关系）：按「前置」按钮认关系那一个 ✓ */
+      const relationsRoot = harness.page.locator('.kn-editor-heading > .kn-note-relations')
+        .filter({has: harness.page.getByRole('button', {name: /^前置/})});
+      assert.equal(await relationsRoot.count(), 1, '要找到关系组件');
+      assert.equal(await relationsRoot.locator('> button').count(), 2, '标题栏只剩「前置」「被依赖」两颗按钮');
+      assert.equal(await harness.page.locator('.kn-editor-heading .kn-note-relations-add').count(), 0, '标题栏不再有「＋ 添加前置」');
+      const popover = harness.page.locator('.kn-note-relations-popover');
+      const preButton = relationsRoot.locator('> button').first();
+      const dependButton = relationsRoot.locator('> button').nth(1);
+      /* 「前置」弹窗里才有入口 ✓ */
+      await preButton.click();
+      await popover.waitFor({state: 'visible', timeout: 8000});
+      const add = popover.locator('.kn-note-relations-add');
+      await add.waitFor({state: 'visible', timeout: 5000});
+      assert.ok((await add.innerText()).includes('添加前置'), '弹窗里的入口文案是「＋ 添加前置」');
+      await add.click();
+      await harness.page.waitForTimeout(250);
+      await popover.locator('input').waitFor({state: 'visible', timeout: 5000});
+      /* 点旁边空白 ⇒ 关闭 ✓（shadow DOM 安全 ✓） */
+      await harness.page.mouse.click(400, 300);
+      await harness.page.waitForTimeout(350);
+      assert.equal(await popover.count(), 0, '点弹窗旁边空白要关闭');
+      /* 被依赖弹窗 + Esc ⇒ 关闭 ✓ */
+      await dependButton.click();
+      await popover.waitFor({state: 'visible', timeout: 8000});
+      await harness.page.keyboard.press('Escape');
+      await harness.page.waitForTimeout(350);
+      assert.equal(await popover.count(), 0, 'Esc 要关闭弹窗');
       assert.deepEqual(harness.pageErrors, []);
     } catch (error) { await diagnostics(harness, error); }
     finally { await harness.close(); }

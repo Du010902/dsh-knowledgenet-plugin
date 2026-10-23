@@ -37,7 +37,7 @@ import {
 } from "@milkdown/kit/preset/gfm";
 import { deleteColumn, deleteRow, deleteTable } from "@milkdown/kit/prose/tables";
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
-import type { Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
+import { Fragment, type Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { replaceAll } from "@milkdown/kit/utils";
 import { EditorView } from "@codemirror/view";
@@ -480,6 +480,50 @@ function codeBlockAt(view: ProseMirrorView, host: HTMLElement): { language: stri
  * ④ **不伪造** `vscode-editor-data` ✗（那是别人的格式 ✓）。
  */
 let lastCopiedBlock: { language: string; code: string } | null = null;
+
+/**
+ * **代码块 / 公式块里"手动选中复制"的纯文本** ✓（用户第十三轮要求 ✓）。
+ *
+ * 语义要和右上角「复制」按钮分开：
+ * - 点「复制」按钮 ⇒ 结构化载荷 ⇒ 粘贴回正文**还原成完整代码块 / 公式块** ✓（原有行为 ✓）；
+ * - **手动选中一段代码/公式复制** ⇒ 只写纯文本 ✓ ⇒ 粘贴回来就是**纯文本**（不还原成块 ✗）。
+ *
+ * 这里记住最后一次"选中复制"的文本 ✓：粘贴时若剪贴板纯文本与它一致、又没有本插件载荷，
+ * 就按纯文本插入 ✓（并清掉「复制按钮」的记忆，避免同一段文字被误还原成块 ✗）。
+ */
+let lastSelectionCopy: string | null = null;
+
+/**
+ * 把多行纯文本**原样**插到当前选区 ✓（行间用硬换行 ✓，不解析 Markdown、不建块 ✓）。
+ *
+ * @param view - 编辑器视图 ✓。
+ * @param text - 剪贴板纯文本 ✓。
+ * @returns 是否插入成功 ✓。
+ */
+function insertPlainTextAtSelection(view: ProseMirrorView, text: string): boolean {
+  if (!view.editable) return false;
+  const { state } = view;
+  const selection = state.selection;
+  if (!(selection instanceof TextSelection) || !selection.$from.parent.inlineContent) return false;
+  const normalized = text.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+  if (normalized === "") return false;
+  const hardbreak = state.schema.nodes.hardbreak;
+  const nodes: ProseMirrorNode[] = [];
+  normalized.split("\n").forEach((line, index) => {
+    if (index > 0) {
+      if (hardbreak === undefined) nodes.push(state.schema.text(" "));
+      else nodes.push(hardbreak.create());
+    }
+    if (line !== "") nodes.push(state.schema.text(line));
+  });
+  if (nodes.length === 0) return false;
+  const fragment = Fragment.fromArray(nodes);
+  const { from, to } = selection;
+  const transaction = state.tr.replaceWith(from, to, fragment);
+  transaction.setSelection(TextSelection.create(transaction.doc, from + fragment.size));
+  view.dispatch(transaction.scrollIntoView());
+  return true;
+}
 
 async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
@@ -1998,6 +2042,8 @@ export function MarkdownRichEditor(props: {
       void writeCodeBlockClipboard(payload)
         .then(() => {
           lastCopiedBlock = { ...payload };
+          /* 复制按钮 = 结构化复制 ⇒ 清掉"手动选中复制"的标记 ✓（免得同一段文字被当成纯文本 ✗） */
+          lastSelectionCopy = null;
           /* **成功**才给对勾 ✓（写失败时不能显示"已复制" ✗） */
           flashCopied(button);
           reportRef.current?.("code-block-copy", { language: payload.language, chars: payload.code.length });
@@ -2005,6 +2051,39 @@ export function MarkdownRichEditor(props: {
         .catch((error: unknown) => { reportRef.current?.("code-block-copy-failed", String(error)); });
     };
     root.addEventListener("click", onCopyClick, true);
+
+    /*
+     * **代码块 / 公式块里"手动选中复制" ⇒ 只写纯文本** ✓（用户第十三轮要求 ✓）。
+     *
+     * 为什么需要 ✗：CodeMirror / 预览区默认复制会写 `text/plain + text/html` ✓，
+     * 而粘贴路径还会用"刚复制的块"记忆和"纯文本像代码"启发式把内容**还原成块** ✗ ——
+     * 用户想要的是：只有点右上角「复制」按钮再粘贴才还原成块 ✓；手动选中复制 = 纯文本 ✓。
+     * 这里在捕获阶段改写剪贴板：只留 `text/plain` ✓，清掉复制按钮记忆 ✓、记录本次选中文本 ✓
+     * （粘贴时据此走纯文本插入 ✓）。选区不在代码/公式块里时**不动** ✗（普通文字复制保持原样 ✓）。
+     */
+    const onCopySelection = (event: Event): void => {
+      const clip = (event as ClipboardEvent).clipboardData;
+      if (clip === null || clip === undefined) return;
+      const root = hostRef.current?.getRootNode?.() as Document | ShadowRoot | null;
+      const shadowSelection = root !== null && "getSelection" in root
+        ? (root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.() ?? null
+        : null;
+      const selection = shadowSelection ?? window.getSelection();
+      if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return;
+      const anchor = selection.anchorNode;
+      const element = anchor === null
+        ? null
+        : anchor.nodeType === 1 ? (anchor as Element) : anchor.parentElement;
+      if (element === null || element.closest(".milkdown-code-block") === null) return;
+      const text = selection.toString();
+      if (text === "") return;
+      clip.setData("text/plain", text);
+      event.preventDefault();
+      lastCopiedBlock = null;
+      lastSelectionCopy = text;
+      reportRef.current?.("code-block-copy-selection", { chars: text.length });
+    };
+    root.addEventListener("copy", onCopySelection, true);
 
     /*
      * **行内公式小浮窗：点「完成」后收起** ✓（用户实测要求 ✓）。
@@ -2160,7 +2239,32 @@ export function MarkdownRichEditor(props: {
       const view = viewRef.current;
       const clip = (event as ClipboardEvent).clipboardData;
       if (view === null || !readyRef.current || clip === null || clip === undefined) return;
+      const html = clip.getData("text/html");
+      const plain = clip.getData("text/plain");
+      const knMime = clip.getData(KN_CODE_BLOCK_MIME);
+      /*
+       * **手动选中复制（代码/公式块）⇒ 按纯文本插入** ✓（用户第十三轮要求 ✓）：
+       * 只认"上次手动选中复制的文本"且剪贴板里**没有**本插件载荷 ✓ ⇒
+       * 不还原成代码块/公式块 ✗、不跑"纯文本像代码"启发式 ✗，直接按纯文本（行间硬换行）插入 ✓。
+       * 粘进已有代码块里则保持原有"只插字符"行为 ✓。
+       */
+      const selectionCopy = lastSelectionCopy !== null && lastSelectionCopy === plain && knMime === ""
+        ? lastSelectionCopy
+        : null;
+      /*
+       * 标记**不在这里消费** ✓（复核查出的边界 ✗）：
+       * 同一段"手动选中复制"的剪贴板连续粘贴多次，每次都应保持纯文本 ✓；
+       * 早先"粘一次就清掉"会让第二次粘贴掉进"纯文本像代码"启发式、又被插成代码块 ✗。
+       * 只在**下一次复制**（选中复制覆盖 / 点「复制」按钮清空）时更新 ✓ —— 剪贴板内容变了自然对不上 ✓。
+       */
       if (insideCodeBlock(currentBlockName(view))) return;
+      if (selectionCopy !== null) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        insertPlainTextAtSelection(view, selectionCopy);
+        reportRef.current?.("code-block-paste", { via: "selection-plain", language: "", chars: selectionCopy.length, viaHtml: false });
+        return;
+      }
       /*
        * ① 本插件载荷（自定义格式 ✓）⇒ 最可靠 ✓；
        * ② 没有载荷（浏览器拒了多格式、或粘贴来自别的应用 ✓）⇒ 看 `text/html`：
@@ -2171,8 +2275,6 @@ export function MarkdownRichEditor(props: {
        *    —— 用户截图里那一串 ✗）。所以先做一次**保守**的"这看起来是代码"识别 ✓，
        *    命中就用事务插入完整代码块 ✓（一字不改、也不产生 HTML 节点 ✓）。
        */
-      const html = clip.getData("text/html");
-      const plain = clip.getData("text/plain");
       // 系统可能保留 HTML 却移除语言信息；刚复制的原文匹配优先于 HTML 降级。
       const remembered = lastCopiedBlock !== null
         && (plain === lastCopiedBlock.code || (lastCopiedBlock.language.toLowerCase() === "latex"
@@ -2185,7 +2287,7 @@ export function MarkdownRichEditor(props: {
       const plainCode = strictHtml === null && !remembered && formula === null && richHtml === null
         ? codeBlockFromPlainText(plain)
         : null;
-      const payload = parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))
+      const payload = parseCodeBlockPayload(knMime)
         ?? remembered
         ?? strictHtml
         ?? formula
@@ -2203,7 +2305,7 @@ export function MarkdownRichEditor(props: {
         language: payload.language,
         chars: payload.code.length,
         via: plainCode !== null ? "plain-code" : richHtml !== null ? "rich-html" : formula !== null ? "formula" : strictHtml !== null ? "html" : "payload",
-        viaHtml: clip.getData(KN_CODE_BLOCK_MIME) === "",
+        viaHtml: knMime === "",
       });
     };
     root.addEventListener("paste", onPastePayload, true);
@@ -2486,6 +2588,7 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("pointerdown", onBlockHandlePointerDown, true);
       root.removeEventListener("pointerup", onBlockHandlePointerUp, true);
       root.removeEventListener("click", onCopyClick, true);
+      root.removeEventListener("copy", onCopySelection, true);
       root.removeEventListener("pointerdown", onLatexInlineConfirm, true);
       root.removeEventListener("click", onLatexInlineConfirm, true);
       root.removeEventListener("click", onMermaidAction, true);

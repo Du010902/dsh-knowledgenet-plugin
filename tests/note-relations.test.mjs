@@ -24,6 +24,7 @@ const relations = readFileSync(path.join(CLIENT, "NoteRelations.tsx"), "utf8");
 const editor = readFileSync(path.join(CLIENT, "NodeDocumentEditor.tsx"), "utf8");
 const panel = readFileSync(path.join(CLIENT, "GraphPanel.tsx"), "utf8");
 const css = readFileSync(path.join(CLIENT, "panel.css"), "utf8");
+const dictSource = readFileSync(path.join(CLIENT, "index.ts"), "utf8");
 
 describe("关系列表可点：点一下切到那个节点 ✓", () => {
   it("列表项是**按钮** ✓（原来是 div ⇒ 点不动 ✗）", () => {
@@ -199,5 +200,53 @@ describe("关系列表里的「已理解」标签 ✓", () => {
       css.includes('.kn-understanding-button[aria-pressed="true"] { color: #167346; }'),
       "参照色仍在 ✓（标签沿用它 ✓）",
     );
+  });
+});
+
+/* ------------------- 「＋ 添加前置」入口移进「前置」弹窗 + 点外面关闭（用户第十三轮 ✓） ------------------- */
+
+describe("「＋ 添加前置」入口移进「前置」弹窗 + 点旁边空白/Esc 关闭 ✓", () => {
+  it("标题栏只剩两颗按钮（前置 / 被依赖），不再有顶层「添加前置」✗", () => {
+    const barStart = relations.indexOf('<div className="kn-note-relations"');
+    const popoverStart = relations.indexOf('<div className="kn-note-relations-popover">');
+    assert.ok(barStart >= 0 && popoverStart > barStart, "要找得到关系组件根节点与弹窗 ✓");
+    const header = relations.slice(barStart, popoverStart);
+    assert.equal((header.match(/<button\b/g) ?? []).length, 2, "标题栏只有「前置」「被依赖」两颗按钮 ✓");
+    assert.ok(header.includes('t("relPre"') && header.includes('t("relDepend"'), "两颗按钮是 前置 / 被依赖 ✓");
+    assert.ok(!header.includes('t("relAdd")'), "标题栏不再有「＋ 添加前置」✗（用户要求移进弹窗 ✓）");
+  });
+
+  it("「＋ 添加前置」入口在「前置」弹窗里，且只在 mode === \"pre\" 时出现 ✓", () => {
+    assert.ok(relations.includes('className="kn-note-relations-add"'), "弹窗里有入口按钮 ✓");
+    assert.equal((relations.match(/className="kn-note-relations-add"/g) ?? []).length, 1, "入口只出现一次 ✓");
+    assert.ok(
+      /\{mode === "pre" \? \([\s\S]{0,400}?className="kn-note-relations-add"[\s\S]{0,400}?\{t\("relAdd"\)\}/.test(relations),
+      "入口按钮只在「前置」弹窗（mode === \"pre\"）里渲染、文案走 relAdd ✓",
+    );
+  });
+
+  it("点弹窗旁边空白 / Esc ⇒ 关闭 ✓（shadow DOM 安全：composedPath + 根节点 ref）", () => {
+    assert.ok(relations.includes("const rootRef = useRef<HTMLDivElement | null>(null);"), "要用根节点 ref 认领面板 ✓");
+    assert.ok(relations.includes('document.addEventListener("pointerdown", onPointerDown, true)'), "document 捕获 pointerdown ✓");
+    assert.ok(relations.includes("event.composedPath()"), "shadow DOM 里要用 composedPath ✓");
+    assert.ok(relations.includes("path.includes(root)"), "按根节点判断点里/点外 ✓");
+    assert.ok(/if \(root !== null && path\.includes\(root\)\) return;/.test(relations), "点在弹窗里不关闭 ✓");
+    assert.ok(/if \(mode === null\) return undefined;/.test(relations), "弹窗没打开不挂监听 ✓");
+    assert.ok(/if \(event\.key === "Escape"\) close\(\);/.test(relations), "Esc 关闭 ✓");
+    assert.ok(/const close = \(\): void => \{ setMode\(null\); setSnippet\(""\); \};/.test(relations), "关闭要收起弹窗并清掉本次 snippet ✓");
+    assert.ok(/return \(\) => \{\s*document\.removeEventListener\("pointerdown", onPointerDown, true\);/.test(relations), "卸载要摘监听 ✓");
+  });
+
+  it("弹窗里的入口样式（分隔线）与中英词典文案 ✓", () => {
+    assert.ok(/\.kn-note-relations-popover \.kn-note-relations-add \{/.test(css), "入口要有（带上位选择器的）样式 ✓");
+    const at = css.indexOf(".kn-note-relations-popover .kn-note-relations-add {");
+    const block = css.slice(at, at + 400);
+    for (const part of ["margin-top", "padding-top", "border-top"]) assert.ok(block.includes(part), `入口样式要有 ${part} ✓`);
+    const zh = dictSource.slice(dictSource.indexOf("const DICT_ZH"), dictSource.indexOf("const DICT_EN"));
+    const en = dictSource.slice(dictSource.indexOf("const DICT_EN"));
+    for (const key of ["relAdd", "relAddTitle", "relAddFromSelection"]) {
+      assert.ok(zh.includes(`${key}:`), `中文词典要有 ${key} ✓`);
+      assert.ok(en.includes(`${key}:`), `英文词典要有 ${key} ✓`);
+    }
   });
 });

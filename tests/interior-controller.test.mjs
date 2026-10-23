@@ -2,7 +2,6 @@
  * 内部导航**控制器**的接线测试（DOM 打桩，不需要真实浏览器）。
  *
  * 数学层已由 `interior-navigation.test.mjs` 覆盖；这里验证事件接线与端到端行为：
- * - 滚轮 = 沿视线前进/后退，**只动相机**，球心 C 与图谱姿态不变 ✓；
  * - 拖动 = 抓取点跟手（用控制器给出的 `basis()` 投影复核）✓；
  * - 短点击仍然选中节点、拖动后不误触发选中 ✓；
  * - Shift 拖动 = 平移；右键 = 菜单；取消 = 丢弃抓取 ✓；
@@ -45,28 +44,19 @@ function makeElement() {
 
 let globals = null;
 
-/** 装全局桩：控制器构造时会挂 window/document 监听，并广播小地图用的状态事件 ✓ */
+/** 装全局桩：控制器构造时会挂 window/document 监听 ✓ */
 function installGlobals() {
   const windowHandlers = new Map();
-  const dispatched = [];
   const previous = {
     window: globalThis.window,
     document: globalThis.document,
     matchMedia: globalThis.matchMedia,
-    CustomEvent: globalThis.CustomEvent,
-  };
-  globalThis.CustomEvent = class {
-    constructor(type, init) {
-      this.type = type;
-      this.detail = init?.detail;
-    }
   };
   globalThis.window = {
     addEventListener: (type, handler) => { windowHandlers.set(type, handler); },
     removeEventListener: (type) => { windowHandlers.delete(type); },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
-    dispatchEvent: (event) => { dispatched.push(event); return true; },
   };
   globalThis.document = {
     hidden: false,
@@ -76,11 +66,10 @@ function installGlobals() {
   };
   /* 关掉动画：定位/取景一步到位，测试不必等 620ms ✓ */
   globalThis.matchMedia = () => ({ matches: true });
-  return { windowHandlers, dispatched, restore() {
+  return { windowHandlers, restore() {
     globalThis.window = previous.window;
     globalThis.document = previous.document;
     globalThis.matchMedia = previous.matchMedia;
-    globalThis.CustomEvent = previous.CustomEvent;
   } };
 }
 
@@ -119,42 +108,6 @@ function projectWith(navigation, layout) {
 function pushNode(projected, index, screen) {
   projected.push({ index, id: `n${index}`, x: screen.x, y: screen.y, depth: screen.depth, radius: 8, visible: true });
 }
-
-describe("控制器接线：滚轮只推相机", () => {
-  it("向前滚 ⇒ 相机沿视线靠近球心；球心与图谱姿态、视角都不变", () => {
-    const { navigation, element, calls } = makeNavigation();
-    const before = navigation.basis().position;
-    const centerBefore = [...navigation.camera.target];
-    const viewBefore = [...navigation.camera.q];
-    assert.equal(element.emit("wheel", { deltaY: -100, deltaMode: 0 }), true);
-    const after = navigation.basis().position;
-    assert.ok(after[2] < before[2], `应沿 −Z 前进（${before[2]} → ${after[2]}）`);
-    assert.deepEqual(navigation.camera.target, centerBefore, "球心不动");
-    assert.deepEqual([...navigation.camera.q], viewBefore, "视角/图谱姿态不动");
-    assert.equal(calls.user, 1, "要通知上层「用户自己动了相机」");
-    assert.ok(calls.camera >= 1, "要触发相机变更回调");
-  });
-
-  it("滚轮位置无关：同一输入在画布不同位置产生相同位移", () => {
-    const a = makeNavigation();
-    const b = makeNavigation();
-    a.element.emit("wheel", { deltaY: -100, deltaMode: 0, clientX: 10, clientY: 10 });
-    b.element.emit("wheel", { deltaY: -100, deltaMode: 0, clientX: 700, clientY: 500 });
-    assert.deepEqual(a.navigation.basis().position, b.navigation.basis().position, "位移必须与光标位置无关");
-  });
-
-  it("滚轮会打断进行中的抓取（不继续旋转）", () => {
-    const { navigation, element, projected } = makeNavigation();
-    const screen = projectWith(navigation, [0, 0, 700]);
-    pushNode(projected, 0, screen);
-    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: screen.x, clientY: screen.y, shiftKey: false });
-    element.emit("pointermove", { pointerId: 1, clientX: screen.x + 40, clientY: screen.y });
-    const rotated = [...navigation.camera.q];
-    element.emit("wheel", { deltaY: -60, deltaMode: 0 });
-    element.emit("pointermove", { pointerId: 1, clientX: screen.x + 90, clientY: screen.y });
-    assert.deepEqual([...navigation.camera.q], rotated, "滚轮之后拖动不该继续转图谱");
-  });
-});
 
 describe("控制器接线：拖动抓取点跟手", () => {
   for (const [name, layout] of [["球心前方", [0, 0, 700]], ["球心后方", [0, 0, -250]]]) {
@@ -224,48 +177,6 @@ describe("控制器接线：拖动抓取点跟手", () => {
   });
 });
 
-describe("控制器接线：小地图状态广播", () => {
-  const lastDetail = () => {
-    const events = globals.dispatched.filter((event) => event.type === "kn-interior-state");
-    return events.length === 0 ? null : events[events.length - 1].detail;
-  };
-
-  it("挂载后就会广播一次（面板不必等用户操作才画得出图）", () => {
-    const { element } = makeNavigation();
-    const detail = lastDetail();
-    assert.ok(detail !== null, "应当已经广播过状态");
-    assert.equal(detail.host, element, "负载要带宿主元素（面板据此认领）");
-    assert.equal(detail.radius, 300, "带操作球半径");
-    assert.ok(Math.abs(detail.distance - 900) < 1e-9, "带相机到球心的距离");
-  });
-
-  it("滚轮之后广播新位置；拖动只转图谱 ⇒ 位置与朝向都不变", () => {
-    const { navigation, element, projected } = makeNavigation();
-    const initial = lastDetail();
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
-    const afterWheel = lastDetail();
-    assert.ok(afterWheel.distance < initial.distance, "前进 ⇒ 离球心更近");
-
-    /* 拖动：半径（= 到球心的距离）与朝向都必须不变，只有图谱在转 ✓ */
-    const screen = projectWith(navigation, [0, 0, 700]);
-    pushNode(projected, 0, screen);
-    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: screen.x, clientY: screen.y, shiftKey: false });
-    element.emit("pointermove", { pointerId: 1, clientX: screen.x + 40, clientY: screen.y + 10 });
-    const afterDrag = lastDetail();
-    assert.ok(Math.abs(afterDrag.distance - afterWheel.distance) < 1e-9, "拖动不该改变到球心的距离");
-    assert.deepEqual(afterDrag.forward, afterWheel.forward, "拖动不该改变朝向（视角不动 ✓）");
-    assert.deepEqual(afterDrag.eye, afterWheel.eye, "拖动不该改变相机位置（视角不动 ✓）");
-  });
-
-  it("dispose 之后不再广播（卸载后不许再往面板推状态）", () => {
-    const { navigation, element } = makeNavigation();
-    navigation.dispose();
-    const count = globals.dispatched.length;
-    element.emit("wheel", { deltaY: -100, deltaMode: 0 });
-    assert.equal(globals.dispatched.length, count, "dispose 后不该再有事件");
-  });
-});
-
 describe("控制器接线：生命周期", () => {
   it("F 键只在画布持有焦点时定位", () => {
     const { navigation, element, calls } = makeNavigation();
@@ -283,8 +194,8 @@ describe("控制器接线：生命周期", () => {
   it("dispose 之后事件不再生效，且可重复调用", () => {
     const { navigation, element } = makeNavigation();
     navigation.dispose();
-    assert.equal(element.has("wheel"), false, "滚轮监听器要摘掉");
-    assert.equal(element.emit("wheel", { deltaY: -100, deltaMode: 0 }), false);
+    assert.equal(element.has("pointerdown"), false, "指针按下监听器要摘掉");
+    assert.equal(element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300 }), false);
     navigation.dispose();
   });
 

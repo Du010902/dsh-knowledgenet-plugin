@@ -248,7 +248,8 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
   });
 
   it("粘贴：认得本插件载荷就插**完整代码块** ✓，其它一律放行 ✗", () => {
-    assert.ok(richSource.includes("parseCodeBlockPayload(clip.getData(KN_CODE_BLOCK_MIME))"), "只认本插件载荷 ✓");
+    assert.ok(richSource.includes('const knMime = clip.getData(KN_CODE_BLOCK_MIME);'), "先取本插件载荷 ✓");
+    assert.ok(richSource.includes("parseCodeBlockPayload(knMime)"), "只认本插件载荷（校验后解析 ✓）");
     assert.ok(richSource.includes("if (insideCodeBlock(currentBlockName(view))) return;"), "在代码块里 ⇒ 只插字符 ✓（不嵌套 ✓）");
     assert.ok(richSource.includes("insertCodeBlockNode(view, payload)"), "要用事务插入完整 code_block ✓");
     assert.ok(
@@ -259,6 +260,28 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
     assert.ok(richSource.includes('root.addEventListener("paste", onPastePayload, true)'), "粘贴监听要挂上 ✓");
     assert.ok(richSource.includes('root.removeEventListener("click", onCopyClick, true)'), "卸载要摘掉 ✓");
     assert.ok(richSource.includes('root.removeEventListener("paste", onPastePayload, true)'), "卸载要摘掉 ✓");
+  });
+
+  it("**复制语义拆分** ✓：手动选中复制代码只写纯文本 ⇒ 粘贴成纯文本；复制按钮仍是结构化", () => {
+    /* 手动选中复制：捕获 copy、只留 text/plain、清掉"刚复制块"记忆、记下选中文本 ✓ */
+    assert.ok(richSource.includes("const onCopySelection = (event: Event): void => {"), "要有 copy 捕获处理 ✓");
+    assert.ok(richSource.includes('element.closest(".milkdown-code-block") === null'), "只接管代码块/公式块里的选中复制 ✓");
+    assert.ok(richSource.includes('clip.setData("text/plain", text);'), "手动选中复制只写纯文本 ✓");
+    assert.ok(richSource.includes('root.addEventListener("copy", onCopySelection, true)'), "copy 监听要挂上（捕获阶段 ✓）");
+    assert.ok(richSource.includes("lastCopiedBlock = null;"), "要清掉「刚复制块」记忆 ✓（否则同一段会被误还原成块 ✗）");
+    assert.ok(richSource.includes("lastSelectionCopy = text;"), "要记下这次选中复制的纯文本 ✓");
+    assert.ok(richSource.includes("insertPlainTextAtSelection"), "粘贴时要能按纯文本原样插入 ✓");
+    /* 纯文本插入：按行加 hardbreak、不解析 Markdown、不建块 ✓ */
+    assert.ok(richSource.includes("const hardbreak = state.schema.nodes.hardbreak;"), "行间用硬换行 ✓");
+    assert.ok(richSource.includes("state.tr.replaceWith(from, to, fragment)"), "纯文本走事务插入 ✓");
+    /* 粘贴分支：命中"上次选中复制"且没有插件载荷 ⇒ 直接按纯文本插入并上报 ✓ */
+    assert.ok(richSource.includes("const selectionCopy = lastSelectionCopy !== null && lastSelectionCopy === plain && knMime === \"\""), "粘贴要先判断是不是手动选中复制 ✓");
+    assert.ok(richSource.includes("if (selectionCopy !== null) {"), "命中就走纯文本分支 ✓");
+    assert.ok(richSource.includes("insertPlainTextAtSelection(view, selectionCopy)"), "纯文本分支要原样插入 ✓");
+    assert.ok(richSource.includes('via: "selection-plain"'), "上报里要能区分「选中复制 ⇒ 纯文本」✓");
+    /* 复制按钮：结构化写剪贴板 + 成功后才记记忆 ✓ */
+    assert.ok(/writeCodeBlockClipboard\(payload\)[\s\S]{0,300}?lastCopiedBlock = \{ \.\.\.payload \};/.test(richSource), "复制按钮成功后才记「刚复制块」✓");
+    assert.ok(richSource.includes("lastSelectionCopy = null;"), "复制按钮要清掉手动选中复制标记 ✓（两者互斥 ✓）");
   });
 
   it("**粘贴被拆散后的一键补救** ✓：提示条上能把「刚才粘进来的内容」作为代码块插入", () => {
@@ -285,10 +308,11 @@ describe("代码块复制 / 粘贴的接线 ✓", () => {
       richSource.includes("codeBlockFromRichHtml(html, plain)") && richSource.includes("codeBlockFromPlainText(plain)"),
       "网页 <pre> 与外部纯文本代码的识别要接进粘贴路径 ✓",
     );
-    const payloadChain = /const payload = parseCodeBlockPayload\(clip\.getData\(KN_CODE_BLOCK_MIME\)\)[\s\S]{0,200}?\?\? strictHtml[\s\S]{0,200}?\?\? richHtml[\s\S]{0,200}?\?\? plainCode;/.exec(richSource);
+    /* 6 级检测链：载荷 → 记忆 → 严格 HTML → 公式 → 富 HTML → 纯文本代码 ✓ */
+    const payloadChain = /const payload = parseCodeBlockPayload\(knMime\)[\s\S]{0,240}?\?\? remembered[\s\S]{0,240}?\?\? strictHtml[\s\S]{0,240}?\?\? formula[\s\S]{0,240}?\?\? richHtml[\s\S]{0,240}?\?\? plainCode;/.exec(richSource);
     assert.notEqual(payloadChain, null, "检测链顺序：载荷 → 记忆 → 严格 HTML → 公式 → 富 HTML → 纯文本代码 ✓");
     assert.ok(richSource.includes('via: plainCode !== null ? "plain-code" : richHtml !== null ? "rich-html"'), "上报里要能区分来源 ✓");
-    assert.ok(richSource.includes("viaHtml:"), "上报里要能区分是走 HTML 还原的 ✓");
+    assert.ok(richSource.includes("viaHtml: knMime === \"\""), "上报里要能区分是走 HTML 还原的 ✓");
   });
 
   it("**提示与实际模式一致** ✓：还在正文时不许宣称已改用纯文本 ✗", () => {

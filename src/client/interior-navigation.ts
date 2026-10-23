@@ -4,13 +4,13 @@
  * 依 `design/knowledgenet-interior-navigation.md` 实现。为什么换模型（而不是继续修符号）：
  * 上游把"相机在哪"和"绕谁转"绑在同一个轨道表示上（`target` + `distance` + 欧拉姿态），
  * 于是**绕心旋转**时不同深度的节点屏幕位移符号不同（`Δ ∝ Z/(D−Z)`），
- * 球背面必然反向 —— 那是几何事实，不是符号写错；把滚轮改成"移动相机"、把拖动改成
- * "抓取点投影约束求解"才能让**正在抓取的那一块**始终跟手 ✓。
+ * 球背面必然反向 —— 那是几何事实，不是符号写错；把拖动改成"抓取点投影约束求解"
+ * 才能让**正在抓取的那一块**始终跟手 ✓。
  *
  * 三个量彻底分开：
  * - `C`（center）：固定旋转中心，取稳定布局的包围体中心；用户开始操作后冻结，只有明确
  *   「重新整理 / 换库」才换 ✓；
- * - `P`（eye）：相机在**显示世界**里的位置；**滚轮只改它**（沿视线前进后退，可以穿过 C）✓；
+ * - `P`（eye）：相机在**显示世界**里的位置；定位/取景只改它（拖动不动它 ✓）；
  * - `Q`（view）：相机完整姿态（含滚转）；右/上/前轴都由它给出，不靠固定世界上方向 ✓；
  * - `S`（scene）：图谱绕 C 的整体旋转；**拖动只改它** ✓。
  *
@@ -814,176 +814,11 @@ export function spinStep(
   };
 }
 
-/* ------------------------------- 小地图截面 ------------------------------- */
-
-/**
- * 位置图的**固定参考轴**。
- *
- * 文档要点：轴必须在该库视图首次建立时定下来，**不能随相机朝向变** ✗ ——
- * 否则定位/适应窗口改了 `view`（甚至只是滚转）就会让整张位置图与历史轨迹一起变，
- * 用户会把"坐标轴变了"误读成"相机移动了" ✗。
- */
-export interface MinimapAxes {
-  /** 深度轴：`depth = -dot(offset, forward)`，球心在相机前方时为正 ✓ */
-  forward: Vec3;
-  up: Vec3;
-  right: Vec3;
-}
-
-/** 由一次相机姿态取参考轴（只在**建立/重置**时调用 ✓） */
-export function minimapAxesFrom(forward: Vec3, up: Vec3, right: Vec3): MinimapAxes {
-  return { forward: [...forward], up: [...up], right: [...right] };
-}
-
-/**
- * 相机位置在固定参考轴下的三个分量。
- *
- * **三个分量都保留** ✓（两张正交位置图各用其中两条）：
- * 旧实现只画 `forward/up` 两个分量、把 `right` 丢掉 ✗，于是相机在 `(600,0,0)` 时
- * depth 与 lateral 都是 0 ⇒ 眼睛被画到圆心，可读数却写着 2R ✗（文档复现的第一个错误）。
- */
-export interface MinimapComponents {
-  /** 沿参考深度轴的分量（球心在前方为正 ✓） */
-  depth: number;
-  /** 参考"上"轴分量 */
-  up: number;
-  /** 参考"右"轴分量（旧实现丢掉的第三轴 ✓） */
-  right: number;
-  /** 到球心的**真实**距离（世界单位 ✓） */
-  distance: number;
-}
-
-/**
- * 相机相对球心的位置 → 固定参考轴下的三个分量。
- * @param eye - 相机位置（显示世界）。
- * @param center - 固定球心 C。
- * @param axes - 固定的参考轴。
- * @returns 三分量与真实距离（`hypot(depth, up, right) === distance` ✓ 无损 ✓）。
- */
-export function minimapComponents(eye: Vec3, center: Vec3, axes: MinimapAxes): MinimapComponents {
-  const offset = sub(eye, center);
-  return {
-    depth: -dot(offset, axes.forward),
-    up: dot(offset, axes.up),
-    right: dot(offset, axes.right),
-    distance: length(offset),
-  };
-}
-
-/**
- * 当前视线在固定参考轴下的分量（画方向箭头用 ✓）。
- * @param axes - 固定参考轴。
- * @param forward - 当前视线方向。
- * @returns 三个分量（绝对值很小 = 视线垂直于该图平面 ⇒ 调用方该画"朝内/朝外"符号 ✓）。
- */
-export function minimapForwardIn(axes: MinimapAxes, forward: Vec3): { forward: number; up: number; right: number } {
-  return {
-    forward: dot(forward, axes.forward),
-    up: dot(forward, axes.up),
-    right: dot(forward, axes.right),
-  };
-}
-
-/** 球外压缩的渐近余量：图上半径 1 = 球面 ⇒ 最远 `1 + HEADROOM` ✓ */
-export const MINIMAP_EXTERIOR_HEADROOM = 0.32;
-/** 球外压缩的尺度（越小压缩来得越早 ✓） */
-export const MINIMAP_EXTERIOR_SCALE = 1.5;
-
-/**
- * 真实距离 → **图上半径**（以球半径为单位）。
- *
- * - 球内**线性**（球面正好 = 1 ✓，空间含义直观 ✓）；
- * - 球外**严格单调的连续压缩**（渐近到 `1 + HEADROOM` ✓）。
- *
- * 旧实现是"超过 1.4R 就硬夹在 1.4R" ✗ —— 于是 (0,0,984)、(0,0,900)、(0,0,600) 三个
- * 真实距离 3.28R / 3R / 2R 的位置**全被画在同一个点**上（文档复现的第二个错误 ✓）。
- *
- * @param distance - 真实距离（世界单位）。
- * @param radius - 操作球半径。
- * @returns 图上半径（0 = 球心，1 = 球面，>1 = 球外且随距离严格增长 ✓）。
- */
-export function minimapPlottedRatio(distance: number, radius: number): number {
-  if (!(radius > 0) || !Number.isFinite(distance)) return 0;
-  const ratio = Math.max(0, distance / radius);
-  if (ratio <= 1) return ratio;
-  return 1 + (1 - Math.exp(-(ratio - 1) / MINIMAP_EXTERIOR_SCALE)) * MINIMAP_EXTERIOR_HEADROOM;
-}
-
-/** 轨迹采样的一次判定结果 */
-export interface TrailSampleStep {
-  /** 这次事件是否**真的**落了一个轨迹点 */
-  committed: boolean;
-  /** 提交后的"最后采样位置"（**只在实际提交时**才变 ✓） */
-  lastEye: Vec3 | null;
-  /** 提交后的"最后采样时刻" */
-  lastAt: number;
-}
-
-/**
- * 轨迹要不要落一个采样点（文档 §轨迹采样比较基准更新过早）。
- *
- * 旧实现先按位移判断、**立刻**更新基准，然后才看 120ms 时间闸门 ✗ ——
- * 没被采纳的中间位置也会覆盖基准 ⇒ 慢速小步永远攒不出一个采样点 ✗。
- * 这里把"基准"定义为**最后一次真正提交的位置** ✓：只有提交才更新 it，
- * 于是小步位移会**累加**到超过阈值为止 ✓。
- *
- * @param lastEye - 最后一次**真正提交**的位置（没有 ⇒ 直接提交 ✓）。
- * @param eye - 本次位置。
- * @param radius - 操作球半径（用来把位移归一化成比例）。
- * @param now - 当前时刻（毫秒）。
- * @param lastAt - 最后一次提交的时刻。
- * @param minRatio - 位移阈值（相对半径）。
- * @param intervalMs - 时间间隔下限。
- * @returns 是否提交，以及提交后应写回的基准与时刻 ✓。
- */
-export function trailSampleStep(
-  lastEye: Vec3 | null,
-  eye: Vec3,
-  radius: number,
-  now: number,
-  lastAt: number,
-  minRatio = 0.004,
-  intervalMs = 120,
-): TrailSampleStep {
-  if (!(radius > 0)) return { committed: false, lastEye, lastAt };
-  /* 还没有基准 ⇒ 第一个采样直接落下 ✓（不该被时间闸门挡住 ✗） */
-  if (lastEye === null) return { committed: true, lastEye: [...eye], lastAt: now };
-  const moved = length(sub(eye, lastEye)) / radius;
-  if (moved <= minRatio) return { committed: false, lastEye, lastAt };
-  if (now - lastAt < intervalMs) return { committed: false, lastEye, lastAt };
-  return { committed: true, lastEye: [...eye], lastAt: now };
-}
-
-/**
- * 一对位置分量 → 图上的平面偏移（**相对球心**，单位 = 球半径 ✓）。
- *
- * 关键：压缩要按"**每世界单位**的图上半径"算 —— `minimapPlottedRatio / distance` ✓。
- * 写成 `plotted / raw`（两个无量纲比值相除 ✗）会把球外位置又缩回圆心附近 ✗
- * （实测：2R 与球心几乎重叠 —— 这正是渲染预览才看出来的 ✗）。
- * 方向保持不变（等比缩放 ✓），模长正好等于 `minimapPlottedRatio` ✓。
- *
- * @param x - 横轴分量（深度 ✓）。
- * @param y - 纵轴分量（该图的侧轴 ✓）。
- * @param distance - 到球心的真实距离。
- * @param radius - 操作球半径。
- * @returns 相对球心的偏移（图上单位 = 球半径；`hypot` = `minimapPlottedRatio` ✓）。
- */
-export function minimapPlotOffset(
-  x: number,
-  y: number,
-  distance: number,
-  radius: number,
-): { x: number; y: number } {
-  if (!(distance > 1e-9) || !(radius > 0)) return { x: 0, y: 0 };
-  const factor = minimapPlottedRatio(distance, radius) / distance;
-  return { x: x * factor, y: y * factor };
-}
-
 /**
  * 以**固定球心 C** 为基准测量操作球半径：`max|X − C|`（文档 P2）。
  *
  * 为什么不能用包围体的 `radius`：那个是绕 `bounds.center` 算的 ✗ ——
- * 球心冻结在别处时它未必包得住全部节点，小地图与抓取范围都会失真 ✗。
+ * 球心冻结在别处时它未必包得住全部节点，取景与抓取范围都会失真 ✗。
  *
  * @param positions - 节点坐标（xyz 连续存放）。
  * @param count - 节点数。
@@ -1002,92 +837,6 @@ export function radiusAbout(positions: Float32Array, count: number, center: Vec3
     if (distance > maxDistance) maxDistance = distance;
   }
   return maxDistance > 0 ? maxDistance : 0;
-}
-
-/* --------------------------------- 滚轮 --------------------------------- */
-
-/** 滚轮推进的配置（都由插件拥有并校验，不散落在构建替换字符串里 ✓） */
-export interface WheelOptions {
-  /** 一个"标准化像素"推进的世界距离（插件按场景尺度给，带正的下限） */
-  speed: number;
-  /** 单次事件的最大行程（世界单位） */
-  maxStep: number;
-  /** 行高换算（`deltaMode === 1`） */
-  lineHeight: number;
-}
-
-export const DEFAULT_WHEEL: WheelOptions = { speed: 0.5, maxStep: 400, lineHeight: 16 };
-
-/**
- * 标准化滚轮增量并换算成**沿视线的前进行程**。
- *
- * 约定与浏览器一致：向前滚（`deltaY < 0`）⇒ 返回**正值**（前进）；
- * `deltaMode` 三种单位分别处理（像素 / 行 / 页），并把单事件行程限幅，
- * 免得一次大增量直接跨过整张图 ✓。
- *
- * @param deltaY - 原始 `event.deltaY`。
- * @param deltaMode - 原始 `event.deltaMode`（0 像素 / 1 行 / 2 页）。
- * @param viewportHeight - 画布高度（页单位换算用）。
- * @param options - 速度配置。
- * @returns 前进行程（世界单位，正 = 前进）。
- */
-export function wheelTravel(
-  deltaY: number,
-  deltaMode: number,
-  viewportHeight: number,
-  options: WheelOptions = DEFAULT_WHEEL,
-): number {
-  if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
-  const page = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : options.lineHeight * 20;
-  const unit = deltaMode === 1 ? options.lineHeight : deltaMode === 2 ? page : 1;
-  const pixels = deltaY * unit;
-  const travel = -pixels * options.speed; /* 向前滚（deltaY < 0）⇒ 正行程 ✓ */
-  return clampNum(travel, -options.maxStep, options.maxStep);
-}
-
-/**
- * 相机沿视线前进/后退：`P ← P + F × travel`，**只动位置**（C/Q/S 都不变）✓。
- *
- * 不依赖"到球心的距离"，所以走到球心也不会失去推进能力 ✓；
- * 同时对 `|P − C|` 设一个有限上限，防止一路飞出场景 ✗。
- *
- * @param state - 就地更新 `eye`。
- * @param travel - 前进行程（世界单位，正 = 前进）。
- * @param maxRange - `|P − C|` 的上限。
- */
-export function advanceEye(state: InteriorState, travel: number, maxRange: number): void {
-  if (!Number.isFinite(travel) || travel === 0) return;
-  const forward = rotateVec(state.view, [0, 0, -1]);
-  const next = add(state.eye, scale(forward, travel));
-  const offset = sub(next, state.center);
-  const distance = length(offset);
-  if (Number.isFinite(maxRange) && maxRange > 0 && distance > maxRange) {
-    /*
-     * 超范围时**沿视线截断行程**，而不是把点径向投回球面（文档开发备注）：
-     * 径向投影会附带给横向位移，于是"一直往前滚"会莫名其妙地往侧面漂 ✗。
-     * 求 |P + F·t − C| = maxRange 的根，取沿行进方向最远的那个 ✓。
-     */
-    const origin = sub(state.eye, state.center);
-    const b = 2 * dot(origin, forward);
-    const c = dot(origin, origin) - maxRange * maxRange;
-    const disc = b * b - 4 * c;
-    if (disc >= 0) {
-      const root = Math.sqrt(disc);
-      const roots = [(-b - root) / 2, (-b + root) / 2];
-      /* 只保留**沿行进方向**且不超过本次行程的根，取最远的那个 ✓ */
-      const usable = travel > 0
-        ? roots.filter((t) => t > 0 && t <= travel).sort((l, r) => r - l)
-        : roots.filter((t) => t < 0 && t >= travel).sort((l, r) => l - r);
-      if (usable.length > 0) {
-        /* 用一个略小于边界的系数，避免浮点落在球外 ✓ */
-        state.eye = add(state.eye, scale(forward, usable[0] * 0.999));
-        return;
-      }
-    }
-    /* 没有可截断的交点（理论上不该发生）⇒ 不动，别乱跳 ✓ */
-    return;
-  }
-  state.eye = next;
 }
 
 /* ------------------------------ 定位与取景 ------------------------------ */

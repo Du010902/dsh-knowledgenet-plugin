@@ -821,8 +821,7 @@ describe("与设计稿对应的部件与入口", () => {
     assert.ok(/\.kn-graph:has\(\.kn-editor\)::after \{[\s\S]{0,200}?z-index:\s*11/.test(css), "图谱遮罩在编辑器之下 ✓");
     /* 被盖住的图谱层**不接受指针** ✓（不许点到看不见的控件 ✓） */
     const noPointer = /\.kn-graph:has\(\.kn-editor\) \.kn-graph-stage,[\s\S]{0,240}?pointer-events: none;/;
-    assert.ok(noPointer.test(css), "舞台 / 小地图 / HUD 一起不接受指针 ✓");
-    assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-minimap"), "右下小地图点名列出 ✓");
+    assert.ok(noPointer.test(css), "舞台 / HUD 一起不接受指针 ✓");
     /* 关掉编辑器后规则自动失效（不再依赖任何持久状态）✓ */
     assert.ok(css.includes(":has(.kn-editor)"), "用 :has 跟随编辑器存在与否 ⇒ 关闭即恢复 ✓");
     assert.ok(css.includes(".kn-graph:has(.kn-editor) .kn-sel"), "选中信息条也要让位 ✓");

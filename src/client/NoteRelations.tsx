@@ -80,6 +80,33 @@ export function NoteRelations(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const lastAddNonceRef = useRef(-1);
+  /** 关系面板根节点 ✓（判断"点外面"用 ✓：面板在 shadow DOM 里 ⇒ 要用 composedPath 认领 ✓） */
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * **点旁边空白区域 ⇒ 弹窗自动消失** ✓（用户第十三轮要求 ✓）。
+   * 面板在 shadow DOM 里 ⇒ 必须用 `composedPath()` + 根节点引用判"里面/外面" ✓
+   * （事件冒到 document 时 target 会被重定向成 shadow host ✗）。
+   * Esc 同样关闭 ✓（不改正文、不提交任何东西 ✓）。
+   */
+  useEffect(() => {
+    if (mode === null) return undefined;
+    const close = (): void => { setMode(null); setSnippet(""); };
+    const onPointerDown = (event: PointerEvent): void => {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const root = rootRef.current;
+      if (root !== null && path.includes(root)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [mode]);
   /*
    * 工具栏点「＋ 添加前置节点」⇒ 打开添加面板，并把**选中原文**填进标题 ✓。
    * 用 `nonce` 而不是"内容变了就打开"✗：同一段文字反复触发也要能再次打开 ✓。
@@ -110,10 +137,14 @@ export function NoteRelations(props: {
     } catch (e) { setError(e instanceof Error ? e.message : t("relFailed")); }
     finally { setBusy(false); }
   };
-  return <div className="kn-note-relations">
+  return <div className="kn-note-relations" ref={rootRef}>
     <button type="button" onClick={() => { setMode(mode === "pre" ? null : "pre"); setError(""); }}>{t("relPre", { count: pre.length })}</button>
     <button type="button" onClick={() => { setMode(mode === "depend" ? null : "depend"); setError(""); }}>{t("relDepend", { count: depend.length })}</button>
-    <button type="button" onClick={() => { setMode("add"); setTitle(""); setSnippet(""); setError(""); }}>{t("relAdd")}</button>
+    {/*
+     * **「＋ 添加前置」从标题栏移进「前置」弹窗** ✓（用户第十三轮要求："使用频率不高" ✓）。
+     * 弹窗里在列表下方给一个入口 ✓（见下面 `mode === "pre"` 那个按钮 ✓）；
+     * 选中文字后工具栏那颗「添加前置节点」仍然直达添加态 ✓（`addRequest` ✓）。
+     */}
     {/*
      * 旧的"贴着选区的浮钮"（`.kn-note-selection`）已删除 ✗ —— 它和格式化工具栏互相遮挡（用户截图 ✓）；
      * 功能并进浮动工具栏的「＋ 添加前置节点」✓（`addRequest` prop 接收请求 ✓）。
@@ -126,33 +157,45 @@ export function NoteRelations(props: {
         <input aria-label={t("relSearchLabel")} placeholder={t("relSearchPlaceholder")} value={title} disabled={busy} onChange={e => setTitle(e.target.value)} />
         {candidates.map(n => <button type="button" key={n.id} disabled={busy} onClick={() => { void add(n.title, false); }}>{n.title}</button>)}
         <button type="button" disabled={busy || !title.trim()} onClick={() => { void add(title, true); }}>{busy ? t("relAdding") : t("relCreate", { title: title.trim() })}</button>
-      </> : items.length ? items.map(n => (
-        /*
-         * **列表项是按钮** ✓（原来是 `<div>` ✗ ⇒ 点不动 ✓，用户实测 ✓）：
-         * 点击跳到该节点的编辑界面 ✓；键盘也能 Tab 到、回车打开 ✓。
-         * 没有回调时（只读场景 ✓）退化成不可点的行 ✓（保留原来的样子 ✓）。
-         */
-        <button
-          type="button"
-          className="kn-note-relation-item"
-          key={n!.id}
-          disabled={props.onOpenNode === undefined}
-          title={props.onOpenNode === undefined ? undefined : t("relOpen", { title: n!.title })}
-          onClick={() => { props.onOpenNode?.(n!.id); }}
-        >
-          {/*
-            * **已理解的节点后面加一个「已理解」标签** ✓（用户实测要求 ✓）。
-            *
-            * 判据只有一条：`understanding[n.id] === true` ✓ —— 没有标记、或显式标成"未理解"的节点
-            * **一律什么都不加** ✗（用户明确要求"没理解的不做任何改变"✓；
-            * 而且"没标过"不等于"他不懂"✓，多挂一个灰标签只是噪声 ✓）。
-            *
-            * 标签是**装饰性**的 ✓（`aria-hidden`）⇒ 按钮的无障碍名字仍然只有节点标题 ✓
-            * （读屏听到"打开「克隆」"就够 ✓；理解状态另有编辑器头部那个真正的按钮承担 ✓）。
-            */}
-          {n!.title}{props.understanding?.[n!.id] === true ? <span className="kn-note-relation-understood" aria-hidden="true"><span className="kn-note-relation-understood-dot" />{t("understood")}</span> : null}
-        </button>
-      )) : <div className="kn-editor-dim">{t("relEmpty")}</div>}
+      </> : <>
+        {items.length ? items.map(n => (
+          /*
+           * **列表项是按钮** ✓（原来是 `<div>` ✗ ⇒ 点不动 ✓，用户实测 ✓）：
+           * 点击跳到该节点的编辑界面 ✓；键盘也能 Tab 到、回车打开 ✓。
+           * 没有回调时（只读场景 ✓）退化成不可点的行 ✓（保留原来的样子 ✓）。
+           */
+          <button
+            type="button"
+            className="kn-note-relation-item"
+            key={n!.id}
+            disabled={props.onOpenNode === undefined}
+            title={props.onOpenNode === undefined ? undefined : t("relOpen", { title: n!.title })}
+            onClick={() => { props.onOpenNode?.(n!.id); }}
+          >
+            {/*
+              * **已理解的节点后面加一个「已理解」标签** ✓（用户实测要求 ✓）。
+              *
+              * 判据只有一条：`understanding[n.id] === true` ✓ —— 没有标记、或显式标成"未理解"的节点
+              * **一律什么都不加** ✗（用户明确要求"没理解的不做任何改变"✓；
+              * 而且"没标过"不等于"他不懂"✓，多挂一个灰标签只是噪声 ✓）。
+              *
+              * 标签是**装饰性**的 ✓（`aria-hidden`）⇒ 按钮的无障碍名字仍然只有节点标题 ✓
+              * （读屏听到"打开「克隆」"就够 ✓；理解状态另有编辑器头部那个真正的按钮承担 ✓）。
+              */}
+            {n!.title}{props.understanding?.[n!.id] === true ? <span className="kn-note-relation-understood" aria-hidden="true"><span className="kn-note-relation-understood-dot" />{t("understood")}</span> : null}
+          </button>
+        )) : <div className="kn-editor-dim">{t("relEmpty")}</div>}
+        {/* **「＋ 添加前置」入口** ✓：只在「前置」弹窗里出现 ✓（标题栏不再放它 ✓） */}
+        {mode === "pre" ? (
+          <button
+            type="button"
+            className="kn-note-relations-add"
+            onClick={() => { setMode("add"); setTitle(""); setSnippet(""); setError(""); }}
+          >
+            {t("relAdd")}
+          </button>
+        ) : null}
+      </>}
       {error ? <div role="alert" className="kn-editor-error">{error}</div> : null}
     </div> : null}
   </div>;

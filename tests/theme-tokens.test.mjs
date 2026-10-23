@@ -29,6 +29,7 @@ const REAL_TOKENS = new Set([
   "--dsw-alias-brand-primary",
   "--dsw-alias-label-primary",
   "--dsw-alias-label-secondary",
+  "--dsw-alias-markdown-inline-code",
   "--dsw-alias-state-error-primary",
   "--dsw-alias-state-idle-primary",
   "--dsw-alias-state-success-primary",

@@ -129,6 +129,8 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   代码块 / 图片 / 表格这类拆不开的块则在**这一块之后**插空段落 ✓。
   **行内格式**（2026-10-21 修复"看起来没生效" ✗；2026-10-22 第四轮按"和浮动工具栏重复"**从右键菜单里删掉** ✓，
   详见 [行内格式修复](design/inline-format-fix.md)）：
+  行内代码样式**与 DSH 正文的 Markdown 渲染一致** ✓（`inline-flex` / 0.875em / `0.5px` 细边 /
+  主题行内代码底色 / 小圆角 / 左右 5px 内边距 ✓，2026-10-22 用户要求）。
   **统一走「选中文字 → 浮动工具栏」** ✓ —— 右键菜单里**不再**重复列一遍行内格式项 ✗（用户反馈 ✓）；
   浮动工具栏提供 加粗 / 斜体 / 删除线 / 行内代码 / 行内公式 / 链接 / 清除文字格式 ✓，
   这些动作**绝不拆开段落** ✓、两侧文字原样保留 ✓；快捷键（`Ctrl/⌘+B` / `I` 等）照旧可用 ✓。
@@ -151,6 +153,9 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   在本插件正文里粘贴时会**还原成一个完整代码块**（语言、缩进、空行、`<iostream>` 一字不改 ✓，
   一次撤销回到粘贴前 ✓）；在已有代码块里粘贴仍然只插字符、不嵌套新块 ✓，
   从别处复制的**普通** Markdown / HTML（不包含代码）继续走原有粘贴 ✓。
+  **手动选中复制 = 纯文本** ✓（2026-10-22 用户要求）：在代码块 / 公式块里**手动划选文字**复制，
+  粘回来就是**纯文本** ✓（不再自动还原成块 ✗）；只有点右上角「复制」按钮才是结构化复制 ✓
+  （粘贴还原完整代码块 / 公式块 ✓）——两种复制语义互不串 ✓（详见 [复制语义拆分](design/editor-copy-selection-and-relations-polish.md)）。
   **从别的应用复制代码粘进来**（剪贴板只有纯文本 / 网页 `<pre>` 的情况）也会**自动插成完整代码块** ✓，
   不再被当成 Markdown 拆散（`#include<iostream>` 不再变原始 HTML、不会因此整篇被踢进纯文本 ✗，
   详见 [粘贴与引用块健壮性](design/editor-paste-quote-robustness.md)）。
@@ -213,6 +218,9 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   打开菜单会把焦点放进菜单 ✓，↑/↓ 与 Esc 才真正生效 ✓）。
   多单元格选择的底纹是低对比的 10%，复制矩形区域照常可以 ✓，拖列宽的手柄也还在 ✓。
 - **只有空间视图**（三维）。聚焦（二维）视图按需求已整体移除 ✓。
+  **滚轮不再让视角前进** ✓（整套"滚轮 → 相机沿视线移动"逻辑已删 ✓），拖动旋转 / 平移 / 双击定位照旧 ✓；
+  右下角那张「视角位置图」（两张圆形投影图）也一并删除 ✓（用户要求，详见 [空间视图删滚轮与位置图](design/space-view-remove-wheel-and-minimap.md)），
+  底部提示语已同步去掉"滚轮靠近" ✓。
 
 ## 后台开销（桌面端流畅度）
 
@@ -247,7 +255,7 @@ profile 的 `cordis.patch.yml` 插入本插件（`@local/dsh-knowledgenet`）。
 
 ```bash
 node build.mjs                 # 构建宿主 + 客户端 + 布局 Worker + Mermaid 运行时（四个产物）
-node --test "tests/*.test.mjs" # 全部测试（当前 918 个，全绿）
+node --test "tests/*.test.mjs" # 全部测试（当前 893 个，全绿）
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 
@@ -258,7 +266,7 @@ $env:KN_PROJECT='D:/AppInstallation/DSH/deepseek-harness'
 node --test tests/mermaid-note.browser.mjs   # Mermaid 图块（14 个：图 / 复制 / 下载 / 输入保护 / 缓存 / 安全 / 运行时缺失）
 node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
 node --test tests/block-menu.browser.mjs   # 右键块菜单（真 client.js + 宿主 Menu 契约替身）
-node --test tests/inline-format.browser.mjs   # 行内格式（真实面板 UI：选中文字浮动工具栏 8 项 / clear / 行内代码 / 公式 / 链接 / 添加前置节点）
+node --test tests/inline-format.browser.mjs   # 行内格式（真实面板 UI：浮动工具栏 8 项 / 行内代码样式 / 复制语义 / 公式 / 链接 / 关系弹窗点外关闭）
 node --test tests/block-robustness.browser.mjs   # 粘贴/引用块健壮性（外部代码粘成代码块、空引用可删除、误判样本）
 ```
 
@@ -295,7 +303,9 @@ node --test tests/block-robustness.browser.mjs   # 粘贴/引用块健壮性（�
 - 图谱面板与模型查询分别返回数据；模型节点页、边页和正文页可独立续读。
 - 三维视图为上游实现（构建期补丁注入四元数 trackball）；标签密度等仅有固定策略。
 
-笔记弹窗标题栏提供前置、被依赖列表和添加前置；正文选中文字后可创建前置节点。表格结构操作由单元格右键菜单进入，支持删除整张表格并撤销。
+笔记弹窗标题栏提供前置、被依赖列表；**「＋ 添加前置」已挪进「前置」弹窗里** ✓（使用频率不高 ⇒ 不占标题栏 ✓），
+前置 / 被依赖弹窗点旁边空白或按 Esc 会**自动关闭** ✓；正文选中文字后仍可从浮动工具栏直接创建前置节点 ✓。
+表格结构操作由单元格右键菜单进入，支持删除整张表格并撤销。
 
 ## 图片与理解标记
 

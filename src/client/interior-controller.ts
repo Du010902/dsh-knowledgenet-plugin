@@ -5,12 +5,10 @@
  * （`camera` / `basis()` / `command()` / `fitAll()` / `setFrameContext()` / `update()` /
  * `cancelPointer()` / `dispose()`），所以接线只需要把 `engine.ts` 的导入换掉 ✓。
  *
- * 与上游的三点根本区别：
- * 1. **滚轮只移动相机位置 P**（沿视线前进后退，可穿过球心），不再改观察距离、
- *    也不朝光标横移、更不会自动挪旋转中心 ✓；
- * 2. **拖动只旋转图谱 S**（绕固定球心 C），用"抓取点投影约束"求解 ⇒
+ * 与上游的两点根本区别：
+ * 1. **拖动只旋转图谱 S**（绕固定球心 C），用"抓取点投影约束"求解 ⇒
  *    正在抓取的那一块按指针方向移动，球前球后都一致 ✓（上游绕 target 环绕时球背面必然反向 ✗）；
- * 3. 姿态用完整四元数 Q（含滚转），右/上轴由 Q 给出，没有极点翻转 ✓。
+ * 2. 姿态用完整四元数 Q（含滚转），右/上轴由 Q 给出，没有极点翻转 ✓。
  *
  * 渲染/标签/拾取全部走 `basis()` 给出的**等效相机基向量**（把 S 折进去），
  * 所以那些既有代码一行都不用改 ✓。
@@ -21,12 +19,10 @@ import type { CameraCommand, CameraState, ProjectedNode, Vec3, Viewport } from "
 import type { ContextHit } from "../vendor/upstream/graph3d/navigation.ts";
 
 import {
-  advanceEye,
   aimAt,
   anchorFromRay,
   anchorReachable,
   applySceneRotation,
-  displayBasis,
   dragAnchorTo,
   dragGainAt,
   effectiveBasis,
@@ -38,8 +34,6 @@ import {
   radiusAbout,
   recenterOn,
   spinStep,
-  wheelTravel,
-  DEFAULT_WHEEL,
   SPIN_FALLBACK_GAIN,
   type DragGain,
   type GrabAnchor,
@@ -56,16 +50,6 @@ const FOV_DEG = 50;
 const STATE_KEY = "knInterior";
 
 /**
- * 「相机在球里在哪」的窗口事件名。
- *
- * 引擎是在**上游组件内部**创建的（`GraphUniverse.tsx`），插件拿不到它的实例 ✗；
- * 而相机状态只有这里（内部导航控制器）知道 ✓。
- * 所以由控制器在每次状态变化后广播一个 `CustomEvent`，面板据此画右下角的小地图 ✓
- * —— 与插件既有的 `NODE_CONTEXT_MENU_EVENT` 那套 glue 同一种做法，不必改上游 ✓。
- */
-export const INTERIOR_STATE_EVENT = "kn-interior-state";
-
-/**
  * 「用户按了重新整理」的窗口事件名。
  *
  * 面板按钮在重排布局的同时广播它 ✓；控制器据此：
@@ -80,24 +64,6 @@ const RELAYOUT_DEADLINE_MS = 2000;
 
 /** 这次取景是**为什么**发生的（引擎显式传入；不能用 `smooth` 猜 ✗） */
 export type FitReason = "initial" | "settle" | "command";
-
-/** 事件负载：相机位置/朝向、固定球心与操作球半径 */
-export interface InteriorStateDetail {
-  /** 发起这次更新的画布宿主元素（面板用 `contains()` 认领属于自己那一块 ✓） */
-  host: Element;
-  center: Vec3;
-  eye: Vec3;
-  /** 相机朝向（显示世界） */
-  forward: Vec3;
-  /** 相机上方向（显示世界） */
-  up: Vec3;
-  /** 相机右方向（显示世界）——小地图要靠它才能画出被旧实现丢掉的第三轴 ✓ */
-  right: Vec3;
-  /** 到球心的距离 */
-  distance: number;
-  /** 操作包围球半径 */
-  radius: number;
-}
 
 /** 挂在 `camera` 上的内部状态（`frozen` = 球心已冻结，缓存恢复时要一起带回来 ✓） */
 type CarriedState = InteriorState & { frozen?: boolean };
@@ -192,8 +158,6 @@ export class InteriorNavigation {
   private viewport: Viewport = { width: 800, height: 600 };
   /** 用户是否已经自己操作过相机：操作过就**冻结球心** ✓ */
   private userInteracted = false;
-  /** 同一帧里的相机变化只在下一帧广播一次 ✓ */
-  private stateEventPending = false;
   /** 节点坐标（引擎每帧交过来；线段拾取需要世界坐标 ✓） */
   private positions: Float32Array | null = null;
   private positionCount = 0;
@@ -227,7 +191,6 @@ export class InteriorNavigation {
     element.addEventListener("pointerleave", this.onPointerLeave);
     element.addEventListener("dblclick", this.onDoubleClick);
     element.addEventListener("contextmenu", this.onContextMenu);
-    element.addEventListener("wheel", this.onWheel, { passive: false });
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("blur", this.onWindowBlur);
     window.addEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);
@@ -309,41 +272,6 @@ export class InteriorNavigation {
       /* 冻结标记：缓存恢复时要一起带回来，否则球心会被再挪一次 ✗ */
       frozen: this.userInteracted,
     };
-    this.publishState();
-  }
-
-  /**
-   * 广播"相机在球里的位置"（给右下角的小地图用）。
-   *
-   * 用 `requestAnimationFrame` 合并同一帧里的多次变化：拖动时每个 pointermove 都会同步一次相机，
-   * 不合并的话一帧要派发好几次事件、面板也跟着重渲染好几次 ✗。
-   */
-  private publishState(): void {
-    if (this.stateEventPending || this.disposed) return;
-    if (typeof window === "undefined" || typeof CustomEvent !== "function") return;
-    this.stateEventPending = true;
-    const flush = (): void => {
-      this.stateEventPending = false;
-      if (this.disposed) return;
-      const basis = displayBasis(this.state);
-      const detail: InteriorStateDetail = {
-        host: this.options.element,
-        center: [...this.state.center],
-        eye: [...this.state.eye],
-        forward: [...basis.forward],
-        up: [...basis.up],
-        right: [...basis.right],
-        distance: Math.hypot(
-          this.state.eye[0] - this.state.center[0],
-          this.state.eye[1] - this.state.center[1],
-          this.state.eye[2] - this.state.center[2],
-        ),
-        radius: this.state.radius,
-      };
-      window.dispatchEvent(new CustomEvent<InteriorStateDetail>(INTERIOR_STATE_EVENT, { detail }));
-    };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
-    else flush();
   }
 
   /** 等效姿态（把 S 折进 Q）：布局坐标系里相机朝向 */
@@ -531,8 +459,8 @@ export class InteriorNavigation {
    * 每帧推进定位/取景动画（P 线性插值、Q 球面插值）。
    *
    * **只有这里才把插值结果写进 state**（文档 P2）：命令之后、第一帧之前，
-   * 状态必须还停在出发前 —— 否则滚轮/按下取消动画时会从"终点"开始操作，产生突发移动 ✗，
-   * 同步出去的 camera 与状态事件也会提前暴露终点 ✗。
+   * 状态必须还停在出发前 —— 否则按下取消动画时会从"终点"开始操作，产生突发移动 ✗，
+   * 同步出去的 camera 也会提前暴露终点 ✗。
    */
   update(now: number): boolean {
     if (this.disposed) return false;
@@ -874,35 +802,6 @@ export class InteriorNavigation {
     this.options.onContextMenu(hit, event.clientX, event.clientY);
   };
 
-  /**
-   * 滚轮 = **沿视线前进/后退**（文档 §滚轮前进后退）。
-   *
-   * - 只改相机位置 P；不动 C / Q / S / FOV；
-   * - 不做朝光标的横向偏移：同一输入在画布任何位置产生同样位移 ✓；
-   * - 速度与单事件上限由插件按场景尺度给（带正的下限，走到球心也能继续）✓；
-   * - 拖动期间收到滚轮 ⇒ 结束当前抓取（文档要求）✓。
-   */
-  private onWheel = (event: WheelEvent): void => {
-    event.preventDefault();
-    this.animation = null;
-    /* 滚轮打断当前拖动（两个阶段的状态一起清 ✓） */
-    this.grab = null;
-    this.dragPhase = "grab";
-    this.spinGain = null;
-    this.options.onUserCameraInput?.();
-    this.userInteracted = true;
-    this.interactedSinceRelayout = true;
-    const spacing = clampNum(this.options.edgeLength, 8, 200);
-    const travel = wheelTravel(event.deltaY, event.deltaMode, this.viewport.height, {
-      ...DEFAULT_WHEEL,
-      speed: clampNum(spacing * 0.01, 0.05, 4),
-      maxStep: Math.max(this.state.radius * 0.6, 80),
-    });
-    advanceEye(this.state, travel, Math.max(this.state.radius * 4, 600));
-    this.syncCamera();
-    this.options.onCameraChange();
-  };
-
   private setHover(index: number | null): void {
     if (this.hover === index) return;
     this.hover = index;
@@ -936,11 +835,11 @@ export class InteriorNavigation {
     if (document.hidden) this.cancelPointer();
   };
 
-  /** 丢掉未完成的拖动/抓取（切后台、失焦、右键菜单、滚轮打断）✓ */
+  /** 丢掉未完成的拖动/抓取（切后台、失焦、右键菜单）✓ */
   cancelPointer(): void {
     this.pointer = null;
     this.grab = null;
-    /* 两个阶段的状态一起清（失焦/取消/滚轮打断都不该留下半个连续阶段 ✓） */
+    /* 两个阶段的状态一起清（失焦/取消都不该留下半个连续阶段 ✓） */
     this.dragPhase = "grab";
     this.spinGain = null;
     this.spinLastX = 0;
@@ -965,7 +864,6 @@ export class InteriorNavigation {
     element.removeEventListener("pointerleave", this.onPointerLeave);
     element.removeEventListener("dblclick", this.onDoubleClick);
     element.removeEventListener("contextmenu", this.onContextMenu);
-    element.removeEventListener("wheel", this.onWheel);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("blur", this.onWindowBlur);
     window.removeEventListener(RELAYOUT_EVENT, this.onRelayoutRequest);

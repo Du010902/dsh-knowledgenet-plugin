@@ -29,7 +29,6 @@ import { rememberSessionId } from "./chat-selection.ts";
 import { LIBRARY_CHANGED_EVENT, clearCurrentContext, publishCurrentContext } from "./current-context.ts";
 import { PlanReview } from "./PlanReview.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
-import { InteriorMinimap } from "./InteriorMinimap.tsx";
 import { NodeDocumentEditor } from "./NodeDocumentEditor.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { libraryKeyOf } from "./view-cache.ts";
@@ -763,9 +762,7 @@ function GraphPanelInner(props: {
   /**
    * 三维**场景标识**：库身份 + 节点集合。
    *
-   * 两个地方要用同一个 key ✓：
-   * - `<GraphUniverse key=…>`：换库或增删节点时重建引擎；
-   * - 右下角**视角位置图**：变化时清空位置快照与历史轨迹（别把上一个场景的点投到新场景 ✗）。
+   * `<GraphUniverse key=…>` 用它：换库或增删节点时重建引擎。
    *
    * **必须放在 `graph` 之后** ✗ —— 它读 `graph`；放到组件前部会在模块初始化时序上踩 TDZ
    * （实测 `ReferenceError: Cannot access 'graph' before initialization` ⇒ 整块面板渲染失败 ✗）。
@@ -1242,17 +1239,6 @@ function GraphPanelInner(props: {
                 />
               </ErrorBoundary>
             </div>
-            {/*
-             * 右下角的**视角位置图**（用户手绘那张平面图的界面版，两张正交投影）：
-             * 球心点 = 固定转动中心、眼睛 = 相机当前位置、淡点 = 走过的路径、↗ 读数 = 真实距离比例 ✓。
-             * `sceneKey` 与三维场景同一个 key ⇒ 换库/重建时位置图与历史轨迹一起清空 ✓。
-             * 只认自己这块画布广播的事件（`contains` 认领）；`pointer-events: none`，不会吃掉拖动 ✓。
-             */}
-            <InteriorMinimap
-              hostRef={graphHostRef}
-              active={visible}
-              sceneKey={sceneKey}
-            />
             {/*
              * 选中节点信息 + 「编辑笔记」入口（设计稿左上角那条 ✓）。
              *

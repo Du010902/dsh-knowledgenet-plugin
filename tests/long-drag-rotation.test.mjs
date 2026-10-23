@@ -316,7 +316,7 @@ describe("端到端：连续向右拖动跨越可达轮廓", () => {
     assert.equal(navigation.interiorSnapshot().dragPhase, "spin", "同一次拖动里不反复重抓 ✓");
   });
 
-  it("滚轮/取消会清掉两个阶段的状态（不留半个连续阶段 ✗）", () => {
+  it("取消会清掉两个阶段的状态（不留半个连续阶段 ✗）", () => {
     const layout = [50, 30, 100];
     const { navigation, element } = makeNavigation(layout);
     const start = projectPoint(layout, navigation.basis(), VIEWPORT, FOV);
@@ -325,11 +325,11 @@ describe("端到端：连续向右拖动跨越可达轮廓", () => {
       element.emit("pointermove", { pointerId: 1, clientX: start.x + step, clientY: start.y });
     }
     assert.equal(navigation.interiorSnapshot().dragPhase, "spin", "前置：已经进入连续阶段");
-    element.emit("wheel", { deltaY: -60, deltaMode: 0 });
-    assert.equal(navigation.interiorSnapshot().dragPhase, "none", "滚轮打断后阶段状态清干净 ✓");
-    /* 打断后继续移动指针不该再转（沿用旧的打断语义 ✓） */
-    const sceneAfterWheel = [...navigation.interiorSnapshot().scene];
+    navigation.cancelPointer();
+    assert.equal(navigation.interiorSnapshot().dragPhase, "none", "取消后阶段状态清干净 ✓");
+    /* 取消后继续移动指针不该再转（沿用旧的打断语义 ✓） */
+    const sceneAfterCancel = [...navigation.interiorSnapshot().scene];
     element.emit("pointermove", { pointerId: 1, clientX: start.x + 400, clientY: start.y });
-    assert.deepEqual([...navigation.interiorSnapshot().scene], sceneAfterWheel, "打断后不该继续旋转 ✗");
+    assert.deepEqual([...navigation.interiorSnapshot().scene], sceneAfterCancel, "取消后不该继续旋转 ✗");
   });
 });
