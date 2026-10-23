@@ -107,6 +107,22 @@ test('节点历史列表按 recordState 过滤（空白 + 归档筛选都由它�
  assert.match(source,/nodeChatArchived/,'已归档要标出来 ✓');
 });
 
+test('对话弹窗与「前置知识」弹窗同构：底部动作入口、同一最大高度', async () => {
+  const source = await readFile(new URL('../src/client/NodeConversations.tsx', import.meta.url), 'utf8');
+  assert.match(source, /nodeChatNew: "＋ 打开新对话"/, '动作文案与「＋ 添加前置」同一风格 ✓');
+  assert.match(source, /className="kn-note-relations-add"/, '动作入口沿用关系弹窗的底部样式 ✓');
+  assert.ok(
+    source.indexOf('kn-node-chat-hint') < source.indexOf('kn-note-relations-add'),
+    '动作入口排在列表/提示之后（统一收在底部 ✓）',
+  );
+  const css = await readFile(new URL('../src/client/panel.css', import.meta.url), 'utf8');
+  assert.ok(!/\.kn-node-conversations \.kn-note-relations-popover \{/.test(css), '两个弹窗不再各自覆盖弹层高度 ✗');
+  assert.ok(
+    /\.kn-note-relations-popover \{[^}]*max-height: min\(360px, 60vh\)/.test(css),
+    '弹层最大高度由公共样式统一 ✓',
+  );
+});
+
 function sidebarFixture(){
  let mounted='old';let expanded=true;const listeners=new Set();const opened=[];const focused=[];
  const source=[{id:'graph',kind:'knowledgenet',contentId:'sidebar://knowledgenet'},{id:'web',kind:'browser',contentId:'sidebar://browser/original'},{id:'file',kind:'document',contentId:'dsh-resource://file/report.md'}];

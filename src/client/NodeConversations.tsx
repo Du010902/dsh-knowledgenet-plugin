@@ -3,7 +3,7 @@ import type { DocumentTarget } from "./node-document-client.ts";
 import { nodeConversations, type ConversationRecord, type ConversationState } from "./node-conversations.ts";
 import { makeTranslator } from "./card-model.ts";
 
-const LITERAL = { nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档" };
+const LITERAL = { nodeChats: "对话 {count}", nodeChatNew: "＋ 打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档" };
 
 /** 侧栏筛选变化后的轮询间隔：筛选值只落在 localStorage 里（宿主没暴露服务），只能这么跟 ✓ */
 const FILTER_POLL_MS = 500;
@@ -97,10 +97,10 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t("nodeChats", { count: rows.length })}</button>
     {open ? <div className="kn-note-relations-popover">
       <div className="kn-note-relations-head"><strong>{t("nodeChats", { count: rows.length })}</strong><button type="button" aria-label={t("nodeChatClose")} onClick={() => setOpen(false)}>×</button></div>
-      <button type="button" disabled={busy || loading} onClick={() => { void create(); }}>{t(busy ? "nodeChatCreating" : "nodeChatNew")}</button>
       {loading ? <div className="kn-editor-dim">{t("nodeChatLoading")}</div> : rows.length ? rows.map(({ item, archived }) => <button className="kn-note-relation-item" type="button" key={item.sessionId} disabled={busy || archived} title={archived ? t("nodeChatArchivedHint") : undefined} onClick={() => { try { props.onOpen(item.sessionId); setOpen(false); } catch (e) { setError(e instanceof Error ? e.message : t("nodeChatFailed")); } }}><span>{nodeConversations.title(item.sessionId)}</span><small>{new Date(item.createdAt).toLocaleString()}{archived ? ` · ${t("nodeChatArchived")}` : ""}</small></button>) : <div className="kn-editor-dim">{t("nodeChatEmpty")}</div>}
       {error ? <div className="kn-editor-error" role="alert">{error}</div> : null}
-      <div className="kn-editor-dim kn-node-chat-hint">{t("nodeChatHint")}</div>
+      <div className="kn-node-chat-hint">{t("nodeChatHint")}</div>
+      <button type="button" className="kn-note-relations-add" disabled={busy || loading} onClick={() => { void create(); }}>{t(busy ? "nodeChatCreating" : "nodeChatNew")}</button>
     </div> : null}
   </div>;
 }
