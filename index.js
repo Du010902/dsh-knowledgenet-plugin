@@ -409,6 +409,64 @@ var NodeVfs = class {
 	}
 };
 //#endregion
+//#region src/host/v3/ulid.ts
+/**
+* ULID：节点 v3 的唯一标识（时间有序 + 随机后缀）。
+*
+* 为什么用它（用户选定 ✓）：26 个字符、按时间自然有序、无需中央协调、碰撞概率可忽略；
+* 而且它**与标题/文件名无关** ✓ —— 改标题、重命名文件、两个节点同名，都不会改变身份 ✓。
+*
+* 实现说明：零依赖 ⇒ 自己按规范拼：48 位毫秒时间戳 + 80 位随机数，Crockford Base32 编码。
+*/
+/** Crockford Base32（去掉容易看混的 I L O U） */
+const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const TIME_CHARS = 10;
+const RANDOM_CHARS = 16;
+/** 48 位时间戳能表示到 10889 年，ULID 规范限制在这个范围内 */
+const MAX_TIME = 0xffffffffffff;
+/**
+* 生成一个 ULID。
+* @param now - 毫秒时间戳（默认当前时间；测试可注入）。
+* @returns 26 字符的 ULID。
+*/
+function ulid(now = Date.now()) {
+	let time = Math.floor(Number.isFinite(now) ? now : Date.now());
+	if (time < 0) time = 0;
+	if (time > MAX_TIME) time = MAX_TIME;
+	let timePart = "";
+	let remaining = time;
+	for (let i = 0; i < TIME_CHARS; i += 1) {
+		timePart = ALPHABET[remaining % 32] + timePart;
+		remaining = Math.floor(remaining / 32);
+	}
+	const bytes = randomBytes(10);
+	let randomPart = "";
+	let bits = 0;
+	let value = 0;
+	for (const byte of bytes) {
+		value = value << 8 | byte;
+		bits += 8;
+		while (bits >= 5) {
+			randomPart += ALPHABET[value >>> bits - 5 & 31];
+			bits -= 5;
+			value &= (1 << bits) - 1;
+		}
+	}
+	while (randomPart.length < RANDOM_CHARS) randomPart += ALPHABET[0];
+	return timePart + randomPart.slice(0, RANDOM_CHARS);
+}
+/**
+* 判断一个字符串像不像 ULID（26 字符、全在字母表内）。
+* 用于"id 与文件名/标题无关"的校验，以及数据自检。
+* @param value - 待判断的字符串。
+* @returns 是否形如 ULID。
+*/
+function isUlid(value) {
+	if (typeof value !== "string" || value.length !== 26) return false;
+	for (const char of value) if (!ALPHABET.includes(char)) return false;
+	return true;
+}
+//#endregion
 //#region src/host/node-conversation-file.ts
 /** Read the complete plugin-owned index, refusing damaged records. */
 async function readConversationIndex(root) {
@@ -449,7 +507,51 @@ async function writeConversationIndex(root, nodes) {
 		throw error;
 	}
 }
-/** Copy navigation history before an ordinary Markdown node adopts its permanent ID. */
+/**
+* **读取时**决定每条对话归哪个节点 ✓；一条对话最多显示在一个节点下 ✓。
+*
+* 为什么需要（用户实测 2026-10-25）：DSH 会复用工作区里的**空白会话** ⇒ 节点 1 和节点 2 先后
+* "打开新对话"可能拿到**同一个 sessionId** ✗；旧客户端创建后立即记录，于是索引里同一 sessionId
+* 被两个节点各记一条 ✗。旧记录**不改写**（历史文件保持原样 ✓），只在读取时隐藏旧归属 ✓。
+*
+* 规则（同刻也必须**确定性** ✓，同一份索引无论对象键顺序如何都得到同一个答案 ✓）：
+* 1. `createdAt` **最新**的那条胜出 ✓ —— 即"最新一次显式认领胜出" ✓（正常写入路径已经保证只剩一条 ✓）；
+* 2. `createdAt` 相同时，**正式 ULID 身份优先于临时 `adopted-*` 身份** ✓：普通 Markdown 首次保存
+*    固化正式 ID 时，`copyConversationIdentity` 会把旧身份下的记录**复制**一份（崩溃安全 ✓，见其注释），
+*    于是同刻出现新旧两份；旧身份对应的节点此后解析不到（节点文件已带上新 ULID ✓）⇒ 归给 ULID ✓；
+* 3. 仍相同时（同类身份）按节点 ID 的**码元序**取较大者 ✓。规则宁可武断，也要可复现 ✓。
+*
+* @param nodes - `readConversationIndex` 读出的完整索引。
+* @returns sessionId ⇒ nodeId 的归属表 ✓（列表、记录返回值都按它过滤 ✓）。
+*/
+function conversationOwners(nodes) {
+	const best = /* @__PURE__ */ new Map();
+	for (const [nodeId, records] of Object.entries(nodes)) for (const record of records) {
+		const previous = best.get(record.sessionId);
+		if (previous !== void 0 && !winsOwnership(nodeId, record.createdAt, previous.nodeId, previous.createdAt)) continue;
+		best.set(record.sessionId, {
+			nodeId,
+			createdAt: record.createdAt
+		});
+	}
+	const owners = /* @__PURE__ */ new Map();
+	for (const [sessionId, record] of best) owners.set(sessionId, record.nodeId);
+	return owners;
+}
+/** Ownership comparison for {@link conversationOwners}; keep the rules in sync with its doc comment. */
+function winsOwnership(nodeId, createdAt, ownerId, ownerCreatedAt) {
+	if (createdAt !== ownerCreatedAt) return createdAt > ownerCreatedAt;
+	const permanent = isUlid(nodeId);
+	if (permanent !== isUlid(ownerId)) return permanent;
+	return nodeId > ownerId;
+}
+/**
+* Copy navigation history before an ordinary Markdown node adopts its permanent ID.
+*
+* 这里**故意是复制而不是移动** ✓：节点正文文件还没提交新 ID 时若写盘失败，旧身份下的历史不能丢 ✗。
+* 代价是复制后新旧身份下各留一份**同刻**记录 ✓ ⇒ `conversationOwners` 的同刻规则把归属判给正式 ULID ✓，
+* 旧临时身份的记录只被隐藏、不主动清理 ✓（与"已有重复不改写历史文件"一致 ✓）。
+*/
 async function copyConversationIdentity(root, from, to) {
 	const nodes = await readConversationIndex(root);
 	if (!Object.hasOwn(nodes, from)) return;
@@ -616,64 +718,6 @@ function contentHash(text) {
 function fileNameFromTitle(title) {
 	const cleaned = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/\.+$/, "").slice(0, 80).trim();
 	return cleaned === "" ? "node" : cleaned;
-}
-//#endregion
-//#region src/host/v3/ulid.ts
-/**
-* ULID：节点 v3 的唯一标识（时间有序 + 随机后缀）。
-*
-* 为什么用它（用户选定 ✓）：26 个字符、按时间自然有序、无需中央协调、碰撞概率可忽略；
-* 而且它**与标题/文件名无关** ✓ —— 改标题、重命名文件、两个节点同名，都不会改变身份 ✓。
-*
-* 实现说明：零依赖 ⇒ 自己按规范拼：48 位毫秒时间戳 + 80 位随机数，Crockford Base32 编码。
-*/
-/** Crockford Base32（去掉容易看混的 I L O U） */
-const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const TIME_CHARS = 10;
-const RANDOM_CHARS = 16;
-/** 48 位时间戳能表示到 10889 年，ULID 规范限制在这个范围内 */
-const MAX_TIME = 0xffffffffffff;
-/**
-* 生成一个 ULID。
-* @param now - 毫秒时间戳（默认当前时间；测试可注入）。
-* @returns 26 字符的 ULID。
-*/
-function ulid(now = Date.now()) {
-	let time = Math.floor(Number.isFinite(now) ? now : Date.now());
-	if (time < 0) time = 0;
-	if (time > MAX_TIME) time = MAX_TIME;
-	let timePart = "";
-	let remaining = time;
-	for (let i = 0; i < TIME_CHARS; i += 1) {
-		timePart = ALPHABET[remaining % 32] + timePart;
-		remaining = Math.floor(remaining / 32);
-	}
-	const bytes = randomBytes(10);
-	let randomPart = "";
-	let bits = 0;
-	let value = 0;
-	for (const byte of bytes) {
-		value = value << 8 | byte;
-		bits += 8;
-		while (bits >= 5) {
-			randomPart += ALPHABET[value >>> bits - 5 & 31];
-			bits -= 5;
-			value &= (1 << bits) - 1;
-		}
-	}
-	while (randomPart.length < RANDOM_CHARS) randomPart += ALPHABET[0];
-	return timePart + randomPart.slice(0, RANDOM_CHARS);
-}
-/**
-* 判断一个字符串像不像 ULID（26 字符、全在字母表内）。
-* 用于"id 与文件名/标题无关"的校验，以及数据自检。
-* @param value - 待判断的字符串。
-* @returns 是否形如 ULID。
-*/
-function isUlid(value) {
-	if (typeof value !== "string" || value.length !== 26) return false;
-	for (const char of value) if (!ALPHABET.includes(char)) return false;
-	return true;
 }
 //#endregion
 //#region src/host/understanding-file.ts
@@ -3951,9 +3995,16 @@ var LearningState = class {
 			source: view.source
 		} : void 0;
 	}
-	/** Record an entry action once; opening an existing conversation does not call this. */
+	/**
+	* Record the latest explicit entry action; **a newer claim replaces the previous hint** ✓.
+	*
+	* 一条对话可能先从一个节点打开、随后又从另一个节点打开（DSH 会复用空白会话 ⇒ 同一个 sessionId ✓），
+	* 这时**最新一次认领胜出** ✓。旧写法 `if (!this.entries.has(sessionId))` 会让第一个节点的线索占住 ✗，
+	* 节点 2 认领之后 `kn_current_node` 的 entry 线索仍然指向节点 1 ✗（用户实测 2026-10-25）。
+	* 打开已有对话不会调用这里 ✓；`entry()` 的"首轮之后失效"语义不变 ✓。
+	*/
 	enter(sessionId, root, nodeId) {
-		if (!this.entries.has(sessionId)) this.entries.set(sessionId, {
+		this.entries.set(sessionId, {
 			root: libraryKey(root),
 			nodeId
 		});
@@ -5672,25 +5723,57 @@ function registerPrompts(ctx, config, enabled = () => true, state = new Learning
 }
 //#endregion
 //#region src/host/node-conversations.ts
+/**
+* 当前节点**可见**的历史：先按归属过滤 ✓（旧重复里非最新认领的节点不显示 ✓），
+* 再按 createdAt 降序 ✓。同一节点内若还留着同一会话的多条旧记录，只显示最新一条 ✓
+* （与文件里其它重复一样：读取时隐藏，不改写历史文件 ✓）。
+*/
+function visibleConversations(nodes, nodeId) {
+	const owners = conversationOwners(nodes);
+	const seen = /* @__PURE__ */ new Set();
+	return (nodes[nodeId] ?? []).filter((entry) => owners.get(entry.sessionId) === nodeId).sort((a, b) => b.createdAt - a.createdAt).filter((entry) => {
+		if (seen.has(entry.sessionId)) return false;
+		seen.add(entry.sessionId);
+		return true;
+	});
+}
 /** Read one node's navigation history without reading or changing Session files. */
 async function listNodeConversations(root, nodeId) {
 	if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
-	return ((await readConversationIndex(root))[nodeId] ?? []).slice().sort((a, b) => b.createdAt - a.createdAt);
+	return visibleConversations(await readConversationIndex(root), nodeId);
 }
-/** Record a successfully created Session once, serializing concurrent library changes. */
+/**
+* Record a successfully created Session once, serializing concurrent library changes.
+*
+* **移动语义**（用户实测 2026-10-25）：同一条对话**最多只属于一个节点** ✓，最新一次显式认领胜出 ✓。
+* DSH 会复用工作区的空白会话 ⇒ 节点 1、节点 2 先后创建可能拿到同一个 sessionId ✗；旧写法直接在
+* 当前节点追加，于是两个节点都记录 ✗。现在先删掉**其它节点**上的同一 sessionId（旧认领 ✓），
+* 再在当前节点插入（createdAt=Date.now()）✓；已经归当前节点时不再插新记录（重复认领幂等 ✓），
+* 只在索引确实有变化时写盘 ✓。
+*/
 async function recordNodeConversation(root, nodeId, sessionId) {
 	return withLibraryWrite(root, async () => {
 		if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
 		const nodes = await readConversationIndex(root);
-		const entries = nodes[nodeId] ?? [];
-		if (!entries.some((entry) => entry.sessionId === sessionId)) {
-			nodes[nodeId] = [...entries, {
-				sessionId,
-				createdAt: Date.now()
-			}];
-			await writeConversationIndex(root, nodes);
+		let changed = false;
+		for (const [otherId, entries] of Object.entries(nodes)) {
+			if (otherId === nodeId) continue;
+			const kept = entries.filter((entry) => entry.sessionId !== sessionId);
+			if (kept.length === entries.length) continue;
+			if (kept.length === 0) delete nodes[otherId];
+			else nodes[otherId] = kept;
+			changed = true;
 		}
-		return (nodes[nodeId] ?? []).slice().sort((a, b) => b.createdAt - a.createdAt);
+		if ((nodes[nodeId] ?? []).some((entry) => entry.sessionId === sessionId)) {
+			if (changed) await writeConversationIndex(root, nodes);
+			return visibleConversations(nodes, nodeId);
+		}
+		nodes[nodeId] = [...nodes[nodeId] ?? [], {
+			sessionId,
+			createdAt: Date.now()
+		}];
+		await writeConversationIndex(root, nodes);
+		return visibleConversations(nodes, nodeId);
 	});
 }
 //#endregion

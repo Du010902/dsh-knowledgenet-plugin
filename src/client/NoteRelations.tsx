@@ -3,6 +3,7 @@ import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 import type { DocumentTarget } from "./node-document-client.ts";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { makeTranslator } from "./card-model.ts";
+import { relationAddKeyIntent } from "./relation-add-keyboard.ts";
 
 /**
  * 关系面板的中英文案 ✓（**原来全是硬编码中文** ✗ —— 用户实测："插件的语言没有跟随系统"✓）。
@@ -154,7 +155,31 @@ export function NoteRelations(props: {
     {mode ? <div className="kn-note-relations-popover">
       <div className="kn-note-relations-head"><strong>{mode === "add" ? t("relAddTitle") : mode === "pre" ? t("relPreTitle") : t("relDependTitle")}</strong><button type="button" onClick={() => { setMode(null); setSnippet(""); }} aria-label={t("relClose")}>×</button></div>
       {mode === "add" ? <>
-        <input aria-label={t("relSearchLabel")} placeholder={t("relSearchPlaceholder")} value={title} disabled={busy} onChange={e => setTitle(e.target.value)} />
+        {/*
+         * **回车 = 点「新建「x」并设为前置」** ✓（用户实测：输入名字后按 Enter 毫无反应 ✗）。
+         * 判定抽到 `relation-add-keyboard.ts` ✓（纯函数 ⇒ 能被 Node 直接单测 ✓；
+         * 重点钉住"输入法组合中不误触发"✓ 与"busy / 空标题和按钮 disabled 一致"✓）。
+         * 这里只把意图落地：ignore 什么都不做 ✓；consume 只 preventDefault ✓；
+         * create 才调与按钮语义相同的 `add(title.trim(), true)` ✓（`add()` 里还会再 trim 一次 ✓）。
+         */}
+        <input
+          aria-label={t("relSearchLabel")}
+          placeholder={t("relSearchPlaceholder")}
+          value={title}
+          disabled={busy}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={event => {
+            const intent = relationAddKeyIntent(event.key, {
+              title,
+              busy,
+              isComposing: event.nativeEvent.isComposing === true,
+              keyCode: event.nativeEvent.keyCode,
+            });
+            if (intent === "ignore") return;
+            event.preventDefault();
+            if (intent === "create") void add(title.trim(), true);
+          }}
+        />
         {candidates.map(n => <button type="button" key={n.id} disabled={busy} onClick={() => { void add(n.title, false); }}>{n.title}</button>)}
         <button type="button" disabled={busy || !title.trim()} onClick={() => { void add(title, true); }}>{busy ? t("relAdding") : t("relCreate", { title: title.trim() })}</button>
       </> : <>

@@ -63,9 +63,16 @@ export class LearningState {
     return view?.nodeId ? { nodeId: view.nodeId, root: view.root, source: view.source } : undefined;
   }
 
-  /** Record an entry action once; opening an existing conversation does not call this. */
+  /**
+   * Record the latest explicit entry action; **a newer claim replaces the previous hint** ✓.
+   *
+   * 一条对话可能先从一个节点打开、随后又从另一个节点打开（DSH 会复用空白会话 ⇒ 同一个 sessionId ✓），
+   * 这时**最新一次认领胜出** ✓。旧写法 `if (!this.entries.has(sessionId))` 会让第一个节点的线索占住 ✗，
+   * 节点 2 认领之后 `kn_current_node` 的 entry 线索仍然指向节点 1 ✗（用户实测 2026-10-25）。
+   * 打开已有对话不会调用这里 ✓；`entry()` 的"首轮之后失效"语义不变 ✓。
+   */
   enter(sessionId: string, root: string, nodeId: string): void {
-    if (!this.entries.has(sessionId)) this.entries.set(sessionId, { root: libraryKey(root), nodeId });
+    this.entries.set(sessionId, { root: libraryKey(root), nodeId });
   }
 
   /** A hint survives tool continuations of the first human request, but no subsequent request. */

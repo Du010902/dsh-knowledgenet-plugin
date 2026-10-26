@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { makeV3Fixture, cleanupFixtures } from './support/v3-fixture.mjs';
 import { listNodeConversations, recordNodeConversation } from '../src/host/node-conversations.ts';
+import { conversationOwners, readConversationIndex } from '../src/host/node-conversation-file.ts';
 import { readLibrary, writeNote } from '../src/host/v3/store.ts';
 import { handleApiRequest } from '../src/host/api.ts';
 import { makeConversationActions, pickWorkspaceId } from '../src/client/node-conversations.ts';
@@ -25,6 +26,50 @@ test('未知节点及损坏记录不覆盖已有文件',async()=>{
 test('普通 Markdown 固化节点身份后保留对话历史',async()=>{
  const f=await makeV3Fixture();await writeFile(join(f.root,'Nodes','ordinary.md'),'正文');const lib=await readLibrary(f.root,{withNotes:true});const n=lib.nodes.find(n=>n.relativePath.endsWith('ordinary.md'));
  await recordNodeConversation(f.root,n.id,'chat');const saved=await writeNote(f.root,{id:n.id,text:'新正文',expectedHash:n.hash});assert.equal(saved.ok,true);assert.notEqual(saved.node.id,n.id);assert.equal((await listNodeConversations(f.root,saved.node.id))[0].sessionId,'chat');
+ /* 固化时按崩溃安全**复制**（旧身份保留一份同刻记录 ✓）⇒ 同刻 tie-break 必须把归属判给正式 ULID ✓，否则新节点反而不显示历史 ✗ */
+ assert.equal(conversationOwners(await readConversationIndex(f.root)).get('chat'),saved.node.id,'同刻新旧副本归正式 ULID ✓');
+});
+test('同一对话改从另一节点打开：最新认领胜出，旧节点隐藏、索引只留一条、正文不变',async()=>{
+ const f=await makeV3Fixture({nodes:['A','B']});const aFile=join(f.root,f.nodes.A.relativePath),bFile=join(f.root,f.nodes.B.relativePath);
+ const beforeA=await readFile(aFile,'utf8'),beforeB=await readFile(bFile,'utf8');
+ assert.deepEqual((await recordNodeConversation(f.root,f.nodes.A.id,'chat-x')).map(e=>e.sessionId),['chat-x'],'第一次认领返回当前节点列表 ✓');
+ assert.deepEqual((await recordNodeConversation(f.root,f.nodes.B.id,'chat-x')).map(e=>e.sessionId),['chat-x'],'最新认领返回 B 自己的列表 ✓');
+ assert.deepEqual(await listNodeConversations(f.root,f.nodes.A.id),[],'旧认领节点不再显示这条对话 ✓');
+ assert.deepEqual((await listNodeConversations(f.root,f.nodes.B.id)).map(e=>e.sessionId),['chat-x'],'新认领节点显示 ✓');
+ const index=JSON.parse(await readFile(join(f.root,'node-conversations.json'),'utf8'));
+ const occurrences=Object.values(index.nodes).flat().filter(entry=>entry.sessionId==='chat-x');
+ assert.equal(occurrences.length,1,'索引文件里同一 sessionId 只出现一次 ✓');
+ assert.equal(await readFile(aFile,'utf8'),beforeA,'笔记正文不被改写 ✓');assert.equal(await readFile(bFile,'utf8'),beforeB);
+});
+test('重复认领同一对话幂等：不重复插入、不重写索引、createdAt 不变',async()=>{
+ const f=await makeV3Fixture({nodes:['A']});
+ const first=await recordNodeConversation(f.root,f.nodes.A.id,'chat-1');
+ const snapshot=await readFile(join(f.root,'node-conversations.json'),'utf8');
+ const second=await recordNodeConversation(f.root,f.nodes.A.id,'chat-1');
+ assert.deepEqual(second,first,'重复认领返回同一列表 ✓');
+ assert.equal(await readFile(join(f.root,'node-conversations.json'),'utf8'),snapshot,'没有变化就不写盘 ✓');
+ assert.equal(JSON.parse(snapshot).nodes[f.nodes.A.id].length,1,'同一节点内不重复插入 ✓');
+});
+test('旧版本留下的重复索引：读取时隐藏旧归属且不改写文件，再次认领后归一',async()=>{
+ const f=await makeV3Fixture({nodes:['A','B']});const indexFile=join(f.root,'node-conversations.json');
+ const legacy={version:1,nodes:{[f.nodes.A.id]:[{sessionId:'chat-x',createdAt:100}],[f.nodes.B.id]:[{sessionId:'chat-x',createdAt:200}]}};
+ await writeFile(indexFile,JSON.stringify(legacy));const before=await readFile(indexFile,'utf8');
+ assert.deepEqual(await listNodeConversations(f.root,f.nodes.A.id),[],'旧归属（createdAt 旧）隐藏 ✓');
+ assert.deepEqual((await listNodeConversations(f.root,f.nodes.B.id)).map(e=>e.sessionId),['chat-x'],'最新归属显示 ✓');
+ assert.equal(await readFile(indexFile,'utf8'),before,'读取不重写历史文件 ✓');
+ assert.deepEqual((await recordNodeConversation(f.root,f.nodes.A.id,'chat-x')).map(e=>e.sessionId),['chat-x'],'再次从 A 显式打开 ⇒ 最新认领胜出 ✓');
+ assert.deepEqual(await listNodeConversations(f.root,f.nodes.B.id),[],'B 的旧归属被移走 ✓');
+ const normalized=JSON.parse(await readFile(indexFile,'utf8'));
+ assert.equal(Object.values(normalized.nodes).flat().filter(entry=>entry.sessionId==='chat-x').length,1,'写一次后索引归一 ✓');
+ assert.equal(conversationOwners(normalized.nodes).get('chat-x'),f.nodes.A.id);
+});
+test('归属同刻的确定性 tie-break：正式 ULID 优先于临时身份，其次节点 ID 码元序',()=>{
+ const permanent='01ARZ3NDEKTSV4RRFFQ69G5FAV';
+ assert.equal(conversationOwners({'adopted-abc':[{sessionId:'x',createdAt:5}],[permanent]:[{sessionId:'x',createdAt:5}]}).get('x'),permanent,'正式 ULID 身份优先 ✓');
+ assert.equal(conversationOwners({[permanent]:[{sessionId:'x',createdAt:5}],'adopted-abc':[{sessionId:'x',createdAt:5}]}).get('x'),permanent,'换键顺序结论不变 ✓');
+ assert.equal(conversationOwners({A:[{sessionId:'y',createdAt:9}],B:[{sessionId:'y',createdAt:9}]}).get('y'),'B','同类身份按码元序（较大者胜，确定性 ✓）');
+ assert.equal(conversationOwners({B:[{sessionId:'y',createdAt:9}],A:[{sessionId:'y',createdAt:9}]}).get('y'),'B','换键顺序结论不变 ✓');
+ assert.equal(conversationOwners({A:[{sessionId:'z',createdAt:1}],B:[{sessionId:'z',createdAt:2}]}).get('z'),'B','createdAt 更新者胜出 ✓');
 });
 test('插件 HTTP 返回历史和工作区，记录操作不需要修改 Session 服务',async()=>{
  const f=await makeV3Fixture({nodes:['A']});const post=body=>handleApiRequest({}, {libraryRoot:f.root}, {url:'http://dsh.local/api',method:'POST',json:async()=>({...body,root:f.root})});

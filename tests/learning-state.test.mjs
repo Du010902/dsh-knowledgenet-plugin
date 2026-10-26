@@ -117,3 +117,33 @@ describe("接线：路由两边各自解析后再比 ✓、工具回落到视图
     assert.ok(toolsSource.includes("async function target(args: Record<string, unknown>, exec: unknown, config: KnowledgeNetConfig, rootOverride?: string)"), "`target` 要能接受指定库根 ✓");
   });
 });
+
+describe("入口线索：最新认领覆盖旧值 ✓", () => {
+  const firstTurn = { snapshotEvents: () => [{ type: "turn/start" }] };
+
+  it("同一会话先后从两个节点打开新对话 ⇒ 线索指向最新认领的节点 ✓", () => {
+    const state = new LearningState();
+    state.enter(SESSION, LIBRARY, "n-old");
+    assert.equal(state.entry(SESSION, LIBRARY, firstTurn), "n-old", "第一次认领先生效 ✓");
+    state.enter(SESSION, LIBRARY, "n-latest");
+    assert.equal(state.entry(SESSION, LIBRARY, firstTurn), "n-latest", "旧行为第一个节点占住 ✗（用户实测 2026-10-25）");
+    state.dispose();
+  });
+
+  it("重新认领会重置首轮计数：新认领的线索照常返回，不会立刻失效 ✓", () => {
+    const state = new LearningState();
+    state.enter(SESSION, LIBRARY, "n-1");
+    assert.equal(state.entry(SESSION, LIBRARY, firstTurn), "n-1");
+    /* 上一条线索已经记过 request=1；重新认领必须重开一轮 ✓，否则新线索会被当成第二轮请求删掉 ✗ */
+    state.enter(SESSION, LIBRARY, "n-2");
+    assert.equal(state.entry(SESSION, LIBRARY, firstTurn), "n-2", "覆盖后 request 重新计 ✓");
+    state.dispose();
+  });
+
+  it("库根不同的线索不串用 ✓", () => {
+    const state = new LearningState();
+    state.enter(SESSION, LIBRARY, "n-in-lib");
+    assert.equal(state.entry(SESSION, WORKSPACE, firstTurn), undefined, "线索只对认领时的库有效 ✓");
+    state.dispose();
+  });
+});

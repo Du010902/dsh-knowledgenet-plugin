@@ -18,6 +18,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
+import { relationAddKeyIntent } from "../src/client/relation-add-keyboard.ts";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, "..", "src", "client");
 const relations = readFileSync(path.join(CLIENT, "NoteRelations.tsx"), "utf8");
@@ -248,5 +250,87 @@ describe("「＋ 添加前置」入口移进「前置」弹窗 + 点旁边空白
       assert.ok(zh.includes(`${key}:`), `中文词典要有 ${key} ✓`);
       assert.ok(en.includes(`${key}:`), `英文词典要有 ${key} ✓`);
     }
+  });
+});
+
+/* ------------------- 「添加前置」输入框按 Enter 直接创建（用户实测 ✓） ------------------- */
+
+/**
+ * **输入框里按 Enter = 点「新建「x」并设为前置」** ✓
+ * （用户实测：输入完节点名直接按 Enter **毫无反应** ✗）。
+ *
+ * 键盘判定抽成纯 `.ts` 函数 `relationAddKeyIntent` ✓（仓库先例 `dialog-keyboard.ts` ✓）：
+ * `.tsx` 里的 JSX 没法被 Node 直接 import ✗（strip-only TS 不认 ✓），
+ * 而"这一下回车该不该建节点"正是这次最容易做错的地方 ✓
+ * ⇒ 纯函数**真跑行为断言** ✓，再用源码契约钉住"组件真的接了线、按钮行为没变"✓。
+ */
+describe("「添加前置」输入框按 Enter 直接创建 ✓", () => {
+  /** add 态那一小段 JSX ✓（源码契约只在这块里找 ✓，别把列表项 / 关闭按钮的键位也算进来 ✗） */
+  const addStart = relations.indexOf('{mode === "add" ? <>');
+  const addEnd = addStart < 0 ? -1 : relations.indexOf("</>", addStart);
+  const addBlock = addStart < 0 || addEnd < 0 ? "" : relations.slice(addStart, addEnd);
+
+  it("Enter + 有效标题 ⇒ create ✓（首尾空格不影响 ✓）", () => {
+    assert.equal(relationAddKeyIntent("Enter", { title: "克隆" }), "create");
+    assert.equal(relationAddKeyIntent("Enter", { title: "  克隆  " }), "create", "按 trim 后判空 ✓，不该要求用户先删空格 ✓");
+    assert.equal(relationAddKeyIntent("Enter", {}), "consume", "没给标题 ⇒ 当空标题 ⇒ 不提交 ✓");
+  });
+
+  it("busy / 空标题 ⇒ **不提交** ✓（与创建按钮的 disabled 完全一致 ✓）", () => {
+    assert.equal(relationAddKeyIntent("Enter", { title: "克隆", busy: true }), "consume", "busy 时 Enter 不许再提交 ✓");
+    assert.equal(relationAddKeyIntent("Enter", { title: "" }), "consume", "空标题不提交 ✓");
+    assert.equal(relationAddKeyIntent("Enter", { title: "   " }), "consume", "纯空白同样不提交 ✓");
+  });
+
+  it("**中文输入法组合期间绝不触发创建** ✓（isComposing / keyCode 229 两个信号都挡 ✓）", () => {
+    assert.equal(relationAddKeyIntent("Enter", { title: "克隆", isComposing: true }), "ignore", "组合中的 Enter 是选词确认 ✓");
+    assert.equal(relationAddKeyIntent("Enter", { title: "克隆", keyCode: 229 }), "ignore", "老浏览器的组合信号也要挡 ✓");
+    assert.equal(relationAddKeyIntent("Enter", { title: "", isComposing: true }), "ignore", "组合中连 consume 都不该做 ✓");
+  });
+
+  it("只有 Enter 有动作 ✓（Esc / 方向键 / 普通字符一律 ignore ✓，不抢既有键盘行为 ✓）", () => {
+    for (const key of ["Escape", "ArrowDown", "ArrowUp", "Tab", "a", " "]) {
+      assert.equal(relationAddKeyIntent(key, { title: "克隆" }), "ignore", `${key} 不该被当成创建 ✓`);
+    }
+  });
+
+  it("组件真的接了线：input 有 onKeyDown、输入法两个信号都传进去了 ✓", () => {
+    assert.ok(addBlock.length > 0, "要找得到 add 态那块 JSX ✓");
+    assert.ok(relations.includes('from "./relation-add-keyboard.ts"'), "组件要 import 纯函数判定 ✓");
+    assert.match(addBlock, /<input[\s\S]{0,1400}?onKeyDown=\{/, "input 上必须有 onKeyDown ✓（否则回车仍然没反应 ✗）");
+    assert.ok(addBlock.includes("relationAddKeyIntent("), "判定要走纯函数 ✓（与测试同一套规则 ✓）");
+    assert.ok(
+      addBlock.includes("isComposing: event.nativeEvent.isComposing === true"),
+      "必须把输入法组合状态传进去 ✓（中文选词时不许建节点 ✗）",
+    );
+    assert.ok(addBlock.includes("keyCode: event.nativeEvent.keyCode"), "keyCode 229 的兜底也要传进去 ✓");
+  });
+
+  it("Enter 分支：先 preventDefault，再执行与创建按钮**相同的动作** ✓", () => {
+    assert.ok(
+      /if \(intent === "ignore"\) return;[\s\S]{0,80}?event\.preventDefault\(\);/.test(addBlock),
+      "ignore 直接返回 ✓（组合中不许拦输入法 ✗）；其余两支才 preventDefault ✓",
+    );
+    assert.ok(
+      addBlock.includes('if (intent === "create") void add(title.trim(), true);'),
+      "create 分支要调 add(title.trim(), true) ✓（与「新建…并设为前置」按钮同一动作 ✓）",
+    );
+    /* 创建按钮那一支**原样不动** ✓（本次只加键盘路径 ✓） */
+    assert.ok(
+      /disabled=\{busy \|\| !title\.trim\(\)\} onClick=\{\(\) => \{ void add\(title, true\); \}\}/.test(relations),
+      "创建按钮仍然是 disabled + add(title, true) ✓",
+    );
+    /* add() 自己会 trim ✓ ⇒ 键盘传 trim 后的值、按钮传原值，落盘内容完全一样 ✓ */
+    assert.ok(/if \(busy \|\| name\.trim\(\) === ""\) return;/.test(relations), "add() 内部仍按 trim 判空 ✓");
+    assert.ok(relations.includes("title: name.trim()"), "请求体里发的仍是 trim 后的标题 ✓");
+  });
+
+  it("候选按钮与 Esc / 点外面关闭都不受影响 ✓（本次只加键盘路径 ✓）", () => {
+    assert.ok(
+      /candidates\.map\(n => <button type="button" key=\{n\.id\} disabled=\{busy\} onClick=\{\(\) => \{ void add\(n\.title, false\); \}\}>/.test(relations),
+      "候选按钮仍然是 add(n.title, false) ✓（候选人交互不走 Enter ✓）",
+    );
+    assert.ok(/if \(event\.key === "Escape"\) close\(\);/.test(relations), "Esc 关闭仍然在 ✓");
+    assert.ok(/path\.includes\(root\)/.test(relations), "点弹窗外面关闭的判定仍然在 ✓");
   });
 });

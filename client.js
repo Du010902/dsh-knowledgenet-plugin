@@ -43120,6 +43120,29 @@ void main() {
 			});
 		}
 		//#endregion
+		//#region src/client/relation-add-keyboard.ts
+		/**
+		* 输入框里按键该做什么。
+		*
+		* @param key - `event.key`。
+		* @param options.title - 输入框当前内容 ✓（空标题按 **trim 后**算 ✓，与按钮的 `!title.trim()` 一致 ✓）。
+		* @param options.busy - 正在提交 ✓（与按钮 `disabled={busy || ...}` 一致 ✓）。
+		* @param options.isComposing - `event.nativeEvent.isComposing` ✓（输入法组合中 ⇒ 忽略 ✓）。
+		* @param options.keyCode - `event.nativeEvent.keyCode` ✓（`229` = 组合中 ✓，老浏览器兜底 ✓）。
+		* @returns
+		* - `"create"`：Enter ✓ 且按钮此刻可点 ⇒ `preventDefault()` + `add(title.trim(), true)` ✓；
+		* - `"consume"`：Enter ✓ 但按钮不可点（busy / 空标题）⇒ 只 `preventDefault()`、**不提交** ✗
+		*   （回车被这个输入框消化掉 ✓，但绝不越过按钮 disabled 的判定 ✓）；
+		* - `"ignore"`：其它键 / 输入法组合中 ⇒ **连 `preventDefault()` 都不做** ✗
+		*   （组合中的 Enter 要留给输入法选词 ✓）。
+		*/
+		function relationAddKeyIntent(key, options = {}) {
+			if (options.isComposing === true || options.keyCode === 229) return "ignore";
+			if (key !== "Enter") return "ignore";
+			if (options.busy === true || (options.title ?? "").trim() === "") return "consume";
+			return "create";
+		}
+		//#endregion
 		//#region src/client/NoteRelations.tsx
 		/**
 		* 关系面板的中英文案 ✓（**原来全是硬编码中文** ✗ —— 用户实测："插件的语言没有跟随系统"✓）。
@@ -43269,7 +43292,18 @@ void main() {
 									placeholder: t("relSearchPlaceholder"),
 									value: title,
 									disabled: busy,
-									onChange: (e) => setTitle(e.target.value)
+									onChange: (e) => setTitle(e.target.value),
+									onKeyDown: (event) => {
+										const intent = relationAddKeyIntent(event.key, {
+											title,
+											busy,
+											isComposing: event.nativeEvent.isComposing === true,
+											keyCode: event.nativeEvent.keyCode
+										});
+										if (intent === "ignore") return;
+										event.preventDefault();
+										if (intent === "create") add(title.trim(), true);
+									}
 								}),
 								candidates.map((n) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									type: "button",

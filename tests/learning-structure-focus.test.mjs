@@ -3,6 +3,7 @@ import { after, test } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { LearningState } from "../src/host/learning-state.ts";
+import { handleApiRequest } from "../src/host/api.ts";
 import { structurePage } from "../src/host/structure-page.ts";
 import { __internal } from "../index.js";
 import { makeV3Fixture, cleanupFixtures } from "./support/v3-fixture.mjs";
@@ -90,6 +91,22 @@ test("focus HTTP rejects foreign roots; node-origin records add only plugin memo
   const events = [{ type: "turn/start" }]; assert.equal(s.entry("new", f.root, exec(f, "new", events).agent.session), f.nodes.A.id);
   assert.equal(await readFile(join(f.root, f.nodes.A.relativePath), "utf8"), before);
   assert.deepEqual(Object.keys(JSON.parse(await readFile(join(f.root, "node-conversations.json"), "utf8"))).sort(), ["nodes", "version"]);
+});
+
+test("同一对话先后从两个节点打开：入口线索与历史都归最新认领的节点", async () => {
+  /* 用户实测 2026-10-25：DSH 复用空白会话 ⇒ 节点 1、节点 2 的「打开新对话」拿到同一个 sessionId ✗
+   * 这里直接 import **源码** handleApiRequest（不是 index.js 里的构建产物 ✓）：宿主半的改动要由 Lead
+   * 统一构建，构建前 __internal 里还是旧记录逻辑 ⇒ 走源码模块才是在断言这次改的行为 ✓。 */
+  const f = await makeV3Fixture({ nodes: ["A", "B"] }); const s = new LearningState();
+  const ctx = { sessions: { get: () => ({ header: { cwd: f.workspace } }) } };
+  const api = body => handleApiRequest(ctx, {}, request({ ...body, root: f.root }), s);
+  const events = [{ type: "turn/start" }];
+  assert.equal((await api({ kind: "record-node-conversation", nodeId: f.nodes.A.id, conversationId: "shared", entryHint: true })).body.ok, true);
+  assert.equal(s.entry("shared", f.root, exec(f, "shared", events).agent.session), f.nodes.A.id, "第一次认领先给 A ✓");
+  assert.equal((await api({ kind: "record-node-conversation", nodeId: f.nodes.B.id, conversationId: "shared", entryHint: true })).body.ok, true);
+  assert.equal(s.entry("shared", f.root, exec(f, "shared", events).agent.session), f.nodes.B.id, "节点 2 认领后入口线索换成 B ✓（旧行为仍指向 A ✗）");
+  assert.deepEqual((await api({ kind: "node-conversations", nodeId: f.nodes.A.id })).body.conversations, [], "A 的历史列表不再有这条 ✓");
+  assert.deepEqual((await api({ kind: "node-conversations", nodeId: f.nodes.B.id })).body.conversations.map(entry => entry.sessionId), ["shared"], "B 的历史列表有这条 ✓");
 });
 
 test("visible notes can publish focus before their persisted session is attached", async () => {
