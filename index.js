@@ -7433,6 +7433,95 @@ async function handleApiRequest(ctx, config, request, learningState = new Learni
 			}
 		};
 	}
+	if (record.kind === "reveal-note") {
+		const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+		if (nodeId === "") return {
+			status: 400,
+			body: {
+				ok: false,
+				error: {
+					code: "bad_body",
+					message: "缺少 nodeId"
+				}
+			}
+		};
+		const resolved = await resolveRequestedRoot(ctx, config, {
+			root: typeof record.root === "string" ? record.root : void 0,
+			sessionId: typeof record.sessionId === "string" ? record.sessionId : void 0
+		});
+		if (resolved.root === void 0 || resolved.root === null) return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "library_unavailable",
+					message: "找不到知识库"
+				}
+			}
+		};
+		const root = resolved.root;
+		let relativePath;
+		try {
+			const found = await readNodeFast(root, nodeId);
+			if (!found.ok) return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "node_missing",
+						message: "没有找到这个知识点"
+					}
+				}
+			};
+			relativePath = found.node.relativePath;
+		} catch (error) {
+			return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "read_failed",
+						message: error instanceof Error ? error.message : String(error)
+					}
+				}
+			};
+		}
+		const controller = ctx.get?.("sessionController") ?? void 0;
+		if (typeof controller?.openWorkspacePath !== "function") return {
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code: "reveal_unavailable",
+					message: "当前 DSH 没有提供「在文件管理器中显示」能力"
+				}
+			}
+		};
+		try {
+			await controller.openWorkspacePath({
+				path: join(root, relativePath),
+				action: "reveal"
+			}, AbortSignal.timeout(15e3));
+			return {
+				status: 200,
+				body: {
+					ok: true,
+					path: relativePath
+				}
+			};
+		} catch (error) {
+			return {
+				status: 200,
+				body: {
+					ok: false,
+					error: {
+						code: "reveal_failed",
+						message: error instanceof Error ? error.message : String(error)
+					}
+				}
+			};
+		}
+	}
 	if (record.kind === "remove-node") {
 		const resolved = await resolveRequestedRoot(ctx, config, {
 			root: typeof record.root === "string" ? record.root : void 0,

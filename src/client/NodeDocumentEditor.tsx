@@ -1,6 +1,7 @@
 import { NodeConversations } from "./NodeConversations.tsx";
 import { UnderstandingButton } from "./UnderstandingButton.tsx";
 import { NoteRelations } from "./NoteRelations.tsx";
+import { RevealInFileManager } from "./RevealInFileManager.tsx";
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 /**
  * **节点笔记编辑器**（`design/node-note-editor.html` 的界面语言 + `node-note-editor-plan.md` 的行为
@@ -806,6 +807,13 @@ export function NodeDocumentEditor(props: {
         {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
         {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
         <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
+        {/*
+         * **「在资源管理器中显示」**（用户 2026-10-29 要求 ✓）：
+         * 放在关闭按钮左侧 —— 同属"整个文档"的动作 ✓。传 **nodeId + 库目标**（不传绝对路径 ✗）：
+         * 宿主半按 nodeId 解析当前 md 的实际路径，再交给 DSH 的原生文件管理器 ✓
+         * （见 `RevealInFileManager` / `reveal-note.ts` ✓）。
+         */}
+        <RevealInFileManager nodeId={props.nodeId} target={props.target} t={props.t} fetcher={props.fetcher} />
         <button type="button" className="kn-editor-close" aria-label={t("closeEditor")} onClick={() => { leaveRich("close"); }}>
           ×
         </button>

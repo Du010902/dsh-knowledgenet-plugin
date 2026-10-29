@@ -65,6 +65,9 @@ const DICT_ZH: Record<string, string> = {
   editNote: "编辑笔记",
   notePanelTitle: "节点笔记",
   closeEditor: "关闭编辑区",
+  /* 「在资源管理器中显示」：复用宿主 Session Remote 的 reveal 能力 ✓（见 reveal-note.ts ✓） */
+  revealInExplorer: "在资源管理器中显示",
+  revealFailed: "无法在资源管理器中显示，请重试",
   richLoading: "正在准备正文编辑器…",
   richFailed: "正文编辑器初始化失败，已改用纯文本继续编辑（内容不会丢、保存照常 ✓；重新打开这个节点可以再试一次）",
   unsupportedNotice: "这份正文含有正文编辑器无法原样保留的语法，已自动改用纯文本编辑（原文一字不动 ✓）",
@@ -350,6 +353,9 @@ const DICT_EN: Record<string, string> = {
   editNote: "Edit note",
   notePanelTitle: "Node note",
   closeEditor: "Close the editor",
+  /* Reveal in the host file manager (reuses the Host Session Remote, see reveal-note.ts) */
+  revealInExplorer: "Show in File Explorer",
+  revealFailed: "Could not show the file in File Explorer. Try again.",
   richLoading: "Preparing the rich editor…",
   richFailed: "The rich editor failed to start, so plain-text editing is used (nothing is lost and saving still works ✓; reopen the node to retry)",
   unsupportedNotice: "This note uses syntax the rich editor cannot preserve byte-for-byte, so plain-text editing is used automatically (your text is untouched)",

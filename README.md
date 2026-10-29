@@ -114,7 +114,7 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
 - **节点笔记编辑器**（右键节点或选中条上的「编辑笔记」打开）：打开后以**图谱区域内的留边弹窗**显示，保留背景图谱和上方工具栏 ✓
   （3D 图谱、状态灯、视角图、提示条一起让位 ✓；点 × 关闭即原样回来、镜头不重置 ✓），
   面板够宽时正文收成一条**居中的阅读栏** ✓（一行不会拖太长 ✓）；
-  只有**一条标题栏**（节点名 + 关闭），高度全留给正文 ✓；**没有模式切换**，打开就是正文（所见即所得）。
+  只有**一条标题栏**（节点名 + 理解 / 对话 / 关系等文档动作 + 关闭），高度全留给正文 ✓；**没有模式切换**，打开就是正文（所见即所得）。
   正文比视口短时，**下面那块空白也是编辑区** ✓：点它会落到一个**末尾空段落**（已经有空段落就直接用它，不无脑加空行 ✓）
   ⇒ 在那儿**右键**同样能弹出块菜单、插表格 / 公式（不再"点了没反应"✗）。
   **正文里右键 ⇒ 弹出块菜单** ✓（标题 / 列表 / 引用 / 表格 / 公式 / 图片 / 代码块…）；**＋ 块手柄打开的是同一个菜单** ✓，
@@ -271,7 +271,7 @@ profile 的 `cordis.patch.yml` 插入本插件（`@local/dsh-knowledgenet`）。
 
 ```bash
 node build.mjs                 # 构建宿主 + 客户端 + 布局 Worker + Mermaid 运行时（四个产物）
-node --test "tests/*.test.mjs" # 全部测试（当前 909 个，全绿）
+node --test "tests/*.test.mjs" # 全部测试（当前 923 个，全绿）
 node scripts/sync-vendor.mjs --check   # 上游副本必须逐字节一致（77 个文件）
 ```
 
@@ -284,7 +284,7 @@ node --test tests/current-note-focus.browser.mjs   # 焦点与当前节点
 node --test tests/block-menu.browser.mjs   # 右键块菜单（真 client.js + 宿主 Menu 契约替身）
 node --test tests/inline-format.browser.mjs   # 行内格式（真实面板 UI：浮动工具栏 8 项 / 行内代码样式 / 复制语义 / 公式 / 链接 / 关系弹窗点外关闭）
 node --test tests/block-robustness.browser.mjs   # 粘贴/引用块健壮性（外部代码粘成代码块、空引用可删除、误判样本）
-node --test tests/node-conversations.browser.mjs   # 节点对话：侧栏标签恢复 / 历史实时更新 / 新建前置（输入后按 Enter）→ 打开笔记 → 创建对话
+node --test tests/node-conversations.browser.mjs   # 节点对话：侧栏标签恢复 / 历史实时更新 / 新建前置（输入后按 Enter）→ 打开笔记 → 创建对话 / 在资源管理器中显示（假 fetcher 记录 reveal-note 请求 ✓）
 ```
 
 - 上游（`src/vendor/upstream/**`）是**逐字节冻结**的开放格式实现：只读、不手改；
@@ -323,6 +323,10 @@ node --test tests/node-conversations.browser.mjs   # 节点对话：侧栏标签
 笔记弹窗标题栏提供前置、被依赖列表；**「＋ 添加前置」已挪进「前置」弹窗里** ✓（使用频率不高 ⇒ 不占标题栏 ✓），
 输入节点名后**直接按 Enter 就会创建前置节点** ✓（等价于点「新建「x」并设为前置」✓；中文输入法选词时的 Enter 不会误建 ✓），
 前置 / 被依赖弹窗点旁边空白或按 Esc 会**自动关闭** ✓；正文选中文字后仍可从浮动工具栏直接创建前置节点 ✓。
+标题栏最右侧的**文件夹按钮 = 在资源管理器中显示当前 md 文档** ✓（关闭按钮左边；点击后由**宿主半**按 nodeId
+解析当前文件路径，再调 DSH 的 `sessionController.openWorkspacePath({ action: "reveal" })` ✓：Windows 资源管理器会
+选中这个文件、macOS 用 Finder 定位；只定位、不打开不修改文件 ✓；失败在按钮旁给一句提示 ✓。为什么不从客户端直接调
+Session Remote：**编译型插件的客户端半拿不到 `ctx.remote`**（实机诊断 `no-remote` ✗），详见 [在资源管理器中显示](design/note-reveal-in-file-manager.md)）。
 表格结构操作由单元格右键菜单进入，支持删除整张表格并撤销。
 
 ## 图片与理解标记

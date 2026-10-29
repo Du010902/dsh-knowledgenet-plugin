@@ -1,7 +1,7 @@
 import { listNodeConversations, recordNodeConversation } from "./node-conversations.ts";
 import { LearningState, libraryKey } from "./learning-state.ts";
 import { resolveLearningConfig } from "./learning-config.ts";
-import { dirname, basename } from "node:path";
+import { dirname, basename, join } from "node:path";
 import { readUnderstanding, setUnderstanding } from "./understanding.ts";
 /**
  * 宿主侧 HTTP（Fetch）路由：给**常驻面板**取数据用。
@@ -33,7 +33,7 @@ import { createSubdirectory } from "./create-dir.ts";
 import { createNodeFromUi } from "./mutate.ts";
 import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
 /* 轻量格式检查住在 store 里（只读 library.json ✓；库模块带 Node 参数属性 ⇒ 单测导不进来 ✗） */
-import { checkLibraryFormat } from "./v3/store.ts";
+import { checkLibraryFormat, readNodeFast } from "./v3/store.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation } from "./isolation-state.ts";
 import { discardPlan, listPlans } from "./plans.ts";
@@ -902,6 +902,64 @@ export async function handleApiRequest(
         },
       },
     };
+  }
+
+  /*
+   * 「在资源管理器中显示当前笔记」（用户 2026-10-29 要求 ✓）。
+   *
+   * **为什么走宿主半**：编译型插件的客户端半访问不到 `ctx.remote`（实测：客户端 `ctx.get("remote")`
+   * 返回 undefined ⇒ Session Remote 调不到 ✗，见 `design/note-reveal-in-file-manager.md` 的复查记录）；
+   * 宿主半可以直连 `ctx.sessionController.openWorkspacePath({ action: "reveal" })` ✓ ——
+   * 平台分支（Windows `explorer /select,` / macOS `open -R` / Linux 目录管理器）、路径校验
+   * （必须能被 `ctx.fs` 映射成 Host 路径 ✓）与命令注入边界仍然归宿主 ✓，插件不自己 spawn ✗。
+   *
+   * 插件这层只做两件事：**按 nodeId 解析出库内相对路径**（客户端不传绝对路径 ✗）、
+   * 把失败原因原样带回去给界面显示 ✓。
+   */
+  if (record.kind === "reveal-note") {
+    const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+    if (nodeId === "") {
+      return { status: 400, body: { ok: false, error: { code: "bad_body", message: "缺少 nodeId" } } };
+    }
+    const resolved = await resolveRequestedRoot(ctx, config, {
+      root: typeof record.root === "string" ? record.root : undefined,
+      sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
+    });
+    if (resolved.root === undefined || resolved.root === null) {
+      return { status: 200, body: { ok: false, error: { code: "library_unavailable", message: "找不到知识库" } } };
+    }
+    /* 未定义/空库根都已挡掉 ⇒ 下面放心当 string 用（避免再新增一条 TS 的 `string | null` 噪声 ✓） */
+    const root = resolved.root;
+    let relativePath: string;
+    try {
+      const found = await readNodeFast(root, nodeId);
+      if (!found.ok) {
+        return { status: 200, body: { ok: false, error: { code: "node_missing", message: "没有找到这个知识点" } } };
+      }
+      relativePath = found.node.relativePath;
+    } catch (error) {
+      return { status: 200, body: { ok: false, error: { code: "read_failed", message: error instanceof Error ? error.message : String(error) } } };
+    }
+    const controller = (ctx.get?.("sessionController") ?? undefined) as
+      | { openWorkspacePath?: (request: { path: string; action: "reveal" }, signal: AbortSignal) => Promise<unknown> }
+      | undefined;
+    if (typeof controller?.openWorkspacePath !== "function") {
+      return {
+        status: 200,
+        body: { ok: false, error: { code: "reveal_unavailable", message: "当前 DSH 没有提供「在文件管理器中显示」能力" } },
+      };
+    }
+    try {
+      /* 宿主自己会校验路径（`ctx.fs` 映射）并把动作交给原生文件管理器 ✓；
+       * 超时只防"原生命令卡住"（15s 足够拉起资源管理器 ✓，失败也只影响这一条请求 ✓）。 */
+      await controller.openWorkspacePath({ path: join(root, relativePath), action: "reveal" }, AbortSignal.timeout(15_000));
+      return { status: 200, body: { ok: true, path: relativePath } };
+    } catch (error) {
+      return {
+        status: 200,
+        body: { ok: false, error: { code: "reveal_failed", message: error instanceof Error ? error.message : String(error) } },
+      };
+    }
   }
 
   /*

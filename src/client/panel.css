@@ -683,6 +683,47 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/*
+ * 「在资源管理器中显示」：与关闭按钮同尺寸的小方钮 ✓（图标 15px、`currentColor` ✓）。
+ * 只在宿主桌面可用时渲染 ✓；失败提示沿用编辑器内联错误样式 ✓（与「已理解」按钮同一套 ✓）。
+ */
+.kn-reveal-control {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.kn-editor-reveal {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.kn-editor-reveal:hover:not(:disabled) {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  color: var(--dsw-alias-label-primary);
+}
+
+.kn-editor-reveal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.kn-editor-reveal:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .kn-editor-notice {
   padding: 10px 18px;
   background: var(--kn-warn-bg, color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent));

@@ -138,6 +138,45 @@ export function SearchGlyphIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
+ * 「在资源管理器中显示」的**文件夹（打开）字形**：几何**原样照抄** harness 产品图标集
+ * （`packages/client/ui-primitives/src/icons/artwork.ts` 的 `'folder-open-outline'` ✓）。
+ *
+ * 为什么抄几何而不是 import 宿主的 `IconFolderOpenOutlineRegular` ✗：
+ * 宿主产品图标渲染的是 `<use href="#dsw-icon-…">` 的 **sprite 引用**，而本插件面板在 **Shadow DOM** 里
+ * —— 实测（headless Chrome 探针）：shadow 内 `<use>` 对主文档 symbol 求 bbox 得 `0×0`，
+ * 也就是**什么都不画** ✗（同一页的 light DOM 里 bbox 是正常的 ✓）。
+ * `PanelIcon.tsx` 里其余几枚图标因此同样采用"几何原样照抄"的写法 ✓。
+ *
+ * 画法逐字照抄：16 网格 + 两条 path 各自 `stroke="currentColor"` + 线宽 1（`ICON_REGULAR_STROKE`），
+ * **不设** linecap / linejoin（原版就是默认的 butt / miter ✓）。
+ *
+ * @param size - 边长（px），默认 15（与右上角关闭按钮旁的宿主图标同一渲染尺寸 ✓）。
+ */
+export function FolderOpenIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+      strokeWidth={1}
+    >
+      <path
+        d="M12.3994 13.5986H2.04956C1.49728 13.5986 1.04956 13.1509 1.04956 12.5986V3.40137C1.04956 2.84908 1.49728 2.40137 2.04956 2.40137H4.76632C5.01016 2.40137 5.24561 2.49046 5.42836 2.6519L6.94088 3.98799C7.12364 4.14943 7.35908 4.23852 7.60293 4.23852H12.3994C12.9517 4.23852 13.3994 4.68624 13.3994 5.23852V7.16991"
+        stroke="currentColor"
+      />
+      <path
+        d="M2.55911 7.93683C2.67584 7.49906 3.07229 7.19446 3.52536 7.19446H13.6491C14.3061 7.19446 14.7846 7.81725 14.6153 8.45209L13.4411 12.856C13.3244 13.2938 12.9279 13.5984 12.4748 13.5984H2.35113C1.69411 13.5984 1.21562 12.9756 1.38489 12.3407L2.55911 7.93683Z"
+        stroke="currentColor"
+      />
+    </svg>
+  );
+}
+
+/**
  * 搜索框右侧的**提交箭头**：抄自 harness 的 `IconRightUpOutlineArtwork`
  * （浏览器面板里那颗"在外部打开"用的就是它；这里借来做"搜过去"的动作图标）。
  *
