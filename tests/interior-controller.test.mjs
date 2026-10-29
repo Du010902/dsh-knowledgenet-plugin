@@ -155,6 +155,15 @@ describe("控制器接线：拖动抓取点跟手", () => {
     assert.deepEqual(calls.select, [3], "短点击应选中该节点");
   });
 
+  it("双击节点 ⇒ 只选中，**不再定位 / 放大局部视图** ✓（2026-10-29 用户要求）", () => {
+    const { navigation, element, projected, calls } = makeNavigation();
+    const screen = projectWith(navigation, [0, 0, 700]);
+    pushNode(projected, 2, screen);
+    element.emit("dblclick", { clientX: screen.x, clientY: screen.y });
+    assert.deepEqual(calls.select, [2], "双击要选中该节点");
+    assert.equal(calls.locate, 0, "双击不再触发定位（不缩放、不飞镜头 ✓）");
+  });
+
   it("拖动之后的 pointerup / dblclick 不触发选中", () => {
     const { navigation, element, projected, calls } = makeNavigation();
     const screen = projectWith(navigation, [0, 0, 700]);

@@ -323,13 +323,13 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     assert.ok(Math.abs(carried.radius - 100) < 1e-6, `半径应是 100，实际 ${carried.radius}`);
   });
 
-  it("**双击节点**：转动中心就落在那个节点上 ✓（画面不跳、相机飞过去、半径按新中心量）", () => {
+  it("**定位命令**（F / 搜索聚焦）：相机飞过去并看向它，但**转动中心与图谱旋转都不变** ✓", () => {
     /*
-     * 用户 2026-10 明确要求："双击某个结点之后，将中心放在这个节点上" ✓
-     * （上一版把它做成"定位只动相机、球心不动" ✗，与要求相反，这里改回来 ✓）。
-     *
-     * 关键约束：换中心的那一刻**画面不许跳** ✗ —— 渲染用的是"布局空间里的相机"，
-     * 单独换 C 会让它整体位移；`recenterOn` 会把相机补偿回去 ✓。
+     * 2026-10-29 用户两轮要求：① 双击不再把旋转中心搬过去；② 双击的"放大局部视图"也删掉。
+     * 所以**双击已经不走这条命令**（只选中，见 `interior-controller.test.mjs`）；
+     * 这里钉的是 F 键 / 搜索聚焦仍在用的 `focusNode` 命令：
+     * 只移动并转向节点，保留球心 C 与图谱旋转 S ✓；
+     * 球心只在「首次进入」与「明确重新整理」时变（见上一组用例 ✓）。
      */
     const { navigation } = makeNavigation();
     const layout = positionsOf([[0, 0, 0], [100, 0, 0]]);
@@ -342,30 +342,24 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
       layout,
       2,
     );
-    const pictureBefore = [...navigation.basis().position];
-    const axesBefore = [...navigation.basis().right];
+    const centerBefore = [...navigation.camera.knInterior.center];
+    const sceneBefore = [...navigation.camera.knInterior.scene];
+    const radiusBefore = navigation.camera.knInterior.radius;
 
     navigation.command({ type: "focusNode", nodeId: "n1", source: "toolbar" }, 1, layout, 2);
 
-    /* ① 中心 = 被双击节点的**布局**坐标 ✓ */
-    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "转动中心应当落在被双击的节点上 ✓");
-    /* ② 换中心这一刻画面逐像素不动：布局空间里的相机与朝向都不许变 ✗ */
-    assert.ok(
-      Math.hypot(
-        pictureBefore[0] - navigation.basis().position[0],
-        pictureBefore[1] - navigation.basis().position[1],
-        pictureBefore[2] - navigation.basis().position[2],
-      ) < 1e-9,
-      "换中心不许让画面跳 ✗",
+    /* ① 转动中心**不许**被搬到被定位的节点上 ✗ */
+    assert.deepEqual(
+      navigation.camera.knInterior.center,
+      centerBefore,
+      "定位命令不许把转动中心搬过去 ✗",
     );
-    assert.deepEqual([...navigation.basis().right], axesBefore, "朝向也不许跳 ✗");
-    /* ③ 半径按新中心量：max|X − C| = 100 ✓（操作球 / 取景共用它 ✓） */
-    assert.ok(
-      Math.abs(navigation.camera.knInterior.radius - 100) < 1e-6,
-      `半径要以新 C 为准，实际 ${navigation.camera.knInterior.radius}`,
-    );
+    /* ② 图谱旋转不动 ✓ */
+    assert.deepEqual(navigation.camera.knInterior.scene, sceneBefore, "定位不改图谱旋转 ✓");
+    /* ③ 操作半径仍以原球心量（球心没变，半径也不该被重算）✓ */
+    assert.equal(navigation.camera.knInterior.radius, radiusBefore, "半径不因定位重算 ✓");
 
-    /* ④ 相机飞过去并看向它（动画走完 ⇒ 停在节点前方 104 处 ✓） */
+    /* ④ 相机仍然飞过去并看向它（动画走完 ⇒ 停在节点前方 104 处 ✓） */
     navigation.update(performance.now() + 5000);
     const display = displayBasisOf(navigation);
     const eye = display.position;
@@ -376,21 +370,13 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     const facing = (toNode[0] * display.forward[0] + toNode[1] * display.forward[1] + toNode[2] * display.forward[2]) / length;
     assert.ok(facing > 0.999, `视线应当正对节点，实际 cos=${facing.toFixed(4)}`);
 
-    /* ⑤ 之后拖动只转图谱：中心保持在这个节点上 ✓ */
-    navigation.setFrameContext(
-      { center: [100, 0, 0], radius: 100, min: [0, 0, 0], max: [100, 0, 0] },
-      { width: 800, height: 600 },
-      layout,
-      2,
-    );
-    const sceneBefore = [...navigation.camera.knInterior.scene];
+    /* ⑤ 再定位同一节点：中心仍然不动 ✓ */
     navigation.command({ type: "focusNode", nodeId: "n1", source: "toolbar" }, 1, layout, 2);
-    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "再次定位仍然是同一个节点 ✓");
-    assert.deepEqual(navigation.camera.knInterior.scene, sceneBefore, "定位不改图谱旋转 ✓");
+    assert.deepEqual(navigation.camera.knInterior.center, centerBefore, "再次定位也不许改中心 ✗");
 
-    /* ⑥ 引擎自己发的收敛取景不许把它改回去 ✗ */
+    /* ⑥ 引擎自己发的收敛取景也不许把它搬走（球心保持初次取景的值 ✓） */
     navigation.fitAll(positionsOf([[400, 0, 0], [500, 0, 0]]), 2, true, "settle");
-    assert.deepEqual(navigation.camera.knInterior.center, [100, 0, 0], "收敛取景不许搬走中心 ✗");
+    assert.deepEqual(navigation.camera.knInterior.center, centerBefore, "收敛取景不许搬走中心 ✗");
   });
 
   it("**首次进入**的那一次收敛取景仍然采球心（有布局缓存、没有相机缓存的路径 ✓）", () => {
@@ -573,6 +559,13 @@ describe("开发备注：对外姿态与基向量一致", () => {
         assert.ok(Math.abs(got[i] - want[i]) < 1e-9, `${name} 分量 ${i} 不一致：${got[i]} vs ${want[i]}`);
       }
     }
+  });
+
+  it("画布提示语：双击已不定位 ⇒ 只教「F 定位选中节点」✓", () => {
+    /* vendor 的 GraphUniverse 逐字节冻结，提示语走 build.mjs 补丁 ✓ */
+    assert.ok(bundle.includes("F 定位选中节点"), "提示语要保留 F 定位");
+    assert.equal(bundle.includes("双击或 F"), false, "双击已不再定位，提示语不能再写「双击或」✗");
+    assert.equal(controllerSource.includes("if (node !== null) this.options.onLocate();"), false, "双击命中节点后不许再触发定位 ✗");
   });
 });
 

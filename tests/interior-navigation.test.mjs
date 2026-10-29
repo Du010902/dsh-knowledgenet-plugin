@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  aimAt,
   anchorFromRay,
   applySceneRotation,
   cursorRay,
@@ -21,7 +22,6 @@ import {
   hasLever,
   layoutOf,
   projectDisplay,
-  recenterOn,
   solveDrag,
 } from "../src/client/interior-navigation.ts";
 import { quatFromAxisAngle, rotateVec } from "../src/client/trackball.ts";
@@ -355,41 +355,40 @@ describe("光标射线与姿态轴", () => {  it("画布中心的光标射线 = 
   });
 });
 
-/* ============ 换转动中心（双击/定位节点）：画面不跳，之后绕它转 ============ */
+/* ============ 定位命令（F / 搜索聚焦）：只动相机，不动球心与图谱旋转 ============ */
 
-describe("把转动中心搬到某个节点上", () => {
-  it("换中心那一刻**画面逐像素不动**（布局空间里的相机与朝向都不变 ✓）", () => {
+describe("定位只移动并转向相机（球心 C 与图谱旋转 S 都不变 ✓）", () => {
+  it("aimAt 把相机放到目标前方并看向它，center / scene 一位都不动", () => {
     const state = makeState({ scene: quatFromAxisAngle([0, 1, 0.3], 0.7) });
-    const before = effectiveBasis(state);
-    const pictureBefore = [...before.position];
-    const axesBefore = { right: [...before.right], up: [...before.up], forward: [...before.forward] };
+    const centerBefore = [...state.center];
+    const sceneBefore = [...state.scene];
+    const eyeBefore = [...state.eye];
 
-    recenterOn(state, [120, -40, 60]);
+    aimAt(state, [120, 0, 700], 104);
 
-    const after = effectiveBasis(state);
-    for (let i = 0; i < 3; i += 1) {
-      assert.ok(Math.abs(after.position[i] - pictureBefore[i]) < 1e-9, `相机位置分量 ${i} 不许变 ✗`);
-      assert.ok(Math.abs(after.right[i] - axesBefore.right[i]) < 1e-12, "右轴不许变 ✗");
-      assert.ok(Math.abs(after.up[i] - axesBefore.up[i]) < 1e-12, "上轴不许变 ✗");
-      assert.ok(Math.abs(after.forward[i] - axesBefore.forward[i]) < 1e-12, "视线不许变 ✗");
-    }
-    /* 中心确实搬过去了 ✓，而且 S / Q 一位都没动 ✗ */
-    assert.deepEqual(state.center, [120, -40, 60], "中心要落在目标点上 ✓");
-    assert.deepEqual(state.scene, quatFromAxisAngle([0, 1, 0.3], 0.7), "图谱旋转不许变 ✗");
+    assert.deepEqual(state.center, centerBefore, "球心不许被定位搬走 ✗");
+    assert.deepEqual(state.scene, sceneBefore, "图谱旋转不许变 ✗");
+    assert.notDeepEqual(state.eye, eyeBefore, "相机应该动了（定位）✓");
+    /* 视线确实对着目标、且停在目标前方 104（显示空间距离）✓ */
+    const display = displayOf(state, [120, 0, 700]);
+    const forward = rotateVec(state.view, [0, 0, -1]);
+    const toTarget = [display[0] - state.eye[0], display[1] - state.eye[1], display[2] - state.eye[2]];
+    const length = Math.hypot(...toTarget);
+    const facing = (toTarget[0] * forward[0] + toTarget[1] * forward[1] + toTarget[2] * forward[2]) / length;
+    assert.ok(facing > 0.999, `视线应正对目标，实际 cos=${facing.toFixed(4)}`);
+    assert.ok(Math.abs(length - 104) < 1e-6, `相机离目标应是 104，实际 ${length}`);
   });
 
-  it("搬完之后，图谱绕**新中心**作刚体旋转（旧中心的相对关系不再保持 ✗）", () => {
-    const state = makeState();
-    recenterOn(state, [50, 0, 0]);
-    const node = [150, 0, 0];
+  it("定位之后拖动仍然绕**原来的**球心转（不会突然绕节点转 ✓）", () => {
+    const state = makeState({ scene: quatFromAxisAngle([0, 1, 0.3], 0.7) });
+    aimAt(state, [200, 0, 0], 104);
+    const center = [...state.center];
+    const node = [200, 0, 0];
     const before = displayOf(state, node);
     applySceneRotation(state, quatFromAxisAngle([0, 1, 0], 0.5));
     const after = displayOf(state, node);
-    /* 绕 (50,0,0) 转 0.5 弧度：距离不变 ✓ */
-    const d0 = Math.hypot(before[0] - 50, before[1], before[2]);
-    const d1 = Math.hypot(after[0] - 50, after[1], after[2]);
-    assert.ok(Math.abs(d0 - d1) < 1e-9, "到新中心的距离应当守恒 ✓");
-    assert.ok(Math.abs(d0 - 100) < 1e-9, "节点到新中心 100 ✓");
-    assert.ok(Math.hypot(after[0] - before[0], after[2] - before[2]) > 10, "确实绕新中心转了 ✓");
+    const d0 = Math.hypot(before[0] - center[0], before[1] - center[1], before[2] - center[2]);
+    const d1 = Math.hypot(after[0] - center[0], after[1] - center[1], after[2] - center[2]);
+    assert.ok(Math.abs(d0 - d1) < 1e-9, "绕原球心旋转 ⇒ 到球心的距离守恒 ✓");
   });
 });

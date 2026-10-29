@@ -5417,26 +5417,6 @@ window.__ModuleLoader__.load({
 			return maxDistance > 0 ? maxDistance : 0;
 		}
 		/**
-		* 把**转动中心 C** 搬到某个布局坐标上，并保持**当前看到的画面完全不动** ✓。
-		*
-		* 用户要求（2026-10）：双击/定位某个节点时，让转动中心就落在那个节点上 ——
-		* 之后拖动的环绕中心就是它 ✓。
-		*
-		* 为什么不能只改 `center` ✗：渲染用的是"布局空间里的相机"
-		* `effectiveBasis.position = C + S⁻¹(P − C)` ⇒ 单独换 C 会让画面整体跳一下 ✗。
-		* 这里先把旧中心的相机位置记下来，换完 C 再把 `eye` 补偿回去
-		* （`displayOf` 就是布局坐标 → 显示坐标的映射 ✓），于是 S/Q 不变、画面不跳 ✓，
-		* 变的只有"以后拖动绕着谁转" ✓。
-		*
-		* @param state - 就地更新 `center` 与 `eye`。
-		* @param layoutPoint - 新的转动中心（**布局**坐标，例如被双击节点的坐标 ✓）。
-		*/
-		function recenterOn(state, layoutPoint) {
-			const before = effectiveBasis(state);
-			state.center = [...layoutPoint];
-			state.eye = displayOf(state, before.position);
-		}
-		/**
 		* 定位到某个**布局坐标**的点：移动相机并转向它，**球心 C 与图谱旋转 S 都不变** ✓。
 		* @param state - 就地更新 `eye` / `view`。
 		* @param target - 布局坐标。
@@ -5819,11 +5799,6 @@ window.__ModuleLoader__.load({
 					positions[index * 3 + 1] ?? 0,
 					positions[index * 3 + 2] ?? 0
 				];
-				recenterOn(this.state, target);
-				this.centerAdopted = true;
-				this.userInteracted = true;
-				this.radiusMeasured = false;
-				this.measureRadius(positions, count);
 				const distance = clampNum(this.options.edgeLength * 2.6, 40, Math.max(60, this.bounds.radius));
 				const from = {
 					eye: [...this.state.eye],
@@ -6158,9 +6133,7 @@ window.__ModuleLoader__.load({
 					this.options.onSelectEdge?.(hit.index);
 					return;
 				}
-				const node = hit.kind === "node" ? hit.index : null;
-				this.options.onSelect(node);
-				if (node !== null) this.options.onLocate();
+				this.options.onSelect(hit.kind === "node" ? hit.index : null);
 			};
 			onContextMenu = (event) => {
 				event.preventDefault();
@@ -41508,7 +41481,7 @@ void main() {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "universe-hint",
-						children: "拖动旋转 · 单击选择节点或关系 · 右键连线可断开 · 双击或 F 定位选中节点"
+						children: "拖动旋转 · 单击选择节点或关系 · 右键连线可断开 · F 定位选中节点"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 						className: "sr-only",
@@ -202296,14 +202269,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 			/** 搜索框里正在敲的关键词（只影响提示与回车时的选点，不进图谱数据 ✓） */
 			const [searchQuery, setSearchQuery] = (0, react.useState)("");
 			/**
-			* 发一条 `fitAll` 相机命令：把**环绕中心**（旋转中心）与距离复位到**整张图的包围盒**。
+			* 发一条 `fitAll` 相机命令：把取景距离复位到**整张图的包围盒**（球心由控制器的承诺负责）。
 			*
-			* 上游 `navigation.fitAll()` 取的是**全部节点**的 bounds.center，所以它天然"不认"某个聚焦节点 ✓。
-			* 两处用它：
+			* 上游 `navigation.fitAll()` 取的是**全部节点**的 bounds；两处用它：
 			*  1. 新建节点后 ⇒ 把新节点收进视野；
-			*  2. 点「重新整理」⇒ **把旋转中心收回来**（用户要求 2026-09）。
+			*  2. 点「重新整理」⇒ 立刻先给一次全图取景。
 			*     —— 上游 `engine.relayout()` 是"只重排布局、相机保持不动"（注释里写明了是刻意的），
-			*     于是聚焦过某个节点后，环绕中心会一直钉在那个节点上 ✗；这里补上归位那一步 ✓。
+			*     重排后的新球心要等控制器收到 `RELAYOUT_EVENT` 并在布局收敛时取景才复位；
+			*     这里补上"立即取景"那一步，免得重排期间镜头还停在旧布局的距离上 ✓。
+			* 注意：**定位（F / 搜索聚焦）不在这里** —— 定位只动相机与朝向，不改球心 ✓。
+			* 双击节点也不定位（2026-10-29 用户要求：双击只选中，不放大局部视图 ✓）。
 			*/
 			const fitWholeGraph = (0, react.useCallback)(() => {
 				fitSeqRef.current += 1;
@@ -202317,7 +202292,9 @@ Expected function or array of functions, received type ${typeof value}.`);
 			* 飞到某个节点：**选中 + 取景**两件事一起做（搜索命中后用它 ✓）。
 			*
 			* - `setFocusId` ⇒ 高亮这个节点，并触发既有的"记住聚焦 / 上报 / 发布标题"副作用 ✓；
-			* - 再发一条 `focusNode` 相机命令 ⇒ 镜头对上去（与**双击节点、按 F** 是同一条路 ✓）。
+			* - 再发一条 `focusNode` 相机命令 ⇒ 镜头对上去（与**按 F** 是同一条路 ✓）；
+			*   这条命令**只移动并转向相机，不改旋转中心**（2026-10-29 用户要求删掉「双击改中心」✓）。
+			*   注意**双击节点不走这条路**：双击只选中，不定位也不放大 ✓。
 			*
 			* 为什么不能只 `setFocusId`：上游把"选择"与"定位"严格分开了 —— `engine.setFocus()` 只改高亮，
 			* **不动相机**（`navigation.focusOn` 才是取景）✓。

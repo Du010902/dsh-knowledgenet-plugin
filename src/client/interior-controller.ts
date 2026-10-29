@@ -32,7 +32,6 @@ import {
   quatConjugate,
   quatSlerp,
   radiusAbout,
-  recenterOn,
   spinStep,
   SPIN_FALLBACK_GAIN,
   type DragGain,
@@ -341,19 +340,20 @@ export class InteriorNavigation {
       positions[index * 3 + 2] ?? 0,
     ];
     /*
-     * 定位（双击节点 / 按 F / 选中搜索结果）：**把转动中心搬到这个节点上** ✓
-     * （用户 2026-10 明确要求：双击之后环绕中心就是该节点 ✓）。
+     * 定位（按 F / 选中搜索结果）：**只移动并转向这个节点** ✓
      *
-     * `recenterOn` 会同时补偿相机 ⇒ 换中心这一刻**画面不跳** ✓，
-     * 然后才做"飞过去并看向它"的动画（起点是补偿后的当前状态 ✓ 依然连续 ✓）。
-     * 半径按"以新 C 为中心"重新量（操作球 / 取景 / 小地图共用它 ✓）。
-     * 标记为"已采纳 / 用户动过"：引擎之后自己发的收敛取景不许再把它改掉 ✗。
+     * 注意**双击不走到这里**（2026-10-29 用户要求：双击只选中，既不改旋转中心、
+     * 也不放大局部视图 ✗）。
+     *
+     * 用户 2026-10-29 第一轮要求删掉「双击节点把转动中心变成该节点」：
+     * 球心 C 与图谱旋转 S **都不动**（与 `design/knowledgenet-interior-navigation.md`
+     * 的"F 或双击定位 ⇒ 保留球心"一致 ✓）。球心只在「首次进入」与「明确重新整理」时变，
+     * 见 `fitAll()` 的采纳规则 ✓。
+     *
+     * 于是定位只走 `aimAt`：把相机放到目标前方、视线对准它（onCameraChange 照旧 ✓），
+     * 不 `recenterOn`、不改 `centerAdopted / userInteracted`（那会把"定位"误记成
+     * "用户动过球心"，之后收敛取景就不敢再按承诺取景 ✗）。
      */
-    recenterOn(this.state, target);
-    this.centerAdopted = true;
-    this.userInteracted = true;
-    this.radiusMeasured = false;
-    this.measureRadius(positions, count);
     const distance = clampNum(this.options.edgeLength * 2.6, 40, Math.max(60, this.bounds.radius));
     const from = { eye: [...this.state.eye] as Vec3, view: this.state.view };
     this.animateTo(from, this.aimTarget(target, distance), true);
@@ -787,9 +787,14 @@ export class InteriorNavigation {
       this.options.onSelectEdge?.(hit.index);
       return;
     }
-    const node = hit.kind === "node" ? hit.index : null;
-    this.options.onSelect(node);
-    if (node !== null) this.options.onLocate();
+    /*
+     * 双击 = **只选中**（与单击同一个动作），不再"定位/放大局部视图" ✓。
+     *
+     * 用户 2026-10-29 第二轮："点击之后放大局部视图的功能你没动，这个也一块删了" ——
+     * 第一轮已删掉"把球心搬过去"，这一轮把双击触发的相机定位也删掉：
+     * 双击后画面**不缩放、不飞镜头**。按 F 键仍可显式定位（那一次只动相机、不改球心 ✓）。
+     */
+    this.options.onSelect(hit.kind === "node" ? hit.index : null);
   };
 
   private onContextMenu = (event: MouseEvent): void => {
