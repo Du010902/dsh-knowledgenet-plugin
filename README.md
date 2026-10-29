@@ -252,6 +252,8 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
   详见 [双击与定位的取舍](design/space-focus-keeps-center.md)）；
   右下角那张「视角位置图」（两张圆形投影图）也一并删除 ✓（用户要求，详见 [空间视图删滚轮与位置图](design/space-view-remove-wheel-and-minimap.md)），
   底部提示语已同步去掉"滚轮靠近"与"双击" ✓。
+  **选中节点后左上角信息条只显示三项** ✓：名称 / **理解状态（只有已理解·未理解两态，与图谱着色同源）** /
+  「编辑笔记」入口（用户 2026-10-29 要求，详见 [节点信息条](design/space-node-strip-minimal.md)）。
 
 ## 后台开销（桌面端流畅度）
 

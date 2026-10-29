@@ -485,7 +485,8 @@
   border: 0;
 }
 
-/* 选中节点信息条 + 编辑入口（图谱左上角 ✓） */
+/* 选中节点信息条（图谱左上角）：**只放三项**——名称 / 理解状态 / 编辑入口 ✓
+   用户 2026-10-29 要求砍掉"当前知识点"标签与前置数量，条子也从两行收成一行。 */
 .kn-sel {
   position: absolute;
   left: 14px;
@@ -493,41 +494,74 @@
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   max-width: calc(100% - 28px);
-  padding: 10px 14px;
+  padding: 5px 6px 5px 10px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 9px;
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
 }
 
-.kn-sel-tag {
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-}
-
+/* 名称：单行、过长省略（给状态与按钮留位置 ✓） */
 .kn-sel-title {
+  min-width: 0;
+  max-width: min(56cqw, 240px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
+  font-weight: 600;
 }
 
-.kn-sel-sub {
-  margin-top: 2px;
+/* 理解状态：小胶囊 + 状态点（已完成绿 / 学习中黄 / 未开始灰） */
+.kn-sel-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent));
   color: var(--dsw-alias-state-idle-primary);
   font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.kn-sel-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.kn-sel-status.is-done {
+  color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+}
+
+.kn-sel-status.is-learning {
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+}
+
+/* 未理解：与"未开始"同一档灰色（节点只有已理解/未理解两种 ✓） */
+.kn-sel-status.is-todo {
+  color: var(--dsw-alias-state-idle-primary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent);
 }
 
 .kn-sel-edit {
   flex: none;
-  padding: 6px 12px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 7px;
   background: transparent;
   color: inherit;
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
 

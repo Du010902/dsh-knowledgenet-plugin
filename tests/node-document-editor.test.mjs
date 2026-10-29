@@ -887,6 +887,33 @@ describe("与设计稿对应的部件与入口", () => {
     );
   });
 
+  it("选中节点信息条只保留**三项**：名称 / 理解状态 / 编辑入口 ✓（用户 2026-10-29 要求）", () => {
+    /* 结构：一行三件 —— 标题、理解状态胶囊、按钮 */
+    assert.ok(panelSource.includes('className="kn-sel-title"'), "要有节点名称");
+    assert.ok(panelSource.includes("kn-sel-status ${selectedNode.understood ?"), "状态胶囊按理解标记分两档（已理解 / 未理解）");
+    assert.ok(panelSource.includes('className="kn-sel-status-dot"'), "状态胶囊里要有状态点");
+    assert.ok(panelSource.includes('className="kn-sel-edit"'), "要有「编辑笔记」入口");
+    for (const key of ["understood", "notUnderstood"]) {
+      assert.ok(panelSource.includes(`"${key}"`), `理解状态文案走词典：${key}`);
+    }
+    /* 节点只有"已理解 / 未理解"两种状态：学习状态三件套不许再出现 ✗ */
+    assert.ok(panelSource.includes("payload?.understanding?.[node.id] === true"), "状态取理解标记（与图谱着色同源 ✓）");
+    for (const key of ["statusDone", "statusLearning", "statusTodo"]) {
+      assert.equal(panelSource.includes(key), false, `不该再用学习状态文案：${key} ✗`);
+    }
+    /* 砍掉的两项：不再有"当前知识点"标签、也不再显示前置数量 */
+    assert.equal(panelSource.includes("kn-sel-tag"), false, "「当前知识点」标签要删掉 ✗");
+    assert.equal(panelSource.includes("kn-sel-sub"), false, "第二行（状态 + 前置数）要删掉 ✗");
+    assert.equal(panelSource.includes("focusNow"), false, "不再用 focusNow 文案 ✗");
+    assert.equal(panelSource.includes("selectedNode.prerequisites"), false, "不再数前置条数 ✗");
+    /* 样式也要同步：新结构有定义、旧结构清掉；两档状态各有颜色 */
+    for (const cls of [".kn-sel {", ".kn-sel-title {", ".kn-sel-status {", ".kn-sel-status-dot {", ".kn-sel-status.is-done {", ".kn-sel-status.is-todo {", ".kn-sel-edit {"]) {
+      assert.ok(css.includes(cls), `样式要有 ${cls}`);
+    }
+    assert.equal(css.includes(".kn-sel-tag"), false, "旧标签样式要删掉 ✗");
+    assert.equal(css.includes(".kn-sel-sub"), false, "旧第二行样式要删掉 ✗");
+  });
+
   it("**对话入口只在笔记编辑界面**：右键空间视图的节点不再打开对话 ✓", () => {
     assert.ok(!menuSource.includes("onCreateConversation"), "右键菜单不许再有「打开新对话」✗");
     assert.ok(!menuSource.includes("nodeChatNew"), "菜单里的对话文案要一起删干净 ✗");

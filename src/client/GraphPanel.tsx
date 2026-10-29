@@ -181,13 +181,11 @@ const LITERAL: Record<string, string> = {
   createAnyway: "仍然新建",
   menuFailed: "操作失败",
   dependents: "依赖它的地方",
-  focusNow: "当前知识点",
-  prerequisites: "它的前置知识",
   dependentsEmpty: "没有其它知识点依赖它",
   prerequisitesEmpty: "它没有前置知识",
-  statusDone: "已完成",
-  statusLearning: "学习中",
-  statusTodo: "未开始",
+  /* 节点信息条只显示两种「理解状态」（与图谱着色同源 ✓） */
+  understood: "已理解",
+  notUnderstood: "未理解",
   notKnowledgeBase:
     "当前工作区不是知识库（没有通过「添加知识库」按钮登记过）。"
     + "用左侧栏「工作区」表头上的知识库按钮把它加进来即可。",
@@ -869,6 +867,9 @@ function GraphPanelInner(props: {
   /**
    * 当前**选中的节点**（信息条 + 「编辑笔记」入口要用 ✓）。
    *
+   * 状态只取**理解标记**（`payload.understanding`）：节点只有"已理解 / 未理解"两种状态 ✓，
+   * 与图谱节点的染色同源（`coloredGraph` 也是按它染的 ✓）。
+   *
    * 声明顺序很关键 ✗：它读 `graph` **和** `scopedFocus` ⇒ 必须排在这两个之后
    * （`useMemo` 的工厂在渲染期立即求值 ⇒ 排前面就是
    * `Cannot access 'X' before initialization`，整块面板崩 ✗ —— 这个坑已经踩过两次 ✓）。
@@ -880,10 +881,9 @@ function GraphPanelInner(props: {
     return {
       id: node.id,
       title: node.title,
-      status: node.status,
-      prerequisites: graph.edges.filter((edge) => edge.fromId === node.id).length,
+      understood: payload?.understanding?.[node.id] === true,
     };
-  }, [graph, scopedFocus]);
+  }, [graph, scopedFocus, payload?.understanding]);
 
   /**
    * 编辑器开着时，用户在图上点了别的节点 ⇒ **跟着切过去** ✓
@@ -1475,22 +1475,18 @@ function GraphPanelInner(props: {
               </ErrorBoundary>
             </div>
             {/*
-             * 选中节点信息 + 「编辑笔记」入口（设计稿左上角那条 ✓）。
-             *
-             * 上游那个 `sr-only` 播报是给读屏用的、**本来不可见** ✗；
-             * 这里给用户一条**真正看得见**的信息条（标题 + 状态 + 前置数），
-             * 并把正文编辑入口放在它右边 ✓ —— 与右键菜单里的同名入口是同一个动作 ✓。
+             * 选中节点信息条：**只保留三项**（用户 2026-10-29 要求 ✓）——
+             * ① 名称；② 理解状态（**只有已理解 / 未理解两种**，与图谱着色同源 ✓）；
+             * ③「编辑笔记」入口。不再显示"当前知识点"标签、不数前置条数、
+             * 也不显示学习状态（已完成/学习中/未开始 ✗）。
              */}
             {selectedNode !== null && editingNodeId === null && layer === "space" ? (
               <div className="kn-sel">
-                <div>
-                  <span className="kn-sel-tag">{t("focusNow")}</span>{" "}
-                  <span className="kn-sel-title">{selectedNode.title}</span>
-                  <div className="kn-sel-sub">
-                    {t(selectedNode.status === "done" ? "statusDone" : selectedNode.status === "learning" ? "statusLearning" : "statusTodo")}
-                    {selectedNode.prerequisites > 0 ? ` · ${selectedNode.prerequisites} ${t("prerequisites")}` : ""}
-                  </div>
-                </div>
+                <span className="kn-sel-title">{selectedNode.title}</span>
+                <span className={`kn-sel-status ${selectedNode.understood ? "is-done" : "is-todo"}`}>
+                  <span className="kn-sel-status-dot" aria-hidden="true" />
+                  {t(selectedNode.understood ? "understood" : "notUnderstood")}
+                </span>
                 <button
                   type="button"
                   className="kn-sel-edit"
