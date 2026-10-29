@@ -498,7 +498,7 @@
   padding: 10px 14px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 9px;
-  background: var(--dsw-alias-bg-layer-1));
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
 }
 
@@ -1673,4 +1673,322 @@
   border-top: 1px solid var(--dsw-alias-border-l1);
   border-radius: 0;
   color: var(--dsw-alias-label-primary);
+}
+
+/* ============================================================================
+   平面总览层：知识地图（两层视图的入口层，2026-10 设计稿 knowledge-islands.html ✓）
+   ----------------------------------------------------------------------------
+   - 层级：`.kn-map-stage`(z1) 盖在三维 stage 之上；`.kn-sel`(z3) 与编辑器(z12) 仍在上层 ✓；
+   - 三维 stage 只是 visibility:hidden（不卸载，避免 WebGL 上下文反复重建 ✗）；
+   - 颜色全部走宿主主题 token；派生色用 color-mix ✓（theme-tokens 守门）。
+   ========================================================================== */
+
+.kn-map-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+}
+
+/* 不可见时保留布局尺寸（不重排），但不可见也不可交互 ✓（与三维 stage 同一套约定） */
+.kn-map-stage[data-visible="false"] {
+  visibility: hidden;
+}
+
+/* 编辑器打开时地图让位（与 .kn-graph-stage / .kn-sel 同一组规则 ✓） */
+.kn-graph:has(.kn-editor) .kn-map-stage {
+  pointer-events: none;
+}
+
+.kn-map {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--dsw-alias-label-primary);
+  /* 参考设计稿的"知识海"点阵：只是很淡的底纹，不抢卡片 ✓ */
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent) 0.7px,
+    transparent 0.8px
+  );
+  background-size: 22px 22px;
+}
+
+/* ------------------------------- 地图头 ------------------------------- */
+
+.kn-map-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 16px 10px;
+}
+
+.kn-map-eyebrow {
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 1.6px;
+  color: var(--dsw-alias-label-caption);
+  text-transform: uppercase;
+}
+
+.kn-map-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.kn-map-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.kn-map-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.kn-map-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kn-map-whole {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-brand-primary);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.kn-map-whole[hidden] {
+  display: none;
+}
+
+.kn-map-whole:hover {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
+}
+
+.kn-map-whole:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.kn-map-whole-arrow {
+  font-size: 11px;
+}
+
+.kn-map-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--dsw-alias-state-idle-primary);
+}
+
+.kn-map-legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-idle-primary);
+}
+
+.kn-map-legend-dot.is-known {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.kn-map-legend-text {
+  margin-right: 6px;
+}
+
+/* ------------------------------- 岛卡列表 ------------------------------- */
+
+.kn-map-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 16px 10px;
+}
+
+.kn-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  gap: 8px;
+}
+
+.kn-island {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg, 12px);
+  background: var(--dsw-alias-bg-layer-2);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kn-island:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, var(--dsw-alias-bg-layer-2));
+}
+
+/* 当前空间所在的那座岛：从空间返回地图时一眼认出"刚才在哪"（头行不再重复写岛名 ✓） */
+.kn-island.is-current {
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, var(--dsw-alias-bg-layer-2));
+}
+
+.kn-island:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.kn-island-preview {
+  flex: none;
+  display: block;
+  width: 72px;
+  height: 54px;
+  overflow: hidden;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 3%, transparent);
+}
+
+.kn-island-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.kn-island-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.kn-island-code {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dsw-alias-label-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kn-island-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kn-island-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.kn-island-enter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--dsw-alias-brand-primary);
+  opacity: 0.85;
+}
+
+.kn-island-enter-arrow {
+  font-size: 11px;
+}
+
+/* 缩略图：点、连线与代表节点指纹环（颜色跟随主题 ✓） */
+.kn-island-link {
+  stroke: color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);
+  stroke-width: 0.6;
+}
+
+.kn-island-dot {
+  fill: var(--dsw-alias-state-idle-primary);
+}
+
+.kn-island-dot.is-known {
+  fill: var(--dsw-alias-state-success-primary);
+}
+
+.kn-island-ring {
+  fill: none;
+  stroke: var(--dsw-alias-brand-primary);
+  stroke-width: 0.7;
+  opacity: 0.55;
+}
+
+/* ------------------------------- 地图脚注 / 空态 ------------------------------- */
+
+.kn-map-foot {
+  flex: none;
+  padding: 6px 16px 9px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+  font-size: 10.5px;
+  color: var(--dsw-alias-state-idle-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kn-map-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.kn-map-empty-title {
+  font-size: 14px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.kn-map-empty-hint {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* 窄面板：省掉副标题与点阵感，卡片缩略图收小一点，保证一屏能看见两三座岛 ✓ */
+@container (max-width: 380px) {
+  .kn-map-head { padding: 12px 12px 8px; }
+  .kn-map-title { font-size: 18px; }
+  .kn-map-sub { display: none; }
+  .kn-map-scroll { padding: 2px 12px 8px; }
+  .kn-island-preview { width: 58px; height: 44px; }
 }

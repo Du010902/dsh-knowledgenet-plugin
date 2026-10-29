@@ -1,18 +1,21 @@
 import { nodeConversations } from "./node-conversations.ts";
 import { useViewFocus } from "./view-focus.ts";
 /**
- * 右侧栏标签页里的知识库图谱面板（**只有三维空间视图**）。
+ * 右侧栏标签页里的知识库图谱面板：**平面总览（知识地图）+ 三维空间**两层。
  *
  * 数据来自宿主注册的 Fetch 路由（`api/knowledgenet.graph`），与工具结果**同一份构造逻辑**：
  * 面板看到的图与模型看到的 JSON 不会说两套话。
  *
- * 视图只有**空间**（`GraphUniverse`：three.js + Worker 力导向布局，Worker 源码由构建期内联为 Blob）。
- * 旧的两维视图已经**从产品里去掉了** ✗ —— 因此：
- * - 面板不再注册任何两维卡片（`GraphCard` 那个文件是遗留死代码）；
- * - 兜底页也不再出现"回到另一个视图"那种话与按钮（构建期把上游那份文案与按钮一起改掉 ✓）。
+ * 两层怎么分工（`design/knowledge-map-two-layer.md`）：
+ * - **知识地图（默认入口，平面）**：按连通分量把图分成一座座"知识岛"，先回答"有哪些群"；
+ *   岛之间不画线、距离也没有语义。点岛 ⇒ 进入只含这座岛的**空间视图**；
+ * - **空间（`GraphUniverse`：three.js + Worker 力导向布局）**：一次只服务一座岛；
+ *   每座岛的相机/朝向按 `libraryKey + 岛键` 分区缓存（`view-cache.ts` / 上游 session 补丁），
+ *   所以来回进出不会互相串视角。整张图也保留为一张"总览"入口（多个岛时才出现）。
  *
- * 三维视图套了错误边界：WebGL/Worker 出问题时给一条可读提示与「重试」，
- * 而不是把整个面板从槽位里摘掉；视图**常驻挂载**（不可见只做显隐），
+ * 旧的两维聚焦视图没有复活 ✗：平面层是**岛级总览**，不是"以某个节点为中心的二维图"。
+ * 三维视图套了错误边界：WebGL/Worker 出问题时给一条可读提示，
+ * 而不是把整个面板从槽位里摘掉；视图**常驻挂载**（第一次进入才创建，之后不可见只做显隐），
  * 免得反复重建 WebGL 上下文 ✗。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -20,6 +23,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 import { GraphUniverse } from "../vendor/upstream/components/GraphUniverse.tsx";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
+import { KnowledgeMap } from "./KnowledgeMap.tsx";
+import { buildKnowledgeMap, islandSnapshot } from "./knowledge-map.ts";
 import { makeTranslator } from "./card-model.ts";
 import { pluginTranslate } from "./plugin-locale.ts";
 import { GraphContextMenu, requestCanvasMenu } from "./GraphContextMenu.tsx";
@@ -35,7 +40,7 @@ import { libraryKeyOf } from "./view-cache.ts";
 import { forgetOpenEditor, openEditorNode, rememberOpenEditor } from "./open-editor.ts";
 import { draftKey, forgetDraft, leaveLabels } from "./node-document-state.ts";
 import { RELAYOUT_EVENT } from "./interior-controller.ts";
-import { RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
+import { BackArrowIcon, RefreshRingIcon, RelayoutTreeIcon, SearchGlyphIcon, SubmitArrowIcon } from "./PanelIcon.tsx";
 import { rankNodes, type NodeMatch, type SearchableNode } from "./node-search.ts";
 import { ShadowPanel } from "./shadow.tsx";
 import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
@@ -101,6 +106,25 @@ const LITERAL: Record<string, string> = {
   searchGo: "搜索并聚焦",
   searchResults: "匹配结果",
   searchMiss: "没有匹配的节点",
+  /* 平面总览层（知识地图）：文案同时进中英词典 ✓ */
+  mapEyebrow: "你的知识，在上下文里",
+  mapTitle: "知识地图",
+  mapSubtitle: "先找到一片知识，再走进它的联系。",
+  mapMeta: "节点 {nodes} · 依赖 {edges} · 知识岛 {islands}",
+  wholeGraphAction: "整张图",
+  currentSpace: "当前空间",
+  mapLegendKnown: "已理解",
+  mapLegendUnknown: "未理解",
+  mapEmptyHint: "建好知识点与依赖之后，这里会自动长出知识岛。",
+  islandCode: "知识岛 / {index}",
+  islandCodeLoose: "未连接 / {count} 个",
+  isolatedIsland: "未连接节点",
+  islandMeta: "{nodes} 节点 · {edges} 依赖",
+  enterSpace: "进入空间",
+  islandAria: "{name}：{nodes} 个节点、{edges} 条依赖，进入空间",
+  islandAriaIsolated: "未连接节点：{nodes} 个节点，进入空间",
+  mapHint: "单击知识岛进入空间 · 地图上的距离不代表知识关系",
+  backToMap: "返回知识地图",
   loading: "正在解析当前工作区…",
   failed: "读取知识库失败",
   noNodes: "这个知识库里还没有知识点。",
@@ -232,6 +256,25 @@ function GraphPanelInner(props: {
   /** 相机命令：`fitAll`（收全图）或 `focusNode`（飞到某个节点）—— 类型直接用上游那份，别再写窄的 ✓ */
   const [cameraCommand, setCameraCommand] = useState<CameraCommand | null>(null);
   const fitSeqRef = useRef(0);
+  /*
+   * ------------------------------ 两层视图 ------------------------------
+   * 平面层（知识地图）是**默认入口**；空间层一次只服务一座知识岛。
+   * 三个状态刻意分开：
+   *  - `layer`：当前看哪一层（不持久化：面板换标签页会整体重挂，打开就回到地图 ✓ 用户 2026-10 选的是"地图优先"）；
+   *  - `islandId`：空间层的作用域（null = 整张图）；
+   *  - `spaceMounted`：空间层**第一次进入才挂载**（地图阶段不必替看不见的 WebGL 场景付初始化成本 ✓；
+   *    进入之后**常驻挂载**、只显隐 —— 反复销毁会丢 WebGL 上下文 ✗）。
+   */
+  const [layer, setLayer] = useState<"map" | "space">("map");
+  const [islandId, setIslandId] = useState<string | null>(null);
+  const [spaceMounted, setSpaceMounted] = useState(false);
+  /**
+   * 换岛会重建引擎（`key` 变了）：挂载时同 seq 的相机命令会被当成"已经执行过"而跳过 ⇒
+   * 搜索命中后要补发一次聚焦命令。这里只记"挂载后该聚焦谁"，发完就清 ✓。
+   */
+  const pendingFocusRef = useRef<string | null>(null);
+  /** 每座岛各自记住上次选中的节点（设计稿："每个群单独记住朝向与选择" ✓；相机由 view-cache 按岛键记 ✓） */
+  const islandSelectionRef = useRef(new Map<string, string>());
   /**
    * **正在编辑笔记的节点**（null = 编辑器关着 ✓）。
    *
@@ -759,20 +802,56 @@ function GraphPanelInner(props: {
   const coloredGraph = useMemo<GraphSnapshot | null>(() => graph ? { ...graph, nodes: graph.nodes.map(node => ({ ...node, status: payload?.understanding?.[node.id] === true ? "done" : "todo" })) } : graph, [graph, payload?.understanding]);
 
 
-  /**
-   * 三维**场景标识**：库身份 + 节点集合。
+  /*
+   * ------------------------------ 两层视图的数据 ------------------------------
    *
-   * `<GraphUniverse key=…>` 用它：换库或增删节点时重建引擎。
-   *
+   * 知识地图模型：按连通分量分岛（纯逻辑在 knowledge-map.ts ✓）。
    * **必须放在 `graph` 之后** ✗ —— 它读 `graph`；放到组件前部会在模块初始化时序上踩 TDZ
    * （实测 `ReferenceError: Cannot access 'graph' before initialization` ⇒ 整块面板渲染失败 ✗）。
    */
+  const mapModel = useMemo(() => (coloredGraph === null ? null : buildKnowledgeMap(coloredGraph)), [coloredGraph]);
+  /** 当前空间作用域对应的岛（null = 整张图；岛被合并/删掉时也是 null，下面有一条兜底 effect ✓） */
+  const island = useMemo(() => {
+    if (mapModel === null || islandId === null) return null;
+    return mapModel.islands.find((item) => item.key === islandId) ?? null;
+  }, [mapModel, islandId]);
+  /**
+   * 交给三维视图的**裁剪后的图**：空间层一次只服务一座岛。
+   *
+   * 关系按"两端都在岛内"过滤 —— 上游反查被点中的关系用 `graph.edges[hit.index]`，
+   * 留着跨岛边会让索引错位（右键就作用到别的关系上 ✗）。
+   */
+  const visibleGraph = useMemo<GraphSnapshot | null>(() => {
+    if (coloredGraph === null) return null;
+    return island === null ? coloredGraph : islandSnapshot(coloredGraph, island);
+  }, [coloredGraph, island]);
+  const visibleIds = useMemo(() => new Set((visibleGraph?.nodes ?? []).map((node) => node.id)), [visibleGraph]);
+  /**
+   * 空间层的**视角缓存身份**：库身份 + 岛键。
+   *
+   * 上游 `view-cache.ts` 与 session 布局缓存都按这个身份分区 ⇒ 每座岛各自记朝向、互不串 ✓，
+   * 回到整张图也还是原来那张图的视角 ✓。重排事件也按它"认领"（`interior-controller.ts` ✓）。
+   */
+  const sceneLibraryKey = useMemo(
+    () => (island === null ? libraryKey : `${libraryKey}::island:${island.key}`),
+    [libraryKey, island],
+  );
+  /**
+   * 三维**场景标识**：作用域键 + 节点集合。
+   *
+   * `<GraphUniverse key=…>` 用它：换库 / 换岛 / 增删节点时重建引擎。
+   */
   const sceneKey = useMemo(
-    () => `${libraryKey}#${(graph?.nodes ?? []).map((node) => node.id).sort().join(",")}`,
-    [libraryKey, graph],
+    () => `${sceneLibraryKey}#${(visibleGraph?.nodes ?? []).map((node) => node.id).sort().join(",")}`,
+    [sceneLibraryKey, visibleGraph],
   );
 
   const effectiveFocus = focusId ?? payload?.focusId ?? null;
+  /**
+   * 空间层里的**当前选中节点**：不在当前岛内就当没选中
+   * （否则信息条会报一个视图里根本不存在的节点 ✗）。搜索命中换岛时由 pendingFocus 补一条相机命令 ✓。
+   */
+  const scopedFocus = effectiveFocus !== null && visibleIds.has(effectiveFocus) ? effectiveFocus : null;
   const actualFocus = editingNodeId ?? focusId;
   useViewFocus({
     sessionId: props.sessionId,
@@ -786,13 +865,13 @@ function GraphPanelInner(props: {
   /**
    * 当前**选中的节点**（信息条 + 「编辑笔记」入口要用 ✓）。
    *
-   * 声明顺序很关键 ✗：它读 `graph` **和** `effectiveFocus` ⇒ 必须排在这两个之后
+   * 声明顺序很关键 ✗：它读 `graph` **和** `scopedFocus` ⇒ 必须排在这两个之后
    * （`useMemo` 的工厂在渲染期立即求值 ⇒ 排前面就是
    * `Cannot access 'X' before initialization`，整块面板崩 ✗ —— 这个坑已经踩过两次 ✓）。
    */
   const selectedNode = useMemo(() => {
-    if (graph === null || effectiveFocus === null || effectiveFocus === undefined) return null;
-    const node = graph.nodes.find((item) => item.id === effectiveFocus);
+    if (graph === null || scopedFocus === null) return null;
+    const node = graph.nodes.find((item) => item.id === scopedFocus);
     if (node === undefined) return null;
     return {
       id: node.id,
@@ -800,7 +879,7 @@ function GraphPanelInner(props: {
       status: node.status,
       prerequisites: graph.edges.filter((edge) => edge.fromId === node.id).length,
     };
-  }, [graph, effectiveFocus]);
+  }, [graph, scopedFocus]);
 
   /**
    * 编辑器开着时，用户在图上点了别的节点 ⇒ **跟着切过去** ✓
@@ -812,6 +891,96 @@ function GraphPanelInner(props: {
     if (effectiveFocus === editingNodeId) return;
     requestEdit({ kind: "open", nodeId: effectiveFocus });
   }, [effectiveFocus, editingNodeId, requestEdit]);
+
+  /*
+   * ------------------------------ 两层视图的切换 ------------------------------
+   */
+
+  /** 进入某座岛的空间：记住 / 恢复这座岛上次选中的节点 ✓（相机由按岛分区的视角缓存恢复 ✓） */
+  const enterIsland = (key: string): void => {
+    const target = mapModel?.islands.find((item) => item.key === key) ?? null;
+    const anchor = focusId ?? payload?.focusId ?? null;
+    const remembered = islandSelectionRef.current.get(key)
+      ?? (anchor !== null && target !== null && target.nodeIds.includes(anchor) ? anchor : null);
+    if (remembered !== null && remembered !== focusId) setFocusId(remembered);
+    setIslandId(key);
+    setLayer("space");
+    setSpaceMounted(true);
+  };
+
+  /** 进入整张图的空间（多座岛时的"总览"入口；不换作用域键 ⇒ 沿用整图的视角缓存 ✓） */
+  const enterWholeGraph = (): void => {
+    setIslandId(null);
+    setLayer("space");
+    setSpaceMounted(true);
+  };
+
+  /** 回到地图：编辑器开着时不走（避免地图浮在编辑器后面 / 让人以为未保存内容没了 ✗） */
+  const backToMap = useCallback((): void => {
+    if (editingNodeId !== null || leaveDialog !== null) return;
+    setLayer("map");
+  }, [editingNodeId, leaveDialog]);
+
+  /*
+   * 换岛会重建引擎（`key` 变了）⇒ 挂载时当前 seq 的命令会被当成"执行过了"而跳过 ✗。
+   * 搜索命中后在这里补发一条聚焦命令：effect 在子组件挂载之后才跑 ⇒ 引擎已经在了 ✓。
+   */
+  useEffect(() => {
+    if (layer !== "space") return;
+    const target = pendingFocusRef.current;
+    if (target === null) return;
+    pendingFocusRef.current = null;
+    fitSeqRef.current += 1;
+    setCameraCommand({ seq: fitSeqRef.current, type: "focusNode", nodeId: target, source: "toolbar" });
+  }, [layer, islandId]);
+
+  /* 每座岛各记各的选中节点（"每个群单独记住选择" ✓） */
+  useEffect(() => {
+    if (layer !== "space" || island === null || focusId === null) return;
+    if (!island.nodeIds.includes(focusId)) return;
+    islandSelectionRef.current.set(island.key, focusId);
+  }, [layer, island, focusId]);
+
+  /*
+   * 进入空间层时把焦点交给三维画布：
+   * ① 设计稿的「Esc 返回地图」要生效 —— Esc 监听挂在 `.graph` 上，焦点不在图谱区域里就收不到 ✗；
+   * ② F / 双击定位这些键盘操作进来就能用 ✓。
+   * 画布的焦点环在 CSS 里被压掉（`.kn-root .universe:focus`），所以不会出现"点一下出现一圈高亮"✗。
+   */
+  useEffect(() => {
+    if (layer !== "space" || editingNodeId !== null) return undefined;
+    const host = graphHostRef.current;
+    if (host === null) return undefined;
+    const timer = window.setTimeout(() => {
+      const canvas = host.querySelector(".universe");
+      if (canvas instanceof HTMLElement) canvas.focus({ preventScroll: true });
+    }, 30);
+    return () => { window.clearTimeout(timer); };
+  }, [layer, islandId, editingNodeId, spaceMounted]);
+
+  /*
+   * 编辑器打开时如果**还在地图上**（典型场景：面板重挂后恢复了上次打开的编辑器），
+   * 就进入"包含被编辑节点的那座岛"的空间 —— 否则编辑器会浮在地图上面 ✗。
+   * 已经在空间层时**不跳作用域**：整张图里打开编辑器就留在整图，岛里打开就留在那个岛 ✓。
+   */
+  useEffect(() => {
+    if (editingNodeId === null || layer === "space") return;
+    const owner = mapModel?.nodeToIsland.get(editingNodeId) ?? null;
+    setIslandId(owner);
+    setLayer("space");
+    setSpaceMounted(true);
+  }, [editingNodeId, layer, mapModel]);
+
+  /*
+   * 增删节点 / 改关系可能让当前岛合并、拆分或消失（设计稿把这列为边界情况）：
+   * 优先跟到"当前节点所在的新岛"，找不到就退回整张图 —— 空间层不能停在空场景里 ✓。
+   */
+  useEffect(() => {
+    if (islandId === null || mapModel === null) return;
+    if (mapModel.islands.some((item) => item.key === islandId)) return;
+    const anchor = focusId ?? payload?.focusId ?? null;
+    setIslandId(anchor === null ? null : mapModel.nodeToIsland.get(anchor) ?? null);
+  }, [islandId, mapModel, focusId, payload?.focusId]);
 
   /*
    * 搜索候选：**列出所有命中的节点，让用户自己挑** ✓（用户反馈 2026-10）。
@@ -848,7 +1017,22 @@ function GraphPanelInner(props: {
     const hit = searchMatches[index];
     if (hit === undefined) return;
     void reportDiag("graph-panel", "search-focus", `${hit.via}:${hit.score}`);
-    focusNodeById(hit.node.id);
+    /* 命中节点所在的岛：搜索必须把用户**带到那个岛的空间**，而不是在别处让它"看不见" ✗ */
+    const owner = mapModel?.nodeToIsland.get(hit.node.id) ?? null;
+    const inWholeSpace = layer === "space" && islandId === null;
+    if (owner === islandId || inWholeSpace) {
+      /* 同一作用域（或本来就在整张图的空间里）：引擎还挂着，直接选中 + 飞过去 ✓ */
+      setLayer("space");
+      setSpaceMounted(true);
+      focusNodeById(hit.node.id);
+    } else {
+      /* 换岛（或从整图进岛）：`key` 变了会重建引擎 ⇒ 挂载后补发聚焦命令 ✓ */
+      setIslandId(owner);
+      setLayer("space");
+      setSpaceMounted(true);
+      setFocusId(hit.node.id);
+      pendingFocusRef.current = hit.node.id;
+    }
     setSearchQuery("");
   };
 
@@ -964,15 +1148,30 @@ function GraphPanelInner(props: {
     <div ref={setFocusView} style={{ height: "100%", minHeight: "320px" }}>
     <ShadowPanel height="fill">
       {/*
-       * 这里**不再显示库名与计数**（用户反馈：知识库必然是当前项目下的 `.dsh_knowledge`，
-       * 那行是冗余信息 ✗）。面板顶部只留操作按钮；视图也只保留**空间视图**——
-       * 「聚焦视图」按用户要求整体去掉 ✓。
+       * 头行（用户要求：只留操作，不显示库名/计数 ✓）：
+       * - 平面层：刷新 + 搜索（地图自带标题与说明，头行不再重复）；
+       * - 空间层：最前面多一枚「返回知识地图」图标按钮（与旁边两颗图标按钮同形，不占宽度 ✓；
+       *   当前是哪座岛由地图上的「当前空间」标记表达，不在头行重复写岛名 ✗）。
+       *   「重新整理」只在空间层出现（平面层没有三维布局可重排 ✓）。
        */}
       <div className={searchOpen ? "kn-head kn-head-panel is-search-open" : "kn-head kn-head-panel"}>
-        {/*
-          * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
-          * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。
-          */}
+        {layer === "space" ? (
+          <button
+            type="button"
+            className="kn-btn kn-icon-btn"
+            aria-label={t("backToMap")}
+            title={t("backToMap")}
+            onClick={backToMap}
+            disabled={editingNodeId !== null || leaveDialog !== null}
+          >
+            <BackArrowIcon />
+          </button>
+        ) : null}
+        {layer === "space" ? (
+        /*
+         * 「重新整理」按用户要求换成**设计稿那枚"层级树"图标**（图标按钮，形态与右边那颗刷新一致）✓。
+         * 文字改由 `aria-label` 承担；`title` 里说明它到底做了什么（重跑力导向布局）✓。
+         */
         <button
           type="button"
           className="kn-btn kn-icon-btn"
@@ -987,9 +1186,12 @@ function GraphPanelInner(props: {
              *  ② `relayoutToken` +1 ⇒ 丢掉缓存的坐标、从确定性初始分布重排一轮；
              *  ③ 发一条 `fitAll` ⇒ 收全图（球心是否更新由控制器按②的请求决定 ✓）。
              * 注意：只复位"中心与距离"，**不动用户当前的旋转姿态** ✓。
+             *
+             * 广播里带的是**作用域身份**（库 + 岛）：空间层一次只服务一座岛，
+             * 控制器按身份认领 ⇒ 别的面板 / 别的岛的实例不会跟着重排 ✓。
              */
             window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT, {
-              detail: { libraryKey: libraryKeyOf(payload?.library) },
+              detail: { libraryKey: sceneLibraryKey },
             }));
             setRelayoutToken((value) => value + 1);
             fitWholeGraph();
@@ -997,6 +1199,7 @@ function GraphPanelInner(props: {
         >
           <RelayoutTreeIcon />
         </button>
+        ) : null}
         {/*
           * 「刷新」按用户要求改成**浏览器那颗圆环刷新按钮**的形态 ✓（字形直接抄 harness 产品图标集）。
           *
@@ -1174,34 +1377,59 @@ function GraphPanelInner(props: {
              * 编辑器也挂在这块 `.graph` 里 ✓，不排除的话每次右键都会多弹一个"创建节点"菜单 ✗。
              */
             onContextMenuCapture={(event) => {
-              /*
-               * **笔记编辑器里右键不弹图谱菜单** ✗（用户实测：会和表格菜单叠在一起 ✓——
-               * 截图里"这张图 / 创建节点"压在"在左侧插入列 / 本列对齐…"上面 ✓）。
-               *
-               * 编辑器就挂在这块 `.graph` 里 ✓，而这条监听是**捕获阶段**的 ✓
-               * ⇒ 不做判断的话，编辑器里的每一次右键都会开一次"创建节点"菜单 ✗。
-               * 提前返回 ⇒ ① 图谱菜单不弹 ✓；② 也**不 `preventDefault`** ✓
-               * ⇒ 浏览器/系统的原生右键菜单照旧可用 ✓（不许把用户的右键整体吃掉 ✗）。
-               */
+              /* 编辑器里右键不弹图谱菜单：编辑器也挂在这块 `.graph` 里，且本条是捕获阶段 ✓。
+               * 提前返回 ⇒ 菜单不弹、也不 preventDefault ⇒ 编辑器/系统的原生菜单照旧 ✓。 */
               const target = event.target as Element | null;
               if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) {
                 return;
               }
+              /* 地图卡是按钮，右键不算空白，不弹「创建节点」；地图背景照旧可以右键建节点 ✓。 */
+              if (layer === "map" && target !== null && target.closest(".kn-island") !== null) return;
               requestCanvasMenu(event.clientX, event.clientY);
               event.preventDefault();
+            }}
+            /*
+             * Esc 返回知识地图（设计稿的"返回不迷路"✓）。
+             * 只在空间层、没有编辑器 / 三选一 / 搜索候选时生效；编辑器里的 Esc 归编辑器自己 ✓。
+             */
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              if (layer !== "space" || editingNodeId !== null || leaveDialog !== null) return;
+              if (searchQuery.trim() !== "") return;
+              const target = event.target as Element | null;
+              if (target !== null && typeof target.closest === "function" && target.closest(".kn-editor") !== null) return;
+              setLayer("map");
             }}
           >
             {/*
              * 空库也要把画布渲染出来：**右键菜单是唯一的建节点入口**，
              * 没有画布就没有可右键的地方——第一颗节点会永远建不出来（实测反馈）。
-             * 这里只在画布上方叠一句提示，不放按钮。
+             * 这里只在画布上方叠一句提示，不放按钮；平面层自带空态，不重复叠 ✓。
              */}
-            {graph.nodes.length === 0 ? (
+            {layer === "space" && graph.nodes.length === 0 ? (
               <div className="kn-msg kn-empty-hint">
                 <div>{t("noNodes")}</div>
                 <div className="kn-dim">{t("emptyHint")}</div>
               </div>
             ) : null}
+            {/*
+             * 平面总览层（知识地图）：默认入口，盖在三维画布上方（`z-index` 高于 stage）。
+             *
+             * 地图本身没有节点级交互，右键空白仍然走上面那条捕获处理器 ⇒ 建节点入口不丢 ✓。
+             */}
+            <div className="kn-map-stage" data-visible={layer === "map" ? "true" : "false"}>
+              {mapModel !== null ? (
+                <ErrorBoundary fallback={<div className="kn-msg">{t("panelCrashed")}</div>}>
+                  <KnowledgeMap
+                    model={mapModel}
+                    currentIslandId={islandId}
+                    onEnterIsland={enterIsland}
+                    onEnterWhole={enterWholeGraph}
+                    t={t}
+                  />
+                </ErrorBoundary>
+              ) : null}
+            </div>
             {/*
               * 三维视图**常驻挂载**，可见性只控制显隐 ✓。
               *
@@ -1210,11 +1438,12 @@ function GraphPanelInner(props: {
               * —— 那正是「三维绘制已中断」那一页的来源 ✗。
               * 上游的渲染循环是**按需唤醒**的（静止时不再排帧）⇒ 常驻几乎不耗电 ✓。
               */}
-            <div className="kn-graph-stage" data-visible={visible ? "true" : "false"}>
+            <div className="kn-graph-stage" data-visible={visible && layer === "space" ? "true" : "false"}>
               <ErrorBoundary
                 fallback={<div className="kn-msg">{t("spaceFailed")}</div>}
                 onError={() => { setSpaceNotice(t("spaceFailed")); }}
               >
+                {spaceMounted && visibleGraph !== null ? (
                 <GraphUniverse
                   /*
                    * **节点集合变化时重建场景**（key 变化 ⇒ React 重新挂载）。
@@ -1223,20 +1452,22 @@ function GraphPanelInner(props: {
                    * 所以改关系、聚焦等不会触发重建（镜头不会乱跳 ✓）。
                    */
                   /*
-                   * key = **库根 + 节点集合**：换库或增删节点时重建场景 ✓。
-                   * 为什么要带库根：上游的相机/布局缓存是**模块级全局单例** ✗（跨库共用），
-                   * 不带库根就会出现"切到另一个库后沿用上一个库的视角"（位置不对）✓。
+                   * key = **作用域键 + 节点集合**：换库 / 换岛 / 增删节点时重建场景 ✓。
+                   * 为什么要带作用域键：上游的相机/布局缓存按身份分区（`view-cache.ts` 与
+                   * 构建期对 `session.ts` 的补丁 ✓），不带它就会出现"切到另一座岛后沿用
+                   * 上一张图的视角 / 布局坐标"（位置不对）✓。
                    */
                   key={sceneKey}
-                  graph={coloredGraph ?? graph}
-                  rootId={payload?.focusId ?? null}
-                  focusId={effectiveFocus}
+                  graph={visibleGraph}
+                  rootId={island === null ? (payload?.focusId ?? null) : island.representativeId}
+                  focusId={scopedFocus}
                   labelDensity="smart"
                   command={cameraCommand}
                   relayoutToken={relayoutToken}
-                  libraryKey={libraryKey}
+                  libraryKey={sceneLibraryKey}
                   onEnter={(id: string) => setFocusId(id)}
                 />
+                ) : null}
               </ErrorBoundary>
             </div>
             {/*
@@ -1246,7 +1477,7 @@ function GraphPanelInner(props: {
              * 这里给用户一条**真正看得见**的信息条（标题 + 状态 + 前置数），
              * 并把正文编辑入口放在它右边 ✓ —— 与右键菜单里的同名入口是同一个动作 ✓。
              */}
-            {selectedNode !== null && editingNodeId === null ? (
+            {selectedNode !== null && editingNodeId === null && layer === "space" ? (
               <div className="kn-sel">
                 <div>
                   <span className="kn-sel-tag">{t("focusNow")}</span>{" "}

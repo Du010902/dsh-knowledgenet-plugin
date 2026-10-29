@@ -204,3 +204,29 @@ export function SubmitArrowIcon({ size = 14 }: { size?: number }) {
     </svg>
   );
 }
+
+/**
+ * 「返回知识地图」的**左箭头**：16 网格 + 线宽 1，与面板其它图标同一套画法。
+ *
+ * 几何是常规的"←"（横线 + 左向折角），不是从宿主抄的 —— 宿主产品图标集里没有单纯的返回箭头可用，
+ * 而且它的 sprite `<use>` 在 Shadow DOM 里渲染成 0×0（见上面 `FolderOpenIcon` 的说明 ✓）。
+ *
+ * @param size - 边长（px），默认 15（面板头行里那几颗图标同一渲染尺寸 ✓）。
+ */
+export function BackArrowIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+      strokeWidth={1}
+    >
+      <path d="M13.5 8H2.5" stroke="currentColor" strokeLinecap="round" />
+      <path d="M7 3.5 2.5 8 7 12.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

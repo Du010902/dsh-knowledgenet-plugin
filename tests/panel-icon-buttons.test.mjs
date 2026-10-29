@@ -1,13 +1,14 @@
 /**
- * 面板头部的两颗图标按钮：形态守门（用户要求 2026-09）。
+ * 面板头部的图标按钮：形态守门（用户要求 2026-09；2026-10 新增「返回知识地图」）。
  *
- * 这一版把「重新整理」与「刷新」都从**文字胶囊**换成了**图标按钮**：
+ * 这一版把「返回地图」「重新整理」「刷新」都做成**同形的图标按钮**（不是文字胶囊）：
  * - **刷新** = harness 产品图标集的原版圆环字形（`ui-primitives/src/icons/index.tsx`
  *   的 `IconRefreshOutlineArtwork`，浏览器/文件面板那颗就是它）；
- * - **重新整理** = 用户给的设计稿里那枚"层级树"字形（三个圆角方块 + 一条分叉干线）。
+ * - **重新整理** = 用户给的设计稿里那枚"层级树"字形（三个圆角方块 + 一条分叉干线）；
+ * - **返回知识地图** = 面板自绘的左箭头（用户 2026-10 反馈"左上角不要新增文字块"⇒ 只留图标）。
  *
  * 钉住的点（都是容易回退或画偏的地方）：
- * 1. 两颗按钮都用 `kn-icon-btn`、**不能有可见文字**，但读屏名字（`aria-label`）与 hover 说明要在；
+ * 1. 每颗按钮都用 `kn-icon-btn`、**不能有可见文字**，但读屏名字（`aria-label`）与 hover 说明要在；
  * 2. **几何必须逐字照抄来源**：刷新对 harness、重新整理对设计稿 —— 上一轮"自己算几何"就把刷新画歪过 ✗；
  * 3. 画法按面板约定（16 网格 + 线宽 1 + `currentColor`），否则和邻居图标粗细对不上；
  * 4. 形状覆盖必须写在 `panel.css` **末尾** —— `.kn-root-fill .kn-btn` 那几条响应式规则
@@ -38,13 +39,14 @@ function buttonOf(marker) {
 }
 
 describe("面板头部图标按钮：共同形态", () => {
-  it("两颗按钮都是 kn-icon-btn（外观一致），且都不再有可见文字", () => {
+  it("三颗按钮都是 kn-icon-btn（外观一致），且都不再有可见文字", () => {
     assert.equal(
       (panel.match(/className="kn-btn kn-icon-btn"/g) ?? []).length,
-      2,
-      "「重新整理」与「刷新」都应是图标按钮",
+      3,
+      "「返回地图」「重新整理」与「刷新」都应是图标按钮",
     );
     for (const [marker, label, iconTag] of [
+      ['aria-label={t("backToMap")}', "返回知识地图", "<BackArrowIcon />"],
       ['aria-label={t("relayout")}', "重新整理", "<RelayoutTreeIcon />"],
       ['aria-label={t("refresh")}', "刷新", "<RefreshRingIcon />"],
     ]) {
@@ -53,7 +55,7 @@ describe("面板头部图标按钮：共同形态", () => {
       const body = button.slice(button.indexOf(">") + 1);
       assert.ok(body.includes(iconTag), `${label} 的按钮体里只应有图标`);
       assert.equal(
-        /t\("(relayout|refresh)"\)(?!\s*\})/.test(body.replace(/aria-label=\{[^}]*\}/g, "")),
+        /t\("(backToMap|relayout|refresh)"\)(?!\s*\})/.test(body.replace(/aria-label=\{[^}]*\}/g, "")),
         false,
         `${label} 不能再把文字渲染进按钮（那又会变回文字胶囊）`,
       );
@@ -61,6 +63,8 @@ describe("面板头部图标按钮：共同形态", () => {
   });
 
   it("可见文字没了，读屏名字与 hover 说明必须在", () => {
+    assert.ok(panel.includes('aria-label={t("backToMap")}'), "返回地图要有 aria-label");
+    assert.ok(panel.includes('title={t("backToMap")}'), "返回地图要有 hover 说明");
     assert.ok(panel.includes('aria-label={t("relayout")}'), "重新整理要有 aria-label");
     assert.ok(panel.includes('title={t("relayoutHint")}'), "重新整理要有 hover 说明");
     assert.ok(panel.includes('aria-label={t("refresh")}'), "刷新要有 aria-label");

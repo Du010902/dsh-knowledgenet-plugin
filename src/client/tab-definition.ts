@@ -98,8 +98,8 @@ export function graphTabDefinition(english: boolean, icon?: unknown): GraphTabDe
   const tabTitle = english ? "Graph" : "图谱";
   const guideTitle = english ? "Knowledge graph" : "知识库图谱";
   const description = english
-    ? "Focus and space views of the knowledge library, docked beside the conversation"
-    : "在右侧栏里看知识库的聚焦视图与空间视图";
+    ? "Map and space views of the knowledge library, docked beside the conversation"
+    : "在右侧栏里看知识库的知识地图与空间视图";
   return {
     id: GRAPH_TAB_ID,
     kind: GRAPH_TAB_KIND,

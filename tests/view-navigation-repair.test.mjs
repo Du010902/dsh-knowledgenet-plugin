@@ -103,7 +103,7 @@ describe("P1 视图缓存：按知识库身份分区", () => {
      *   `new SpaceEngine({ libraryKey })` → `this.knLibraryKey` →
      *   `new SpaceNavigation({ libraryKey })` 与每一次缓存读写 ✓。
      */
-    assert.ok(panelSource.includes("libraryKey={libraryKey}"), "面板要把身份作为 prop 传下去");
+    assert.ok(panelSource.includes("libraryKey={sceneLibraryKey}"), "面板要把**作用域身份**（库 + 岛）作为 prop 传给三维视图");
     assert.ok(panelSource.includes("useMemo(() => libraryKeyOf(payload?.library)"), "身份由载荷算出来（稳定 id 优先 ✓）");
     assert.ok(!/setActiveLibraryKey|activeLibraryKey/.test(panelSource), "面板不该再写全局身份 ✗");
     assert.ok(!/setActiveLibraryKey|activeLibraryKey/.test(controllerSource), "控制器不该再读全局身份 ✗");
