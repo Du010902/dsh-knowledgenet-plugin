@@ -49,7 +49,7 @@ export interface IslandPreview {
   edges: Array<[number, number]>;
 }
 
-/** 一座知识岛（一个连通分量；多个孤立节点会合并成一张「未连接节点」卡） */
+/** 一座知识岛（一个连通分量；多个孤立节点会合并成一张「独立节点」卡） */
 export interface KnowledgeIsland {
   /**
    * 作用域键 / 视角缓存键：成员 ID 集合的哈希。
@@ -62,7 +62,7 @@ export interface KnowledgeIsland {
   nodeIds: string[];
   /** 与 `nodeIds` 同序的展示信息 */
   nodes: IslandNodeView[];
-  /** 卡片标题：代表节点（岛内**入口节点**，见 `representativeId`）的标题；多节点「未连接节点」卡为 null */
+  /** 卡片标题：代表节点（岛内**入口节点**，见 `representativeId`）的标题；多节点「独立节点」卡为 null */
   name: string | null;
   /**
    * 代表节点：没有依赖者的入口节点（多棵树顶时取度数最高的；理论上没有则退回度数最高）。
@@ -73,14 +73,14 @@ export interface KnowledgeIsland {
   /** 岛内无向关系条数（同一对节点的多条有向边只算一条 ✓） */
   edgeCount: number;
   knownCount: number;
-  /** 是否是「未连接节点」合并卡（单个孤立节点也算，此时 name 是该节点标题） */
+  /** 是否是「独立节点」合并卡（单个孤立节点也算，此时 name 是该节点标题） */
   isolated: boolean;
   preview: IslandPreview;
 }
 
 /** 整张图切成知识岛之后的结果 */
 export interface KnowledgeMapModel {
-  /** 卡片顺序：非孤立岛按节点数降序（同数按名字），未连接卡固定最后 */
+  /** 卡片顺序：非孤立岛按节点数降序（同数按名字），独立节点卡固定最后 */
   islands: KnowledgeIsland[];
   /** 节点 ID → 岛键（搜索命中后"该去哪个岛"、局部刷新后"还认不认得这座岛"都要它） */
   nodeToIsland: Map<string, string>;
@@ -404,7 +404,7 @@ function normalizePreviewPoints(
 
 /* -------------------------------- 小工具 -------------------------------- */
 
-/** 岛卡排序：节点多的在前；同数量按名字（未连接卡固定最后） */
+/** 岛卡排序：节点多的在前；同数量按名字（独立节点卡固定最后） */
 function compareIslands(a: KnowledgeIsland, b: KnowledgeIsland): number {
   if (a.isolated !== b.isolated) return a.isolated ? 1 : -1;
   if (a.nodeCount !== b.nodeCount) return b.nodeCount - a.nodeCount;

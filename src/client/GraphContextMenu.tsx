@@ -18,6 +18,7 @@ import { makeTranslator } from "./card-model.ts";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { reportDiag } from "./diag.ts";
+import { rankNodes, type SearchableNode } from "./node-search.ts";
 
 /** 上游事件名（契约来自 vendor/upstream/components/nodeContextMenu.ts） */
 export const NODE_MENU_EVENT = "knowledgenet:node-context-menu";
@@ -47,6 +48,8 @@ export function requestCanvasMenu(x: number, y: number): void {
 interface MenuNode {
   id: string;
   title?: string;
+  /** 别名也参与候选匹配（"添加前置"输入框下面的已有节点列表用 ✓） */
+  aliases?: readonly string[];
 }
 
 interface MenuEdge {
@@ -135,7 +138,15 @@ function ensureStyle(doc: Document): void {
   doc.head.append(style);
 }
 
-/** 输入标题的弹窗（替代会被静默忽略的 `window.prompt`） */
+/**
+ * 输入标题的图内弹窗（替代会被静默忽略的 `window.prompt`）。
+ *
+ * 用户 2026-10-29 要求：
+ * ① 弹窗**只出现在图谱界面上方** ✓ —— 不再 portal 到 body 铺满整个窗口，而是渲染在
+ *    `.graph` 里（`.kn-prompt-backdrop` 绝对定位到图谱区、贴顶居中）；
+ * ② 输入「添加前置节点」名称时，**下面列出知识库里已有的节点**供选择 ✓
+ *    （点一下就把名字填进输入框，再点「添加」；不会误建重复节点 ✓）。
+ */
 function PromptDialog(props: {
   title: string;
   hint: string;
@@ -143,49 +154,90 @@ function PromptDialog(props: {
   cancelLabel: string;
   initial: string;
   busy?: boolean;
+  /** 已有节点候选（只有"添加前置"传：输入时按匹配度列出来 ✓） */
+  suggestions?: readonly MenuNode[];
+  /** 候选列表的读屏名字 */
+  suggestionLabel?: string;
   onConfirm: (value: string) => void;
   onCancel: () => void;
 }): ReactNode {
   const [value, setValue] = useState(props.initial);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 输入框下方的已有节点候选：**复用面板搜索的打分**（标题 / 别名都算命中）✓，
+   * 同一标题只列一次，最多 6 条（再多就成翻列表了 ✗）。
+   */
+  const matches = useMemo(() => {
+    if (props.suggestions === undefined) return [];
+    const query = value.trim();
+    if (query === "") return [];
+    const pool: SearchableNode[] = [];
+    for (const node of props.suggestions) {
+      if (typeof node.title !== "string" || node.title.trim() === "") continue;
+      pool.push({ id: node.id, title: node.title, aliases: node.aliases });
+    }
+    const titles: string[] = [];
+    const seen = new Set<string>();
+    for (const hit of rankNodes(pool, query, 8)) {
+      const title = hit.node.title;
+      if (seen.has(title)) continue;
+      seen.add(title);
+      titles.push(title);
+      if (titles.length >= 6) break;
+    }
+    return titles;
+  }, [props.suggestions, value]);
   if (typeof document === "undefined") return null;
-  return createPortal(
-    <div className="kn-modal-backdrop" role="presentation" onClick={props.onCancel}>
-      <div className="kn-modal" role="dialog" aria-modal="true" aria-label={props.title} onClick={(e) => { e.stopPropagation(); }}>
-        <div className="kn-modal-title">{props.title}</div>
-        <div className="kn-modal-body">{props.hint}</div>
+  const submit = (): void => {
+    if (value.trim() === "") { setError(props.hint); return; }
+    props.onConfirm(value.trim());
+  };
+  return (
+    <div className="kn-prompt-backdrop" role="presentation" onClick={props.onCancel}>
+      <div className="kn-prompt" role="dialog" aria-label={props.title} onClick={(event) => { event.stopPropagation(); }}>
+        <div className="kn-prompt-title">{props.title}</div>
+        <div className="kn-prompt-body">{props.hint}</div>
         <input
-          className="kn-modal-input"
+          className="kn-prompt-input"
           autoFocus
           value={value}
           placeholder={props.hint}
-          onChange={(event) => { setValue(event.target.value); setError(null); }}
+          onChange={(event) => { setValue(event.currentTarget.value); setError(null); }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
-              if (value.trim() === "") { setError(props.hint); return; }
-              props.onConfirm(value.trim());
+              submit();
             } else if (event.key === "Escape") {
               props.onCancel();
             }
           }}
         />
-        <div className="kn-modal-actions">
-          <button type="button" className="kn-modal-btn" onClick={props.onCancel}>{props.cancelLabel}</button>
-          <button
-            type="button"
-            className="kn-modal-btn kn-modal-primary"
-            onClick={() => {
-              if (value.trim() === "") { setError(props.hint); return; }
-              props.onConfirm(value.trim());
-            }}
-          >
+        {matches.length === 0 ? null : (
+          <div className="kn-prompt-suggest" role="listbox" aria-label={props.suggestionLabel ?? props.title}>
+            {matches.map((title) => (
+              <button
+                key={title}
+                type="button"
+                role="option"
+                aria-selected={false}
+                className="kn-prompt-suggest-item"
+                /* 按下时别抢走输入框焦点（否则连续点选会乱）✓ */
+                onMouseDown={(event) => { event.preventDefault(); }}
+                onClick={() => { setValue(title); setError(null); }}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="kn-prompt-actions">
+          <button type="button" className="kn-prompt-btn" onClick={props.onCancel}>{props.cancelLabel}</button>
+          <button type="button" className="kn-prompt-btn kn-prompt-primary" onClick={submit}>
             {props.confirmLabel}
           </button>
         </div>
-        {error === null ? null : <div className="kn-modal-error">{error}</div>}
+        {error === null ? null : <div className="kn-prompt-error">{error}</div>}
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 
@@ -211,13 +263,16 @@ export interface GraphContextMenuProps {
     addPrerequisite: string;
     edgeMenuTitle: string;
     removeRelation: string;
-  /** 空白处右键菜单：创建节点 */
-  createNode?: string;
-  /** 建节点弹窗的标题/提示 */
+  /** 空白处右键菜单：创建**独立节点**（不连任何关系，会归入地图的「独立节点」✓） */
+  createIndependentNode?: string;
+  /** 建独立节点弹窗的标题/提示/确认按钮 */
   createNodeTitle?: string;
   createNodeHint?: string;
-  /** 空白菜单的标题（默认「这张图」） */
+  createNodeConfirm?: string;
+  /** 空白菜单的标题（默认「这张图」；空白菜单只有一条动作，不再显示标题 ✓） */
   canvasMenuTitle?: string;
+  /** 「添加前置」输入框下方已有节点列表的读屏名字 */
+  suggestLabel?: string;
     removeNode: string;
     removeNodeConfirmTitle: string;
     removeNodeConfirmMessage: string;
@@ -247,9 +302,12 @@ export interface GraphContextMenuProps {
 /** 右键菜单的字面兜底 ✓（放在模块级：组件里的 `useMemo` 引用它不会踩"先用后声明"那条测试 ✓） */
 const MENU_LITERAL: Record<string, string> = {
   canvasMenuTitle: "这张图",
+  createIndependentNode: "创建独立节点",
   createNode: "创建节点",
-  createNodeTitle: "创建知识点",
-  createNodeHint: "输入知识点名称（会作为它的文件名）",
+  createNodeTitle: "创建独立节点",
+  createNodeHint: "输入知识点名称（会作为文件名）；新节点不与任何节点相连，会归入地图的「独立节点」。",
+  createNodeConfirm: "创建",
+  suggestLabel: "知识库里已有的节点",
   editNote: "编辑笔记",
   removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
   removeNodePurge: "删除",
@@ -465,13 +523,15 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
            * 但**没有任何元素压在菜单之上** ✓。
            */}
           <div className="kn-menu" style={{ left: menu.x, top: menu.y }} role="menu">
-            <div className="kn-menu-title">
-              {menu.kind === "canvas"
-                ? (props.copy.canvasMenuTitle ?? tr("canvasMenuTitle"))
-                : menu.kind === "node"
-                  ? titleOf(menu.id)
-                  : edgeLabel(menu.id)}
-            </div>
+            {/*
+             * 空白处菜单**不显示标题**（用户 2026-10-29："只需要有创建独立节点即可"）：
+             * 那种场景只有一条动作，标题只会多占一行、还容易让人以为"这张图"是个可点的东西 ✗。
+             */}
+            {menu.kind === "canvas" ? null : (
+              <div className="kn-menu-title">
+                {menu.kind === "node" ? titleOf(menu.id) : edgeLabel(menu.id)}
+              </div>
+            )}
             {menu.kind === "canvas" ? (
               <button
                 type="button"
@@ -482,7 +542,7 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
                   report("canvas-menu-create", {});
                 }}
               >
-                {props.copy.createNode ?? tr("createNode")}
+                {props.copy.createIndependentNode ?? tr("createIndependentNode")}
               </button>
             ) : menu.kind === "node" ? (
               <>
@@ -562,6 +622,9 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
           confirmLabel={props.copy.confirmCreate}
           cancelLabel={props.copy.cancel}
           initial=""
+          /* 输入时在下面列出**知识库里已有**的节点（排除当前这个节点自己 ✓） */
+          suggestions={props.nodes.filter((node) => node.id !== prompt.fromId)}
+          suggestionLabel={props.copy.suggestLabel ?? tr("suggestLabel")}
           onCancel={() => { setPrompt(null); }}
           onConfirm={(value) => {
             const fromId = prompt.fromId;
@@ -572,14 +635,14 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
       )}
 
       {/*
-        * 空白处右键 → 「创建节点」：只问名称。
+        * 空白处右键 → 「创建独立节点」：只问名称。
         * 空库里的第一颗节点就走这条路（复用库自己的建节点写法，扫描得到、不是手搓的）。
         */}
       {createNodeAt === null ? null : (
         <PromptDialog
           title={props.copy.createNodeTitle ?? tr("createNodeTitle")}
           hint={props.copy.createNodeHint ?? tr("createNodeHint")}
-          confirmLabel={props.copy.createNode ?? tr("createNode")}
+          confirmLabel={props.copy.createNodeConfirm ?? tr("createNodeConfirm")}
           cancelLabel={props.copy.cancel}
           initial=""
           onCancel={() => { setCreateNodeAt(null); }}

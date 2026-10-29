@@ -33,6 +33,11 @@
   --danger: var(--dsw-alias-state-error-primary);
   --graph-glow-1: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent);
   --graph-glow-2: color-mix(in srgb, var(--dsw-alias-brand-primary) 3%, transparent);
+  /* 两层视图共用的点阵底纹（22px 网格）：知识地图与三维空间用**同一份**，切换层时网格不会跳 ✓ */
+  --kn-dot-grid: radial-gradient(
+    color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent) 0.7px,
+    transparent 0.8px
+  );
   /* 对比色与阴影没有对应 token：前者是品牌前景色，后者是中性阴影，都不随主题走 */
   --on-accent: #ffffff;
   --shadow: 0 18px 55px rgba(0, 0, 0, 0.16);
@@ -105,6 +110,14 @@
 .kn-graph-stage {
   position: absolute;
   inset: 0;
+  /*
+   * 三维视图底下的**点阵底纹**（用户 2026-10-29："这种点点背景，给节点视图界面也加上吧"）：
+   * 与知识地图共用 `--kn-dot-grid`，22px 网格对齐 ⇒ 地图 ⇄ 空间切换时底纹位置不跳 ✓。
+   * WebGL 画布是透明清屏（`setClearColor(0,0)`）⇒ 点阵会从画布后面透出来 ✓；
+   * 上游 `.universe` 的底色在标签页模式里已被压成 transparent ✓。
+   */
+  background-image: var(--kn-dot-grid);
+  background-size: 22px 22px;
 }
 
 .kn-graph-stage[data-visible="false"] {
@@ -1740,11 +1753,8 @@
   height: 100%;
   min-height: 0;
   color: var(--dsw-alias-label-primary);
-  /* 参考设计稿的"知识海"点阵：只是很淡的底纹，不抢卡片 ✓ */
-  background-image: radial-gradient(
-    color-mix(in srgb, var(--dsw-alias-label-primary) 9%, transparent) 0.7px,
-    transparent 0.8px
-  );
+  /* 与三维空间共用同一份"知识海"点阵（22px 网格 ✓） */
+  background-image: var(--kn-dot-grid);
   background-size: 22px 22px;
 }
 
@@ -2025,4 +2035,133 @@
   .kn-map-sub { display: none; }
   .kn-map-scroll { padding: 2px 12px 8px; }
   .kn-island-preview { width: 58px; height: 44px; }
+}
+
+/* ============================================================================
+   图内输入弹窗（「添加前置节点」/「创建独立节点」）
+   ----------------------------------------------------------------------------
+   用户 2026-10-29：这类弹窗**只出现在图谱界面上方**即可，不要再铺满整个窗口；
+   「添加前置节点」输入时，输入框下面要列出知识库里已有的节点供选择 ✓。
+   渲染位置：GraphContextMenu 在 `.graph` 里，这里用绝对定位贴合 `.kn-graph` ✓
+   （面板在 Shadow DOM 里，所以样式必须写进 panel.css、不能用 light DOM 的 .kn-modal ✗）。
+   ========================================================================== */
+
+.kn-prompt-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 56px 14px 14px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent);
+}
+
+.kn-prompt {
+  box-sizing: border-box;
+  width: min(360px, 100%);
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg, 12px);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--shadow-soft);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12.5px;
+}
+
+.kn-prompt-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.kn-prompt-body {
+  margin-top: 6px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.kn-prompt-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-base);
+  color: inherit;
+  font: inherit;
+}
+
+.kn-prompt-input:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+/* 已有节点候选：输入时出现，点一下填进输入框 ✓ */
+.kn-prompt-suggest {
+  margin-top: 6px;
+  max-height: 148px;
+  overflow: auto;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-base);
+}
+
+.kn-prompt-suggest-item {
+  display: block;
+  width: 100%;
+  padding: 5px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.kn-prompt-suggest-item:hover,
+.kn-prompt-suggest-item:focus-visible {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+  outline: none;
+}
+
+.kn-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.kn-prompt-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kn-prompt-btn:hover {
+  background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent));
+}
+
+.kn-prompt-primary {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.kn-prompt-primary:hover {
+  background: var(--dsw-alias-brand-primary);
+  opacity: 0.92;
+}
+
+.kn-prompt-error {
+  margin-top: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 11.5px;
 }

@@ -258,4 +258,20 @@ describe("面板接线（静态守门）", () => {
     }
     assert.ok(css.includes(".kn-map-stage[data-visible=\"false\"]"), "地图也要用显隐而不是卸载");
   });
+
+  it("平面层与**三维空间层**共用同一份点阵底纹（用户 2026-10-29 要求 ✓）", () => {
+    assert.ok(css.includes("--kn-dot-grid:"), "点阵底纹要有一份共享定义（两层共用、网格对齐 ✓）");
+    assert.ok(
+      /\.kn-map \{[\s\S]{0,200}?background-image: var\(--kn-dot-grid\)/.test(css),
+      "知识地图用共享点阵 ✓",
+    );
+    assert.ok(
+      /\.kn-graph-stage \{[\s\S]{0,400}?background-image: var\(--kn-dot-grid\)/.test(css),
+      "三维空间层也要用同一份点阵（画布透明清屏 ⇒ 会透出来 ✓）",
+    );
+    assert.ok(
+      /\.kn-graph-stage \{[\s\S]{0,400}?background-size: 22px 22px/.test(css),
+      "三维空间的点阵网格也必须是 22px（与地图一致，切换层不跳 ✓）",
+    );
+  });
 });
