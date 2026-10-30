@@ -148,7 +148,7 @@ describe("按钮样式与注册形状", () => {
     assert.match(css, /position: fixed; inset: 0;/, "必须脱离侧栏布局");
     assert.match(css, /z-index: 9999/);
     assert.match(css, /\.kn-modal \{/);
-    assert.match(css, /border-radius: 12px/);
+    assert.match(css, /border-radius: 14px/);
     assert.match(css, /\.kn-modal-actions/);
     assert.match(css, /\.kn-modal-primary/, "确认按钮要有主色");
     // 颜色全走宿主 token，亮暗主题自动跟随

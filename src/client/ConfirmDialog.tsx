@@ -8,7 +8,7 @@
  * - 样式由 `confirmDialogCss()` 注入到 head（弹窗在 light DOM 里，Shadow DOM 的样式管不到它）；
  * - Esc = 取消，Enter = 确认，背景点击 = 取消，打开时焦点落在"确认"上。
  */
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export interface ConfirmDialogProps {
@@ -57,12 +57,35 @@ export function ConfirmDialog(props: ConfirmDialogProps): ReactNode {
   const { onConfirm, onCancel } = props;
   const busy = props.busy === true;
   const confirmDisabled = props.confirmDisabled === true || busy;
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (!dialogRef.current?.contains(document.activeElement)) {
+      dialogRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    }
     const onKey = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === "Tab") {
+        const buttons = Array.from(dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+        if (buttons.length === 0) { event.preventDefault(); return; }
+        const first = buttons[0];
+        const last = buttons[buttons.length - 1];
+        if (!dialogRef.current?.contains(document.activeElement)) {
+          event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus();
+        }
+        return;
+      }
+      // Enter activates the focused button, including Cancel/Discard.
+      if (event.key === "Enter" && event.target instanceof Element
+        && event.target.closest("button") !== null && dialogRef.current?.contains(event.target)) return;
       const intent = dialogKeyboardIntent(event.key, { busy, confirmDisabled });
       if (intent === "ignore") return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       if (intent === "cancel") onCancel();
       else onConfirm();
     };
@@ -76,6 +99,7 @@ export function ConfirmDialog(props: ConfirmDialogProps): ReactNode {
     <div className="kn-modal-backdrop" role="presentation" onClick={busy ? undefined : onCancel}>
       <div
         className="kn-modal"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-busy={busy ? "true" : undefined}

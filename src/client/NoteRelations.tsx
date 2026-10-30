@@ -99,7 +99,11 @@ export function NoteRelations(props: {
       close();
     };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      rootRef.current?.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')?.focus();
+      close();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -107,6 +111,9 @@ export function NoteRelations(props: {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
+  }, [mode]);
+  useEffect(() => {
+    if (mode === "add") rootRef.current?.querySelector<HTMLInputElement>("input")?.focus();
   }, [mode]);
   /*
    * 工具栏点「＋ 添加前置节点」⇒ 打开添加面板，并把**选中原文**填进标题 ✓。
@@ -139,8 +146,8 @@ export function NoteRelations(props: {
     finally { setBusy(false); }
   };
   return <div className="kn-note-relations" ref={rootRef}>
-    <button type="button" onClick={() => { setMode(mode === "pre" ? null : "pre"); setError(""); }}>{t("relPre", { count: pre.length })}</button>
-    <button type="button" onClick={() => { setMode(mode === "depend" ? null : "depend"); setError(""); }}>{t("relDepend", { count: depend.length })}</button>
+    <button type="button" aria-expanded={mode === "pre" || mode === "add"} onClick={() => { setMode(mode === "pre" ? null : "pre"); setError(""); }}>{t("relPre", { count: pre.length })}</button>
+    <button type="button" aria-expanded={mode === "depend"} onClick={() => { setMode(mode === "depend" ? null : "depend"); setError(""); }}>{t("relDepend", { count: depend.length })}</button>
     {/*
      * **「＋ 添加前置」从标题栏移进「前置」弹窗** ✓（用户第十三轮要求："使用频率不高" ✓）。
      * 弹窗里在列表下方给一个入口 ✓（见下面 `mode === "pre"` 那个按钮 ✓）；

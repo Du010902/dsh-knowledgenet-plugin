@@ -13,9 +13,10 @@ import { unwrapBlockquoteTransaction } from '../src/client/blockquote-escape.ts'
 const schema = new Schema({
   nodes: {
     doc: { content: 'block+' },
-    paragraph: { group: 'block', content: 'text*' },
+    paragraph: { group: 'block', content: 'inline*' },
     blockquote: { group: 'block', content: 'block+' },
-    text: {},
+    text: { group: 'inline' },
+    image: { inline: true, group: 'inline', atom: true, attrs: { src: {} } },
   },
   marks: {},
 });
@@ -35,6 +36,18 @@ function textPos(doc, text, offset = 0) {
   return hit;
 }
 const blockTypes = doc => Array.from({ length: doc.childCount }, (_, i) => doc.child(i).type.name);
+
+test('引用里的图片不能被当作空引用删除', () => {
+  const image = schema.node('image', { src: 'note.png' });
+  const imageParagraph = schema.node('paragraph', null, image);
+  const single = docOf(quote(imageParagraph), p('正文'));
+  const transaction = unwrapBlockquoteTransaction(stateWith(single, 2), 'back');
+  assert.ok(transaction);
+  assert.equal(transaction.doc.firstChild.firstChild.type.name, 'image');
+  assert.equal(transaction.doc.firstChild.firstChild.attrs.src, 'note.png');
+  const multiple = docOf(quote(p(''), imageParagraph), p('正文'));
+  assert.equal(unwrapBlockquoteTransaction(stateWith(multiple, 2), 'back'), null);
+});
 
 test('空引用（后面还有块）⇒ 整块删掉，光标落到下一块开头', () => {
   const doc = docOf(quote(p('')), p('正文'));

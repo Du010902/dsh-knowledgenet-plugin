@@ -611,17 +611,22 @@ export function NodeDocumentEditor(props: {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+      if (event.altKey || event.shiftKey) return;
       const root = rootRef.current;
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
       const inside = root !== null && (path.includes(root) || root.contains(event.target as Node));
       if (!inside) return;
-      if (!canSave(state)) return;
       event.preventDefault();
+      if (event.isComposing || event.keyCode === 229) return;
+      // The Markdown change listener is debounced. Read the actual document
+      // before deciding whether a quick Ctrl+S has anything to save.
+      const live = snapshotDraft();
+      if (live === null || !canSave({ ...state, draft: live })) return;
       void save();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => { window.removeEventListener("keydown", onKeyDown, true); };
-  }, [save, state]);
+  }, [save, snapshotDraft, state]);
 
   /** 冲突里"刷新最新正文"（没有 latest 时用 ✓）：只更新比较基线，**不碰草稿** ✗ */
   const refreshLatest = useCallback(async (): Promise<NodeDocument | null> => {
@@ -804,9 +809,11 @@ export function NodeDocumentEditor(props: {
             </sup>
           ) : null}
         </h2>
-        {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
-        {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
-        <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
+        <div className="kn-editor-tools">
+          {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
+          {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
+          <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
+        </div>
         {/*
          * **「在资源管理器中显示」**（用户 2026-10-29 要求 ✓）：
          * 放在关闭按钮左侧 —— 同属"整个文档"的动作 ✓。传 **nodeId + 库目标**（不传绝对路径 ✗）：

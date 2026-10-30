@@ -795,7 +795,7 @@ describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', 
     try {
       await harness.openNote();
       /* 标题栏里有两个 `.kn-note-relations`（对话入口 + 关系）：按「前置」按钮认关系那一个 ✓ */
-      const relationsRoot = harness.page.locator('.kn-editor-heading > .kn-note-relations')
+      const relationsRoot = harness.page.locator('.kn-editor-tools > .kn-note-relations')
         .filter({has: harness.page.getByRole('button', {name: /^前置/})});
       assert.equal(await relationsRoot.count(), 1, '要找到关系组件');
       assert.equal(await relationsRoot.locator('> button').count(), 2, '标题栏只剩「前置」「被依赖」两颗按钮');

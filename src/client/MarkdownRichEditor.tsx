@@ -35,7 +35,7 @@ import {
   moveRowCommand,
   setAlignCommand,
 } from "@milkdown/kit/preset/gfm";
-import { deleteColumn, deleteRow, deleteTable } from "@milkdown/kit/prose/tables";
+import { deleteColumn, deleteRow, deleteTable, goToNextCell } from "@milkdown/kit/prose/tables";
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
 import { Fragment, type Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
@@ -505,16 +505,17 @@ function insertPlainTextAtSelection(view: ProseMirrorView, text: string): boolea
   const { state } = view;
   const selection = state.selection;
   if (!(selection instanceof TextSelection) || !selection.$from.parent.inlineContent) return false;
-  const normalized = text.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+  const normalized = text.replace(/\r\n?/g, "\n");
   if (normalized === "") return false;
   const hardbreak = state.schema.nodes.hardbreak;
+  const marks = state.storedMarks ?? selection.$from.marks();
   const nodes: ProseMirrorNode[] = [];
   normalized.split("\n").forEach((line, index) => {
     if (index > 0) {
       if (hardbreak === undefined) nodes.push(state.schema.text(" "));
       else nodes.push(hardbreak.create());
     }
-    if (line !== "") nodes.push(state.schema.text(line));
+    if (line !== "") nodes.push(state.schema.text(line, marks));
   });
   if (nodes.length === 0) return false;
   const fragment = Fragment.fromArray(nodes);
@@ -2311,13 +2312,52 @@ export function MarkdownRichEditor(props: {
      * ② 外部复制的 Markdown / HTML ⇒ 继续走 milkdown 原有粘贴 ✓
      *    （也不能把所有多行文本都当代码 ✗，复查要求 ✓）。
      */
+    let plainPasteUntil = 0;
+    const onEditorShortcut = (event: KeyboardEvent): void => {
+      plainPasteUntil = !event.isComposing && (event.ctrlKey || event.metaKey)
+        && event.shiftKey && !event.altKey && event.key.toLowerCase() === "v"
+        ? Date.now() + 1000 : 0;
+      const view = viewRef.current;
+      // Handle table navigation before the generic indentation plugin.
+      if (view !== null && view.editable && !readOnlyRef.current && !event.defaultPrevented
+        && !event.isComposing && event.keyCode !== 229 && event.key === "Tab"
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && event.target instanceof Element && view.dom.contains(event.target)
+        && event.target.closest("input, textarea, select, .cm-editor, [contenteditable='false']") === null
+        && readTableContext(view.state).inTable) {
+        let handled = goToNextCell(event.shiftKey ? -1 : 1)(view.state, view.dispatch);
+        if (!handled && !event.shiftKey) {
+          // The installed prosemirror-tables stops at the last cell. Use the
+          // GFM row command so the header/body schema stays intact.
+          crepe.editor.action((ctx) => { ctx.get(commandsCtx).call(addRowAfterCommand.key); });
+          handled = goToNextCell(1)(view.state, view.dispatch);
+        }
+        if (handled) event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    root.addEventListener("keydown", onEditorShortcut, true);
     const onPastePayload = (event: Event): void => {
       const view = viewRef.current;
       const clip = (event as ClipboardEvent).clipboardData;
-      if (view === null || !readyRef.current || clip === null || clip === undefined) return;
+      const plainPaste = Date.now() < plainPasteUntil;
+      plainPasteUntil = 0;
+      if (event.defaultPrevented || view === null || !readyRef.current || readOnlyRef.current
+        || !view.editable || clip === null || clip === undefined) return;
+      const target = event.target instanceof Element ? event.target : null;
+      // Embedded inputs and CodeMirror own their clipboard and selection.
+      if (target === null || !view.dom.contains(target)
+        || target.closest("input, textarea, select, .cm-editor, [contenteditable='false']") !== null) return;
       const html = clip.getData("text/html");
       const plain = clip.getData("text/plain");
       const knMime = clip.getData(KN_CODE_BLOCK_MIME);
+      if (plainPaste) {
+        if (plain !== "" && insertPlainTextAtSelection(view, plain)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
       /*
        * **手动选中复制（代码/公式块）⇒ 按纯文本插入** ✓（用户第十三轮要求 ✓）：
        * 只认"上次手动选中复制的文本"且剪贴板里**没有**本插件载荷 ✓ ⇒
@@ -2761,6 +2801,7 @@ export function MarkdownRichEditor(props: {
       mermaid.dispose();
       root.removeEventListener("click", onClickInsideLanguagePicker);
       root.removeEventListener("paste", onPastePayload, true);
+      root.removeEventListener("keydown", onEditorShortcut, true);
       root.removeEventListener("contextmenu", onTableContext, true);
       root.closest(".kn-editor-body")?.removeEventListener("scroll", clearTextSelection, true);
       window.removeEventListener("resize", clearTextSelection);

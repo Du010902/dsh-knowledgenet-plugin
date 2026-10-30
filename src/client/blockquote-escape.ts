@@ -52,7 +52,13 @@ export function unwrapBlockquoteTransaction(
   const quote = $from.node(depth);
   const from = $from.before(depth);
   const to = $from.after(depth);
-  const empty = quote.textContent.trim() === "";
+  // Images, formulas and other non-text nodes can have empty textContent.
+  // Only paragraphs containing whitespace/hard breaks count as an empty quote.
+  let empty = true;
+  quote.descendants((node) => {
+    if (!["paragraph", "text", "hardbreak"].includes(node.type.name)
+      || (node.isText && node.textContent.trim() !== "")) empty = false;
+  });
   if (empty) {
     /* 空引用：后面还有块 ⇒ 直接删掉、光标落到下一块；否则换成一个空段落（文档必须有块 ✓） */
     if (to < state.doc.content.size) {

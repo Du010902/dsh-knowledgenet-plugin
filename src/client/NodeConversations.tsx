@@ -56,7 +56,12 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
   useEffect(() => {
     if (!open) return;
     const outside = (e: PointerEvent) => { if (holder.current && !e.composedPath().includes(holder.current)) setOpen(false); };
-    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); setOpen(false); } };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      holder.current?.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')?.focus();
+      setOpen(false);
+    };
     document.addEventListener("pointerdown", outside, true); document.addEventListener("keydown", escape, true);
     return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
   }, [open]);

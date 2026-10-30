@@ -234,7 +234,8 @@ describe("「＋ 添加前置」入口移进「前置」弹窗 + 点旁边空白
     assert.ok(relations.includes("path.includes(root)"), "按根节点判断点里/点外 ✓");
     assert.ok(/if \(root !== null && path\.includes\(root\)\) return;/.test(relations), "点在弹窗里不关闭 ✓");
     assert.ok(/if \(mode === null\) return undefined;/.test(relations), "弹窗没打开不挂监听 ✓");
-    assert.ok(/if \(event\.key === "Escape"\) close\(\);/.test(relations), "Esc 关闭 ✓");
+    assert.ok(relations.includes('event.key !== "Escape" || event.isComposing || event.keyCode === 229'), "Esc 关闭前排除输入法组合 ✓");
+    assert.ok(relations.includes('event.stopImmediatePropagation()'), "Esc 只关闭当前弹层 ✓");
     assert.ok(/const close = \(\): void => \{ setMode\(null\); setSnippet\(""\); \};/.test(relations), "关闭要收起弹窗并清掉本次 snippet ✓");
     assert.ok(/return \(\) => \{\s*document\.removeEventListener\("pointerdown", onPointerDown, true\);/.test(relations), "卸载要摘监听 ✓");
   });
@@ -330,7 +331,7 @@ describe("「添加前置」输入框按 Enter 直接创建 ✓", () => {
       /candidates\.map\(n => <button type="button" key=\{n\.id\} disabled=\{busy\} onClick=\{\(\) => \{ void add\(n\.title, false\); \}\}>/.test(relations),
       "候选按钮仍然是 add(n.title, false) ✓（候选人交互不走 Enter ✓）",
     );
-    assert.ok(/if \(event\.key === "Escape"\) close\(\);/.test(relations), "Esc 关闭仍然在 ✓");
+    assert.ok(relations.includes('event.key !== "Escape"'), "Esc 关闭仍然在 ✓");
     assert.ok(/path\.includes\(root\)/.test(relations), "点弹窗外面关闭的判定仍然在 ✓");
   });
 });

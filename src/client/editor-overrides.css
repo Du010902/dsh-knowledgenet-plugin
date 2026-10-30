@@ -528,9 +528,9 @@
   max-height: 260px;
   overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--dsw-alias-bg-overlay);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-soft);
 }
 
 .kn-root .kn-editor-rich .milkdown .language-picker .search-box {
@@ -1005,7 +1005,8 @@
 .kn-root .kn-editor-rich .milkdown .milkdown-toolbar {
   background: var(--dsw-alias-bg-overlay);
   border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
 }
 .kn-root .kn-editor-rich .milkdown .milkdown-toolbar .toolbar-item svg {
   color: var(--dsw-alias-label-secondary);

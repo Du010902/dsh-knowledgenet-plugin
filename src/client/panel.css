@@ -1147,8 +1147,7 @@
 }
 
 .kn-editor-text:focus {
-  box-shadow: inset 2px 0 var(--dsw-alias-border-l1);
-  padding-left: 10px;
+  box-shadow: inset 2px 0 var(--accent-soft);
 }
 
 .kn-editor-preview {
@@ -2164,4 +2163,142 @@
   margin-top: 8px;
   color: var(--dsw-alias-state-error-primary);
   font-size: 11.5px;
+}
+
+/* UI polish: consistent surfaces and spacing, with room for long node titles. */
+.kn-root {
+  --shadow-soft: 0 4px 8px rgb(0 0 0 / 4%), 0 16px 40px rgb(0 0 0 / 12%);
+  font-family: inherit;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.kn-root :where(button, input) {
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.kn-root :where(button, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kn-root :where(button):disabled { cursor: default; }
+.kn-root :where(input)::placeholder { color: var(--muted); }
+.kn-root :where(.kn-editor-body, .kn-search-list, .kn-note-relations-popover, .kn-prompt-suggest) {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.kn-root-fill .kn-head-panel { padding-inline: 8px; }
+.kn-search { gap: 6px; }
+.kn-search-field:focus-visible { outline: none; }
+.kn-search-box { border-radius: 8px; background: var(--canvas); }
+.kn-search-box:hover { border-color: color-mix(in srgb, var(--secondary) 40%, var(--border)); }
+.kn-search-box:focus-within {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-faint);
+}
+.kn-search-list {
+  top: calc(100% + 6px);
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+.kn-search-item { min-height: 34px; padding: 7px 9px; border-radius: 6px; align-items: center; }
+.kn-search-item.is-active { background: var(--accent-soft); color: var(--text); }
+.kn-search-item-alias { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-search-empty { padding: 12px 9px; font-size: 12px; }
+
+.kn-sel { box-shadow: 0 2px 8px rgb(0 0 0 / 5%); }
+.kn-editor { box-shadow: var(--shadow-soft); }
+.kn-graph:has(.kn-editor) :is(.universe-status, .universe-hint) { visibility: hidden; }
+
+/* Title and document actions stay on the first row; secondary actions get their
+   own row in a sidebar. Wide panels can fit both groups on a single line. */
+.kn-editor-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px 6px;
+  padding: 12px 14px 10px;
+  background: var(--surface);
+}
+.kn-editor-title { font-size: 14px; line-height: 24px; }
+.kn-editor-tools {
+  position: relative;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kn-editor-tools > .kn-note-relations { position: static; margin-left: 0; gap: 2px; }
+.kn-editor-tools > .kn-node-conversations { margin-left: auto; }
+.kn-editor-tools .kn-understanding-button { min-height: 28px; padding: 3px 9px; font-size: 12px; }
+.kn-editor-tools .kn-note-relations > button { min-height: 28px; padding: 4px 7px; font-size: 12px; }
+.kn-editor-tools > .kn-note-relations:not(.kn-node-conversations) {
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+.kn-note-relations > button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.kn-editor-close, .kn-editor-reveal { width: 28px; height: 28px; }
+.kn-editor-close { font-size: 18px; }
+.kn-editor-tools .kn-note-relations-popover {
+  top: calc(100% + 8px);
+  width: min(320px, calc(100cqw - 56px));
+  max-height: min(360px, 50vh);
+  padding: 8px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+}
+.kn-note-relations-head { padding: 2px 4px 6px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.kn-note-relations-head strong { font-size: 12px; font-weight: 600; }
+.kn-note-relations-head > button { width: 26px; height: 26px; padding: 0; font-size: 16px; }
+.kn-note-relations .kn-note-relation-item { padding: 8px; border-radius: 7px; overflow-wrap: anywhere; }
+.kn-node-conversations .kn-note-relation-item > span { font-weight: 500; }
+.kn-node-conversations small { font-variant-numeric: tabular-nums; }
+.kn-node-chat-hint { padding: 6px 8px; margin: 0; line-height: 1.6; }
+.kn-note-relations-popover > .kn-editor-dim { padding: 12px 8px; }
+.kn-note-relations-popover input { font: inherit; background: var(--canvas); }
+.kn-note-relations-popover input { min-height: 34px; border-radius: 8px; }
+.kn-note-relations-popover input:focus-visible { outline-offset: 1px; }
+.kn-note-relations-popover .kn-note-relations-add { padding: 10px 8px 6px; color: var(--accent-text); }
+.kn-editor-conflict-bar { flex-wrap: wrap; }
+.kn-editor-conflict-actions { flex-wrap: wrap; }
+.kn-editor-notice-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kn-editor-notice-actions button, .kn-editor-retry { min-height: 30px; border-radius: 8px; }
+.kn-editor-error { overflow-wrap: anywhere; line-height: 1.65; }
+
+@container (min-width: 720px) {
+  .kn-editor-heading { display: flex; gap: 8px; padding: 10px 14px; }
+  .kn-editor-tools { flex: none; flex-wrap: nowrap; }
+  .kn-editor-tools > .kn-node-conversations { margin-left: 0; }
+}
+@container (max-width: 340px) {
+  .kn-editor-heading { padding-inline: 10px; }
+  .kn-editor-tools { gap: 4px; }
+  .kn-editor-tools .kn-note-relations > button { padding-inline: 5px; font-size: 11px; }
+}
+@container (max-width: 600px) {
+  .kn-graph:has(.kn-sel) .universe-status { top: 60px; }
+}
+
+.kn-prompt-backdrop { overflow-y: auto; }
+.kn-prompt { flex: none; padding: 18px; border-radius: 14px; box-shadow: var(--shadow-soft); }
+.kn-prompt-title { font-size: 15px; line-height: 1.5; }
+.kn-prompt-body { margin-top: 5px; font-size: 12px; line-height: 1.65; }
+.kn-prompt-input { min-height: 36px; margin-top: 14px; border-radius: 8px; }
+.kn-prompt-suggest { padding: 4px; border-radius: 8px; }
+.kn-prompt-suggest-item { min-height: 30px; border-radius: 5px; }
+.kn-prompt-actions { margin-top: 16px; flex-wrap: wrap; }
+.kn-prompt-btn { min-height: 32px; border-radius: 8px; }
+.kn-map-empty { gap: 8px; padding: 28px; }
+.kn-map-empty-hint { line-height: 1.7; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kn-root :where(button, input) { transition: none; }
 }
