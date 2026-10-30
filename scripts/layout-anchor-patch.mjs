@@ -1,45 +1,68 @@
 /**
  * 空间布局的**分量锚点间距**补丁点（上游 `graph3d/topology.ts` 的 `componentAnchors`）。
  *
- * 背景（用户实测 ✗）：孤点（单节点分量）原来按 `expectedCloudRadius(edgeLength, 1) = edgeLength` 铺开，
- * 间隔是 `radius * 2 + edgeLength * 1.5 = 3.5 × 36 = 126` 世界单位；而主分量（3 个点）的云团半径才 ~68。
- * 于是一张「一个 3 点分量 + 5 个孤点」的图上，孤点锚点被摆到离原点 235 / 361 / 487 / 613 / 739 处，
- * 彼此最近也有 528 —— 相机为了把它们全装进视口只能一路拉远，看起来就是"孤点离得离谱地远" ✗。
+ * 背景（用户实测 ✗）：分量原本沿黄金角螺旋**一路往外排**，每个占 `radius * 2 + edgeLength * 1.5`，
+ * 分量一多，锚点就被摆到越来越远的球壳上：
+ * - 孤点：离原点 235…739（主分量云团半径才 ~58）；
+ * - 多节点节点群：分量中心同样按 89 / 267 / 419 … 递增。
  *
- * 修法：**孤点只占 `collideRadius` 那么大一块地方**（11 的碰撞半径 ⇒ 给 1.2 倍就够，节点不会重叠 ✓），
- * 分量之间的间隙也从 `1.5 Ledge` 收到 `0.45 Ledge`；顺带把多节点分量的锚点半径乘 0.85 收一点。
- * 孤点于是落在 13 / 56 / 98 / 141 / 183 处，与主分量同一量级 ✓。
+ * 相机为了把整张图装进视口只能一路拉远 ⇒ 看起来"群与群之间很远，群内部又挤成一团" ✗
+ * （用户 2026-10-30 截图：一个 9 点群、一个 5 点群、一个 3 点群 + 4 个孤点）。
+ *
+ * 修法：**所有分量都放在同一个紧凑薄壳上**（大分量略靠外、小分量略靠里），
+ * 锚点半径不再随分量数量线性增长；群内节点间距交给斥力 / 碰撞 / 弹簧去撑开，
+ * 群与群之间再靠节点间的普通斥力自然分开 ⇒ 相机可以明显拉近，群内标签不再挤 ✓。
  *
  * 为什么单独一个文件：`build.mjs` 用它做构建期替换，`tests/layout-spacing.test.mjs` 用**同一份字符串**
  * 把补丁应用到临时副本上量结果 —— 补丁点只写一遍，测试量的就是构建时真正用的那一份 ✓。
  */
 
-/** 上游原文（补丁点）：分量的锚点半径、分量间间隙、以及"沿螺旋一路往外推"的落点 */
+/** 上游原文（补丁点）：分量沿"累计半径螺旋"一路往外排 */
 export const ANCHOR_SPACING_NEEDLE = [
+  "  let cursor = 0;",
+  "  components.forEach((component, k) => {",
   "    const radius = expectedCloudRadius(params.edgeLength, component.length);",
   "    const gap = params.edgeLength * 1.5;",
   "    const [ux, uy, uz] = unit(k);",
   "    const center: Vec3 = [ux * (cursor + radius), uy * (cursor + radius), uz * (cursor + radius)];",
+  "    for (const i of component) {",
+  "      anchors[i * 3] = center[0];",
+  "      anchors[i * 3 + 1] = center[1];",
+  "      anchors[i * 3 + 2] = center[2];",
+  "    }",
+  "    cursor += radius * 2 + gap;",
+  "  });",
+  "  return anchors;",
 ].join("\n");
 
 /**
- * 替换成：孤点只占碰撞半径量级的一块，而且**锚定在一个固定的薄壳上**（不再跟着螺旋越走越远）。
+ * 替换成：所有分量放在同一个紧凑薄壳上，不再沿累计半径越排越远。
  *
- * `shell` = `collideRadius × 1.2 + edgeLength × 2.2` ≈ 92（edgeLength 36）：
- * 恰好落在主分量（3 点云团半径 ~58）外侧一点点，孤点之间由黄金角方向自然分开 ✓。
- * 多节点分量仍按原来的螺旋推进（它们确实需要各自的空间），只是云团半径乘 0.85、间隙收到 0.45 Ledge。
+ * 半径仍按分量大小区分（多节点分量取云团半径 × 0.85，孤点只占碰撞半径），
+ * 但中心距离封顶在 `shell = maxRadius + 0.45 × edgeLength` ✓。
  */
 export const ANCHOR_SPACING_PATCHED = [
-  "    /* 孤点（单节点分量）：不参与\"沿螺旋往外排\"——每多一个独立节点就把画布撑大一截是实测的毛病 ✗ */",
-  "    const singleton = component.length === 1;",
-  "    const radius = singleton",
-  "      ? params.collideRadius * 1.2",
-  "      : expectedCloudRadius(params.edgeLength, component.length) * 0.85;",
-  "    const gap = singleton ? params.collideRadius * 2 : params.edgeLength * 0.45;",
+  "  const radii = components.map((component) => component.length === 1",
+  "    ? params.collideRadius * 1.2",
+  "    : expectedCloudRadius(params.edgeLength, component.length) * 0.85);",
+  "  const maxRadius = Math.max(...radii);",
+  "  const gap = params.edgeLength * 0.45;",
+  "  /* 孤点很多时，薄壳半径要按黄金角分布的最小弦长兜底，避免锚点挤在一起 ✓ */",
+  "  const separationAngle = Math.sqrt((4 * Math.PI) / Math.max(2, components.length));",
+  "  const separationRadius = (params.collideRadius * 1.2) / Math.sin(separationAngle / 2);",
+  "  const shell = Math.max(maxRadius + gap, separationRadius);",
+  "  components.forEach((component, k) => {",
   "    const [ux, uy, uz] = unit(k);",
-  "    const shell = params.collideRadius * 1.2 + params.edgeLength * 2.2;",
-  "    const reach = singleton ? Math.min(cursor + radius, shell) : cursor + radius;",
+  "    /* 大分量略靠外、小分量略靠里：总半径由 shell 封顶，不随 k 累加 ✓ */",
+  "    const reach = shell + (radii[k] - maxRadius) * 0.3;",
   "    const center: Vec3 = [ux * reach, uy * reach, uz * reach];",
+  "    for (const i of component) {",
+  "      anchors[i * 3] = center[0];",
+  "      anchors[i * 3 + 1] = center[1];",
+  "      anchors[i * 3 + 2] = center[2];",
+  "    }",
+  "  });",
+  "  return anchors;",
 ].join("\n");
 
 /**
