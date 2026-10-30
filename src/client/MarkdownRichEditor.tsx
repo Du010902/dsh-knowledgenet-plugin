@@ -600,6 +600,231 @@ function parentOfHeading(selection: ProseMirrorView["state"]["selection"]) {
   return parent.type.name === "heading" ? parent : null;
 }
 
+/**
+ * **列表项末尾按 Enter：新项放到子列表之后，不把子列表"挂到"新空项下面** ✓
+ * （用户 2026-10-30 反馈：按 Enter 后子列表像消失、再按删除键又出现 ✗）。
+ *
+ * ProseMirror 默认 `splitListItem` 在"段落 + 子列表"的项末尾会在**子列表之前**插入新项 ⇒
+ * 子列表被重新挂到新空项下面；用户继续按 Backspace 删掉空项时，子列表又被搬回来 ✗。
+ * 这里改成：新兄弟项插到**整个当前项之后** ⇒ 子列表始终留在原项里，Enter / Backspace 都不会搬动它 ✓。
+ *
+ * 只处理"光标在 list_item 内段落末尾、且紧跟着一个子列表"这一种情况 ✓；
+ * 其它位置（段落中间、无子列表、Shift+Enter 等）返回 false 交给上游 ✓。
+ *
+ * @param view - ProseMirror 视图。
+ * @param event - 键盘事件（Enter、无修饰键）。
+ * @returns 是否已处理。
+ */
+function listEnterAfterChildren(view: ProseMirrorView, event: KeyboardEvent): boolean {
+  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
+  const selection = view.state.selection;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const $from = selection.$from;
+  if ($from.parent.type.name !== "paragraph" || $from.parentOffset !== $from.parent.content.size) return false;
+  let itemDepth = -1;
+  for (let depth = $from.depth - 1; depth >= 0; depth -= 1) {
+    const name = $from.node(depth).type.name;
+    if (name === "list_item") { itemDepth = depth; break; }
+    if (name === "doc") break;
+  }
+  if (itemDepth < 0) return false;
+  const item = $from.node(itemDepth);
+  const paragraphIndex = $from.index(itemDepth);
+  const next = item.maybeChild(paragraphIndex + 1);
+  if (next === null || (next.type.name !== "bullet_list" && next.type.name !== "ordered_list")) return false;
+  const insertPos = $from.after(itemDepth);
+  const paragraphType = $from.parent.type;
+  const newParagraph = paragraphType.createAndFill();
+  if (newParagraph === null) return false;
+  const itemType = item.type;
+  /*
+   * 新项继承原项的 attrs，但**任务列表的勾选状态重置为未勾选** ✓
+   * （copy 原 attrs 却保留 checked=true 会出现"新建任务项直接已完成"✗；
+   *  完全不传 attrs 又会让任务项丢掉 `[ ]` 标记、退化成普通列表 ✗）。
+   */
+  const itemAttrs: Record<string, unknown> = { ...item.attrs };
+  if (typeof itemAttrs.checked === "boolean") itemAttrs.checked = false;
+  let newItem: ProseMirrorNode;
+  try {
+    newItem = itemType.create(itemAttrs, newParagraph);
+  } catch {
+    newItem = itemType.create(null, newParagraph);
+  }
+  const transaction = view.state.tr.insert(insertPos, newItem);
+  const caret = insertPos + 2;
+  try {
+    transaction.setSelection(TextSelection.create(transaction.doc, caret));
+  } catch {
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(caret)));
+  }
+  event.preventDefault();
+  view.dispatch(transaction.scrollIntoView());
+  return true;
+}
+
+/**
+ * 公式块的 CodeMirror 语言是 `stex`（LaTeX）✓ —— 也容错 `latex` / `math` ✓。
+ *
+ * @param host - `.milkdown-code-block` 元素。
+ * @returns 是否公式块。
+ */
+function isFormulaHost(host: HTMLElement): boolean {
+  const language = (host.querySelector(".cm-content")?.getAttribute("data-language") ?? "").toLowerCase();
+  return language === "stex" || language === "latex" || language === "math";
+}
+
+/**
+ * 光标紧贴公式块时找到它的 DOM 宿主（用户 2026-10-30 要求：
+ * "公式变成只看结果状态之后，在公式下方空白区域按删除键，碰到公式的时候，
+ * 不要直接删除公式，要进入公式编辑栏"）。
+ *
+ * 只在**顶层正文段落**、空选区、且正好贴着公式块边界时返回 ✓：
+ * - `Backspace`：光标在公式后段落开头；
+ * - `Delete`：光标在公式前段落末尾。
+ *
+ * @param view - ProseMirror 视图。
+ * @param key - 按键名。
+ * @returns 命中公式块时返回它的宿主元素。
+ */
+function adjacentFormulaHost(view: ProseMirrorView, key: "Backspace" | "Delete"): HTMLElement | null {
+  const selection = view.state.selection;
+  if (!(selection instanceof TextSelection) || !selection.empty) return null;
+  const $from = selection.$from;
+  if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") return null;
+  const doc = view.state.doc;
+  const index = $from.index(0);
+  let formulaIndex: number;
+  if (key === "Backspace") {
+    if ($from.parentOffset !== 0 || index === 0) return null;
+    formulaIndex = index - 1;
+  } else {
+    if ($from.parentOffset !== $from.parent.content.size || index === doc.childCount - 1) return null;
+    formulaIndex = index + 1;
+  }
+  if (doc.child(formulaIndex).type.name !== "code_block") return null;
+  let position = 0;
+  for (let i = 0; i < formulaIndex; i += 1) position += doc.child(i).nodeSize;
+  let dom: Node | null = null;
+  try { dom = view.nodeDOM(position); } catch { return null; }
+  if (!(dom instanceof HTMLElement)) return null;
+  const host = dom.matches(".milkdown-code-block") ? dom : dom.querySelector<HTMLElement>(".milkdown-code-block");
+  if (host === null || !isFormulaHost(host)) return null;
+  return host;
+}
+
+/**
+ * 进入公式源码编辑栏（若当前是「只看结果」⇒ 点「编辑源码」展开 ✓），并把光标放到公式末尾 ✓。
+ *
+ * @param host - 公式块 DOM。
+ */
+function openFormulaSource(host: HTMLElement): void {
+  const codeHost = host.querySelector<HTMLElement>(".codemirror-host");
+  if (codeHost?.classList.contains("hidden") === true) {
+    host.querySelector<HTMLButtonElement>(".preview-toggle-button")?.click();
+  }
+  window.setTimeout(() => {
+    const editor = host.querySelector<HTMLElement>(".cm-editor");
+    const codeView = editor === null ? null : EditorView.findFromDOM(editor);
+    if (codeView !== null) {
+      codeView.focus();
+      codeView.dispatch({ selection: { anchor: codeView.state.doc.length }, scrollIntoView: true });
+      return;
+    }
+    host.querySelector<HTMLElement>(".cm-content")?.focus();
+  }, 0);
+}
+
+/**
+ * **Shift+Enter 软换行后输入 `* ` / `1. ` 仍要变成列表**（用户 2026-10-30 要求）。
+ *
+ * 原生 Markdown 输入规则只在**文本块开头**触发 ✗；按 `Shift+Enter` 只是插了一个 hardbreak，
+ * 同一段落里新起的一行并不是新的文本块 ⇒ 输入 `* ` 只会留下字面量 ✗。
+ *
+ * 这里在空格输入前检查：光标所在段落里，最近的折行符之后到光标之间正好是
+ * `*` / `-` / `+` / `1.` 等列表标记 ⇒
+ * 把**折行前的内容留在原段落**、**折行后的内容变成列表项**（标记与刚输入的 URL 空格一起消费掉 ✓），
+ * 光标落进新列表项开头 ✓。普通段落开头的输入规则不受影响 ✓。
+ *
+ * @param view - ProseMirror 视图。
+ * @param from - 输入起点。
+ * @param to - 输入终点。
+ * @param text - 即将输入的文本（只认单个空格 ✓）。
+ * @returns 是否已处理（true 时该空格不再插入 ✓）。
+ */
+function listMarkerAfterHardbreak(view: ProseMirrorView, from: number, to: number, text: string): boolean {
+  if (text !== " " || from !== to) return false;
+  const state = view.state;
+  const selection = state.selection;
+  if (!(selection instanceof TextSelection) || selection.from !== from || selection.to !== to) return false;
+  const $from = selection.$from;
+  if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") return false;
+  const paragraph = $from.parent;
+  const contentStart = $from.start(1);
+  const offset = from - contentStart;
+  if (offset <= 0) return false;
+  const children: ProseMirrorNode[] = [];
+  const starts: number[] = [];
+  let cursor = 0;
+  paragraph.forEach((node) => { children.push(node); starts.push(cursor); cursor += node.nodeSize; });
+  let breakIndex = -1;
+  let breakEnd = -1;
+  for (let i = 0; i < children.length; i += 1) {
+    const node = children[i]!;
+    if (node.type.name === "hardbreak" && starts[i]! + node.nodeSize <= offset) {
+      breakIndex = i;
+      breakEnd = starts[i]! + node.nodeSize;
+    }
+  }
+  if (breakIndex < 0 || breakEnd < 0) return false;
+  const marker = state.doc.textBetween(contentStart + breakEnd, from, "");
+  if (!/^(?:[*+-]|\d{1,9}[.)])$/.test(marker)) return false;
+  const beforeNodes = children.slice(0, breakIndex);
+  const afterNodes = children.filter((_, i) => starts[i]! >= offset);
+  const paragraphType = paragraph.type;
+  const beforeText = beforeNodes.map((node) => node.textContent).join("").trim();
+  const beforeHasAtom = beforeNodes.some((node) => node.isAtom);
+  const inserted: ProseMirrorNode[] = [];
+  if (beforeText !== "" || beforeHasAtom) {
+    inserted.push(paragraphType.create(paragraph.attrs, Fragment.fromArray(beforeNodes)));
+  }
+  const itemParagraph = afterNodes.length === 0
+    ? paragraphType.create(paragraph.attrs, Fragment.empty)
+    : paragraphType.create(paragraph.attrs, Fragment.fromArray(afterNodes));
+  const itemType = state.schema.nodes.list_item;
+  if (itemType === undefined) return false;
+  const item = itemType.create(null, itemParagraph);
+  let list: ProseMirrorNode | null = null;
+  if (marker[0] === "*" || marker[0] === "-" || marker[0] === "+") {
+    const listType = state.schema.nodes.bullet_list;
+    if (listType === undefined) return false;
+    list = listType.create(null, item);
+  } else {
+    const listType = state.schema.nodes.ordered_list;
+    if (listType === undefined) return false;
+    const number = Number.parseInt(marker, 10);
+    try {
+      list = listType.create(Number.isFinite(number) && number > 0 ? { start: number } : null, item);
+    } catch {
+      list = listType.create(null, item);
+    }
+  }
+  const paragraphPos = $from.before(1);
+  const transaction = state.tr.replaceWith(
+    paragraphPos,
+    paragraphPos + paragraph.nodeSize,
+    inserted.concat([list]),
+  );
+  const listStart = paragraphPos + inserted.reduce((sum, node) => sum + node.nodeSize, 0);
+  const caret = listStart + 3;
+  try {
+    transaction.setSelection(TextSelection.create(transaction.doc, caret));
+  } catch {
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(caret)));
+  }
+  view.dispatch(transaction.scrollIntoView());
+  return true;
+}
+
 async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
   const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
@@ -2778,12 +3003,45 @@ export function MarkdownRichEditor(props: {
              * （用户 2026-10-30 审核 ✓，见 `handleEnterNewline` ✓）。
              */
             if (editable && event.key === "Enter"
-              && !event.ctrlKey && !event.metaKey && !event.altKey
-              && handleEnterNewline(targetView, event, () => {
+              && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              /* 列表项末尾 + 子列表：新项放到子列表之后（不挪动子列表 ✓） */
+              if (listEnterAfterChildren(targetView, event)) {
+                reportRef.current?.("list-enter-after-children");
+                return true;
+              }
+              if (handleEnterNewline(targetView, event, () => {
                 /* 最后一格按 Enter：与 Tab 共用同一个 GFM 行命令（保持表头/正文行 schema ✓） */
                 crepe.editor.action((ctx: Ctx) => { ctx.get(commandsCtx).call(addRowAfterCommand.key); });
               })) {
-              return true;
+                return true;
+              }
+            }
+            /*
+             * **贴着公式块按 Backspace / Delete**：不删除公式，进入公式源码编辑栏 ✓
+             * （用户 2026-10-30 要求；见 `adjacentFormulaHost` / `openFormulaSource` ✓）。
+             */
+            if (editable && (event.key === "Backspace" || event.key === "Delete")
+              && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+              const formula = adjacentFormulaHost(targetView, event.key);
+              if (formula !== null) {
+                event.preventDefault();
+                openFormulaSource(formula);
+                reportRef.current?.("formula-boundary-enter-editor", { key: event.key });
+                return true;
+              }
+            }
+            /*
+             * **Shift+Enter 软换行之后输入 `* ` / `1. ` 仍要变成列表** ✓
+             * （用户 2026-10-30 要求；原生 Markdown 输入规则只看文本块开头 ✗）。
+             * 在空格 keydown 阶段转换，避免等 text input 之后 DOM 选区与事务赛跑 ✓。
+             */
+            if (editable && event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              const selection = targetView.state.selection;
+              if (listMarkerAfterHardbreak(targetView, selection.from, selection.to, " ")) {
+                event.preventDefault();
+                reportRef.current?.("list-after-hardbreak");
+                return true;
+              }
             }
             if (previousKeyDown !== undefined && previousKeyDown.call(view.props, targetView, event) === true) {
               return true;

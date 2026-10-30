@@ -219,6 +219,133 @@ test('nested list + formula: Enter stays in the formula; Ctrl+Enter exits withou
   } finally { await h.close(); }
 });
 
+test('formula preview boundary: Backspace/Delete enters formula source instead of deleting the formula', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await h.mount("- 第一层\n  - 第二层\n\n$$\nx = 1\n$$\n\nafter");
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(900);
+    const before = await h.flush();
+    assert.equal(await page.locator(".milkdown-code-block .codemirror-host.hidden").count(), 1, "公式默认是「只看结果」✓");
+
+    /* 公式下方段落开头按 Backspace：不合并/删除公式，直接进入公式编辑栏 ✓ */
+    await page.locator(".ProseMirror p").filter({ hasText: "after" }).click();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(300);
+    assert.equal(await h.flush(), before, "Backspace 不能吃掉公式或后面的段落 ✓");
+    assert.equal(await page.locator(".milkdown-code-block .codemirror-host.hidden").count(), 0, "公式编辑栏已展开（不再只是看结果）✓");
+    assert.equal(await page.evaluate(() => document.activeElement?.className), "cm-content", "光标进入公式源码编辑区 ✓");
+
+    /* 公式上方段落末尾按 Delete：同理进入公式编辑栏 ✓ */
+    await h.mount("before\n\n$$\nx = 1\n$$");
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(900);
+    const beforeFormula = await h.flush();
+    await page.locator(".ProseMirror p").filter({ hasText: "before" }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(300);
+    assert.equal(await h.flush(), beforeFormula, "Delete 不能把公式正文并进段落 ✓");
+    assert.equal(await page.evaluate(() => document.activeElement?.className), "cm-content", "Delete 也进入公式源码编辑区 ✓");
+
+    /* 用户原场景：嵌套列表下方只有公式（下面就是空白区域），点空白按 Backspace ✓ */
+    await h.mount("- 第一层\n  - 第二层\n\n$$\nx = 1\n$$");
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(900);
+    const blankBefore = await h.flush();
+    const formulaBox = await page.locator(".milkdown-code-block").boundingBox();
+    await page.mouse.click(formulaBox.x + 80, formulaBox.y + formulaBox.height + 25);
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(300);
+    assert.equal(await h.flush(), blankBefore, "空白区域 Backspace 不能删除公式 ✓");
+    assert.equal(await page.evaluate(() => document.activeElement?.className), "cm-content", "空白区域 Backspace 进入公式编辑栏 ✓");
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test('Shift+Enter soft line break then * / 1. still becomes a list', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  const ready = async () => {
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(300);
+  };
+  const focusBody = async () => {
+    await page.locator(".ProseMirror").click();
+    await page.waitForFunction(() => document.activeElement?.classList?.contains("ProseMirror"));
+  };
+  try {
+    await h.mount("hello");
+    await ready();
+    await page.locator(".ProseMirror p").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Enter");
+    await page.waitForTimeout(80);
+    await page.keyboard.type("* item");
+    assert.equal(await h.flush(), "hello\n\n* item\n", "软换行后的 * 仍转成无序列表 ✓");
+    assert.equal(await page.locator(".ProseMirror ul").count(), 1);
+
+    await h.mount("hello");
+    await ready();
+    await page.locator(".ProseMirror p").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Enter");
+    await page.waitForTimeout(80);
+    await page.keyboard.type("1. first");
+    assert.equal(await h.flush(), "hello\n\n1. first\n", "软换行后的 1. 仍转成有序列表 ✓");
+    assert.equal(await page.locator(".ProseMirror ol").count(), 1);
+
+    /* 普通段落开头的原生 Markdown 输入规则不受影响 ✓ */
+    await h.mount("");
+    await ready();
+    await focusBody();
+    await page.keyboard.type("- normal");
+    assert.equal(await h.flush(), "* normal\n", "普通输入规则照旧 ✓");
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test('Enter at a list item end keeps its sublist on that item (no reparenting/reappearing)', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await h.mount("- one\n  - nested");
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(300);
+    await page.getByText("one", { exact: true }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("X");
+    assert.equal(await h.flush(), "* one\n  * nested\n* X\n", "新项在子列表之后，不把子列表挂到新项下面 ✓");
+    const treeAfterEnter = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror li.list-item")].map((li) => ({
+      text: li.querySelector(":scope > .children > .content-dom > p")?.textContent ?? "",
+      kids: li.querySelectorAll(":scope > .children ul .list-item").length,
+    })));
+    assert.deepEqual(
+      treeAfterEnter,
+      [{ text: "one", kids: 1 }, { text: "nested", kids: 0 }, { text: "X", kids: 0 }],
+      "子列表仍挂在 one 下面 ✓",
+    );
+
+    /* 再把新项删空：子列表不能被"搬回"或重新出现到别处 ✓ */
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(200);
+    const treeAfterDelete = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror li.list-item")].map((li) => ({
+      text: li.querySelector(":scope > .children > .content-dom > p")?.textContent ?? "",
+      kids: li.querySelectorAll(":scope > .children ul .list-item").length,
+    })));
+    assert.deepEqual(
+      treeAfterDelete,
+      [{ text: "one", kids: 1 }, { text: "nested", kids: 0 }],
+      "删除新项后子列表仍在 one 下，不会重新搬家 ✓",
+    );
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
 /** 读 ShadowRoot / 文档里真正的焦点元素（面板实际是 shadow DOM ✓） */const activeElement = page => page.evaluate(() => {
   const root = document.querySelector('.kn-editor');
   const tree = root?.getRootNode();
