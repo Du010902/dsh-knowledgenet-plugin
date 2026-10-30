@@ -678,9 +678,12 @@ function isFormulaHost(host: HTMLElement): boolean {
  * "公式变成只看结果状态之后，在公式下方空白区域按删除键，碰到公式的时候，
  * 不要直接删除公式，要进入公式编辑栏"）。
  *
- * 只在**顶层正文段落**、空选区、且正好贴着公式块边界时返回 ✓：
+ * 只在**紧贴公式块的正文段落**、空选区、且正好贴着公式块边界时返回 ✓：
  * - `Backspace`：光标在公式后段落开头；
  * - `Delete`：光标在公式前段落末尾。
+ *
+ * 段落可以在任意层级（顶层 / 列表项里 / 引用块里 ✓）——用户实测的嵌套列表场景里，
+ * 公式可能挂在列表项内部，不能只认顶层 ✗。
  *
  * @param view - ProseMirror 视图。
  * @param key - 按键名。
@@ -690,20 +693,21 @@ function adjacentFormulaHost(view: ProseMirrorView, key: "Backspace" | "Delete")
   const selection = view.state.selection;
   if (!(selection instanceof TextSelection) || !selection.empty) return null;
   const $from = selection.$from;
-  if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") return null;
-  const doc = view.state.doc;
-  const index = $from.index(0);
+  if ($from.parent.type.name !== "paragraph") return null;
+  const depth = $from.depth;
+  const parent = $from.node(depth - 1);
+  const index = $from.index(depth - 1);
   let formulaIndex: number;
   if (key === "Backspace") {
     if ($from.parentOffset !== 0 || index === 0) return null;
     formulaIndex = index - 1;
   } else {
-    if ($from.parentOffset !== $from.parent.content.size || index === doc.childCount - 1) return null;
+    if ($from.parentOffset !== $from.parent.content.size || index === parent.childCount - 1) return null;
     formulaIndex = index + 1;
   }
-  if (doc.child(formulaIndex).type.name !== "code_block") return null;
-  let position = 0;
-  for (let i = 0; i < formulaIndex; i += 1) position += doc.child(i).nodeSize;
+  if (parent.child(formulaIndex).type.name !== "code_block") return null;
+  let position = $from.start(depth - 1);
+  for (let i = 0; i < formulaIndex; i += 1) position += parent.child(i).nodeSize;
   let dom: Node | null = null;
   try { dom = view.nodeDOM(position); } catch { return null; }
   if (!(dom instanceof HTMLElement)) return null;
@@ -757,9 +761,13 @@ function listMarkerAfterHardbreak(view: ProseMirrorView, from: number, to: numbe
   const selection = state.selection;
   if (!(selection instanceof TextSelection) || selection.from !== from || selection.to !== to) return false;
   const $from = selection.$from;
-  if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") return false;
+  if ($from.parent.type.name !== "paragraph") return false;
+  const depth = $from.depth;
+  const parent = $from.node(depth - 1);
+  /* 列表项 / 引用块里也可以软换行后起列表 ✓；表格单元格里不接管（结构不安全 ✗） */
+  if (parent.type.name !== "doc" && parent.type.name !== "list_item" && parent.type.name !== "blockquote") return false;
   const paragraph = $from.parent;
-  const contentStart = $from.start(1);
+  const contentStart = $from.start(depth);
   const offset = from - contentStart;
   if (offset <= 0) return false;
   const children: ProseMirrorNode[] = [];
@@ -786,6 +794,9 @@ function listMarkerAfterHardbreak(view: ProseMirrorView, from: number, to: numbe
   const inserted: ProseMirrorNode[] = [];
   if (beforeText !== "" || beforeHasAtom) {
     inserted.push(paragraphType.create(paragraph.attrs, Fragment.fromArray(beforeNodes)));
+  } else if (parent.type.name === "list_item") {
+    /* list_item 的内容模型以 paragraph 开头（`paragraph block*`）⇒ 不能直接塞一个列表做首块 ✗ */
+    inserted.push(paragraphType.create(paragraph.attrs, Fragment.empty));
   }
   const itemParagraph = afterNodes.length === 0
     ? paragraphType.create(paragraph.attrs, Fragment.empty)
@@ -808,12 +819,18 @@ function listMarkerAfterHardbreak(view: ProseMirrorView, from: number, to: numbe
       list = listType.create(null, item);
     }
   }
-  const paragraphPos = $from.before(1);
-  const transaction = state.tr.replaceWith(
-    paragraphPos,
-    paragraphPos + paragraph.nodeSize,
-    inserted.concat([list]),
-  );
+  const paragraphPos = $from.before(depth);
+  let transaction;
+  try {
+    transaction = state.tr.replaceWith(
+      paragraphPos,
+      paragraphPos + paragraph.nodeSize,
+      inserted.concat([list]),
+    );
+  } catch {
+    /* 目标父节点不接受列表（极少见的自定义结构）⇒ 不接管，交给默认行为 ✓ */
+    return false;
+  }
   const listStart = paragraphPos + inserted.reduce((sum, node) => sum + node.nodeSize, 0);
   const caret = listStart + 3;
   try {

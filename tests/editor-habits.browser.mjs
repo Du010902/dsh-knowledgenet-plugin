@@ -283,7 +283,10 @@ test('Shift+Enter soft line break then * / 1. still becomes a list', async () =>
     await page.keyboard.press("End");
     await page.keyboard.press("Shift+Enter");
     await page.waitForTimeout(80);
-    await page.keyboard.type("* item");
+    await page.keyboard.type("* ");
+    /* 转换会挂载一个新的列表项 node view；等它挂完再敲正文，模拟真实人手速 ✓ */
+    await page.waitForTimeout(120);
+    await page.keyboard.type("item");
     assert.equal(await h.flush(), "hello\n\n* item\n", "软换行后的 * 仍转成无序列表 ✓");
     assert.equal(await page.locator(".ProseMirror ul").count(), 1);
 
@@ -293,7 +296,9 @@ test('Shift+Enter soft line break then * / 1. still becomes a list', async () =>
     await page.keyboard.press("End");
     await page.keyboard.press("Shift+Enter");
     await page.waitForTimeout(80);
-    await page.keyboard.type("1. first");
+    await page.keyboard.type("1. ");
+    await page.waitForTimeout(120);
+    await page.keyboard.type("first");
     assert.equal(await h.flush(), "hello\n\n1. first\n", "软换行后的 1. 仍转成有序列表 ✓");
     assert.equal(await page.locator(".ProseMirror ol").count(), 1);
 
