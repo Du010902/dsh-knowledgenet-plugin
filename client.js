@@ -198599,6 +198599,72 @@ Expected function or array of functions, received type ${typeof value}.`);
 			view.dispatch(transaction.scrollIntoView());
 			return true;
 		}
+		/**
+		* 选区是否位于表格单元格内（只沿祖先链走到 table 为止 ✓）。
+		*
+		* @param state - 当前 ProseMirror 状态。
+		* @returns 在 table_cell / table_header 内为 true。
+		*/
+		function selectionInTableCell(state) {
+			const { $from } = state.selection;
+			for (let depth = $from.depth; depth > 0; depth -= 1) {
+				const name = $from.node(depth).type.name;
+				if (name === "table_cell" || name === "table_header") return true;
+				if (name === "table") return false;
+			}
+			return false;
+		}
+		/**
+		* **Enter / Shift+Enter 的换行语义补丁**（用户 2026-10-30 审核："enter 换行相关逻辑"）。
+		*
+		* 上游 Milkdown/ProseMirror 的默认行为在三处不合理：
+		* 1. **表格单元格里按 Enter 会被"挤出表格"**：光标跳到表格后面的段落，用户在拖盘里打字
+		*    结果跑到了表格外 ✗。Markdown 表格单元格**不能保存换行**（序列化会把 `<br>` 吃掉 ✗）⇒
+		*    这里改成与 `Tab` 一致的"提交本格、进入下一格"（为空的格子也一样 ✓）：
+		*    最后一格再按 Enter ⇒ 新增一行并进入新行第一格 ✓；`Shift+Enter` 回到上一格 ✓。
+		* 2. **空标题里按 Enter 会留下一个空的 `#` 标题**：Markdown 里空标题既看不见又要事后手删 ✗。
+		*    ⇒ 把空标题**转成普通段落** ✓（光标留在原处，接着写就是正文）。
+		* 3. **标题里按 Shift+Enter 会插 hardbreak**：Markdown 标题不能跨行，序列化会变成
+		*    非法/不稳定的 setext 写法（实测 `title\\\nmore\n====` ✗）⇒ 按普通 Enter 一样拆块 ✓。
+		*
+		* 其它情况（普通段落、列表、引用、代码块等）一律返回 false，保留上游默认行为 ✓。
+		*
+		* @param view - 当前 ProseMirror 视图。
+		* @param event - 键盘事件（已确认是 Enter 且无 Ctrl/Meta/Alt）。
+		* @param addRowAfter - 表格最后一格按 Enter 时追加正文行（由调用方用编辑器的 ctx 执行 ✓）。
+		* @returns 是否已由这里处理（true 时调用方应阻止后续默认行为 ✓）。
+		*/
+		function handleEnterNewline(view, event, addRowAfter) {
+			const { state } = view;
+			const selection = state.selection;
+			if (parentOfHeading(selection)) {
+				const heading = parentOfHeading(selection);
+				event.preventDefault();
+				if (heading.content.size === 0) {
+					setBlockType(state.schema.nodes.paragraph)(state, view.dispatch);
+					return true;
+				}
+				if (event.shiftKey) {
+					splitBlock(state, view.dispatch);
+					return true;
+				}
+				return false;
+			}
+			if (selectionInTableCell(state)) {
+				event.preventDefault();
+				if (!goToNextCell(event.shiftKey ? -1 : 1)(state, view.dispatch) && !event.shiftKey) {
+					addRowAfter();
+					goToNextCell(1)(view.state, view.dispatch);
+				}
+				return true;
+			}
+			return false;
+		}
+		/** 选区所在文本块是标题时返回它（供 Enter/Shift+Enter 规则判断 ✓） */
+		function parentOfHeading(selection) {
+			const parent = selection.$from.parent;
+			return parent.type.name === "heading" ? parent : null;
+		}
 		async function writeCodeBlockClipboard(payload) {
 			const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
 			const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
@@ -199624,7 +199690,31 @@ Expected function or array of functions, received type ${typeof value}.`);
 						});
 					}
 				};
+				const onCodeBlockModEnter = (event) => {
+					if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+					if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+					const host = (event.target instanceof HTMLElement ? event.target : null)?.closest(".milkdown-code-block");
+					const view = viewRef.current;
+					if (host === null || host === void 0 || view === null || !view.editable || readOnlyRef.current || !root.contains(host)) return;
+					window.setTimeout(() => {
+						const current = viewRef.current;
+						if (current === null || !current.editable || readOnlyRef.current) return;
+						const { state } = current;
+						const selection = state.selection;
+						if (!(selection instanceof TextSelection)) return;
+						const paragraph = selection.$from.parent;
+						if (paragraph.type.name !== "paragraph" || paragraph.content.size !== 0) return;
+						const index = selection.$from.index(0);
+						if (index <= 0 || state.doc.child(index - 1).type.name !== "code_block") return;
+						const last = state.doc.lastChild;
+						if (last === null || last.type.name !== "paragraph" || last.content.size !== 0) return;
+						if (last === paragraph) return;
+						current.dispatch(state.tr.delete(state.doc.content.size - last.nodeSize, state.doc.content.size).scrollIntoView());
+						reportRef.current?.("code-block-exit-reused-trailing");
+					}, 0);
+				};
 				root.addEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+				root.addEventListener("keydown", onCodeBlockModEnter, true);
 				root.addEventListener("focusout", onCodeMirrorFocusOut, true);
 				root.addEventListener("focusin", onSelectionChanged, true);
 				root.addEventListener("compositionend", onSelectionChanged, true);
@@ -200200,8 +200290,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 							return placeTableCaret(targetView, clickEvent);
 						},
 						handleKeyDown: (targetView, event) => {
+							const editable = targetView.editable && !event.isComposing && event.keyCode !== 229;
+							if (editable && event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && handleEnterNewline(targetView, event, () => {
+								crepe.editor.action((ctx) => {
+									ctx.get(commandsCtx).call(addRowAfterCommand.key);
+								});
+							})) return true;
 							if (previousKeyDown !== void 0 && previousKeyDown.call(view.props, targetView, event) === true) return true;
-							if (!targetView.editable || event.isComposing || event.keyCode === 229) return false;
+							if (!editable) return false;
 							if (event.key !== "Backspace" && event.key !== "Delete") return false;
 							if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
 							const transaction = unwrapBlockquoteTransaction(targetView.state, event.key === "Backspace" ? "back" : "forward");
@@ -200278,6 +200374,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 					root.removeEventListener("keyup", onSelectionChanged, true);
 					root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
 					root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+					root.removeEventListener("keydown", onCodeBlockModEnter, true);
 					root.removeEventListener("focusout", onCodeMirrorFocusOut, true);
 					root.removeEventListener("focusin", onSelectionChanged, true);
 					root.removeEventListener("compositionend", onSelectionChanged, true);
@@ -200397,8 +200494,16 @@ Expected function or array of functions, received type ${typeof value}.`);
 					reportBaseline(markdown);
 					scheduleMenu();
 				},
-				focus: () => {
-					hostRef.current?.querySelector(".ProseMirror, [contenteditable='true']")?.focus();
+				focus: (atEnd = false) => {
+					const view = viewRef.current;
+					if (view === null) {
+						hostRef.current?.querySelector(".ProseMirror, [contenteditable='true']")?.focus();
+						return;
+					}
+					if (!view.hasFocus()) view.focus();
+					if (!atEnd) return;
+					const selection = TextSelection.near(view.state.doc.resolve(view.state.doc.content.size));
+					view.dispatch(view.state.tr.setSelection(selection));
 				},
 				insertCodeBlock: (code, language = "") => {
 					const view = viewRef.current;
@@ -201151,9 +201256,23 @@ Expected function or array of functions, received type ${typeof value}.`);
 			/** 已经为哪个节点做过"载入即判纯文本"的判定 ✓（每节点只判定一次 ✓） */
 			const autoSourceRef = (0, react.useRef)(null);
 			const rootRef = (0, react.useRef)(null);
+			/**
+			* **焦点意图**（用户 2026-10-30 审核：打开编辑器 / 换编辑方式后应该能直接敲字 ✓）。
+			*
+			* - `"open"`：打开笔记（或重试读取成功）后把焦点交给编辑区；
+			* - `"mode"`：在正文 / 纯文本之间切换后把焦点交给新的编辑区；
+			* - `null`：没有待执行的焦点动作（不抢用户已经点到的控件 ✓）。
+			*/
+			const focusIntentRef = (0, react.useRef)("open");
+			/** 纯文本模式保存期间是否本来在 textarea 里 ✓（保存结束要把焦点还给正文，和 Rich 的规则一致 ✓） */
+			const sourceHadFocusRef = (0, react.useRef)(false);
+			/** 编辑器内"采用最新版本"的二次确认：键盘操作与焦点归还 ✓ */
+			const adoptConfirmRef = (0, react.useRef)(null);
+			const adoptTriggerRef = (0, react.useRef)(null);
 			const fetcher = (0, react.useMemo)(() => props.fetcher ?? ((input, init) => fetch(input, init)), [props.fetcher]);
 			/** 读一次（序号 + 取消；成功与失败分支都检查请求身份 ✓） */
 			const load = (0, react.useCallback)(async () => {
+				focusIntentRef.current = "open";
 				const seq = seqRef.current + 1;
 				seqRef.current = seq;
 				abortRef.current?.abort();
@@ -201325,14 +201444,62 @@ Expected function or array of functions, received type ${typeof value}.`);
 				richStatus.failed,
 				unsupported.length
 			]);
+			const previousTabRef = (0, react.useRef)(tab);
 			(0, react.useEffect)(() => {
+				if (previousTabRef.current === tab) return;
+				previousTabRef.current = tab;
+				focusIntentRef.current = "mode";
+			}, [tab]);
+			(0, react.useEffect)(() => {
+				if (focusIntentRef.current === null) return;
 				if (state.phase !== "ready" || state.conflicted) return;
-				textareaRef.current?.focus();
+				if (tab === "rich" && !richStatus.ready) return;
+				if (tab === "rich" && unsupported.length > 0 && autoSourceRef.current === props.nodeId) return;
+				focusIntentRef.current = null;
+				if (tab === "source") {
+					const textarea = textareaRef.current;
+					textarea?.focus();
+					if (textarea !== null) {
+						const end = textarea.value.length;
+						textarea.setSelectionRange(end, end);
+					}
+					return;
+				}
+				richRef.current?.focus(true);
 			}, [
 				state.phase,
 				state.conflicted,
+				tab,
+				richStatus.ready,
+				unsupported.length,
 				props.nodeId
 			]);
+			(0, react.useEffect)(() => {
+				if (tab !== "source") {
+					sourceHadFocusRef.current = false;
+					return;
+				}
+				const textarea = textareaRef.current;
+				if (state.saving) {
+					const tree = rootRef.current?.getRootNode();
+					const active = tree !== void 0 && "activeElement" in tree ? tree.activeElement : document.activeElement;
+					sourceHadFocusRef.current = textarea !== null && active === textarea;
+					return;
+				}
+				if (!sourceHadFocusRef.current) return void 0;
+				sourceHadFocusRef.current = false;
+				const timer = window.setTimeout(() => {
+					const current = textareaRef.current;
+					if (current === null) return;
+					const root = rootRef.current;
+					const tree = root?.getRootNode();
+					const active = tree !== void 0 && "activeElement" in tree ? tree.activeElement : document.activeElement;
+					if (active === null || active === document.body || active === document.documentElement || root !== null && active === root) current.focus();
+				}, 0);
+				return () => {
+					window.clearTimeout(timer);
+				};
+			}, [state.saving, tab]);
 			/**
 			* 用**显式给定的正文与指纹**保存。
 			*
@@ -201646,7 +201813,67 @@ Expected function or array of functions, received type ${typeof value}.`);
 				if (latest === null) return;
 				forgetDraft(cacheKeyRef.current);
 				dispatch({ type: "adopt-latest" });
+				focusIntentRef.current = "mode";
 			}, [refreshLatest, state.latest]);
+			/**
+			* **"采用文件最新版本"的二次确认**：键盘与焦点行为（用户 2026-10-30 审核）。
+			*
+			* 之前这个确认框只有鼠标可操作：Esc 不关、Tab 会跑到背景、打开后焦点还留在触发按钮上 ✗。
+			* 现在与项目里其它确认弹窗一致：打开聚焦第一个按钮（保守选项「继续编辑」✓），
+			* Tab/Shift+Tab 在按钮间循环，Enter 执行当前聚焦按钮，Esc 取消；
+			* 关闭后焦点回到触发按钮（采用成功时冲突条消失，改由上面的焦点意图回到正文 ✓）。
+			*/
+			const adoptLatestRef = (0, react.useRef)(adoptLatest);
+			adoptLatestRef.current = adoptLatest;
+			(0, react.useEffect)(() => {
+				if (!confirmAdopt) return void 0;
+				const dialog = adoptConfirmRef.current;
+				const buttons = () => Array.from(dialog?.querySelectorAll("button:not(:disabled)") ?? []);
+				dialog?.querySelector("button:not(:disabled)")?.focus();
+				const onKey = (event) => {
+					if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+					if (event.key === "Tab") {
+						const all = buttons();
+						if (all.length === 0) {
+							event.preventDefault();
+							return;
+						}
+						const first = all[0];
+						const last = all[all.length - 1];
+						if (dialog === null || !dialog.contains(document.activeElement)) {
+							event.preventDefault();
+							(event.shiftKey ? last : first).focus();
+						} else if (event.shiftKey && document.activeElement === first) {
+							event.preventDefault();
+							last.focus();
+						} else if (!event.shiftKey && document.activeElement === last) {
+							event.preventDefault();
+							first.focus();
+						}
+						return;
+					}
+					if (event.key === "Enter" && event.target instanceof Element && event.target.closest("button") !== null && dialog?.contains(event.target) === true) return;
+					if (event.key === "Escape") {
+						event.preventDefault();
+						event.stopImmediatePropagation();
+						setConfirmAdopt(false);
+						return;
+					}
+					if (event.key === "Enter") {
+						event.preventDefault();
+						event.stopImmediatePropagation();
+						setConfirmAdopt(false);
+						adoptLatestRef.current();
+					}
+				};
+				window.addEventListener("keydown", onKey, true);
+				return () => {
+					window.removeEventListener("keydown", onKey, true);
+					window.setTimeout(() => {
+						adoptTriggerRef.current?.focus();
+					}, 0);
+				};
+			}, [confirmAdopt]);
 			/** 复制草稿：**给出成功/失败反馈** ✗（旧实现静默吞掉失败 ⇒ 用户以为复制了 ✓） */
 			const copyDraft = (0, react.useCallback)(() => {
 				const clipboard = typeof navigator === "undefined" ? void 0 : navigator.clipboard;
@@ -201783,6 +202010,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 											type: "button",
 											className: "is-danger",
+											ref: adoptTriggerRef,
 											disabled: state.saving || state.refreshing,
 											onClick: () => setConfirmAdopt(true),
 											children: t("adoptLatest")
@@ -201984,6 +202212,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 						className: "kn-editor-confirm",
 						role: "dialog",
 						"aria-modal": "true",
+						"aria-label": t("adoptLatestConfirmTitle"),
+						ref: adoptConfirmRef,
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "kn-editor-confirm-title",
@@ -202277,11 +202507,25 @@ Expected function or array of functions, received type ${typeof value}.`);
 				}
 				applyEdit(next);
 			}, [editorDirty, applyEdit]);
+			/**
+			* 取消"未保存"三选一 / 保存失败后关闭弹窗时，把焦点还回**正文编辑区**。
+			*
+			* 用户 2026-10-30 审核："继续编辑"之后焦点停在已卸载的弹窗按钮上，回到 body，
+			* 用户得再点一下正文才能继续写 ✗。这里等弹窗卸载后聚焦当前编辑面（正文 / 纯文本 ✓）。
+			*/
+			const focusEditorForContinuation = (0, react.useCallback)(() => {
+				window.setTimeout(() => {
+					const host = graphHostRef.current;
+					if (host === null) return;
+					host.querySelector(".kn-editor .ProseMirror, .kn-editor .kn-editor-text")?.focus();
+				}, 0);
+			}, []);
 			/** 三选一：继续编辑 */
 			const cancelLeave = (0, react.useCallback)(() => {
 				pendingEditRef.current = null;
 				setLeaveDialog(null);
-			}, []);
+				focusEditorForContinuation();
+			}, [focusEditorForContinuation]);
 			/** 三选一：保存并继续（真正的切换在 onSaved 里完成 ⇒ 保存失败就留在原地 ✓） */
 			const saveAndLeave = (0, react.useCallback)(() => {
 				pendingEditRef.current = leaveDialog;
@@ -202302,7 +202546,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				if (outcome === "saved") return;
 				pendingEditRef.current = null;
 				setLeaveDialog(null);
-			}, []);
+				focusEditorForContinuation();
+			}, [focusEditorForContinuation]);
 			/**
 			* 离开弹窗文案：**动作说清楚** ✓（关闭 ⇒「保存并关闭」；切节点 ⇒「保存并切换」）。
 			* 计算放在 `leaveLabels`（纯函数、可单测 ✓）；这里每次渲染直接取（很便宜 ✓，

@@ -342,11 +342,27 @@ function GraphPanelInner(props: {
     applyEdit(next);
   }, [editorDirty, applyEdit]);
 
+  /**
+   * 取消"未保存"三选一 / 保存失败后关闭弹窗时，把焦点还回**正文编辑区**。
+   *
+   * 用户 2026-10-30 审核："继续编辑"之后焦点停在已卸载的弹窗按钮上，回到 body，
+   * 用户得再点一下正文才能继续写 ✗。这里等弹窗卸载后聚焦当前编辑面（正文 / 纯文本 ✓）。
+   */
+  const focusEditorForContinuation = useCallback((): void => {
+    window.setTimeout(() => {
+      const host = graphHostRef.current;
+      if (host === null) return;
+      const target = host.querySelector<HTMLElement>(".kn-editor .ProseMirror, .kn-editor .kn-editor-text");
+      target?.focus();
+    }, 0);
+  }, []);
+
   /** 三选一：继续编辑 */
   const cancelLeave = useCallback((): void => {
     pendingEditRef.current = null;
     setLeaveDialog(null);
-  }, []);
+    focusEditorForContinuation();
+  }, [focusEditorForContinuation]);
 
   /** 三选一：保存并继续（真正的切换在 onSaved 里完成 ⇒ 保存失败就留在原地 ✓） */
   const saveAndLeave = useCallback((): void => {
@@ -370,7 +386,9 @@ function GraphPanelInner(props: {
     if (outcome === "saved") return;
     pendingEditRef.current = null;
     setLeaveDialog(null);
-  }, []);
+    /* 失败 / 冲突收起弹窗后焦点回正文，用户接着处理错误 ✓（不用再点一下 ✗） */
+    focusEditorForContinuation();
+  }, [focusEditorForContinuation]);
   /**
    * 离开弹窗文案：**动作说清楚** ✓（关闭 ⇒「保存并关闭」；切节点 ⇒「保存并切换」）。
    * 计算放在 `leaveLabels`（纯函数、可单测 ✓）；这里每次渲染直接取（很便宜 ✓，

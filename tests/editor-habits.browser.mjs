@@ -126,3 +126,231 @@ test('Markdown writing habits: real keyboard, paste ownership, read-only and und
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
+
+test('Enter/newline: empty heading exits, heading soft break stays valid Markdown, table cells commit like Tab', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  const ready = async () => {
+    await page.locator('.ProseMirror').waitFor();
+    await page.waitForTimeout(250);
+  };
+  try {
+    /* 空标题里按 Enter：转成普通段落，不留一个空的 "#" 标题 ✓ */
+    await h.mount('#');
+    await ready();
+    const heading = page.locator('.ProseMirror h1');
+    await heading.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('x');
+    assert.equal(await h.flush(), 'x\n', '空标题按 Enter 后留下的应是普通段落 ✓');
+    assert.equal(await page.locator('.ProseMirror h1').count(), 0, '不残留空标题 ✓');
+
+    /* 标题里 Shift+Enter：不能插非法软换行（旧行为会序列化成 title\\\nmore\n==== ✗） */
+    await h.mount('# title');
+    await ready();
+    await page.locator('.ProseMirror h1').click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('more');
+    const headingShift = await h.flush();
+    assert.equal(headingShift, '# title\n\nmore\n', '标题 Shift+Enter 拆成标题 + 正文段落 ✓');
+    assert.ok(!headingShift.includes('\\'), 'Markdown 里不出现硬换行反斜杠 ✓');
+    assert.ok(!headingShift.includes('===='), '不出现不稳定的 setext 标题写法 ✓');
+
+    /* 表格单元格里 Enter：与 Tab 一致提交本格、进入下一格（旧行为会把光标挤出表格 ✗） */
+    const table = '| a | b |\n| --- | --- |\n| c | d |';
+    await h.mount(table);
+    await ready();
+    await page.locator('.ProseMirror table.children tbody th').first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('X');
+    assert.equal(await h.flush(), '| a | X |\n| - | - |\n| c | d |\n', 'Enter 只移动单元格，不往表格外写内容 ✓');
+    assert.equal(await page.locator('.ProseMirror table.children tbody tr').count(), 2, 'Enter 不额外造表格行 ✓');
+
+    /* 最后一格 Enter：新增一行并进入新行第一格（与 Tab 一致 ✓） */
+    await h.mount(table);
+    await ready();
+    await page.locator('.ProseMirror table.children tbody td, .ProseMirror table.children tbody th').last().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.ProseMirror table.children tbody tr').count(), 3, '最后一格 Enter 新增正文行 ✓');
+    await page.keyboard.type('z');
+    assert.equal(await h.flush(), '| a | b |\n| - | - |\n| c | d |\n| z |   |\n', '新行第一格可直接写 ✓');
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test('nested list + formula: Enter stays in the formula; Ctrl+Enter exits without a stray <br /> paragraph', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await h.mount("- 第一层\n  - 第二层\n    - 第三层\n\n$$\nx = 1\n$$");
+    await page.locator(".ProseMirror").waitFor();
+    await page.waitForTimeout(700);
+    const formula = page.locator(".ProseMirror .milkdown-code-block .cm-content").first();
+    await formula.waitFor();
+    await formula.click();
+    await page.keyboard.press("Control+End");
+
+    /* 公式编辑器里的普通 Enter 只换行，不退出块 ✓ */
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("y = 2");
+    assert.equal(await page.evaluate(() => document.activeElement?.className), "cm-content", "公式里普通 Enter 后焦点仍在源码编辑区 ✓");
+    assert.ok((await h.flush()).includes("$$\nx = 1\ny = 2\n$$"), "普通 Enter 只在公式内换行 ✓");
+
+    /* Ctrl+Enter 退出公式：焦点到正文段落，且不再多出一个空的 `<br />` 段落 ✓ */
+    await page.keyboard.press("Control+Enter");
+    await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => document.activeElement?.className), "ProseMirror editor ProseMirror-focused", "Ctrl+Enter 后焦点回到正文 ✓");
+    assert.equal(
+      await h.flush(),
+      "* 第一层\n  * 第二层\n    * 第三层\n\n$$\nx = 1\ny = 2\n$$\n",
+      "退出公式后不残留空段落（旧行为会多一个 <br /> ✗）✓",
+    );
+    await page.keyboard.type("after");
+    assert.equal(
+      await h.flush(),
+      "* 第一层\n  * 第二层\n    * 第三层\n\n$$\nx = 1\ny = 2\n$$\n\nafter\n",
+      "退出后可直接在正文继续写 ✓",
+    );
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+/** 读 ShadowRoot / 文档里真正的焦点元素（面板实际是 shadow DOM ✓） */const activeElement = page => page.evaluate(() => {
+  const root = document.querySelector('.kn-editor');
+  const tree = root?.getRootNode();
+  const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+  return {
+    tag: active?.tagName ?? null,
+    className: typeof active?.className === 'string' ? active.className : null,
+    inProseMirror: active !== null && active.closest?.('.ProseMirror') !== null,
+    isSourceTextarea: active !== null && active.classList?.contains('kn-editor-text') === true,
+    isButton: active !== null && active.tagName === 'BUTTON',
+  };
+});
+
+test('opening a note focuses the editor: typing and Ctrl+S need no extra click', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await page.evaluate(() => window.mountDocument());
+    await page.locator('.ProseMirror').filter({ hasText: 'original' }).waitFor();
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.kn-editor');
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+      return active !== null && active.closest?.('.ProseMirror') !== null;
+    }, { timeout: 8000 });
+    assert.equal((await activeElement(page)).inProseMirror, true, '打开笔记后焦点要直接落在正文 ✓');
+
+    await page.keyboard.type(' typed');
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => window.saveRequests.length === 1);
+    assert.match(
+      await page.evaluate(() => window.saveRequests[0].text),
+      /original typed/,
+      '不用先点正文也能保存刚输入的字 ✓',
+    );
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test('unsupported syntax falls back to source with focus; removing it returns focus to rich text', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await page.evaluate(() => window.mountDocument({ text: '<div>raw html</div>' }));
+    const textarea = page.locator('.kn-editor-text');
+    await textarea.waitFor({ timeout: 8000 });
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.kn-editor');
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+      return active !== null && active.classList?.contains('kn-editor-text') === true;
+    }, { timeout: 8000 });
+    assert.equal((await activeElement(page)).isSourceTextarea, true, '自动落到纯文本时焦点要在 textarea ✓');
+
+    await textarea.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type(' edited');
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => window.saveRequests.length === 1);
+    assert.equal((await activeElement(page)).isSourceTextarea, true, '纯文本模式保存后焦点要回到 textarea ✓');
+    assert.match(await page.evaluate(() => window.saveRequests[0].text), /raw html[\s\S]* edited/);
+
+    await textarea.fill('plain text');
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.kn-editor');
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+      return active !== null && active.closest?.('.ProseMirror') !== null;
+    }, { timeout: 8000 });
+    assert.equal((await activeElement(page)).inProseMirror, true, '语法删干净后回正文，焦点要跟着回正文 ✓');
+    await page.keyboard.type('!');
+    await page.keyboard.press('Control+s');
+    await page.waitForFunction(() => window.saveRequests.length === 2);
+    assert.match(await page.evaluate(() => window.saveRequests[1].text), /plain text!/);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test('in-editor "adopt latest" confirmation is keyboard operable and restores focus', async () => {
+  const h = await startEditorBrowser();
+  const { page } = h;
+  try {
+    await page.evaluate(() => window.mountDocument({ conflict: true }));
+    await page.locator('.ProseMirror').filter({ hasText: 'original' }).waitFor();
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.kn-editor');
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+      return active !== null && active.closest?.('.ProseMirror') !== null;
+    }, { timeout: 8000 });
+    await page.keyboard.type(' changed');
+    await page.keyboard.press('Control+s');
+    const conflict = page.locator('.kn-editor-conflict');
+    await conflict.waitFor({ timeout: 8000 });
+    const trigger = conflict.getByRole('button', { name: '使用文件最新版本', exact: true });
+    await trigger.click();
+    const dialog = page.locator('.kn-editor-confirm');
+    await dialog.waitFor();
+    const stay = dialog.getByRole('button', { name: '继续编辑', exact: true });
+    const adopt = dialog.getByRole('button', { name: '使用文件最新版本', exact: true });
+    assert.equal(await stay.evaluate(el => el === document.activeElement), true, '确认框打开先聚焦保守选项 ✓');
+    await page.keyboard.press('Tab');
+    assert.equal(await adopt.evaluate(el => el === document.activeElement), true, 'Tab 在确认框按钮间循环 ✓');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await stay.evaluate(el => el === document.activeElement), true, 'Shift+Tab 反向循环 ✓');
+    await page.keyboard.press('Escape');
+    assert.equal(await dialog.count(), 0, 'Esc 关闭确认框 ✓');
+    assert.equal(await trigger.evaluate(el => el === document.activeElement), true, '取消后焦点回到触发按钮 ✓');
+
+    await trigger.click();
+    await dialog.waitFor();
+    await adopt.focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await stay.evaluate(el => el === document.activeElement), true, '焦点不会跑出确认框 ✓');
+    await stay.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+    assert.equal(await dialog.count(), 1, '输入法组合时不确认 ✓');
+    await page.keyboard.press('Escape');
+    assert.equal(await dialog.count(), 0, 'Esc 关闭确认框 ✓');
+
+    /* 真正采用最新版本：确认后冲突消失，焦点回正文 ✓ */
+    await trigger.click();
+    await dialog.waitFor();
+    await adopt.click();
+    await dialog.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.kn-editor');
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && 'activeElement' in tree ? tree.activeElement : document.activeElement;
+      return active !== null && active.closest?.('.ProseMirror') !== null;
+    }, { timeout: 8000 });
+    assert.equal(await page.locator('.kn-editor-conflict').count(), 0, '采用最新版本后冲突条消失 ✓');
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+

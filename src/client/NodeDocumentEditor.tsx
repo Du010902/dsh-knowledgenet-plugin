@@ -196,6 +196,19 @@ export function NodeDocumentEditor(props: {
   /** 已经为哪个节点做过"载入即判纯文本"的判定 ✓（每节点只判定一次 ✓） */
   const autoSourceRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  /**
+   * **焦点意图**（用户 2026-10-30 审核：打开编辑器 / 换编辑方式后应该能直接敲字 ✓）。
+   *
+   * - `"open"`：打开笔记（或重试读取成功）后把焦点交给编辑区；
+   * - `"mode"`：在正文 / 纯文本之间切换后把焦点交给新的编辑区；
+   * - `null`：没有待执行的焦点动作（不抢用户已经点到的控件 ✓）。
+   */
+  const focusIntentRef = useRef<"open" | "mode" | null>("open");
+  /** 纯文本模式保存期间是否本来在 textarea 里 ✓（保存结束要把焦点还给正文，和 Rich 的规则一致 ✓） */
+  const sourceHadFocusRef = useRef(false);
+  /** 编辑器内"采用最新版本"的二次确认：键盘操作与焦点归还 ✓ */
+  const adoptConfirmRef = useRef<HTMLDivElement | null>(null);
+  const adoptTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fetcher = useMemo<FetchLike>(
     () => props.fetcher ?? ((input, init) => fetch(input, init)),
@@ -204,6 +217,8 @@ export function NodeDocumentEditor(props: {
 
   /** 读一次（序号 + 取消；成功与失败分支都检查请求身份 ✓） */
   const load = useCallback(async (): Promise<void> => {
+    /* 打开 / 重试读取：读取就绪后把焦点交给编辑区 ✓（用户 2026-10-30 审核） */
+    focusIntentRef.current = "open";
     const seq = seqRef.current + 1;
     seqRef.current = seq;
     abortRef.current?.abort();
@@ -418,11 +433,76 @@ export function NodeDocumentEditor(props: {
     setTab("rich");
   }, [tab, richStatus.failed, unsupported.length]);
 
-  /* 读取完成后把焦点给正文（设计稿要求 ✓） */
+  /* 切换到另一种编辑方式 ⇒ 下一帧把焦点交给新的编辑区 ✓（不等用户再点一下 ✗） */
+  const previousTabRef = useRef(tab);
   useEffect(() => {
+    if (previousTabRef.current === tab) return;
+    previousTabRef.current = tab;
+    focusIntentRef.current = "mode";
+  }, [tab]);
+
+  /*
+   * 读取完成 / 切到正文或纯文本后，**把键盘焦点交给当前编辑面** ✓
+   * （`design/node-note-editor-plan.md`："编辑框拥有键盘焦点，F 等图谱快捷键不得拦截正文输入" ✓）。
+   *
+   * 只在有明确焦点意图时执行 ✓ —— 否则用户点了工具栏/别处再回来，会被莫名其妙抢焦点 ✗。
+   * 载入即判纯文本时先等 `tab` 切过去（见 `unsupported` / `autoSourceRef` ✓），
+   * 不然会把焦点先给正文、随即又切到纯文本 ✗。
+   */
+  useEffect(() => {
+    if (focusIntentRef.current === null) return;
     if (state.phase !== "ready" || state.conflicted) return;
-    textareaRef.current?.focus();
-  }, [state.phase, state.conflicted, props.nodeId]);
+    if (tab === "rich" && !richStatus.ready) return;
+    if (tab === "rich" && unsupported.length > 0 && autoSourceRef.current === props.nodeId) return;
+    focusIntentRef.current = null;
+    if (tab === "source") {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      /* 打开 / 切回纯文本后直接接着写：光标放到末尾 ✓（不是最前面 ✗） */
+      if (textarea !== null) {
+        const end = textarea.value.length;
+        textarea.setSelectionRange(end, end);
+      }
+      return;
+    }
+    richRef.current?.focus(true);
+  }, [state.phase, state.conflicted, tab, richStatus.ready, unsupported.length, props.nodeId]);
+
+  /*
+   * 纯文本模式保存后**把焦点还给 textarea** ✓（与 Rich 的"保存后光标还在"同一规则 ✓）：
+   * 保存期间会切只读，浏览器把焦点移走；结束后只在焦点确实丢到 body 时才还，不抢用户主动点到的控件 ✓。
+   */
+  useEffect(() => {
+    if (tab !== "source") {
+      sourceHadFocusRef.current = false;
+      return undefined;
+    }
+    const textarea = textareaRef.current;
+    if (state.saving) {
+      const root = rootRef.current;
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && "activeElement" in tree
+        ? (tree as Document | ShadowRoot).activeElement
+        : document.activeElement;
+      sourceHadFocusRef.current = textarea !== null && active === textarea;
+      return undefined;
+    }
+    if (!sourceHadFocusRef.current) return undefined;
+    sourceHadFocusRef.current = false;
+    const timer = window.setTimeout(() => {
+      const current = textareaRef.current;
+      if (current === null) return;
+      const root = rootRef.current;
+      const tree = root?.getRootNode();
+      const active = tree !== undefined && "activeElement" in tree
+        ? (tree as Document | ShadowRoot).activeElement
+        : document.activeElement;
+      const lost = active === null || active === document.body || active === document.documentElement
+        || (root !== null && active === root);
+      if (lost) current.focus();
+    }, 0);
+    return () => { window.clearTimeout(timer); };
+  }, [state.saving, tab]);
 
   /**
    * 用**显式给定的正文与指纹**保存。
@@ -743,7 +823,71 @@ export function NodeDocumentEditor(props: {
     if (latest === null) return;
     forgetDraft(cacheKeyRef.current);
     dispatch({ type: "adopt-latest" });
+    /* 冲突提示条消失后焦点回到正文（用户刚点完确认，不该落在 body 上 ✓） */
+    focusIntentRef.current = "mode";
   }, [refreshLatest, state.latest]);
+
+  /**
+   * **"采用文件最新版本"的二次确认**：键盘与焦点行为（用户 2026-10-30 审核）。
+   *
+   * 之前这个确认框只有鼠标可操作：Esc 不关、Tab 会跑到背景、打开后焦点还留在触发按钮上 ✗。
+   * 现在与项目里其它确认弹窗一致：打开聚焦第一个按钮（保守选项「继续编辑」✓），
+   * Tab/Shift+Tab 在按钮间循环，Enter 执行当前聚焦按钮，Esc 取消；
+   * 关闭后焦点回到触发按钮（采用成功时冲突条消失，改由上面的焦点意图回到正文 ✓）。
+   */
+  const adoptLatestRef = useRef(adoptLatest);
+  adoptLatestRef.current = adoptLatest;
+  useEffect(() => {
+    if (!confirmAdopt) return undefined;
+    const dialog = adoptConfirmRef.current;
+    const buttons = (): HTMLButtonElement[] =>
+      Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+    dialog?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229
+        || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === "Tab") {
+        const all = buttons();
+        if (all.length === 0) { event.preventDefault(); return; }
+        const first = all[0]!;
+        const last = all[all.length - 1]!;
+        if (dialog === null || !dialog.contains(document.activeElement)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      /* 焦点在按钮上按 Enter：交给浏览器原生 click（「继续编辑」不会误确认 ✗） */
+      if (event.key === "Enter" && event.target instanceof Element
+        && event.target.closest("button") !== null && dialog?.contains(event.target) === true) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setConfirmAdopt(false);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setConfirmAdopt(false);
+        void adoptLatestRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      /* 关闭/取消后把焦点还给触发按钮（采用成功时它已卸载，`focus()` 是安全的空操作 ✓） */
+      window.setTimeout(() => { adoptTriggerRef.current?.focus(); }, 0);
+    };
+  }, [confirmAdopt]);
 
   /** 复制草稿：**给出成功/失败反馈** ✗（旧实现静默吞掉失败 ⇒ 用户以为复制了 ✓） */
   const copyDraft = useCallback((): void => {
@@ -861,6 +1005,7 @@ export function NodeDocumentEditor(props: {
               <button
                 type="button"
                 className="is-danger"
+                ref={adoptTriggerRef}
                 disabled={state.saving || state.refreshing}
                 onClick={() => setConfirmAdopt(true)}
               >
@@ -1068,7 +1213,13 @@ export function NodeDocumentEditor(props: {
       </div>
 
       {confirmAdopt ? (
-        <div className="kn-editor-confirm" role="dialog" aria-modal="true">
+        <div
+          className="kn-editor-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("adoptLatestConfirmTitle")}
+          ref={adoptConfirmRef}
+        >
           <div className="kn-editor-confirm-title">{t("adoptLatestConfirmTitle")}</div>
           <div className="kn-editor-confirm-body">{t("adoptLatestConfirmMessage")}</div>
           <div className="kn-editor-notice-actions">

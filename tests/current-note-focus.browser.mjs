@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { __internal } from "../index.js";
 import { makeV3Fixture, cleanupFixtures } from "./support/v3-fixture.mjs";
@@ -11,7 +12,11 @@ import { makeV3Fixture, cleanupFixtures } from "./support/v3-fixture.mjs";
 if (!process.env.KN_PROJECT) throw Error("Set KN_PROJECT to the DSH dependency checkout.");
 const project = resolve(process.env.KN_PROJECT).replace(/\\/g, "/");
 const reactRequire = createRequire(project + "/node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom/package.json");
-const { rolldown } = await import(pathToFileURL(project + "/node_modules/.pnpm/rolldown@1.0.3/node_modules/rolldown/dist/index.mjs").href);
+/* rolldown 版本随 DSH checkout 变化 ⇒ 用装着的那个（优先已验证可用的 1.1.x） */
+const rolldownDirs = readdirSync(join(project, "node_modules/.pnpm"));
+const rolldownDir = rolldownDirs.find((name) => name.startsWith("rolldown@1.1.")) ?? rolldownDirs.find((name) => name.startsWith("rolldown@"));
+if (rolldownDir === undefined) throw Error("No rolldown installation found in the DSH checkout.");
+const { rolldown } = await import(pathToFileURL(join(project, "node_modules/.pnpm", rolldownDir, "node_modules/rolldown/dist/index.mjs")).href);
 const { chromium } = await import(pathToFileURL(project + "/node_modules/.pnpm/playwright@1.61.1/node_modules/playwright/index.mjs").href);
 const fixture = await makeV3Fixture({ nodes: ["场景无关的欺骗检测", "有包络的波包"], edges: [["场景无关的欺骗检测", "有包络的波包"]] });
 const state = new __internal.LearningState(3000);
@@ -66,6 +71,25 @@ try {
   await page.locator(".kn-editor-title").filter({ hasText: "有包络的波包" }).waitFor();
   await page.locator('.ProseMirror').waitFor();
   const opened = await waitTarget("有包络的波包"); assert.equal(opened.focusKind, "editor");
+  /*
+   * 用户 2026-10-30 审核：打开笔记后能直接输入；关闭时选择「继续编辑」要把焦点还给正文 ✓
+   * （之前焦点停在已卸载的弹窗按钮上，回 body，得再点一下正文 ✗）
+   */
+  await page.keyboard.type(" edited");
+  await page.locator(".kn-editor-close").click();
+  const leaveDialog = page.locator(".kn-modal");
+  await leaveDialog.waitFor();
+  await leaveDialog.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await leaveDialog.waitFor({ state: "detached" });
+  await page.waitForTimeout(150);
+  const continuationFocus = await page.evaluate(() => {
+    const host = document.getElementById("app").querySelector("div").querySelector("div");
+    const root = host.shadowRoot;
+    const active = root.activeElement ?? document.activeElement;
+    const prose = root.querySelector(".ProseMirror");
+    return { inProseMirror: prose !== null && active !== null && prose.contains(active), tag: active?.tagName ?? null };
+  });
+  assert.equal(continuationFocus.inProseMirror, true, "继续编辑后焦点要回正文，用户可以直接接着写 ✓");
   await page.evaluate(() => { document.querySelector('#app').querySelector('div').querySelector('div').shadowRoot.querySelector('.kn-head-panel').style.display='none'; document.hasFocus=()=>false; window.dispatchEvent(new Event('blur')); });
   await page.locator("#chat").fill("解释一下当前知识点");
   await page.waitForTimeout(1200);

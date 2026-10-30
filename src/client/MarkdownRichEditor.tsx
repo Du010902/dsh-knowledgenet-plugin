@@ -39,6 +39,7 @@ import { deleteColumn, deleteRow, deleteTable, goToNextCell } from "@milkdown/ki
 import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
 import { Fragment, type Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+import { setBlockType, splitBlock } from "@milkdown/kit/prose/commands";
 import { replaceAll } from "@milkdown/kit/utils";
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
@@ -526,6 +527,79 @@ function insertPlainTextAtSelection(view: ProseMirrorView, text: string): boolea
   return true;
 }
 
+/**
+ * 选区是否位于表格单元格内（只沿祖先链走到 table 为止 ✓）。
+ *
+ * @param state - 当前 ProseMirror 状态。
+ * @returns 在 table_cell / table_header 内为 true。
+ */
+function selectionInTableCell(state: ProseMirrorView["state"]): boolean {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const name = $from.node(depth).type.name;
+    if (name === "table_cell" || name === "table_header") return true;
+    if (name === "table") return false;
+  }
+  return false;
+}
+
+/**
+ * **Enter / Shift+Enter 的换行语义补丁**（用户 2026-10-30 审核："enter 换行相关逻辑"）。
+ *
+ * 上游 Milkdown/ProseMirror 的默认行为在三处不合理：
+ * 1. **表格单元格里按 Enter 会被"挤出表格"**：光标跳到表格后面的段落，用户在拖盘里打字
+ *    结果跑到了表格外 ✗。Markdown 表格单元格**不能保存换行**（序列化会把 `<br>` 吃掉 ✗）⇒
+ *    这里改成与 `Tab` 一致的"提交本格、进入下一格"（为空的格子也一样 ✓）：
+ *    最后一格再按 Enter ⇒ 新增一行并进入新行第一格 ✓；`Shift+Enter` 回到上一格 ✓。
+ * 2. **空标题里按 Enter 会留下一个空的 `#` 标题**：Markdown 里空标题既看不见又要事后手删 ✗。
+ *    ⇒ 把空标题**转成普通段落** ✓（光标留在原处，接着写就是正文）。
+ * 3. **标题里按 Shift+Enter 会插 hardbreak**：Markdown 标题不能跨行，序列化会变成
+ *    非法/不稳定的 setext 写法（实测 `title\\\nmore\n====` ✗）⇒ 按普通 Enter 一样拆块 ✓。
+ *
+ * 其它情况（普通段落、列表、引用、代码块等）一律返回 false，保留上游默认行为 ✓。
+ *
+ * @param view - 当前 ProseMirror 视图。
+ * @param event - 键盘事件（已确认是 Enter 且无 Ctrl/Meta/Alt）。
+ * @param addRowAfter - 表格最后一格按 Enter 时追加正文行（由调用方用编辑器的 ctx 执行 ✓）。
+ * @returns 是否已由这里处理（true 时调用方应阻止后续默认行为 ✓）。
+ */
+function handleEnterNewline(view: ProseMirrorView, event: KeyboardEvent, addRowAfter: () => void): boolean {
+  const { state } = view;
+  const selection = state.selection;
+  if (parentOfHeading(selection)) {
+    const heading = parentOfHeading(selection)!;
+    event.preventDefault();
+    if (heading.content.size === 0) {
+      setBlockType(state.schema.nodes.paragraph!)(state, view.dispatch);
+      return true;
+    }
+    if (event.shiftKey) {
+      /* 标题不能软换行 ⇒ Shift+Enter 与 Enter 一致：拆成下一块（保持 Markdown 合法 ✓） */
+      splitBlock(state, view.dispatch);
+      return true;
+    }
+    /* 非空标题的普通 Enter 交给上游（标题末尾会起正文段落 ✓） */
+    return false;
+  }
+  if (selectionInTableCell(state)) {
+    event.preventDefault();
+    const handled = goToNextCell(event.shiftKey ? -1 : 1)(state, view.dispatch);
+    if (!handled && !event.shiftKey) {
+      /* 最后一格：与 Tab 一致，追加一行再进入新行第一格 ✓ */
+      addRowAfter();
+      goToNextCell(1)(view.state, view.dispatch);
+    }
+    return true;
+  }
+  return false;
+}
+
+/** 选区所在文本块是标题时返回它（供 Enter/Shift+Enter 规则判断 ✓） */
+function parentOfHeading(selection: ProseMirrorView["state"]["selection"]) {
+  const parent = selection.$from.parent;
+  return parent.type.name === "heading" ? parent : null;
+}
+
 async function writeCodeBlockClipboard(payload: { language: string; code: string }): Promise<void> {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
   const Item = typeof ClipboardItem === "function" ? ClipboardItem : null;
@@ -738,8 +812,8 @@ export interface MarkdownRichEditorHandle {
   flush: () => string | null;
   /** 用给定 Markdown **整体替换**文档（只在确认替换时用 ✓） */
   replaceMarkdown: (markdown: string) => void;
-  /** 聚焦正文 ✓ */
-  focus: () => void;
+  /** 聚焦正文；`atEnd` = 把光标放到文档末尾（打开笔记 / 切回正文后直接接着写 ✓） */
+  focus: (atEnd?: boolean) => void;
   /**
    * 把一段文本**作为代码块插入** ✓（粘贴被拆散后的一键补救 ✓）。
    * @param code - 文本原文 ✓（缩进 / 空行一字不改 ✓）。
@@ -1880,7 +1954,46 @@ export function MarkdownRichEditor(props: {
         codeMirrorView.dispatch({ selection: { anchor: main.head }, scrollIntoView: false });
       }
     };
+    /*
+     * **代码 / 公式块里按 Ctrl / ⌘ + Enter 退出块**（用户 2026-10-30 实测：
+     * 多层嵌套列表下面放公式，在公式源码里按 Ctrl+Enter，公式后多出一个 `<br />` 空段落 ✗）。
+     *
+     * 原因：上游 `@milkdown/components` 的 code-block 把 Mod-Enter 绑到 `exitCode` ⇒ 它会
+     * **新建**一个段落并把光标移进去；而 code_block 后面本来就有 plugin-trailing 的**空段落占位** ⇒
+     * 退出后变成两个空段落，保存时多出一条 `<br />` ✗。
+     *
+     * 这里**不阻止**上游退出动作（焦点/选区由它正确移交 ✓），只在事件处理完之后检查：
+     * 若光标正落在"代码块后新建的**空段落**"里，而文档末尾还挂着另一个空段落 ⇒ 把末尾那个删掉 ✓。
+     * 其它情况（后面是正文块、块在列表里等）不动，保持上游语义 ✓。
+     */
+    const onCodeBlockModEnter = (event: KeyboardEvent): void => {
+      if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const host = target?.closest<HTMLElement>(".milkdown-code-block");
+      const view = viewRef.current;
+      if (host === null || host === undefined || view === null
+        || !view.editable || readOnlyRef.current || !root.contains(host)) return;
+      window.setTimeout(() => {
+        const current = viewRef.current;
+        if (current === null || !current.editable || readOnlyRef.current) return;
+        const { state } = current;
+        const selection = state.selection;
+        if (!(selection instanceof TextSelection)) return;
+        const paragraph = selection.$from.parent;
+        if (paragraph.type.name !== "paragraph" || paragraph.content.size !== 0) return;
+        /* 只有"紧跟在代码 / 公式块后面的新空段落"才归这条规则管 ✓ */
+        const index = selection.$from.index(0);
+        if (index <= 0 || state.doc.child(index - 1).type.name !== "code_block") return;
+        const last = state.doc.lastChild;
+        if (last === null || last.type.name !== "paragraph" || last.content.size !== 0) return;
+        if (last === paragraph) return;
+        current.dispatch(state.tr.delete(state.doc.content.size - last.nodeSize, state.doc.content.size).scrollIntoView());
+        reportRef.current?.("code-block-exit-reused-trailing");
+      }, 0);
+    };
     root.addEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+    root.addEventListener("keydown", onCodeBlockModEnter, true);
     root.addEventListener("focusout", onCodeMirrorFocusOut, true);
     root.addEventListener("focusin", onSelectionChanged, true);
     root.addEventListener("compositionend", onSelectionChanged, true);
@@ -2659,10 +2772,23 @@ export function MarkdownRichEditor(props: {
            * 带修饰键的 Backspace 不拦 ✓（比如 Ctrl/⌘+Backspace 的删词要保留原生行为 ✓）。
            */
           handleKeyDown: (targetView, event) => {
+            const editable = targetView.editable && !event.isComposing && event.keyCode !== 229;
+            /*
+             * Enter / Shift+Enter：表格单元格内不逃出表格、空标题不残留 `#`、标题内不插非法软换行
+             * （用户 2026-10-30 审核 ✓，见 `handleEnterNewline` ✓）。
+             */
+            if (editable && event.key === "Enter"
+              && !event.ctrlKey && !event.metaKey && !event.altKey
+              && handleEnterNewline(targetView, event, () => {
+                /* 最后一格按 Enter：与 Tab 共用同一个 GFM 行命令（保持表头/正文行 schema ✓） */
+                crepe.editor.action((ctx: Ctx) => { ctx.get(commandsCtx).call(addRowAfterCommand.key); });
+              })) {
+              return true;
+            }
             if (previousKeyDown !== undefined && previousKeyDown.call(view.props, targetView, event) === true) {
               return true;
             }
-            if (!targetView.editable || event.isComposing || event.keyCode === 229) return false;
+            if (!editable) return false;
             if (event.key !== "Backspace" && event.key !== "Delete") return false;
             if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
             const transaction = unwrapBlockquoteTransaction(targetView.state, event.key === "Backspace" ? "back" : "forward");
@@ -2773,6 +2899,7 @@ export function MarkdownRichEditor(props: {
       root.removeEventListener("keyup", onSelectionChanged, true);
       root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
       root.removeEventListener("pointerdown", onOutsideCodeMirrorPointerDown, true);
+      root.removeEventListener("keydown", onCodeBlockModEnter, true);
       root.removeEventListener("focusout", onCodeMirrorFocusOut, true);
       root.removeEventListener("focusin", onSelectionChanged, true);
       root.removeEventListener("compositionend", onSelectionChanged, true);
@@ -2933,8 +3060,21 @@ export function MarkdownRichEditor(props: {
       reportBaseline(markdown);
       scheduleMenu();
     },
-    focus: () => {
-      hostRef.current?.querySelector<HTMLElement>(".ProseMirror, [contenteditable='true']")?.focus();
+    focus: (atEnd = false) => {
+      const view = viewRef.current;
+      if (view === null) {
+        hostRef.current?.querySelector<HTMLElement>(".ProseMirror, [contenteditable='true']")?.focus();
+        return;
+      }
+      if (!view.hasFocus()) view.focus();
+      if (!atEnd) return;
+      /*
+       * 打开笔记 / 换编辑方式后**直接接着写**：光标放到末尾 ✓。
+       * 之前只 focus()，ProseMirror 的默认选区在文档开头 ⇒ 用户第一笔会插到最前面 ✗
+       * （用户 2026-10-30 审核：打开后敲字应当像继续写笔记）。
+       */
+      const selection = TextSelection.near(view.state.doc.resolve(view.state.doc.content.size));
+      view.dispatch(view.state.tr.setSelection(selection));
     },
     /*
      * **把某段文本作为代码块插入** ✓（`design/code-block-copy-paste-analysis.md`

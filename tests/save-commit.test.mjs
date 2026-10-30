@@ -154,9 +154,11 @@ describe("commitSavedDraft：保存确认**同步**落缓存（保存后立即�
 });
 
 describe("组件里的顺序：落缓存 → 更新界面 → 通知父面板", () => {
+  /* 文件里有多处 `outcome.ok === true`（读取 / 最新正文刷新）⇒ 要取**保存成功**那一处 ✓ */
+  const conflictAt = editorSource.indexOf('if (outcome.code === "conflict")');
   const success = editorSource.slice(
-    editorSource.indexOf("if (outcome.ok === true) {"),
-    editorSource.indexOf('if (outcome.code === "conflict")'),
+    editorSource.lastIndexOf("if (outcome.ok === true) {", conflictAt),
+    conflictAt,
   );
 
   it("缓存提交发生在 `onSaved` / 「saved」通知**之前** ✓", () => {
