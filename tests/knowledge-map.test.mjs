@@ -1,16 +1,16 @@
 /**
- * 平面总览层（知识地图）的守门测试。
+ * 节点群分组的守门测试。
  *
- * 两层视图的纯逻辑都在 `src/client/knowledge-map.ts`（可像 `plugin-locale.test.mjs` 那样直接 import .ts），
+ * 纯逻辑都在 `src/client/knowledge-map.ts`（可像 `plugin-locale.test.mjs` 那样直接 import .ts），
  * 这里钉住设计稿里那些**容易在后续改动里悄悄变掉**的规则：
- * ① 分岛 = 连通分量、忽略箭头方向、孤立点合并成一张卡 ✓；
- * ② 岛的身份键只看成员集合（视角缓存按它分区，顺序无关）✓；
+ * ① 分组 = 连通分量、忽略箭头方向、孤立点合并成一个群 ✓；
+ * ② 群的身份键只看成员集合（视角缓存按它分区，顺序无关）✓；
  * ③ 代表节点 / 计数 / 缩略图布局（确定、归一化、下标合法、抽样有上限）✓；
- * ④ 裁剪快照必须只留岛内节点与**两端都在岛内**的关系（否则上游边索引会错位）✓；
- * ⑤ 面板接线：地图是默认层、空间层只喂裁剪后的图、换岛按岛键分区视角缓存 ✓。
+ * ④ 裁剪快照必须只留群内节点与**两端都在群内**的关系（否则上游边索引会错位）✓；
+ * ⑤ 面板接线：默认整张图；右键节点「进入节点群」= **直接进入该节点所在的群** ✓。
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -206,72 +206,67 @@ describe("缩略图布局（确定性、归一化、可画）", () => {
 
 describe("面板接线（静态守门）", () => {
   const panel = readFileSync(join(CLIENT, "GraphPanel.tsx"), "utf8");
-  const mapComponent = readFileSync(join(CLIENT, "KnowledgeMap.tsx"), "utf8");
+  const menu = readFileSync(join(CLIENT, "GraphContextMenu.tsx"), "utf8");
   const css = readFileSync(join(CLIENT, "panel.css"), "utf8");
 
-  it("地图是**默认层**；空间层第一次进入才挂载（地图阶段不替看不见的 WebGL 付成本）", () => {
-    assert.ok(panel.includes('useState<"map" | "space">("map")'), "默认 layer 必须是 map");
-    assert.ok(panel.includes("spaceMounted"), "空间层要记录是否已经挂载过");
+  it("默认整张图；右键节点「进入节点群」⇒ **直接进入该节点所在的群**（2026-10-30 最终要求 ✓）", () => {
+    assert.ok(
+      panel.includes("const [islandId, setIslandId] = useState<string | null>(null)"),
+      "默认作用域 = 整张图（islandId 为 null）",
+    );
+    assert.equal(panel.includes('useState<"map" | "space">'), false, "不再有 map / space 两层 ✗");
+    assert.equal(panel.includes("kn-map-stage"), false, "不再渲染独立地图层 ✗");
+    assert.equal(panel.includes("kn-groups-trigger"), false, "右下角悬浮按钮已移除 ✗");
+    assert.ok(panel.includes("mapModel.nodeToIsland.get(nodeId)"), "面板按右键节点找它所在的群");
+    assert.ok(panel.includes("if (owner !== null) enterIsland(owner);"), "找到就**直接进入**这个群 ✓");
+    assert.ok(menu.includes('tr("viewGroups")'), "节点右键菜单要有「进入节点群」一条");
+    assert.ok(menu.includes("props.onViewGroups?.(nodeId)"), "点它要把右键节点 id 传给面板");
+    assert.equal(panel.includes("groupsOpen"), false, "不再有「所有节点群供选择」的弹窗状态 ✗");
+    assert.equal(existsSync(join(CLIENT, "NodeGroupPicker.tsx")), false, "选择弹窗组件已删除 ✗");
   });
 
-  it("空间层只喂**裁剪后的图**，且按岛键分区视角缓存", () => {
+  it("进了节点群：返回整张图 + 只喂裁剪图 + 按作用域分区视角缓存", () => {
     assert.ok(panel.includes("graph={visibleGraph}"), "三维视图拿到的必须是裁剪图");
     assert.ok(panel.includes("islandSnapshot(coloredGraph, island)"), "裁剪走纯函数");
-    assert.ok(panel.includes("focusId={scopedFocus}"), "岛外的全局聚焦不能带进空间（否则信息条报一个看不见的节点）");
-    assert.ok(panel.includes("libraryKey={sceneLibraryKey}"), "视角缓存按作用域（库 + 岛）分区");
-    assert.ok(panel.includes("::island:"), "岛键要拼进作用域身份");
+    assert.ok(panel.includes("focusId={scopedFocus}"), "群外的全局聚焦不能带进空间（否则信息条报一个看不见的节点）");
+    assert.ok(panel.includes("libraryKey={sceneLibraryKey}"), "视角缓存按作用域（库 + 节点群）分区");
+    assert.ok(panel.includes("::island:"), "作用域键要拼进作用域身份");
+    assert.ok(panel.includes('aria-label={t("backToWholeGraph")}'), "头行要有「返回整张图」图标按钮（读屏名 ✓）");
+    assert.ok(panel.includes("onClick={backToWholeGraph}"), "点击回到整张图 ✓");
+    assert.ok(panel.includes("<BackArrowIcon />"), "返回按钮用面板自己的箭头图标（shadow 里不能用宿主 sprite ✗）");
+    assert.ok(panel.includes("disabled={editingNodeId !== null || leaveDialog !== null}"), "编辑器/三选一开着时不许切走");
   });
 
-  it("空库右键建节点仍可用：地图背景也在右键捕获范围内", () => {
-    assert.ok(panel.includes("onContextMenuCapture"), "保留捕获阶段右键");
-    const at = panel.indexOf("onContextMenuCapture");
-    const body = panel.slice(at, at + 900);
-    assert.ok(body.includes("requestCanvasMenu"), "地图空白处右键要能开「创建节点」");
-    assert.ok(body.includes('closest(".kn-island")'), "卡片上的右键要跳过（不算空白）");
-  });
-
-  it("空间层用**返回图标按钮**（不是文字面包屑）回地图；编辑器开着时不允许离开", () => {
+  it("Esc：从节点群回整张图；不再有图层切换 ✗", () => {
     assert.ok(panel.includes('onKeyDown={(event) => {'), "要有键盘返回");
     assert.ok(panel.includes('event.key !== "Escape"'), "只认 Esc");
-    assert.ok(panel.includes('setLayer("map")'), "Esc / 返回按钮最终把层切回 map");
-    assert.ok(panel.includes('aria-label={t("backToMap")}'), "空间层要有返回地图的图标按钮（读屏名 ✓）");
-    assert.ok(panel.includes('title={t("backToMap")}'), "hover 说明 ✓");
-    assert.ok(panel.includes("<BackArrowIcon />"), "返回按钮用面板自己的箭头图标（shadow 里不能用宿主 sprite ✗）");
-    assert.ok(panel.includes("disabled={editingNodeId !== null || leaveDialog !== null}"), "编辑器/三选一开着时不许回地图");
-    /* 用户 2026-10 反馈："左上角突然多出来的文字块不喜欢" ⇒ 头行不许再渲染文字面包屑 ✗ */
-    assert.equal(panel.includes("kn-crumbs"), false, "头行不许再有文字面包屑");
-    assert.equal(panel.includes("wholeGraphName"), false, "不许再用旧的整图名字段");
+    assert.ok(panel.includes("if (islandId !== null) setIslandId(null);"), "Esc 从节点群回整张图");
+    assert.equal(panel.includes("setLayer("), false, "不许再出现 map/space 图层切换 ✗");
   });
 
-  it("地图用「当前空间」标记表达当前在哪座岛（头行不重复写岛名 ✓）", () => {
-    assert.ok(panel.includes("currentIslandId={islandId}"), "把当前作用域交给地图");
-    assert.ok(mapComponent.includes("currentIslandId === island.key"), "命中当前岛的卡片要能标出来");
-    assert.ok(mapComponent.includes('t("currentSpace")'), "当前岛卡片显示「当前空间」而不是「进入空间」");
-    assert.ok(new RegExp("\\.kn-island\\.is-current\\s*[,{]").test(css), "当前岛卡片要有样式");
+  it("右键空白建独立节点仍然可用；图内输入弹窗上的右键不算空白", () => {
+    assert.ok(panel.includes("onContextMenuCapture"), "保留捕获阶段右键");
+    const at = panel.indexOf("onContextMenuCapture");
+    const body = panel.slice(at, at + 1200);
+    assert.ok(body.includes("requestCanvasMenu"), "空白处右键要能开「创建独立节点」");
+    assert.ok(body.includes(".kn-prompt-backdrop"), "图内输入弹窗上的右键要跳过（不算空白）");
   });
 
-  it("地图组件确实渲染 SVG 缩略图，且样式都定义在注入的 panel.css 里（Shadow DOM 边界）", () => {
-    assert.ok(mapComponent.includes("<svg"), "岛卡要有缩略图");
-    assert.ok(mapComponent.includes("kn-island-svg"), "缩略图类名");
-    for (const cls of ["kn-map-stage", "kn-map", "kn-map-grid", "kn-island", "kn-map-foot", "kn-map-whole", "kn-map-empty"]) {
-      assert.ok(new RegExp(`\\.${cls}\\s*[,{]`).test(css), `${cls} 必须有样式定义`);
-    }
-    assert.ok(css.includes(".kn-map-stage[data-visible=\"false\"]"), "地图也要用显隐而不是卸载");
+  it("不再有节点群选择弹窗的组件/样式残留（最终方案不弹列表 ✗）", () => {
+    assert.equal(panel.includes("NodeGroupPicker"), false, "面板不再引用选择弹窗组件");
+    assert.equal(panel.includes("kn-groups"), false, "面板不再有选择弹窗元素");
+    assert.equal(css.includes(".kn-groups-"), false, "panel.css 不再保留选择弹窗样式");
   });
 
-  it("平面层与**三维空间层**共用同一份点阵底纹（用户 2026-10-29 要求 ✓）", () => {
-    assert.ok(css.includes("--kn-dot-grid:"), "点阵底纹要有一份共享定义（两层共用、网格对齐 ✓）");
-    assert.ok(
-      /\.kn-map \{[\s\S]{0,200}?background-image: var\(--kn-dot-grid\)/.test(css),
-      "知识地图用共享点阵 ✓",
-    );
+  it("三维空间层保留点阵底纹（用户 2026-10-29 要求 ✓）", () => {
+    assert.ok(css.includes("--kn-dot-grid:"), "点阵底纹要有一份定义");
     assert.ok(
       /\.kn-graph-stage \{[\s\S]{0,400}?background-image: var\(--kn-dot-grid\)/.test(css),
-      "三维空间层也要用同一份点阵（画布透明清屏 ⇒ 会透出来 ✓）",
+      "三维空间层用点阵底纹（画布透明清屏 ⇒ 会透出来 ✓）",
     );
     assert.ok(
       /\.kn-graph-stage \{[\s\S]{0,400}?background-size: 22px 22px/.test(css),
-      "三维空间的点阵网格也必须是 22px（与地图一致，切换层不跳 ✓）",
+      "点阵网格 22px ✓",
     );
   });
 });

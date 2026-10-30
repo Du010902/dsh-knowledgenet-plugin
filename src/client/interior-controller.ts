@@ -143,9 +143,11 @@ export class InteriorNavigation {
   /**
    * 这个实例是否**已经采纳过球心**。
    *
-   * 承诺（文档 P2）：球心只在「**首次进入**」与「**明确点了重新整理之后**」变 ✓。
-   * 有了这个标记，引擎后续因为选中/聚焦/换结构而发的收敛取景就不会再改球心 ✗
-   * （用户 2026-10 复查："双击节点时旋转中心又被放到这个节点上" ✗）。
+   * 球心规则（2026-10-30 修正）：首次进入先采一次；**布局收敛后**再按收敛后的几何中心校准
+   * （用户没操作过相机，或这是明确点「重新整理」）；用户转过视角之后不再自动改。
+   * 有了这个标记，引擎后续因为选中/聚焦/换结构而发的收敛取景不会把球心丢在原地
+   * （用户 2026-10 复查："双击节点时旋转中心又被放到这个节点上" ✗；
+   *  2026-10-30 又指出"旋转中心不在几何中心" ✗ ⇒ 见 `fitAll()` 的 settleAdopt）。
    */
   private centerAdopted = false;
   private suppressClick = false;
@@ -395,27 +397,27 @@ export class InteriorNavigation {
     const settlingRelayout = reason === "settle" && this.relayoutPending;
     const skipFraming = settlingRelayout && this.interactedSinceRelayout;
     /*
-     * 球心采纳规则（承诺：**只在「首次进入」与「明确重新整理之后」变** ✓）：
+     * 球心采纳规则（2026-10-30 用户反馈修正：**旋转中心必须落在图的几何中心**）：
      *
-     * 1. **还没采过 + 用户没动过** ⇒ 采一次（引擎的"初次取景" ✓；
-     *    也包括"有布局缓存但没有相机缓存"那种首次收敛 ✓）；
-     * 2. 收到过**明确的重新整理请求** + 这次是布局收敛 ⇒ 采新球心（承诺兑现 ✓，
-     *    即使用户在重排期间操作过也照样复位球心 ✓ —— 只是不抢镜头 ✓）。
-     *
-     * 其它情况一律不动 ✗ —— 尤其是引擎**自己**因为选中/聚焦/换结构而发的收敛取景 ✗：
-     * 旧规则里的 `|| !this.userInteracted` 会让"还没拖过"的用户的球心被反复改成
-     * **当前布局的包围盒中心** ✗，而聚焦时引擎给的常常是子集 ⇒
-     * 双击定位后旋转中心就像"跑到那个节点上"了 ✗（用户复查 ✓）。
+     * 1. 首次取景（初始云 / 有布局缓存但没有相机缓存）⇒ 先按当时坐标采一次，保证立刻能看 ✓；
+     * 2. **布局收敛后**（`settle`）⇒ 只要用户没动过相机（或这是明确的重新整理），就用**收敛后
+     *    的包围盒中心**再采一次 —— 引擎的"初始取景"发生在力导向**还没收敛**时，坐标云随后会
+     *    整体偏移；不重采的话转动中心会停在旧云的几何中心，看起来"不在图中心"✗（用户实测）。
+     *    用户拖动/滚轮会关掉引擎的 autoFit，那种情况引擎根本不发这次 settle 取景 ⇒ 不抢视角 ✓。
+     * 3. 其余（尤其 `command` 那次立即取景）⇒ 不动球心 ✓。
      */
     const firstTime = !this.centerAdopted
       && !this.userInteracted
       && (reason === "initial" || reason === "settle");
-    const adoptCenter = firstTime || (reason === "settle" && this.relayoutPending);
+    const settleAdopt = reason === "settle"
+      && this.pointer === null
+      && (!this.userInteracted || this.relayoutPending);
+    const adoptCenter = firstTime || settleAdopt;
     if (adoptCenter && Number.isFinite(bounds.radius) && bounds.radius > 0) {
       this.state.center = [...bounds.center];
       this.radiusMeasured = false;
       this.measureRadius(positions, count);
-      /* 首次那一采之后，只有"明确重新整理"能再改球心 ✓ */
+      /* 首次那一采之后，"布局再次收敛"仍可按上面的规则把中心校准到新的几何中心 ✓ */
       if (firstTime) this.centerAdopted = true;
       /* 只有"布局收敛"这一次才算兑现了重排请求 ✓ */
       if (reason === "settle") {

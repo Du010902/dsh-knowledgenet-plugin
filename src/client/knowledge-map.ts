@@ -1,14 +1,15 @@
 /**
- * 知识地图（平面总览层）的**纯数据逻辑**。
+ * 节点群（知识岛）分组的**纯数据逻辑**。
  *
- * 两层视图的划分（`design/knowledge-map-two-layer.md`）：
- * - **平面层**：把整张图按「连通分量」分成一座座知识岛（忽略依赖箭头方向），只回答"有哪些群"；
- *   岛与岛之间不画任何线、距离也没有语义；
- * - **空间层**：进入某座岛之后，只把这座岛的节点与关系交给三维视图。
+ * 用途（2026-10-30 起）：右键节点「进入节点群」时，面板据此找该节点所属的群、裁剪空间数据；
+ * 选中一个群 ⇒ 三维空间只加载这个群的节点与关系（`GraphPanel` 的 `islandSnapshot`）。
+ * 设计记录：`design/space-with-group-picker.md`（旧的两层视图方案见 `design/knowledge-map-two-layer.md`）。
  *
- * 这个文件不碰 React / DOM / 宿主：连通分量、岛的身份键、代表节点、缩略图坐标都是可单测的纯函数。
- * 连通分量**复用**上游布局层的 `buildTopology`（它本来就要为力导向布局算分量与签名），
- * 不再自己写一套 BFS —— 同一份图两套分量算法迟早会分叉。
+ * - 分组：把整张图按「连通分量」分成一个个群（忽略依赖箭头方向），群与群之间不画任何线；
+ * - 身份 / 代表节点 / 缩略图坐标都是可单测的纯函数。
+ *
+ * 这个文件不碰 React / DOM / 宿主。连通分量**复用**上游布局层的 `buildTopology`
+ * （它本来就要为力导向布局算分量与签名），不再自己写一套 BFS —— 同一份图两套分量算法迟早会分叉。
  */
 import type { GraphSnapshot, KnowledgeNode } from "../vendor/upstream/data/types.ts";
 import { buildTopology } from "../vendor/upstream/graph3d/topology.ts";

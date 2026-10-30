@@ -300,6 +300,7 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     /* 用户在重排期间又操作了一次 ⇒ 结算时不该再取景 ✓ */
     element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
     element.emit("pointermove", { pointerId: 1, clientX: 480, clientY: 320 });
+    element.emit("pointerup", { pointerId: 1, clientX: 480, clientY: 320 });
     const before = { ...displayBasisOf(navigation) };
     navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
     const after = displayBasisOf(navigation);
@@ -374,23 +375,29 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     navigation.command({ type: "focusNode", nodeId: "n1", source: "toolbar" }, 1, layout, 2);
     assert.deepEqual(navigation.camera.knInterior.center, centerBefore, "再次定位也不许改中心 ✗");
 
-    /* ⑥ 引擎自己发的收敛取景也不许把它搬走（球心保持初次取景的值 ✓） */
+    /* ⑥ 之后布局收敛（settle）⇒ 球心校准到**新的几何中心** ✓（2026-10-30 用户要求中心在图中心） */
     navigation.fitAll(positionsOf([[400, 0, 0], [500, 0, 0]]), 2, true, "settle");
-    assert.deepEqual(navigation.camera.knInterior.center, centerBefore, "收敛取景不许搬走中心 ✗");
+    assert.ok(
+      Math.abs(navigation.camera.knInterior.center[0] - 450) < 1e-6,
+      `收敛后中心应是新的几何中心 450，实际 ${navigation.camera.knInterior.center[0]}`,
+    );
   });
 
-  it("**首次进入**的那一次收敛取景仍然采球心（有布局缓存、没有相机缓存的路径 ✓）", () => {
+  it("**首次进入**的那一次收敛取景采球心；布局再次收敛时**校准到新的几何中心** ✓（2026-10-30）", () => {
     const fresh = makeNavigation();
     fresh.navigation.fitAll(positionsOf([[400, 0, 0], [600, 0, 0]]), 2, true, "settle");
     assert.ok(
       Math.abs(fresh.navigation.camera.knInterior.center[0] - 500) < 1e-6,
       "还没采过 + 用户没动过 ⇒ 第一次收敛取景采一次 ✓",
     );
-    /* 采过之后，同样的收敛取景再也不能改它 ✗ */
+    /*
+     * 用户 2026-10-30："旋转中心并不在几何中心的位置" —— 引擎的初始取景发生在布局收敛前，
+     * 所以**每次布局收敛后**都要把球心校准到当时坐标的包围盒中心 ✓（用户没动过相机时）。
+     */
     fresh.navigation.fitAll(positionsOf([[0, 0, 0], [100, 0, 0]]), 2, true, "settle");
     assert.ok(
-      Math.abs(fresh.navigation.camera.knInterior.center[0] - 500) < 1e-6,
-      "采过之后就不许再改（否则聚焦/换结构都会搬走中心 ✗）",
+      Math.abs(fresh.navigation.camera.knInterior.center[0] - 50) < 1e-6,
+      "布局再次收敛 ⇒ 球心跟到新的几何中心（否则会停在旧云中心 ✗）",
     );
   });
 
@@ -431,6 +438,7 @@ describe("P2 重新整理：球心与半径按新布局重采", () => {
     dispatchRelayoutForKey(handlers, "");
     element.emit("pointerdown", { button: 0, pointerId: 1, clientX: 400, clientY: 300, shiftKey: false });
     element.emit("pointermove", { pointerId: 1, clientX: 470, clientY: 300 });
+    element.emit("pointerup", { pointerId: 1, clientX: 470, clientY: 300 });
     const viewBefore = [...navigation.camera.q];
     navigation.fitAll(positionsOf([[100, 0, 0], [200, 0, 0]]), 2, true, "settle");
     assert.ok(Math.abs(navigation.camera.knInterior.center[0] - 150) < 1e-6, "球心仍按承诺复位");

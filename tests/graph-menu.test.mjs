@@ -19,7 +19,6 @@ const read = (name) => readFileSync(join(HERE, "..", "src", "client", name), "ut
 
 const menu = read("GraphContextMenu.tsx");
 const panel = read("GraphPanel.tsx");
-const map = read("KnowledgeMap.tsx");
 const css = read("panel.css");
 const dict = read("index.ts");
 
@@ -100,14 +99,19 @@ describe("添加前置弹窗：只出现在图谱界面上方 + 已有节点候�
   });
 });
 
-describe("地图卡：未连接节点 → 独立节点", () => {
-  it("面板字面兜底与地图组件都用「独立节点」", () => {
-    assert.ok(panel.includes('isolatedIsland: "独立节点"'), "面板兜底文案改成独立节点");
-    assert.ok(panel.includes('islandCodeLoose: "独立节点 / {count} 个"'), "卡片角标也用独立节点");
-    assert.ok(map.includes('t("isolatedIsland")'), "地图卡的本地化名称走同一个键");
-    assert.ok(map.includes('t("islandCodeLoose"'), "地图卡角标走同一个键");
+describe("节点右键：进入节点群 = 直接进入该节点所在的群（2026-10-30 用户最终要求）", () => {
+  it("节点菜单里点了直接进群，不再弹「所有节点群供选择」的弹窗", () => {
+    assert.ok(menu.includes('tr("viewGroups")'), "节点右键菜单要有「进入节点群」一条");
+    assert.ok(menu.includes("props.onViewGroups?.(nodeId)"), "点这一条要把右键节点的 id 传给面板");
+    assert.ok(panel.includes("mapModel.nodeToIsland.get(nodeId)"), "面板按节点 id 找它所在的群");
+    assert.ok(panel.includes("if (owner !== null) enterIsland(owner);"), "找到就**直接进入**这个群 ✓");
+    assert.equal(panel.includes("groupsOpen"), false, "不再有选择弹窗状态 ✗");
+    assert.equal(panel.includes("NodeGroupPicker"), false, "不再引用选择弹窗组件 ✗");
+    assert.ok(dict.includes('viewGroups: "进入节点群"'), "文案走中英词典 ✓");
   });
+});
 
+describe("独立节点文案（词典保留）", () => {
   it("中英词典同步（中文不再出现「未连接节点」）", () => {
     assert.ok(dict.includes('isolatedIsland: "独立节点"'), "中文词典 = 独立节点");
     assert.ok(dict.includes('islandCodeLoose: "独立节点 / {count} 个"'), "中文角标 = 独立节点");

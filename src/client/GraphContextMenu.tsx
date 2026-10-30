@@ -251,6 +251,8 @@ export interface GraphContextMenuProps {
   onChanged: () => void;
   /** 「编辑笔记」入口（节点菜单 ✓）——面板据此打开正文编辑器 ✓ */
   onEditNote?: ((nodeId: string) => void) | undefined;
+  /** 「进入节点群」入口（节点菜单 ✓）：点它**直接进入该节点所在的群**（2026-10-30 用户要求） */
+  onViewGroups?: ((nodeId: string) => void) | undefined;
   /** 逐步上报（诊断） */
   report?: (step: string, detail?: Record<string, unknown> | null) => void;
   /** 宿主 / 插件的翻译函数 ✓ */
@@ -260,6 +262,8 @@ export interface GraphContextMenuProps {
     nodeMenuTitle: string;
     /** 节点菜单里的「编辑笔记」（缺省回落中文 ✓） */
     editNote?: string;
+    /** 节点菜单里的「进入节点群」（缺省回落中文 ✓） */
+    viewGroups?: string;
     addPrerequisite: string;
     edgeMenuTitle: string;
     removeRelation: string;
@@ -308,6 +312,7 @@ const MENU_LITERAL: Record<string, string> = {
   createNodeHint: "输入知识点名称（会作为文件名）；新节点不与任何节点相连，会归入地图的「独立节点」。",
   createNodeConfirm: "创建",
   suggestLabel: "知识库里已有的节点",
+  viewGroups: "进入节点群",
   editNote: "编辑笔记",
   removeNodeHint: "删除会直接删掉那个 markdown 文件，不可恢复。",
   removeNodePurge: "删除",
@@ -564,6 +569,23 @@ export function GraphContextMenu(props: GraphContextMenuProps): ReactNode {
                 >
                   {props.copy.editNote ?? tr("editNote")}
                 </button>
+                {/*
+                 * 「进入节点群」：用户 2026-10-30 追加要求——入口放在**节点右键菜单**里；
+                 * 点了**直接进入这个节点所在的节点群视图**（不再弹"所有群供选择"的弹窗 ✗）。
+                 */}
+                {props.onViewGroups === undefined ? null : (
+                  <button
+                    type="button"
+                    className="kn-menu-item"
+                    onClick={() => {
+                      const nodeId = menu.id;
+                      setMenu(null);
+                      props.onViewGroups?.(nodeId);
+                    }}
+                  >
+                    {props.copy.viewGroups ?? tr("viewGroups")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="kn-menu-item"
