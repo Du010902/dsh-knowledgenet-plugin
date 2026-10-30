@@ -3908,36 +3908,6 @@ window.__ModuleLoader__.load({
 				max
 			};
 		}
-		/**
-		* 「适应窗口」的相机距离。
-		*
-		* 按实际 canvas 的横纵 FOV 取更紧的一侧，并留出浮层边距（insets），
-		* 因此窗口变扁、工具栏变高都不会把节点顶出画面——不沿用二维缩放下限那套。
-		*
-		* 再加一条**最小屏幕占比**约束（验收清单 P2-4）：包围球直径至少要占画布短边
-		* `MIN_COVERAGE`。几何取景本身与半径成正比，正常情况下这条约束不会生效；
-		* 它的作用是兜住「缓存相机来自一张更大的图」这类情况——那时云团会缩成中间一小团，
-		* 看起来像图没加载完整。
-		*/
-		const MIN_COVERAGE = .3;
-		function fitDistance(radius, viewport, fovDeg, insets = {
-			top: 0,
-			bottom: 0
-		}) {
-			if (!Number.isFinite(radius) || radius <= 0) return 200;
-			const top = insets.top ?? 0;
-			const bottom = insets.bottom ?? 0;
-			const left = insets.left ?? 0;
-			const right = insets.right ?? 0;
-			const usableHeight = Math.max(80, viewport.height - top - bottom);
-			const usableWidth = Math.max(80, viewport.width - left - right);
-			const tanHalfV = Math.tan(fovDeg * Math.PI / 360);
-			const tanHalfEffectiveV = tanHalfV * (usableHeight / Math.max(1, viewport.height));
-			const tanHalfEffectiveH = tanHalfV * (usableWidth / Math.max(1, viewport.height));
-			const geometric = radius / Math.sin(Math.max(.05, Math.min(Math.atan(tanHalfEffectiveV), Math.atan(tanHalfEffectiveH))));
-			const maxForCoverage = radius * (1 / tanHalfV) / MIN_COVERAGE;
-			return Math.min(geometric, maxForCoverage);
-		}
 		//#endregion
 		//#region src/vendor/upstream/graph3d/topology.ts
 		/** 稳定 ID 顺序：相同输入必须得到相同顺序，否则「同一份图」每次布局都会变形 */
@@ -5599,6 +5569,22 @@ window.__ModuleLoader__.load({
 		const FOCUS_DURATION_MS = 620;
 		/** 视野角（与引擎渲染、`fitDistance` 用的一致） */
 		const FOV_DEG$1 = 50;
+		/**
+		* 取景安全区（px）：头行与底部提示语各留 64（沿用旧版），左右各留一点给标签。
+		* 可用区域 = 画布去掉这些边距后的矩形。
+		*/
+		const FRAME_INSETS = {
+			top: 64,
+			bottom: 64,
+			left: 12,
+			right: 12
+		};
+		/**
+		* 用户 2026-10-30 最终口径：以"旋转过程中节点可能占据的**最大平面面积**"为准 ——
+		* 即包围球投影圆的直径 = 可用区域短边的 `TARGET_COVERAGE`（86%，落在 80%–90% 内 ✓）。
+		* 球投影与旋转角度无关 ⇒ 相机距离固定，旋转时不会一缩一放 ✓（用户实测反馈）。
+		*/
+		const TARGET_COVERAGE = .86;
 		/** 插在 `camera` 上的内部状态键：让上游的内存相机缓存也能带上完整状态 ✓ */
 		const STATE_KEY = "knInterior";
 		/**
@@ -5667,6 +5653,13 @@ window.__ModuleLoader__.load({
 			positionCount = 0;
 			/** 是否已按"以固定球心 C 为中心"量过半径 ✓（量过就不再被 bounds.radius 覆盖 ✗） */
 			radiusMeasured = false;
+			/**
+			* 是否要在下一帧按**旋转安全距离**复核（用户 2026-10-30 最终口径）。
+			*
+			* 相机从缓存恢复 / 布局刚结算时，构图可能是按旧图算的 ⇒
+			* 在 `setFrameContext()` 里重算一次距离（按包围球投影圆定距离，旋转时不变 ✓）。
+			*/
+			coveragePending = true;
 			/** 收到明确的重新整理请求、正等新布局完成 ✓ */
 			relayoutPending = false;
 			relayoutDeadline = 0;
@@ -5772,7 +5765,9 @@ window.__ModuleLoader__.load({
 			/** 外部（每帧）更新：包围体、视口、节点坐标（线段拾取要用世界坐标 ✓） */
 			setFrameContext(bounds, viewport, positions, count) {
 				this.bounds = bounds;
+				const resized = viewport.width !== this.viewport.width || viewport.height !== this.viewport.height;
 				this.viewport = viewport;
+				if (resized) this.coveragePending = true;
 				if (positions !== void 0) {
 					this.positions = positions;
 					this.positionCount = count ?? positions.length / 3;
@@ -5786,6 +5781,10 @@ window.__ModuleLoader__.load({
 						this.radiusMeasured = false;
 					}
 				}
+				if (this.coveragePending && this.pointer === null && this.animation === null && this.positions !== null && this.positionCount > 0 && this.viewport.width > 0 && this.viewport.height > 0) {
+					this.coveragePending = false;
+					this.ensureCoverage(this.positions, this.positionCount);
+				}
 				this.syncCamera();
 			}
 			command(command, index, positions, count) {
@@ -5796,6 +5795,7 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				if (index === null || index < 0 || index >= count) return;
+				this.coveragePending = false;
 				const target = [
 					positions[index * 3] ?? 0,
 					positions[index * 3 + 1] ?? 0,
@@ -5844,26 +5844,143 @@ window.__ModuleLoader__.load({
 					this.options.onCameraChange();
 					return;
 				}
-				const insets = {
-					top: 64,
-					bottom: 64
-				};
 				const framingRadius = this.state.radius > 0 ? this.state.radius : bounds.radius;
-				const distance = fitDistance(framingRadius, this.viewport, FOV_DEG$1, insets) * 1.08;
+				const distance = this.rotationSafeDistance(framingRadius);
 				const from = {
 					eye: [...this.state.eye],
 					view: this.state.view
 				};
 				this.animateTo(from, this.fitTarget(framingRadius, distance), smooth);
 			}
-			/** 采用新的球心（只由"首次取景 / 布局收敛"触发 ✓） */
-			/** 以**固定球心 C** 为基准量半径：`max|X − C|` ✓（文档 P2） */
+			/**
+			* 以**固定球心 C** 为基准量半径：`max|X − C|` ✓（文档 P2）
+			*/
 			measureRadius(positions, count) {
 				const radius = radiusAbout(positions, count, this.state.center);
 				if (radius > 0) {
 					this.state.radius = radius;
 					this.radiusMeasured = true;
 				}
+			}
+			/**
+			* 当前相机下节点投影包围盒占**可用区域**的比例（0–1+）。
+			*
+			* 只按**节点中心**量、不含标签余量：标签越界时引擎的标签规划器会直接跳过，
+			* 不会出现"贴边半个字"的遮挡 ✓。
+			* 用于诊断与单测；拿不到坐标/视口时返回 null。
+			*
+			* @param positions - 节点坐标；缺省用最近一帧的坐标。
+			* @param count - 节点数。
+			* @returns 占比；拿不到坐标/视口时返回 null。
+			*/
+			measureCoverage(positions = this.positions, count = this.positionCount) {
+				if (positions === null || count <= 0 || this.viewport.width <= 0 || this.viewport.height <= 0) return null;
+				const box = this.projectedBox(this.state, positions, count);
+				if (box === null) return null;
+				return this.coverageOf(box);
+			}
+			/**
+			* 缓冲/兜底：把相机距离复位到**旋转安全**的包围球取景（用户 2026-10-30 最终口径）。
+			*
+			* 为什么不是"按当前投影收紧"：那样旋转到不同角度时投影范围会变，只能跟着一缩一放 ✗
+			* （用户实测："旋转的过程中整个节点显示区域的缩小和放大，体验不是很好"）。
+			* 现在按"节点可能占据的最大平面面积" = **包围球的投影圆** 来定距离：
+			* 球在任意旋转下投影都是同一个圆 ⇒ 距离不变、旋转时不缩放、任何角度都不裁切 ✓。
+			*
+			* 只在缓存相机恢复 / 布局结算 / 侧栏改宽时调用一次，只调距离，不动球心/朝向 ✓。
+			*
+			* @param positions - 节点坐标；缺省用最近一帧的坐标。
+			* @param count - 节点数。
+			* @returns 是否真的改了相机。
+			*/
+			ensureCoverage(positions = this.positions, count = this.positionCount) {
+				if (this.disposed || this.pointer !== null || this.animation !== null) return false;
+				if (positions === null || count <= 0 || this.viewport.width <= 0 || this.viewport.height <= 0) return false;
+				const radius = radiusAbout(positions, count, this.state.center);
+				if (!(Number.isFinite(radius) && radius > 0)) return false;
+				const distance = this.rotationSafeDistance(radius);
+				if (!(Number.isFinite(distance) && distance > 0)) return false;
+				const offset = [
+					this.state.eye[0] - this.state.center[0],
+					this.state.eye[1] - this.state.center[1],
+					this.state.eye[2] - this.state.center[2]
+				];
+				const current = Math.hypot(offset[0], offset[1], offset[2]);
+				if (current > 0 && Math.abs(distance - current) <= Math.max(.5, current * .005)) return false;
+				this.state.radius = radius;
+				this.radiusMeasured = true;
+				fitSphere(this.state, radius, distance);
+				this.syncCamera();
+				this.options.onCameraChange();
+				return true;
+			}
+			/** 布局结算等时机由引擎调用：下一帧按旋转安全距离复核 ✓（幂等） */
+			markCoveragePending() {
+				this.coveragePending = true;
+			}
+			/**
+			* **旋转安全**的取景距离（用户 2026-10-30 最终口径）。
+			*
+			* 把整团节点看成包围球：球在任意旋转下投影都是同一个圆，
+			* 所以按"**球投影直径 = 可用区域短边的 `TARGET_COVERAGE`**"反解距离即可。
+			* 节点都在球内 ⇒ 任意旋转角度都不会被转出画面；距离只由半径与视口决定，
+			* 与当前朝向无关 ⇒ 旋转过程中不会一缩一放 ✓。
+			*
+			* 推导：球投影的屏幕半径 = `focalPx · R / √(d² − R²)`，令其等于目标半径 ⇒
+			* `d = R · √(1 + (focalPx / targetPx)²)`。
+			*
+			* 透视下球体轮廓是精确圆、与朝向无关；标签越界会被标签规划器跳过 ✓。
+			*
+			* @param radius - 以球心 C 量的包围球半径。
+			* @returns 取景距离。
+			*/
+			rotationSafeDistance(radius) {
+				if (!(Number.isFinite(radius) && radius > 0)) return 200;
+				const tanHalfV = Math.tan(FOV_DEG$1 * Math.PI / 360);
+				const focalPx = this.viewport.height / 2 / tanHalfV;
+				const usableWidth = Math.max(80, this.viewport.width - FRAME_INSETS.left - FRAME_INSETS.right);
+				const usableHeight = Math.max(80, this.viewport.height - FRAME_INSETS.top - FRAME_INSETS.bottom);
+				const targetRadiusPx = Math.max(1, TARGET_COVERAGE * Math.min(usableWidth, usableHeight) / 2);
+				const distance = radius * Math.sqrt(1 + Math.pow(focalPx / targetRadiusPx, 2));
+				return Math.max(distance, radius * 1.05);
+			}
+			/** 把节点投影到屏幕，返回**节点中心的包围盒**（px） */
+			projectedBox(state, positions, count) {
+				let minX = Infinity;
+				let minY = Infinity;
+				let maxX = -Infinity;
+				let maxY = -Infinity;
+				let seen = 0;
+				for (let index = 0; index < count; index += 1) {
+					const x = positions[index * 3];
+					const y = positions[index * 3 + 1];
+					const z = positions[index * 3 + 2];
+					if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+					const display = displayOf(state, [
+						x,
+						y,
+						z
+					]);
+					const hit = projectDisplay(state, this.viewport, FOV_DEG$1, display);
+					if (hit === null) return null;
+					minX = Math.min(minX, hit.x);
+					maxX = Math.max(maxX, hit.x);
+					minY = Math.min(minY, hit.y);
+					maxY = Math.max(maxY, hit.y);
+					seen += 1;
+				}
+				return seen === 0 ? null : {
+					minX,
+					minY,
+					maxX,
+					maxY
+				};
+			}
+			/** 投影包围盒 → 可用区域占比（只按节点中心 ✓） */
+			coverageOf(box) {
+				const usableWidth = Math.max(80, this.viewport.width - FRAME_INSETS.left - FRAME_INSETS.right);
+				const usableHeight = Math.max(80, this.viewport.height - FRAME_INSETS.top - FRAME_INSETS.bottom);
+				return Math.max((box.maxX - box.minX) / usableWidth, (box.maxY - box.minY) / usableHeight);
 			}
 			/**
 			* 每帧推进定位/取景动画（P 线性插值、Q 球面插值）。
@@ -40576,6 +40693,10 @@ void main() {
 						if (status === "settled" && this.knAwaitRelayoutSettle) {
 							this.knAwaitRelayoutSettle = false;
 							this.knPendingRelayoutFit = true;
+							this.wake();
+						}
+						if (status === "settled") {
+							this.navigation.markCoveragePending?.();
 							this.wake();
 						}
 						options.onStatus(status, detail);

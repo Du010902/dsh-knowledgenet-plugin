@@ -30,7 +30,7 @@ import {
   viewCacheKeys,
 } from "../src/client/view-cache.ts";
 import { rotateVec } from "../src/client/trackball.ts";
-import { projectPoint } from "../src/vendor/upstream/graph3d/camera.ts";
+import { boundsOf, projectPoint } from "../src/vendor/upstream/graph3d/camera.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const buildSource = await readFile(path.join(HERE, "..", "build.mjs"), "utf8");
@@ -671,5 +671,183 @@ function dispatchRelayoutForKey(handlers, libraryKey) {
   assert.equal(typeof handler, "function", "控制器要订阅重排事件");
   handler({ type: RELAYOUT_EVENT, detail: { libraryKey } });
 }
+
+/* ============ 旋转安全取景：包围球（最大平面面积）占 80%–90% ============ */
+
+/**
+ * 用户 2026-10-30 最终口径："以旋转过程中节点可能占据的最大平面面积为出发点，
+ * 去算空间中的球体应该有多大"。
+ *
+ * 即：把节点团当**包围球**，按"球投影圆直径 = 可用区域短边的 86%"定相机距离：
+ * ① 旋转过程中距离不变 ⇒ 不会一缩一放 ✓；
+ * ② 节点都在球内 ⇒ 任何角度都不会被转出画面 ✓。
+ */
+describe("旋转安全取景：包围球占 80%–90%，旋转时距离不变 ✓", () => {
+  const viewport = { width: 900, height: 700 };
+  const FOV = 50;
+  const INSETS = { top: 64, bottom: 64, left: 12, right: 12 };
+  const TARGET = 0.86;
+
+  function boundsFor(positions, count) {
+    const bounds = boundsOf(positions, count);
+    return { center: bounds.center, radius: bounds.radius, min: bounds.min, max: bounds.max };
+  }
+
+  /** 与控制器同一口径：球投影半径 = 目标像素半径 */
+  function expectedSafeDistance(radius) {
+    const focalPx = viewport.height / 2 / Math.tan((FOV * Math.PI) / 360);
+    const usableMin = Math.min(viewport.width - INSETS.left - INSETS.right, viewport.height - INSETS.top - INSETS.bottom);
+    const targetRadiusPx = (TARGET * usableMin) / 2;
+    return Math.max(radius * Math.sqrt(1 + Math.pow(focalPx / targetRadiusPx, 2)), radius * 1.05);
+  }
+
+  function distanceOf(navigation) {
+    const snapshot = navigation.interiorSnapshot();
+    return Math.hypot(...snapshot.eye.map((value, index) => value - snapshot.center[index]));
+  }
+
+  function assertSafeDistance(navigation, layout, count, label) {
+    const center = navigation.interiorSnapshot().center;
+    const radius = radiusAbout(layout, count, center);
+    const actual = distanceOf(navigation);
+    assert.ok(
+      Math.abs(actual - expectedSafeDistance(radius)) < 1e-6,
+      label + "：距离要按旋转安全的包围球取景（实际 " + actual.toFixed(2) + "）",
+    );
+  }
+
+  function assertNoClip(navigation, layout, count, label) {
+    const coverage = navigation.measureCoverage(layout, count);
+    assert.ok(
+      coverage !== null && coverage <= 0.9 + 1e-6,
+      label + "：节点不许超出可用区域 90%（实际 " + (coverage === null ? "null" : coverage.toFixed(3)) + "）",
+    );
+  }
+
+  /** 均匀球面点云（节点团约等于包围球 ⇒ 投影占比应≈86%） */
+  function sphereCloud(radius = 200, count = 64) {
+    const points = [];
+    for (let index = 0; index < count; index += 1) {
+      const t = (index + 0.5) / count;
+      const z = 1 - 2 * t;
+      const phi = index * Math.PI * (3 - Math.sqrt(5));
+      const r = Math.sqrt(Math.max(0, 1 - z * z));
+      points.push([Math.cos(phi) * r * radius, Math.sin(phi) * r * radius, z * radius]);
+    }
+    return positionsOf(points);
+  }
+
+  it("fitAll 后距离 = 旋转安全距离（任意形状都按最大平面面积定，不按当前朝向紧贴）", () => {
+    const layouts = [
+      positionsOf([[-100, 0, 0], [100, 0, 0]]),
+      positionsOf([[-150, -100, 0], [150, -100, 0], [-150, 100, 0], [150, 100, 0]]),
+      sphereCloud(180, 40),
+    ];
+    for (const [index, layout] of layouts.entries()) {
+      const count = layout.length / 3;
+      const { navigation } = makeNavigation();
+      const bounds = boundsFor(layout, count);
+      navigation.setFrameContext(bounds, viewport, layout, count);
+      navigation.fitAll(layout, count, false, "initial");
+      navigation.update(performance.now() + 5000);
+      navigation.setFrameContext(bounds, viewport, layout, count);
+      assertSafeDistance(navigation, layout, count, "布局 " + (index + 1));
+      assertNoClip(navigation, layout, count, "布局 " + (index + 1));
+    }
+  });
+
+  it("球状点云：包围球投影占可用短边 80%–90%", () => {
+    const layout = sphereCloud(200, 64);
+    const count = layout.length / 3;
+    const { navigation } = makeNavigation();
+    const bounds = boundsFor(layout, count);
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    navigation.fitAll(layout, count, false, "initial");
+    navigation.update(performance.now() + 5000);
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    const coverage = navigation.measureCoverage(layout, count);
+    assert.ok(
+      coverage !== null && coverage >= 0.8 && coverage <= 0.9,
+      "球投影应占 80%–90%，实际 " + (coverage === null ? "null" : coverage.toFixed(3)),
+    );
+  });
+
+  it("从很远的缓存相机恢复 ⇒ 距离回到旋转安全值", () => {
+    const layout = sphereCloud(200, 48);
+    const count = layout.length / 3;
+    const { navigation } = makeNavigation({ initial: cameraAt([0, 0, 5000]) });
+    const bounds = boundsFor(layout, count);
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    assertSafeDistance(navigation, layout, count, "缓存相机恢复");
+    assertNoClip(navigation, layout, count, "缓存相机恢复");
+  });
+
+  it("拖动旋转 76°+：相机距离全程不变（不会一缩一放），节点也不出视图 ✓", () => {
+    /* 沿视线方向拉长的链：整条链都在包围球内 ⇒ 任何朝向都不会比球投影更大 ✓ */
+    const points = [];
+    for (let index = 0; index < 12; index += 1) points.push([0, 0, -220 + index * 40]);
+    const layout = positionsOf(points);
+    const count = layout.length / 3;
+    const { navigation, element } = makeNavigation();
+    const bounds = boundsFor(layout, count);
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    navigation.fitAll(layout, count, false, "initial");
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    const startDistance = distanceOf(navigation);
+    const sceneBefore = [...navigation.interiorSnapshot().scene];
+    const startX = Math.round(viewport.width / 2);
+    const startY = Math.round(viewport.height / 2);
+    element.emit("pointerdown", { button: 0, pointerId: 1, clientX: startX, clientY: startY, shiftKey: false });
+    let peak = 0;
+    let minDistance = startDistance;
+    let maxDistance = startDistance;
+    for (let step = 1; step <= 180; step += 1) {
+      element.emit("pointermove", { pointerId: 1, clientX: startX + step * 24, clientY: startY + step * 4 });
+      const coverage = navigation.measureCoverage(layout, count);
+      if (coverage !== null) peak = Math.max(peak, coverage);
+      const distance = distanceOf(navigation);
+      minDistance = Math.min(minDistance, distance);
+      maxDistance = Math.max(maxDistance, distance);
+    }
+    element.emit("pointerup", { pointerId: 1, clientX: startX + 180 * 24, clientY: startY + 180 * 4 });
+    const sceneAfter = navigation.interiorSnapshot().scene;
+    const quatDot = Math.abs(sceneAfter.reduce((sum, value, index) => sum + value * sceneBefore[index], 0));
+    const rotatedDeg = (2 * Math.acos(Math.min(1, quatDot)) * 180) / Math.PI;
+    assert.ok(rotatedDeg > 30, "要真的转到大角度才测得到（实际 " + rotatedDeg.toFixed(1) + "°）");
+    assert.ok(Math.abs(minDistance - maxDistance) < 1e-6, "旋转全程相机距离必须不变（不许一缩一放 ✗）");
+    assert.ok(Math.abs(maxDistance - startDistance) < 1e-6, "旋转开始时取了什么距离就一直是什么距离");
+    assert.ok(peak <= 0.9 + 1e-6, "旋转过程中节点占比不许超过 90%（实际 " + peak.toFixed(3) + "）");
+  });
+
+  it("已经按包围球取景时，复核不会挪相机", () => {
+    const layout = sphereCloud(150, 24);
+    const count = layout.length / 3;
+    const { navigation } = makeNavigation();
+    const bounds = boundsFor(layout, count);
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    navigation.fitAll(layout, count, false, "initial");
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    const before = navigation.interiorSnapshot().eye;
+    navigation.markCoveragePending();
+    navigation.setFrameContext(bounds, viewport, layout, count);
+    const after = navigation.interiorSnapshot().eye;
+    assert.deepEqual(after, before, "距离已经正确时复核不应该再动相机 ✓");
+  });
+
+  it("引擎补丁：布局结算时通知复核（缓存相机 + 新布局也不会漏 ✓）", () => {
+    assert.ok(
+      buildSource.includes("this.navigation.markCoveragePending?.();"),
+      "布局 settled 时要通知控制器复核取景距离（build.mjs 补丁点）",
+    );
+    assert.ok(
+      controllerSource.includes("markCoveragePending(): void"),
+      "控制器要提供这个通知入口",
+    );
+    assert.ok(
+      controllerSource.includes("rotationSafeDistance(radius: number): number"),
+      "距离要按旋转安全的包围球公式算 ✓",
+    );
+  });
+});
 
 afterEach(() => { globals?.restore(); globals = null; });

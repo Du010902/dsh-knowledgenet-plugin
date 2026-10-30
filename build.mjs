@@ -535,6 +535,15 @@ const SETTLE_BRANCH_PATCHED = [
   "          this.knPendingRelayoutFit = true;",
   "          this.wake();",
   "        }",
+  "        /*",
+  "         * 布局结算后复核**屏幕占比**（用户 2026-10-30：节点至少占可用空间 80%–90% ✓）。",
+  "         * 为什么放在这里：相机从缓存恢复时引擎不会自动取景（autoFit=false 且没有重排请求），",
+  "         * 旧构图可能过松/过紧；结算时通知控制器，下一帧按真实坐标校正一次距离 ✓。",
+  "         */",
+  "        if (status === \"settled\") {",
+  "          this.navigation.markCoveragePending?.();",
+  "          this.wake();",
+  "        }",
 ].join("\n");
 
 const SETTLE_FIT_BLOCK_NEEDLE = [
