@@ -26,6 +26,10 @@ const REAL_TOKENS = new Set([
   "--dsw-alias-bg-overlay",
   "--dsw-alias-border-l1",
   "--dsw-alias-border-l2",
+  /* 2026-11：划词胶囊与宿主的「引用」胶囊对齐（`message-quotes` 的 `.action` ✓）时需要这三条 */
+  "--dsw-alias-border-l3",
+  "--dsw-alias-button-floating-fill",
+  "--dsw-alias-button-floating-hover",
   "--dsw-alias-brand-primary",
   "--dsw-alias-label-primary",
   "--dsw-alias-label-secondary",
@@ -43,7 +47,7 @@ const REAL_TOKENS = new Set([
 const LOCAL_TOKENS = new Set(["--kn-hover", "--kn-warn-bg"]);
 
 /** 几何类（不是主题色 ✓，允许带兜底 ✓） */
-const GEOMETRY = /^--dsw-(radius|focus-ring|shadow|font|spacing|size)/;
+const GEOMETRY = /^--dsw-(radius|focus-ring|shadow|font|spacing|size|elevation)/;
 
 function clientFiles() {
   const out = [];

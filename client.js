@@ -1307,10 +1307,14 @@ window.__ModuleLoader__.load({
 		* 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）→ 写入。
 		*
 		* 设计要点：
-		* - **不碰宿主 DOM**：浮条是 portal 到 `body` 的自己的元素，靠 `window.getSelection()`
-		*   的选区矩形定位；宿主 DOM 只被读选区，不被改写。
-		* - **多选**：点「多选」后把片段攒进列表，浮条变成「已选 N 段 · 完成 · 取消」，
-		*   继续在对话里划词即继续追加（同一句重复划只算一条）。
+		* - **不碰宿主的业务 DOM**：只读宿主给的稳定标记（`[data-conversation-content]` /
+		*   `[data-text-interaction-surface]` 等 ✓），不修改宿主自己的节点与状态 ✓。
+		* - **和宿主那条「引用」浮条合流** ✓：宿主划词后本来就会弹一条浮层（`text-interaction` ✓），
+		*   我们把自己的胶囊**挂进那条浮层里**（并排、同一套外观 ✓）⇒ 只有一条浮条、一次定位，
+		*   不会出现"两条浮条重叠 / 一个显示另一个不显示"✗（用户 2026-11 的反馈 ✓）。
+		*   宿主没开浮层时退回"自己浮在选区上方"✓（外观仍是同一颗胶囊 ✓）。
+		* - **多选**：点「添加节点」后打开收集弹窗，把这块文字变成第一个标签 ✓；
+		*   之后继续在对话里划词就继续追加（同一句重复划只算一条），一个标签 = 一个节点 ✓。
 		* - **目标节点**：给 2–3 个推荐（当前聚焦 → 最近加过前置的 → 最近聚焦的），
 		*   外加**搜索**（走宿主 `POST {kind:'search-nodes'}`，与模型看到的同一套检索）。
 		* - 每一步都上报（`chat-selection/…`），出问题可从 `kn_status` 自证。
@@ -1325,19 +1329,18 @@ window.__ModuleLoader__.load({
 				".kn-sel-mask {",
 				"  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
 				"  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
-				".kn-sel-bar {",
-				"  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
-				"  padding: 3px; border-radius: 8px;",
-				"  border: 1px solid var(--dsw-alias-border-l2);",
-				"  background: var(--dsw-alias-bg-layer-1);",
+				".kn-sel-action {",
+				"  padding: 5px 10px; border: none; border-radius: 999px; corner-shape: round;",
+				"  background: var(--dsw-alias-button-floating-fill);",
+				"  --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);",
+				"  box-shadow: var(--dsw-elevation-panel);",
 				"  color: var(--dsw-alias-label-primary);",
-				"  box-shadow: 0 3px 12px rgb(0 0 0 / 12%); font-size: 12px; }",
-				".kn-sel-bar button {",
-				"  border: 0; border-radius: 6px; background: transparent; color: inherit;",
-				"  font: inherit; font-size: 12px; padding: 5px 8px; cursor: pointer; }",
-				".kn-sel-bar button:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
-				".kn-sel-bar .kn-sel-primary { background: transparent; font-weight: 600; }",
-				".kn-sel-bar .kn-sel-primary:hover, .kn-sel-bar .kn-sel-primary:focus-visible { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
+				"  font: var(--dsw-font-xs-13); cursor: pointer; }",
+				".kn-sel-action:focus-visible { background: var(--dsw-alias-button-floating-hover); }",
+				"@media (hover: hover) { .kn-sel-action:hover { background: var(--dsw-alias-button-floating-hover); } }",
+				".kn-sel-bar { display: inline-flex; align-items: center; vertical-align: middle; }",
+				"[data-text-interaction-surface] .kn-sel-bar { margin-left: 6px; }",
+				".kn-sel-bar-float { position: fixed; z-index: 10001; transform: translateX(-50%); }",
 				".kn-ms-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }",
 				".kn-ms-label-row .kn-pick-label { margin: 0; }",
 				".kn-ms-composer { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 7px; min-height: 90px; padding: 10px; box-sizing: border-box;",
@@ -1476,6 +1479,37 @@ window.__ModuleLoader__.load({
 				return null;
 			}
 		}
+		/**
+		* 宿主自己那条**划词浮层**（对话里那颗「引用」胶囊的容器 ✓）。
+		*
+		* 为什么需要它（用户实测反馈 ✗）：DSH 本来就有"划词 → 引用"的浮层 ✓，我们以前另起一条
+		* `position: fixed` 的方角浮条、还带更高的 z-index ⇒ 两条浮层落在同一位置互相压住 ✗
+		* （用户原话："浮条的重叠，或者是一个显示，另外一个不显示"✗）。
+		*
+		* 现在的做法：**把我们的胶囊挂进宿主这条浮层里** ✓（宿主在 ChatView 里给了稳定的
+		* `data-text-interaction-surface` ✓，它就是"这一轮划词的动作条"）。好处一次拿全 ✓：
+		* - 一条浮条、一次定位（宿主按选区居中、夹在可视区、跟随滚动 ✓）⇒ 不可能再重叠 ✓；
+		* - 宿主把它当"自己的浮层内部" ⇒ 点我们的按钮不会触发它的"点外部收起" ✓（两边一起留着 ✓）；
+		* - 视觉上就是「引用」旁边的兄弟胶囊 ✓（同一套样式，见 `ensureStyle` ✓）。
+		*
+		* @returns 可以挂进去的浮层；宿主没在用（没装引用插件 / 这次不适用 / 还没放好）时返回 `null`，
+		*          调用方退回"自己浮在选区上方"那条老路 ✓。
+		* @param root - 这段选区所属的对话容器（同一页可能有多个会话视图 ⇒ 只找**这一个**的浮层 ✓）；
+		*               没传就退回整页第一个 ✓。
+		*/
+		function hostSelectionSurface(root) {
+			try {
+				if (typeof document === "undefined") return null;
+				const surface = root?.querySelector("[data-text-interaction-surface]") ?? null ?? document.querySelector("[data-conversation-content] [data-text-interaction-surface]") ?? document.querySelector("[data-text-interaction-surface]");
+				if (surface === null) return null;
+				if (surface.childElementCount === 0) return null;
+				const view = surface.ownerDocument.defaultView;
+				if (view !== null && view.getComputedStyle(surface).visibility !== "visible") return null;
+				return surface;
+			} catch {
+				return null;
+			}
+		}
 		/** 字段名 → 词典键：只有撞车的才需要 ✓ */
 		const COPY_KEY_ALIAS = { searchPlaceholder: "chatSearchPlaceholder" };
 		const CHAT_LITERAL = {
@@ -1527,6 +1561,12 @@ window.__ModuleLoader__.load({
 				}
 				return out;
 			}, [props.copy, tr]);
+			/**
+			* 浮条当前的落点与所属浮层。
+			*
+			* `host` = 宿主的划词浮层（有就挂进去、和「引用」并排 ✓）；`null` = 自己浮在选区上方 ✓。
+			* 两种形态用的是**同一颗胶囊**（`.kn-sel-action`）⇒ 外观一致 ✓，只是定位的负责人不同 ✓。
+			*/
 			const [bar, setBar] = (0, react.useState)(null);
 			/**
 			* 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
@@ -2131,7 +2171,8 @@ window.__ModuleLoader__.load({
 							ok: false,
 							reason: "in-own-ui"
 						};
-						if (document.querySelector("[data-conversation-content]") !== null && (element === null || typeof element.closest !== "function" || element.closest("[data-conversation-content]") === null)) return {
+						const conversation = document.querySelector("[data-conversation-content]");
+						if (conversation !== null && (element === null || typeof element.closest !== "function" || element.closest("[data-conversation-content]") === null)) return {
 							ok: false,
 							reason: "outside-conversation"
 						};
@@ -2140,11 +2181,13 @@ window.__ModuleLoader__.load({
 							ok: false,
 							reason: "no-rect"
 						};
+						const root = (element !== null && typeof element.closest === "function" ? element.closest("[data-conversation-content]") : null) ?? conversation;
 						return {
 							ok: true,
 							text,
 							x: rect.left + rect.width / 2,
-							y: rect.top
+							y: rect.top,
+							root
 						};
 					} catch (error) {
 						return {
@@ -2208,13 +2251,35 @@ window.__ModuleLoader__.load({
 						snapCount: snapCountRef.current
 					});
 					barScopeRef.current = `${domSessionId() ?? ""}|${domWorkspacePath()}`;
-					setBar({
-						x: info.x,
-						y: info.y,
-						text: info.text
+					const showBar = (host) => {
+						if (gateAllowedRef.current !== true) return;
+						setBar({
+							x: info.x,
+							y: info.y,
+							text: info.text,
+							host
+						});
+						setNote(null);
+						report("bar-shown", {
+							chars: info.text.length,
+							host: host !== null
+						});
+					};
+					const host = hostSelectionSurface(info.root);
+					if (host !== null) {
+						showBar(host);
+						return;
+					}
+					document.defaultView?.requestAnimationFrame(() => {
+						let same = false;
+						try {
+							same = normalizeSnippet(window.getSelection()?.toString() ?? "").trim() === info.text.trim();
+						} catch {
+							same = false;
+						}
+						if (!same) return;
+						showBar(hostSelectionSurface(info.root));
 					});
-					setNote(null);
-					report("bar-shown", { chars: info.text.length });
 				};
 				document.addEventListener("mouseup", onMouseUp);
 				/**
@@ -2270,6 +2335,10 @@ window.__ModuleLoader__.load({
 					} catch {}
 				};
 				document.addEventListener("selectionchange", onSelectionChange);
+				const onKeyDown = (event) => {
+					if (event.key === "Escape") setBar(null);
+				};
+				document.addEventListener("keydown", onKeyDown);
 				const scopeTimer = window.setInterval(() => {
 					if (barScopeRef.current === "") return;
 					if (`${domSessionId() ?? ""}|${domWorkspacePath()}` !== barScopeRef.current) {
@@ -2285,11 +2354,44 @@ window.__ModuleLoader__.load({
 				return () => {
 					window.clearInterval(scopeTimer);
 					document.removeEventListener("selectionchange", onSelectionChange);
+					document.removeEventListener("keydown", onKeyDown);
 					document.removeEventListener("mouseup", onMouseUp);
 					document.removeEventListener("pointerdown", onPressCapture, true);
 					document.removeEventListener("mousedown", onPressCapture, true);
 				};
 			}, []);
+			/**
+			* 挂在宿主浮层里时，**浮条跟着宿主一起收** ✓。
+			*
+			* 宿主收起浮层不改 DOM（只是把那条浮层的 `visibility` 设成 `hidden` ✓，Esc / 点外部 / 滚出可视区都会这样 ✓）。
+			* 不跟着收的话，我们的 `bar` 状态会一直留着 ⇒ 下一次划词之前它都"看不见但还在"✗，
+			* 而且宿主的浮层一旦被复用，我们那颗胶囊可能又冒出来 ✓。
+			*/
+			const hostOfBar = bar?.host ?? null;
+			(0, react.useEffect)(() => {
+				if (hostOfBar === null) return;
+				const view = hostOfBar.ownerDocument.defaultView;
+				const hide = () => {
+					setBar((current) => current?.host === hostOfBar ? null : current);
+				};
+				const check = () => {
+					if (!hostOfBar.isConnected) {
+						hide();
+						return;
+					}
+					if (view !== null && view.getComputedStyle(hostOfBar).visibility !== "visible") hide();
+				};
+				const observer = new MutationObserver(check);
+				observer.observe(hostOfBar, {
+					attributes: true,
+					attributeFilter: [
+						"style",
+						"class",
+						"hidden"
+					]
+				});
+				return () => observer.disconnect();
+			}, [hostOfBar]);
 			/**
 			* 调宿主：读一次**当前库**的节点表（id → 标题）。
 			*
@@ -2464,17 +2566,22 @@ window.__ModuleLoader__.load({
 					report("standalone-create", `multi:${ok}/${list.length}`);
 				})();
 			};
+			/**
+			* 浮条容器的类名：两种落点、同一个容器 ✓。
+			* `kn-sel-bar` 必须一直在 ✓（"选区落在自家浮条里不算划词"与"按在浮条上"两条判据都认它 ✓）；
+			* `kn-sel-bar-float` 只标记"宿主没开浮层、由我们自己定位"✓。
+			*/
+			const barClassName = bar !== null && bar.host === null ? "kn-sel-bar kn-sel-bar-float" : "kn-sel-bar";
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				bar === null || gateAllowedRef.current !== true ? null : (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "kn-sel-bar",
-					style: {
+					className: barClassName,
+					style: bar.host === null ? {
 						left: bar.x,
-						top: Math.max(8, bar.y - 40),
-						transform: "translateX(-50%)"
-					},
+						top: Math.max(8, bar.y - 40)
+					} : void 0,
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",
-						className: "kn-sel-primary",
+						className: "kn-sel-action",
 						onMouseDown: (event) => {
 							event.preventDefault();
 						},
@@ -2492,7 +2599,7 @@ window.__ModuleLoader__.load({
 						},
 						children: copy.addNode
 					})
-				}), document.body),
+				}), bar.host ?? document.body),
 				multiOpen ? (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "kn-sel-mask",
 					role: "presentation",

@@ -301,6 +301,9 @@ unsupported_format：这个知识库是老格式（formatVersion=2），当前�
 - 切换标签页即卸载（`keepMounted: false`）✓；
 - 取数有请求序号 + `AbortController`：切换工作区/刷新时旧请求被取消，过期响应不会覆盖新数据 ✓；
 - 划词浮条**先判断有没有选中文字**，没有就一个请求都不发（普通点击、拖拽结束不再打扰宿主 ✓）。
+- 划词浮条**不另起一条浮层**：宿主划词后本来就会弹「引用」，我们的「添加节点」直接**挂进同一条浮层并排显示**
+  （胶囊外观与「引用」一致 ✓、点外部 / Esc / 宿主收起它都跟着收 ✓）；宿主没开浮层时才自己浮在选区上方 ✓
+  （见 [设计记录](design/selection-bar-with-host-quote.md)）。
 
 ## 安全边界
 
@@ -339,6 +342,7 @@ node --test tests/block-menu.browser.mjs   # 右键块菜单（真 client.js + �
 node --test tests/inline-format.browser.mjs   # 行内格式（真实面板 UI：浮动工具栏 8 项 / 行内代码样式 / 复制语义 / 公式 / 链接 / 关系弹窗点外关闭）
 node --test tests/block-robustness.browser.mjs   # 粘贴/引用块健壮性（外部代码粘成代码块、空引用可删除、误判样本）
 node --test tests/node-conversations.browser.mjs   # 节点对话：侧栏标签恢复 / 历史实时更新 / 新建前置（输入后按 Enter）→ 打开笔记 → 创建对话 / 在资源管理器中显示（假 fetcher 记录 reveal-note 请求 ✓）
+node --test tests/selection-bar.browser.mjs   # 划词浮条与宿主「引用」共存：挂进同一条浮层 / 矩形不相交 / 同一套胶囊外观 / Esc / 跟随收起 / 宿主晚一帧 / 兜底定位
 ```
 
 - 上游（`src/vendor/upstream/**`）是**逐字节冻结**的开放格式实现：只读、不手改；
