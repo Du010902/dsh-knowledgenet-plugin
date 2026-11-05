@@ -2,10 +2,14 @@
  * 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）→ 写入。
  *
  * 设计要点：
- * - **不碰宿主 DOM**：浮条是 portal 到 `body` 的自己的元素，靠 `window.getSelection()`
- *   的选区矩形定位；宿主 DOM 只被读选区，不被改写。
- * - **多选**：点「多选」后把片段攒进列表，浮条变成「已选 N 段 · 完成 · 取消」，
- *   继续在对话里划词即继续追加（同一句重复划只算一条）。
+ * - **不碰宿主的业务 DOM**：只读宿主给的稳定标记（`[data-conversation-content]` /
+ *   `[data-text-interaction-surface]` 等 ✓），不修改宿主自己的节点与状态 ✓。
+ * - **和宿主那条「引用」浮条合流** ✓：宿主划词后本来就会弹一条浮层（`text-interaction` ✓），
+ *   我们把自己的胶囊**挂进那条浮层里**（并排、同一套外观 ✓）⇒ 只有一条浮条、一次定位，
+ *   不会出现"两条浮条重叠 / 一个显示另一个不显示"✗（用户 2026-11 的反馈 ✓）。
+ *   宿主没开浮层时退回"自己浮在选区上方"✓（外观仍是同一颗胶囊 ✓）。
+ * - **多选**：点「添加节点」后打开收集弹窗，把这块文字变成第一个标签 ✓；
+ *   之后继续在对话里划词就继续追加（同一句重复划只算一条），一个标签 = 一个节点 ✓。
  * - **目标节点**：给 2–3 个推荐（当前聚焦 → 最近加过前置的 → 最近聚焦的），
  *   外加**搜索**（走宿主 `POST {kind:'search-nodes'}`，与模型看到的同一套检索）。
  * - 每一步都上报（`chat-selection/…`），出问题可从 `kn_status` 自证。
@@ -30,6 +34,14 @@ import {
   type StoredMemory,
 } from "./chat-selection.ts";
 import { notifyLibraryChanged, readCurrentContext, readLastWorkspacePath, readNodeTitle } from "./current-context.ts";
+
+/** 浮条当前的落点与所属浮层（`host` = 宿主的划词浮层；`null` = 自己定位 ✓） */
+interface SelectionBarState {
+  x: number;
+  y: number;
+  text: string;
+  host: HTMLElement | null;
+}
 
 export interface ChatSelectionBarProps {
   copy: {
@@ -131,30 +143,40 @@ function ensureStyle(): void {
     "  position: fixed; inset: 0; z-index: 10003; display: flex; align-items: center; justify-content: center;",
     "  background: rgba(0, 0, 0, 0.12); pointer-events: none; }",
     /*
-     * **浮条与笔记编辑器里的关系面板按钮用同一套外观** ✓
-     * （用户实测要求："添加节点（浮条）的 UI 风格，修改成与文档编辑中添加前置节点一致"✓）。
+     * **「添加节点」与宿主自己的划词「引用」用同一套外观** ✓（用户 2026-11 的要求）。
      *
-     * 参照物 = `NoteRelations` 里的按钮 ✓（样式在 `panel.css` 的 `.kn-note-relations button` ✓）。
-     * 注：以前那颗"贴着选区的浮钮"（`.kn-note-selection`）已并进编辑器浮动工具栏 ✗ ——
-     * 两块浮层会互相遮挡（用户截图 ✓），`panel.css` 里不再有那条样式 ✓。
-     * 圆角**矩形**（不是 999px 胶囊 ✗）、`bg-layer-1` 底、`border-l2` 细边、
-     * 更柔的投影（`0 3px 12px 12%` ✗ 不是 `0 6px 20px 28%`）、12px 字、`5px 8px` 内边距 ✓。
-     * 数值两边保持一致 ✓（`tests/selection-action-style.test.mjs` 会逐项比对 ✗ 防止再次跑偏 ✓）。
+     * 参照物 = 宿主 `message-quotes/src/client/QuoteSelection.module.css` 的 `.action` ✓
+     * （对话里划词后那颗「引用」胶囊就是它 ✓）。逐项照抄 ✓：`5px 10px` 内边距、`999px` 胶囊、
+     * `corner-shape: round`、`--dsw-alias-button-floating-fill` 底、压边的 `--dsw-elevation-panel` 投影、
+     * `--dsw-font-xs-13` 字、悬停/聚焦换成 `--dsw-alias-button-floating-hover` ✓。
+     *
+     * 为什么不再自造一套（用户实测反馈 ✗）：宿主划词后本来就会弹那颗「引用」胶囊 ✓，
+     * 我们那条方角白底浮条又落在同一个位置 ⇒ 两条浮层叠在一起，用户看到的是
+     * "浮条重叠 / 一个显示另一个不显示"✗（截图 ✓）。现在形状与配色**完全一致**，
+     * 并且直接**挂进宿主那条浮层**里并排显示 ✓（见下面的 `.kn-sel-bar`）。
+     * 数值由 `tests/selection-action-style.test.mjs` 与宿主源码逐项比对钉住 ✓。
      */
-    ".kn-sel-bar {",
-    "  position: fixed; z-index: 10001; display: flex; align-items: center; gap: 4px;",
-    "  padding: 3px; border-radius: 8px;",
-    "  border: 1px solid var(--dsw-alias-border-l2);",
-    "  background: var(--dsw-alias-bg-layer-1);",
+    ".kn-sel-action {",
+    "  padding: 5px 10px; border: none; border-radius: 999px; corner-shape: round;",
+    "  background: var(--dsw-alias-button-floating-fill);",
+    "  --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);",
+    "  box-shadow: var(--dsw-elevation-panel);",
     "  color: var(--dsw-alias-label-primary);",
-    "  box-shadow: 0 3px 12px rgb(0 0 0 / 12%); font-size: 12px; }",
-    ".kn-sel-bar button {",
-    "  border: 0; border-radius: 6px; background: transparent; color: inherit;",
-    "  font: inherit; font-size: 12px; padding: 5px 8px; cursor: pointer; }",
-    ".kn-sel-bar button:hover { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
-    /* 主按钮**不再自己铺一层底** ✗：参照物在常态下就是透明底 ✓（悬停/键盘聚焦才给反馈 ✓） */
-    ".kn-sel-bar .kn-sel-primary { background: transparent; font-weight: 600; }",
-    ".kn-sel-bar .kn-sel-primary:hover, .kn-sel-bar .kn-sel-primary:focus-visible { background: var(--kn-hover, color-mix(in srgb, var(--dsw-alias-label-primary) 7%, transparent)); }",
+    "  font: var(--dsw-font-xs-13); cursor: pointer; }",
+    ".kn-sel-action:focus-visible { background: var(--dsw-alias-button-floating-hover); }",
+    "@media (hover: hover) { .kn-sel-action:hover { background: var(--dsw-alias-button-floating-hover); } }",
+    /*
+     * **挂进宿主的划词浮层**（`[data-text-interaction-surface]`）✓：
+     * 和「引用」胶囊并排、同一条浮条、由宿主统一定位（按选区居中、夹在可视区内、跟着滚动走）✓。
+     * 只要一颗按钮 + 左边 6px 间隔，容器本身不画任何底/边/影 —— 视觉上就是宿主那颗胶囊的兄弟 ✓。
+     */
+    ".kn-sel-bar { display: inline-flex; align-items: center; vertical-align: middle; }",
+    "[data-text-interaction-surface] .kn-sel-bar { margin-left: 6px; }",
+    /*
+     * 宿主**没有**开浮层时（没装「引用」插件 / 这次不适用 / 还没放好）自己浮在选区上方 ✓ ——
+     * 位置还是以前那条：胶囊中心对着选区中心、`bar.y - 40`（见下面的行内 style ✓）。
+     */
+    ".kn-sel-bar-float { position: fixed; z-index: 10001; transform: translateX(-50%); }",
     /*
      * 「收集知识点」弹窗的标签组（形态照设计稿 `knowledgenet-multiselect-design.html`）：
      * 一个 chip = 一个待建的知识点，chip 内可改名、× 可删；末尾一个输入框负责新增 ✓。
@@ -355,6 +377,45 @@ function domSessionOf(): string | null {
   }
 }
 
+/**
+ * 宿主自己那条**划词浮层**（对话里那颗「引用」胶囊的容器 ✓）。
+ *
+ * 为什么需要它（用户实测反馈 ✗）：DSH 本来就有"划词 → 引用"的浮层 ✓，我们以前另起一条
+ * `position: fixed` 的方角浮条、还带更高的 z-index ⇒ 两条浮层落在同一位置互相压住 ✗
+ * （用户原话："浮条的重叠，或者是一个显示，另外一个不显示"✗）。
+ *
+ * 现在的做法：**把我们的胶囊挂进宿主这条浮层里** ✓（宿主在 ChatView 里给了稳定的
+ * `data-text-interaction-surface` ✓，它就是"这一轮划词的动作条"）。好处一次拿全 ✓：
+ * - 一条浮条、一次定位（宿主按选区居中、夹在可视区、跟随滚动 ✓）⇒ 不可能再重叠 ✓；
+ * - 宿主把它当"自己的浮层内部" ⇒ 点我们的按钮不会触发它的"点外部收起" ✓（两边一起留着 ✓）；
+ * - 视觉上就是「引用」旁边的兄弟胶囊 ✓（同一套样式，见 `ensureStyle` ✓）。
+ *
+ * @returns 可以挂进去的浮层；宿主没在用（没装引用插件 / 这次不适用 / 还没放好）时返回 `null`，
+ *          调用方退回"自己浮在选区上方"那条老路 ✓。
+ * @param root - 这段选区所属的对话容器（同一页可能有多个会话视图 ⇒ 只找**这一个**的浮层 ✓）；
+ *               没传就退回整页第一个 ✓。
+ */
+function hostSelectionSurface(root?: Element | null): HTMLElement | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const scoped = root?.querySelector<HTMLElement>("[data-text-interaction-surface]") ?? null;
+    const surface = scoped
+      ?? document.querySelector<HTMLElement>("[data-conversation-content] [data-text-interaction-surface]")
+      ?? document.querySelector<HTMLElement>("[data-text-interaction-surface]");
+    if (surface === null) return null;
+    /*
+     * 浮层里**必须已经有宿主的动作**（那颗「引用」）✓：
+     * 宿主自己没开时它是个 `visibility: hidden` 的空壳 ⇒ 挂进去我们的胶囊会跟着一起隐形 ✗。
+     */
+    if (surface.childElementCount === 0) return null;
+    const view = surface.ownerDocument.defaultView;
+    if (view !== null && view.getComputedStyle(surface).visibility !== "visible") return null;
+    return surface;
+  } catch {
+    return null;
+  }
+}
+
 /*
  * **划词浮条 / 收集弹窗的默认文案** ✓（用户实测：英文界面下这里还是中文 ✗）。
  *
@@ -418,7 +479,13 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     }
     return out as typeof props.copy;
   }, [props.copy, tr]);
-  const [bar, setBar] = useState<{ x: number; y: number; text: string } | null>(null);
+  /**
+   * 浮条当前的落点与所属浮层。
+   *
+   * `host` = 宿主的划词浮层（有就挂进去、和「引用」并排 ✓）；`null` = 自己浮在选区上方 ✓。
+   * 两种形态用的是**同一颗胶囊**（`.kn-sel-action`）⇒ 外观一致 ✓，只是定位的负责人不同 ✓。
+   */
+  const [bar, setBar] = useState<SelectionBarState | null>(null);
   /**
    * 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
    *
@@ -1037,7 +1104,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     if (typeof document === "undefined") return;
     ensureStyle();
 
-    const selectionInfo = (): { ok: true; text: string; x: number; y: number } | { ok: false; reason: string } => {
+    const selectionInfo = (): { ok: true; text: string; x: number; y: number; root: Element | null } | { ok: false; reason: string } => {
       try {
         const selection = window.getSelection();
         if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return { ok: false, reason: "no-selection" };
@@ -1100,7 +1167,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         }
         const rect = selection.getRangeAt(0).getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return { ok: false, reason: "no-rect" };
-        return { ok: true, text, x: rect.left + rect.width / 2, y: rect.top };
+        /*
+         * 记下这段选区属于**哪个对话容器** ✓：同一页可能同时挂着多个会话视图（内嵌 / 分屏 ✓），
+         * 找宿主浮层时必须找**这一个**的，不能拿页面里第一个 ✗（否则胶囊会跑到别的会话下面 ✓）。
+         */
+        const root = (element !== null && typeof element.closest === "function"
+          ? element.closest("[data-conversation-content]")
+          : null) ?? conversation;
+        return { ok: true, text, x: rect.left + rect.width / 2, y: rect.top, root };
       } catch (error) {
         return { ok: false, reason: `throw:${error instanceof Error ? error.message : String(error)}`.slice(0, 60) };
       }
@@ -1220,9 +1294,40 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
        */
       // 记下浮条属于哪个「会话|工作区」✓ —— 之后只要这个作用域变了就收起（切换会话/仓库 ✓）
       barScopeRef.current = `${domSessionId() ?? ""}|${domWorkspacePath()}`;
-      setBar({ x: info.x, y: info.y, text: info.text });
+      /*
+       * **优先挂进宿主那条浮层** ✓（和「引用」并排 = 一条浮条，不再重叠 ✓）；
+       * 宿主没开浮层时 `host` 为 `null`，退回"自己浮在选区上方"✓（外观仍是同一颗胶囊 ✓）。
+       */
+      const showBar = (host: HTMLElement | null): void => {
+        if (gateAllowedRef.current !== true) return;
+        setBar({ x: info.x, y: info.y, text: info.text, host });
         setNote(null);
-        report("bar-shown", { chars: info.text.length });
+        report("bar-shown", { chars: info.text.length, host: host !== null });
+      };
+      const host = hostSelectionSurface(info.root);
+      if (host !== null) {
+        showBar(host);
+        return;
+      }
+      /*
+       * **宿主可能比我们晚一拍** ✓：`selectionchange` 是浏览器**异步派发**的，
+       * 宿主（`useTextInteraction`）收到它之后才渲染并放出浮层 ✓。
+       * 所以"这一帧没看到宿主浮层"不等于"宿主没有浮层" ✗ —— 直接弹自己那条的话，
+       * 下一帧宿主又弹一条 ⇒ 又变回两条叠在一起 ✗（正是这次要修的现象 ✓）。
+       * 等一帧再确认一次：这一帧宿主还没好，那就真的走兜底 ✓。
+       */
+      const view = document.defaultView;
+      view?.requestAnimationFrame(() => {
+        /* 这一帧里用户可能已经换了选区 / 切了会话 ⇒ 原文变了就不再补弹 ✗ */
+        let same = false;
+        try {
+          same = normalizeSnippet(window.getSelection()?.toString() ?? "").trim() === info.text.trim();
+        } catch {
+          same = false;
+        }
+        if (!same) return;
+        showBar(hostSelectionSurface(info.root));
+      });
     };
 
     document.addEventListener("mouseup", onMouseUp);
@@ -1308,6 +1413,15 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     document.addEventListener("selectionchange", onSelectionChange);
 
     /*
+     * **Esc ⇒ 收起浮条** ✓：宿主那条划词浮层就是这么收的（`text-interaction.ts` 的 `cancel`）✓，
+     * 既然我们现在跟它并排显示，键位也得一样 ✓ —— 否则按 Esc 只收掉「引用」、我们的胶囊还留着 ✗。
+     */
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setBar(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+
+    /*
      * **浮条只在它自己的「会话|工作区」里有效** ✓。
      *
      * 实测反馈 ✗：在当前仓库划词弹出浮条后，**点另一个仓库里的会话**，浮条还赖着不走 ✓。
@@ -1337,11 +1451,35 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       window.clearInterval(scopeTimer);
       /* **必须成对移除** ✗：漏掉 selectionchange 会让每次卸载都泄漏一个 document 级监听 ✓ */
       document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("pointerdown", onPressCapture, true);
       document.removeEventListener("mousedown", onPressCapture, true);
     };
   }, []);
+
+  /**
+   * 挂在宿主浮层里时，**浮条跟着宿主一起收** ✓。
+   *
+   * 宿主收起浮层不改 DOM（只是把那条浮层的 `visibility` 设成 `hidden` ✓，Esc / 点外部 / 滚出可视区都会这样 ✓）。
+   * 不跟着收的话，我们的 `bar` 状态会一直留着 ⇒ 下一次划词之前它都"看不见但还在"✗，
+   * 而且宿主的浮层一旦被复用，我们那颗胶囊可能又冒出来 ✓。
+   */
+  const hostOfBar = bar?.host ?? null;
+  useEffect(() => {
+    if (hostOfBar === null) return;
+    const view = hostOfBar.ownerDocument.defaultView;
+    const hide = (): void => {
+      setBar((current: SelectionBarState | null) => (current?.host === hostOfBar ? null : current));
+    };
+    const check = (): void => {
+      if (!hostOfBar.isConnected) { hide(); return; }
+      if (view !== null && view.getComputedStyle(hostOfBar).visibility !== "visible") hide();
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(hostOfBar, { attributes: true, attributeFilter: ["style", "class", "hidden"] });
+    return () => observer.disconnect();
+  }, [hostOfBar]);
 
   /**
    * 调宿主：读一次**当前库**的节点表（id → 标题）。
@@ -1539,17 +1677,28 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
     })();
   };
 
+  /**
+   * 浮条容器的类名：两种落点、同一个容器 ✓。
+   * `kn-sel-bar` 必须一直在 ✓（"选区落在自家浮条里不算划词"与"按在浮条上"两条判据都认它 ✓）；
+   * `kn-sel-bar-float` 只标记"宿主没开浮层、由我们自己定位"✓。
+   */
+  const barClassName = bar !== null && bar.host === null ? "kn-sel-bar kn-sel-bar-float" : "kn-sel-bar";
+
   return (
     <>
       {/*
         * **浮条**（用户要求：只保留一个「添加节点」✓）。
         * 点它才打开下面的文本框弹窗 ✓ —— 弹窗里再决定"创建独立节点 / 创建前置节点"✓。
+        *
+        * 两个落点、同一颗胶囊 ✓：
+        * - `bar.host !== null` ⇒ portal 进**宿主的划词浮层** ✓，跟在「引用」右边（一条浮条、宿主定位 ✓）；
+        * - `bar.host === null` ⇒ 自己浮在选区上方（宿主没装「引用」插件时的兜底 ✓）。
         */}
       {bar === null || gateAllowedRef.current !== true ? null : createPortal(
-        <div className="kn-sel-bar" style={{ left: bar.x, top: Math.max(8, bar.y - 40), transform: "translateX(-50%)" }}>
+        <div className={barClassName} style={bar.host === null ? { left: bar.x, top: Math.max(8, bar.y - 40) } : undefined}>
           <button
             type="button"
-            className="kn-sel-primary"
+            className="kn-sel-action"
             /*
              * **按下时不许动选区** ✗→✓：浏览器默认会在 mousedown 时把选区收掉
              * ⇒ 取消默认行为后，点击那一刻 `getSelection()` 还读得到原文 ✓，
@@ -1577,7 +1726,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
             {copy.addNode}
           </button>
         </div>,
-        document.body,
+        bar.host ?? document.body,
       )}
 
       {/*
