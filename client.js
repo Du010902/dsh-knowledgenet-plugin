@@ -303,6 +303,13 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/node-conversations.ts
+		var PracticeLaunchError = class extends Error {
+			reason;
+			constructor(reason) {
+				super(reason);
+				this.reason = reason;
+			}
+		};
 		/** 路径归一化：分隔符统一 + 去掉末尾分隔符（Windows 的 `D:\a\` 与 `D:/a` 要能对上） */
 		function normalizePath(value) {
 			return value.trim().replace(/[\\/]+/g, "/").replace(/\/+$/g, "");
@@ -370,6 +377,7 @@ window.__ModuleLoader__.load({
 		/** Node-owned history persists before navigation, including sessions awaiting their first message. */
 		function makeConversationActions(getServices, fetcher) {
 			const pending = /* @__PURE__ */ new Map();
+			const practiceDrafts = /* @__PURE__ */ new Map();
 			const running = /* @__PURE__ */ new Map();
 			const listeners = /* @__PURE__ */ new Set();
 			let unwatch = [];
@@ -414,22 +422,37 @@ window.__ModuleLoader__.load({
 				dispose() {
 					disposeWatchers();
 					cancelNavigation();
+					practiceDrafts.clear();
+					pending.clear();
 				},
-				async create(nodeId, target) {
+				async create(nodeId, target, practice) {
 					const services = getServices();
+					if (practice && (!services?.sessions.retain || !services.conversation?.input?.requestDraftInitialization)) throw new PracticeLaunchError("unavailable");
 					if (!services) throw new Error("DSH conversation service unavailable");
 					const info = await list(nodeId, target);
-					const key = JSON.stringify([info.root, nodeId]);
+					const key = JSON.stringify([
+						info.root,
+						nodeId,
+						practice?.mode
+					]);
 					const existing = running.get(key);
 					if (existing) return existing;
 					const work = (async () => {
 						let sessionId = pending.get(key);
+						if (practice && sessionId !== void 0) {
+							const catalog = services.sessions.list?.getSnapshot();
+							if (knownArchived(services, sessionId) || catalog?.byId[sessionId]?.blank === false || catalog?.phase === "ready" && !Object.hasOwn(catalog.byId, sessionId)) {
+								practiceDrafts.delete(sessionId);
+								pending.delete(key);
+								sessionId = void 0;
+							}
+						}
 						if (sessionId === void 0) {
 							const workspaceId = pickWorkspaceId(services.workspaces?.list?.getSnapshot?.(), {
 								cwd: info.cwd,
 								sessionId: target?.sessionId
 							});
-							sessionId = workspaceId !== void 0 && services.uiWorkspace.connectWorkspace ? await services.uiWorkspace.connectWorkspace(workspaceId) : await services.sessions.create(workspaceId === void 0 ? { cwd: info.cwd } : { workspaceId });
+							sessionId = !practice && workspaceId !== void 0 && services.uiWorkspace.connectWorkspace ? await services.uiWorkspace.connectWorkspace(workspaceId) : await services.sessions.create(workspaceId === void 0 ? { cwd: info.cwd } : { workspaceId });
 							pending.set(key, sessionId);
 						}
 						await request(fetcher, {
@@ -439,7 +462,11 @@ window.__ModuleLoader__.load({
 							conversationId: sessionId,
 							entryHint: true
 						});
-						pending.delete(key);
+						if (practice) practiceDrafts.set(sessionId, {
+							key,
+							prompt: practice.prompt
+						});
+						else pending.delete(key);
 						notify(true);
 						return sessionId;
 					})();
@@ -464,12 +491,34 @@ window.__ModuleLoader__.load({
 						carried.cancel();
 						stop();
 					};
+					const draft = practiceDrafts.get(sessionId);
+					let reference;
 					try {
+						if (draft) {
+							const input = services.conversation?.input;
+							if (!services.sessions.retain || !input?.requestDraftInitialization) throw new PracticeLaunchError("unavailable");
+							reference = services.sessions.retain(sessionId, { source: "controllerOperation" });
+							const result = input.requestDraftInitialization(reference.binding, {
+								prompt: draft.prompt,
+								whenDraftExists: "keep"
+							});
+							if (result === "preserved") {
+								practiceDrafts.delete(sessionId);
+								pending.delete(draft.key);
+							}
+							if (result !== "applied") throw new PracticeLaunchError("draft");
+						}
 						services.uiWorkspace.openSession(sessionId);
+						if (draft) {
+							practiceDrafts.delete(sessionId);
+							pending.delete(draft.key);
+						}
 						restore();
 					} catch (error) {
 						cancelNavigation();
 						throw error;
+					} finally {
+						reference?.release();
 					}
 				},
 				title(sessionId) {
@@ -43628,16 +43677,28 @@ void main() {
 			nodeChatArchived: "已归档",
 			nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档"
 		};
+		const PRACTICE_ZH = {
+			nodePracticeQuiz: "AI 提问",
+			nodePracticeExplain: "自述理解",
+			nodePracticeQuizPrompt: "我想针对知识点 {node} 做主动输出练习（AI 提问）。请按 ID 读取该节点作为参考，逐题提问并点评我的回答。默认三题，请先问第一题。",
+			nodePracticeExplainPrompt: "我想针对知识点 {node} 做主动输出练习（自述理解）。请按 ID 读取该节点作为参考，分别评价我的理解是否准确、关键点是否讲全。如果下面没有自述，请先给我一个简短的引导。\n\n我的理解：\n",
+			nodePracticeUnavailable: "当前 DSH 不支持预填对话草稿，请更新 DSH 后重试。",
+			nodePracticeFailed: "无法打开练习，请重试。"
+		};
 		/** 侧栏筛选变化后的轮询间隔：筛选值只落在 localStorage 里（宿主没暴露服务），只能这么跟 ✓ */
 		const FILTER_POLL_MS = 500;
 		/** Compact node-owned history picker; navigation is delegated to the editor's leave guard. */
 		function NodeConversations(props) {
-			const t = (0, react.useMemo)(() => makeTranslator(props.t, LITERAL$3), [props.t]);
+			const t = (0, react.useMemo)(() => makeTranslator(props.t, {
+				...LITERAL$3,
+				...PRACTICE_ZH
+			}), [props.t]);
 			const [items, setItems] = (0, react.useState)([]);
 			const [open, setOpen] = (0, react.useState)(false);
 			const [loading, setLoading] = (0, react.useState)(true);
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)("");
+			const [listError, setListError] = (0, react.useState)("");
 			/**
 			* 「筛选已归档」的复核计数器。
 			*
@@ -43667,6 +43728,7 @@ void main() {
 				setItems([]);
 				setLoading(true);
 				setError("");
+				setListError("");
 				setOpen(false);
 				const reload = async () => {
 					const request = ++generation;
@@ -43677,10 +43739,10 @@ void main() {
 						});
 						if (active && request === generation) {
 							setItems(data.conversations);
-							setError("");
+							setListError("");
 						}
 					} catch (e) {
-						if (active && request === generation) setError(e instanceof Error ? e.message : t("nodeChatFailed"));
+						if (active && request === generation) setListError(e instanceof Error ? e.message : t("nodeChatFailed"));
 					} finally {
 						if (active && request === generation) setLoading(false);
 					}
@@ -43696,6 +43758,7 @@ void main() {
 				reload();
 				return () => {
 					active = false;
+					pending.current = null;
 					if (current.current === identity) current.current = "";
 					unsubscribe();
 					window.removeEventListener("focus", refresh);
@@ -43729,21 +43792,36 @@ void main() {
 				const timer = setInterval(() => setFilterRevision((value) => value + 1), FILTER_POLL_MS);
 				return () => clearInterval(timer);
 			}, []);
-			const create = async () => {
-				if (pending.current === identity) return;
-				pending.current = identity;
+			const create = async (mode) => {
+				if (pending.current !== null) return;
+				const attempt = {};
+				pending.current = attempt;
 				setBusy(true);
 				setError("");
-				try {
-					const id = await nodeConversations.create(props.nodeId, props.target);
+				const failed = (error) => {
 					if (current.current !== identity) return;
+					setOpen(true);
+					setError(mode ? t(error instanceof PracticeLaunchError && error.reason === "unavailable" ? "nodePracticeUnavailable" : "nodePracticeFailed") : error instanceof Error ? error.message : t("nodeChatFailed"));
+				};
+				try {
+					const practice = mode === void 0 ? void 0 : {
+						mode,
+						prompt: t(mode === "quiz" ? "nodePracticeQuizPrompt" : "nodePracticeExplainPrompt", { node: JSON.stringify({
+							title: props.title ?? props.nodeId,
+							id: props.nodeId
+						}) })
+					};
+					const id = await nodeConversations.create(props.nodeId, props.target, practice);
+					if (current.current !== identity || pending.current !== attempt) return;
 					setOpen(false);
-					props.onOpen(id);
+					props.onOpen(id, failed);
 				} catch (e) {
-					if (current.current === identity) setError(e instanceof Error ? e.message : t("nodeChatFailed"));
+					if (pending.current === attempt) failed(e);
 				} finally {
-					if (pending.current === identity) pending.current = null;
-					if (current.current === identity) setBusy(false);
+					if (pending.current === attempt) {
+						pending.current = null;
+						setBusy(false);
+					}
 				}
 			};
 			const filter = nodeConversations.archivedFilter();
@@ -43795,10 +43873,10 @@ void main() {
 							className: "kn-editor-dim",
 							children: t("nodeChatEmpty")
 						}),
-						error ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						error || listError ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "kn-editor-error",
 							role: "alert",
-							children: error
+							children: error || listError
 						}) : null,
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "kn-node-chat-hint",
@@ -43812,6 +43890,24 @@ void main() {
 								create();
 							},
 							children: t(busy ? "nodeChatCreating" : "nodeChatNew")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "kn-note-relations-add",
+							disabled: busy || loading,
+							onClick: () => {
+								create("quiz");
+							},
+							children: t("nodePracticeQuiz")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "kn-note-relations-add",
+							disabled: busy || loading,
+							onClick: () => {
+								create("explain");
+							},
+							children: t("nodePracticeExplain")
 						})
 					]
 				}) : null]
@@ -202128,6 +202224,8 @@ Expected function or array of functions, received type ${typeof value}.`);
 				const act = (dirty, draft = state.draft) => {
 					if (kind === "source") setTab("source");
 					else if (kind === "conversation" && pendingConversationRef.current) {
+						const { sessionId, onError } = pendingConversationRef.current;
+						pendingConversationRef.current = null;
 						if (dirty) rememberDraft(cacheKeyRef.current, {
 							draft,
 							base: state.base,
@@ -202135,7 +202233,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 							snapshot: state.snapshot
 						});
 						else forgetDraft(cacheKeyRef.current);
-						props.onOpenConversation?.(pendingConversationRef.current, dirty);
+						try {
+							props.onOpenConversation?.(sessionId, dirty);
+						} catch (error) {
+							if (onError) onError(error);
+							else throw error;
+						}
 					} else props.onClose(dirty);
 				};
 				if (tab === "source") {
@@ -202299,10 +202402,14 @@ Expected function or array of functions, received type ${typeof value}.`);
 									}) : null,
 									props.onOpenConversation ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeConversations, {
 										nodeId: props.nodeId,
+										title,
 										target: props.target,
 										t: props.t,
-										onOpen: (sessionId) => {
-											pendingConversationRef.current = sessionId;
+										onOpen: (sessionId, onError) => {
+											pendingConversationRef.current = {
+												sessionId,
+												onError
+											};
 											leaveRich("conversation");
 										}
 									}) : null,
@@ -203963,6 +204070,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 			nodeChatHint: "只在当前节点记录这些对话",
 			nodeChatArchived: "已归档",
 			nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
+			nodePracticeQuiz: "AI 提问",
+			nodePracticeExplain: "自述理解",
+			nodePracticeQuizPrompt: "我想针对知识点 {node} 做主动输出练习（AI 提问）。请按 ID 读取该节点作为参考，逐题提问并点评我的回答。默认三题，请先问第一题。",
+			nodePracticeExplainPrompt: "我想针对知识点 {node} 做主动输出练习（自述理解）。请按 ID 读取该节点作为参考，分别评价我的理解是否准确、关键点是否讲全。如果下面没有自述，请先给我一个简短的引导。\n\n我的理解：\n",
+			nodePracticeUnavailable: "当前 DSH 不支持预填对话草稿，请更新 DSH 后重试。",
+			nodePracticeFailed: "无法打开练习，请重试。",
 			understood: "已理解",
 			notUnderstood: "未理解",
 			understandingSaving: "保存中…",
@@ -204239,6 +204352,12 @@ Expected function or array of functions, received type ${typeof value}.`);
 			nodeChatHint: "These chats are recorded only by this node",
 			nodeChatArchived: "Archived",
 			nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
+			nodePracticeQuiz: "AI questions",
+			nodePracticeExplain: "Explain your understanding",
+			nodePracticeQuizPrompt: "I'd like to practice active recall for {node} (AI questions). Read that node by ID for reference, then ask and review one question at a time. Use three questions by default. Please ask the first one.",
+			nodePracticeExplainPrompt: "I'd like to practice active recall for {node} (explain my understanding). Read that node by ID for reference, then review my explanation for accuracy and coverage of key points. If I haven't included an explanation below, please give me a brief prompt.\n\nMy understanding:\n",
+			nodePracticeUnavailable: "This version of DSH cannot prefill chat drafts. Update DSH and try again.",
+			nodePracticeFailed: "Could not open the practice. Try again.",
 			understood: "Understood",
 			notUnderstood: "Not understood",
 			understandingSaving: "Saving…",
@@ -204525,11 +204644,13 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const attach = () => attachConversationServices(() => {
 				const sessions = ctx.get?.("sessions");
 				const uiWorkspace = ctx.get?.("uiWorkspace");
+				const conversation = ctx.get?.("conversation");
 				const workspaces = ctx.get?.("workspaces");
 				const sidebarRight = ctx.get?.("sidebarRight");
 				return sessions && uiWorkspace ? {
 					sessions,
 					uiWorkspace,
+					...conversation === void 0 ? {} : { conversation },
 					...workspaces === void 0 ? {} : { workspaces },
 					...sidebarRight === void 0 ? {} : { sidebarRight }
 				} : void 0;

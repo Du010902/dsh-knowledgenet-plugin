@@ -12,11 +12,13 @@ export interface ConversationServices {
    */
   sessions: {
     create(options: { cwd?: string; workspaceId?: string }): Promise<string>;
+    retain?(sessionId: string, options: { source: "controllerOperation" }): { binding: unknown; release(): void };
     list?: {
       getSnapshot(): { byId: Record<string, { title?: string; displayTitle?: string; blank?: boolean }>; phase?: string };
       subscribe?(listener: () => void): () => void;
     };
   };
+  conversation?: { input?: { requestDraftInitialization(binding: unknown, options: { prompt: string; whenDraftExists: "keep" }): "applied" | "preserved" | "blocked" } };
   uiWorkspace: {
     openSession(sessionId: string): void;
     /**
@@ -32,6 +34,14 @@ export interface ConversationServices {
 }
 export interface ConversationRecord { sessionId: string; createdAt: number }
 export interface ConversationList { root: string; cwd: string; conversations: ConversationRecord[] }
+export interface NodePractice { mode: "quiz" | "explain"; prompt: string }
+export class PracticeLaunchError extends Error {
+  readonly reason: "unavailable" | "draft";
+  constructor(reason: PracticeLaunchError["reason"]) {
+    super(reason);
+    this.reason = reason;
+  }
+}
 type Fetcher = (url: string, options: RequestInit) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
 
 /** 一次「等它真的有内容再记账」的待办 ✓ */
@@ -109,6 +119,7 @@ async function request(fetcher: Fetcher, body: object): Promise<ConversationList
 /** Node-owned history persists before navigation, including sessions awaiting their first message. */
 export function makeConversationActions(getServices: () => ConversationServices | undefined, fetcher: Fetcher) {
   const pending = new Map<string, string>();
+  const practiceDrafts = new Map<string, { key: string; prompt: string }>();
   const running = new Map<string, Promise<string>>();
   const listeners = new Set<(recordsChanged: boolean) => void>();
   let unwatch: (() => void)[] = [];
@@ -137,25 +148,36 @@ export function makeConversationActions(getServices: () => ConversationServices 
       return () => { listeners.delete(listener); if (!listeners.size) disposeWatchers(); };
     },
     servicesChanged() { bindWatchers(); notify(true); },
-    dispose() { disposeWatchers(); cancelNavigation(); },
-    async create(nodeId: string, target?: DocumentTarget): Promise<string> {
+    dispose() { disposeWatchers(); cancelNavigation(); practiceDrafts.clear(); pending.clear(); },
+    async create(nodeId: string, target?: DocumentTarget, practice?: NodePractice): Promise<string> {
       const services = getServices();
+      if (practice && (!services?.sessions.retain || !services.conversation?.input?.requestDraftInitialization)) throw new PracticeLaunchError("unavailable");
       if (!services) throw new Error("DSH conversation service unavailable");
       const info = await list(nodeId, target);
-      const key = JSON.stringify([info.root, nodeId]);
+      const key = JSON.stringify([info.root, nodeId, practice?.mode]);
       const existing = running.get(key);
       if (existing) return existing;
       const work = (async () => {
         let sessionId = pending.get(key);
+        if (practice && sessionId !== undefined) {
+          const catalog = services.sessions.list?.getSnapshot();
+          if (knownArchived(services, sessionId) || catalog?.byId[sessionId]?.blank === false
+            || (catalog?.phase === "ready" && !Object.hasOwn(catalog.byId, sessionId))) {
+            practiceDrafts.delete(sessionId);
+            pending.delete(key);
+            sessionId = undefined;
+          }
+        }
         if (sessionId === undefined) {
           const workspaceId = pickWorkspaceId(services.workspaces?.list?.getSnapshot?.(), { cwd: info.cwd, sessionId: target?.sessionId });
-          sessionId = workspaceId !== undefined && services.uiWorkspace.connectWorkspace
+          sessionId = !practice && workspaceId !== undefined && services.uiWorkspace.connectWorkspace
             ? await services.uiWorkspace.connectWorkspace(workspaceId)
             : await services.sessions.create(workspaceId === undefined ? { cwd: info.cwd } : { workspaceId });
           pending.set(key, sessionId);
         }
         await request(fetcher, { kind: "record-node-conversation", root: info.root, nodeId, conversationId: sessionId, entryHint: true });
-        pending.delete(key);
+        if (practice) practiceDrafts.set(sessionId, { key, prompt: practice.prompt });
+        else pending.delete(key);
         notify(true);
         return sessionId;
       })();
@@ -171,8 +193,28 @@ export function makeConversationActions(getServices: () => ConversationServices 
       const restore = () => { if (carried.restore()) stop(); };
       stop = carried.watch(restore);
       cancelNavigation = () => { carried.cancel(); stop(); };
-      try { services.uiWorkspace.openSession(sessionId); restore(); }
-      catch (error) { cancelNavigation(); throw error; }
+      const draft = practiceDrafts.get(sessionId);
+      let reference: ReturnType<NonNullable<ConversationServices["sessions"]["retain"]>> | undefined;
+      try {
+        if (draft) {
+          const input = services.conversation?.input;
+          if (!services.sessions.retain || !input?.requestDraftInitialization) throw new PracticeLaunchError("unavailable");
+          reference = services.sessions.retain(sessionId, { source: "controllerOperation" });
+          const result = input.requestDraftInitialization(reference.binding, { prompt: draft.prompt, whenDraftExists: "keep" });
+          if (result === "preserved") {
+            practiceDrafts.delete(sessionId);
+            pending.delete(draft.key);
+          }
+          if (result !== "applied") throw new PracticeLaunchError("draft");
+        }
+        services.uiWorkspace.openSession(sessionId);
+        if (draft) {
+          practiceDrafts.delete(sessionId);
+          pending.delete(draft.key);
+        }
+        restore();
+      } catch (error) { cancelNavigation(); throw error; }
+      finally { reference?.release(); }
     },
     title(sessionId: string): string {
       const entry = getServices()?.sessions.list?.getSnapshot().byId[sessionId];

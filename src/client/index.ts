@@ -33,6 +33,12 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 
 const DICT_ZH: Record<string, string> = {
   nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
+  nodePracticeQuiz: "AI 提问",
+  nodePracticeExplain: "自述理解",
+  nodePracticeQuizPrompt: "我想针对知识点 {node} 做主动输出练习（AI 提问）。请按 ID 读取该节点作为参考，逐题提问并点评我的回答。默认三题，请先问第一题。",
+  nodePracticeExplainPrompt: "我想针对知识点 {node} 做主动输出练习（自述理解）。请按 ID 读取该节点作为参考，分别评价我的理解是否准确、关键点是否讲全。如果下面没有自述，请先给我一个简短的引导。\n\n我的理解：\n",
+  nodePracticeUnavailable: "当前 DSH 不支持预填对话草稿，请更新 DSH 后重试。",
+  nodePracticeFailed: "无法打开练习，请重试。",
   understood: "已理解",
   notUnderstood: "未理解",
   understandingSaving: "保存中…", understandingFailed: "保存失败，请重试",
@@ -335,6 +341,12 @@ const DICT_ZH: Record<string, string> = {
 
 const DICT_EN: Record<string, string> = {
   nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
+  nodePracticeQuiz: "AI questions",
+  nodePracticeExplain: "Explain your understanding",
+  nodePracticeQuizPrompt: "I'd like to practice active recall for {node} (AI questions). Read that node by ID for reference, then ask and review one question at a time. Use three questions by default. Please ask the first one.",
+  nodePracticeExplainPrompt: "I'd like to practice active recall for {node} (explain my understanding). Read that node by ID for reference, then review my explanation for accuracy and coverage of key points. If I haven't included an explanation below, please give me a brief prompt.\n\nMy understanding:\n",
+  nodePracticeUnavailable: "This version of DSH cannot prefill chat drafts. Update DSH and try again.",
+  nodePracticeFailed: "Could not open the practice. Try again.",
   understood: "Understood",
   notUnderstood: "Not understood",
   understandingSaving: "Saving…", understandingFailed: "Could not save. Try again",
@@ -657,6 +669,7 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
   const attach = () => attachConversationServices(() => {
     const sessions = ctx.get?.("sessions") as ConversationServices["sessions"] | undefined;
     const uiWorkspace = ctx.get?.("uiWorkspace") as ConversationServices["uiWorkspace"] | undefined;
+    const conversation = ctx.get?.("conversation") as ConversationServices["conversation"];
     /*
      * `workspaces` 只用来读快照：新对话要挂进「当前节点所在的工作区」（否则侧栏归到「未分组」✗）。
      * 它**不是必需服务**：老宿主/组合里没有它时，创建会退回"只传 cwd"的旧行为 ✓。
@@ -668,7 +681,7 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
      */
     const sidebarRight = ctx.get?.("sidebarRight") as ConversationServices["sidebarRight"] | undefined;
     return sessions && uiWorkspace
-      ? { sessions, uiWorkspace, ...(workspaces === undefined ? {} : { workspaces }), ...(sidebarRight === undefined ? {} : { sidebarRight }) }
+      ? { sessions, uiWorkspace, ...(conversation === undefined ? {} : { conversation }), ...(workspaces === undefined ? {} : { workspaces }), ...(sidebarRight === undefined ? {} : { sidebarRight }) }
       : undefined;
   });
   if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");

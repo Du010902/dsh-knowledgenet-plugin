@@ -177,7 +177,7 @@ export function NodeDocumentEditor(props: {
    * 组合结束补跑时**必须重走同一条"取快照 → 再执行"的流程** ✓
    * （第三次复查 P2-1：直接跑原始闭包会跳过快照，等于拿旧正文离开 ✗）。
    */
-  const pendingConversationRef = useRef<string | null>(null);
+  const pendingConversationRef = useRef<{ sessionId: string; onError?: ((error: unknown) => void) | undefined } | null>(null);
   const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | { kind: "conversation" } | null>(null);
   /**
    * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 自动改用纯文本兜底 ✓。
@@ -783,9 +783,12 @@ export function NodeDocumentEditor(props: {
     const act = (dirty: boolean, draft = state.draft): void => {
       if (kind === "source") setTab("source");
       else if (kind === "conversation" && pendingConversationRef.current) {
+        const { sessionId, onError } = pendingConversationRef.current;
+        pendingConversationRef.current = null;
         if (dirty) rememberDraft(cacheKeyRef.current, { draft, base: state.base, hash: state.hash, snapshot: state.snapshot });
         else forgetDraft(cacheKeyRef.current);
-        props.onOpenConversation?.(pendingConversationRef.current, dirty);
+        try { props.onOpenConversation?.(sessionId, dirty); }
+        catch (error) { if (onError) onError(error); else throw error; }
       }
       else props.onClose(dirty);
     };
@@ -955,7 +958,7 @@ export function NodeDocumentEditor(props: {
         </h2>
         <div className="kn-editor-tools">
           {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
-          {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} target={props.target} t={props.t} onOpen={(sessionId) => { pendingConversationRef.current = sessionId; leaveRich("conversation"); }} /> : null}
+          {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} title={title} target={props.target} t={props.t} onOpen={(sessionId, onError) => { pendingConversationRef.current = { sessionId, onError }; leaveRich("conversation"); }} /> : null}
           <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
         </div>
         {/*

@@ -7,8 +7,88 @@ import { listNodeConversations, recordNodeConversation } from '../src/host/node-
 import { conversationOwners, readConversationIndex } from '../src/host/node-conversation-file.ts';
 import { readLibrary, writeNote } from '../src/host/v3/store.ts';
 import { handleApiRequest } from '../src/host/api.ts';
-import { makeConversationActions, pickWorkspaceId } from '../src/client/node-conversations.ts';
+import { makeConversationActions, pickWorkspaceId, PracticeLaunchError } from '../src/client/node-conversations.ts';
 after(cleanupFixtures);
+
+test('practice creates separate chats and binds each editable draft to its exact session without touching an existing draft', async () => {
+  const drafts = new Map([['existing', 'keep this draft']]);
+  const created = [], recorded = [], opened = [], released = [];
+  const actions = makeConversationActions(() => ({
+    sessions: {
+      create: async options => { created.push(options); return `practice-${created.length}`; },
+      retain: id => ({ binding: id, release: () => released.push(id) }),
+    },
+    workspaces: { list: { getSnapshot: () => ({ items: [{ workspaceId: 'ws', path: '/workspace' }] }) } },
+    uiWorkspace: {
+      connectWorkspace: async () => assert.fail('practice must create a fresh chat'),
+      openSession: id => { assert.ok(drafts.has(id)); opened.push(id); },
+    },
+    conversation: { input: { requestDraftInitialization(id, options) {
+      assert.equal(options.whenDraftExists, 'keep');
+      drafts.set(id, options.prompt);
+      return 'applied';
+    } } },
+  }), async (_url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.kind === 'record-node-conversation') recorded.push([body.nodeId, body.conversationId]);
+    return { ok: true, json: async () => ({ ok: true, root: 'library', cwd: '/workspace', conversations: [] }) };
+  });
+  const quiz = { mode: 'quiz', prompt: 'AI questions for {"title":"Same name","id":"node-a"}' };
+  const explain = { mode: 'explain', prompt: 'My understanding of {"title":"Same name","id":"node-b"}' };
+  const [first, duplicate, second] = await Promise.all([
+    actions.create('node-a', {}, quiz), actions.create('node-a', {}, quiz), actions.create('node-b', {}, explain),
+  ]);
+  assert.equal(duplicate, first);
+  assert.notEqual(first, second);
+  assert.deepEqual(created, [{ workspaceId: 'ws' }, { workspaceId: 'ws' }]);
+  assert.deepEqual(recorded, [['node-a', first], ['node-b', second]]);
+  assert.deepEqual(opened, []);
+  assert.equal(drafts.size, 1);
+  actions.open(first);
+  actions.open(second);
+  assert.deepEqual(opened, [first, second]);
+  assert.deepEqual(released, [first, second]);
+  assert.equal(drafts.get(first), quiz.prompt);
+  assert.equal(drafts.get(second), explain.prompt);
+  assert.equal(drafts.get('existing'), 'keep this draft');
+});
+
+test('practice reports missing draft support before creating and retries recording and prefill on the same session', async () => {
+  let created = 0, failRecord = true, outcome = 'blocked', opens = 0, releases = 0;
+  const services = {
+    sessions: {
+      create: async () => `practice-${++created}`,
+      retain: () => ({ binding: {}, release: () => { releases++; } }),
+    },
+    uiWorkspace: { openSession: () => { opens++; } },
+  };
+  const actions = makeConversationActions(() => services, async (_url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.kind === 'record-node-conversation' && failRecord) throw new Error('write failed');
+    return { ok: true, json: async () => ({ ok: true, root: 'library', cwd: '/workspace', conversations: [] }) };
+  });
+  const practice = { mode: 'quiz', prompt: 'question' };
+  const create = () => actions.create('node-a', {}, practice);
+  await assert.rejects(create, error => error instanceof PracticeLaunchError && error.reason === 'unavailable');
+  assert.equal(created, 0);
+  services.conversation = { input: { requestDraftInitialization: () => outcome } };
+  await assert.rejects(create, /write failed/);
+  failRecord = false;
+  const first = await create();
+  assert.throws(() => actions.open(first), PracticeLaunchError);
+  assert.equal(opens, 0);
+  assert.equal(releases, 1);
+  assert.equal(await create(), first);
+  outcome = 'preserved';
+  assert.throws(() => actions.open(first), PracticeLaunchError);
+  const replacement = await create();
+  assert.notEqual(replacement, first);
+  outcome = 'applied';
+  actions.open(replacement);
+  assert.equal(created, 2);
+  assert.equal(opens, 1);
+  assert.equal(releases, 3);
+});
 
 test('节点保存多条对话，重读、去重和并发不会改写笔记或另一节点',async()=>{
  const f=await makeV3Fixture({nodes:['A','B']});const file=join(f.root,f.nodes.A.relativePath);const before=await readFile(file,'utf8');

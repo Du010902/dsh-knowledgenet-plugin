@@ -1,21 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { DocumentTarget } from "./node-document-client.ts";
-import { nodeConversations, type ConversationRecord, type ConversationState } from "./node-conversations.ts";
+import { nodeConversations, PracticeLaunchError, type ConversationRecord, type ConversationState, type NodePractice } from "./node-conversations.ts";
 import { makeTranslator } from "./card-model.ts";
 
 const LITERAL = { nodeChats: "对话 {count}", nodeChatNew: "＋ 打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档" };
+const PRACTICE_ZH = {
+  nodePracticeQuiz: "AI 提问",
+  nodePracticeExplain: "自述理解",
+  nodePracticeQuizPrompt: "我想针对知识点 {node} 做主动输出练习（AI 提问）。请按 ID 读取该节点作为参考，逐题提问并点评我的回答。默认三题，请先问第一题。",
+  nodePracticeExplainPrompt: "我想针对知识点 {node} 做主动输出练习（自述理解）。请按 ID 读取该节点作为参考，分别评价我的理解是否准确、关键点是否讲全。如果下面没有自述，请先给我一个简短的引导。\n\n我的理解：\n",
+  nodePracticeUnavailable: "当前 DSH 不支持预填对话草稿，请更新 DSH 后重试。",
+  nodePracticeFailed: "无法打开练习，请重试。",
+};
 
 /** 侧栏筛选变化后的轮询间隔：筛选值只落在 localStorage 里（宿主没暴露服务），只能这么跟 ✓ */
 const FILTER_POLL_MS = 500;
 
 /** Compact node-owned history picker; navigation is delegated to the editor's leave guard. */
-export function NodeConversations(props: { nodeId: string; target?: DocumentTarget; t?: unknown; onOpen: (sessionId: string) => void }): ReactNode {
-  const t = useMemo(() => makeTranslator(props.t, LITERAL), [props.t]);
+export function NodeConversations(props: { nodeId: string; title?: string; target?: DocumentTarget; t?: unknown; onOpen: (sessionId: string, onError?: (error: unknown) => void) => void }): ReactNode {
+  const t = useMemo(() => makeTranslator(props.t, { ...LITERAL, ...PRACTICE_ZH }), [props.t]);
   const [items, setItems] = useState<ConversationRecord[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [listError, setListError] = useState("");
   /**
    * 「筛选已归档」的复核计数器。
    *
@@ -31,17 +40,17 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
   const identity = JSON.stringify([root, sessionId, props.nodeId]);
   const current = useRef(identity); current.current = identity;
   const holder = useRef<HTMLDivElement>(null);
-  const pending = useRef<string | null>(null);
+  const pending = useRef<object | null>(null);
   useEffect(() => {
     current.current = identity;
     setBusy(false);
     let active = true;
     let generation = 0;
-    setItems([]); setLoading(true); setError(""); setOpen(false);
+    setItems([]); setLoading(true); setError(""); setListError(""); setOpen(false);
     const reload = async () => {
       const request = ++generation;
-      try { const data = await nodeConversations.list(props.nodeId, { root, sessionId }); if (active && request === generation) { setItems(data.conversations); setError(""); } }
-      catch (e) { if (active && request === generation) setError(e instanceof Error ? e.message : t("nodeChatFailed")); }
+      try { const data = await nodeConversations.list(props.nodeId, { root, sessionId }); if (active && request === generation) { setItems(data.conversations); setListError(""); } }
+      catch (e) { if (active && request === generation) setListError(e instanceof Error ? e.message : t("nodeChatFailed")); }
       finally { if (active && request === generation) setLoading(false); }
     };
     const unsubscribe = nodeConversations.subscribe(recordsChanged => {
@@ -51,7 +60,7 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     const refresh = () => { void reload(); };
     window.addEventListener("focus", refresh);
     void reload();
-    return () => { active = false; if (current.current === identity) current.current = ""; unsubscribe(); window.removeEventListener("focus", refresh); };
+    return () => { active = false; pending.current = null; if (current.current === identity) current.current = ""; unsubscribe(); window.removeEventListener("focus", refresh); };
   }, [props.nodeId, root, sessionId]);
   useEffect(() => {
     if (!open) return;
@@ -70,16 +79,28 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     const timer = setInterval(() => setFilterRevision(value => value + 1), FILTER_POLL_MS);
     return () => clearInterval(timer);
   }, []);
-  const create = async () => {
-    if (pending.current === identity) return;
-    pending.current = identity; setBusy(true); setError("");
-    try {
-      const id = await nodeConversations.create(props.nodeId, props.target);
-
+  const create = async (mode?: NodePractice["mode"]) => {
+    if (pending.current !== null) return;
+    const attempt = {};
+    pending.current = attempt; setBusy(true); setError("");
+    const failed = (error: unknown) => {
       if (current.current !== identity) return;
-      setOpen(false); props.onOpen(id);
-    } catch (e) { if (current.current === identity) setError(e instanceof Error ? e.message : t("nodeChatFailed")); }
-    finally { if (pending.current === identity) pending.current = null; if (current.current === identity) setBusy(false); }
+      setOpen(true);
+      setError(mode ? t(error instanceof PracticeLaunchError && error.reason === "unavailable" ? "nodePracticeUnavailable" : "nodePracticeFailed")
+        : error instanceof Error ? error.message : t("nodeChatFailed"));
+    };
+    try {
+      const practice = mode === undefined ? undefined : {
+        mode,
+        prompt: t(mode === "quiz" ? "nodePracticeQuizPrompt" : "nodePracticeExplainPrompt", {
+          node: JSON.stringify({ title: props.title ?? props.nodeId, id: props.nodeId }),
+        }),
+      };
+      const id = await nodeConversations.create(props.nodeId, props.target, practice);
+      if (current.current !== identity || pending.current !== attempt) return;
+      setOpen(false); props.onOpen(id, failed);
+    } catch (e) { if (pending.current === attempt) failed(e); }
+    finally { if (pending.current === attempt) { pending.current = null; setBusy(false); } }
   };
   /**
    * 哪些记录该出现、以什么形态出现 —— 全部交给 `recordState`（那里对齐侧栏的归档筛选 ✓）：
@@ -103,9 +124,11 @@ export function NodeConversations(props: { nodeId: string; target?: DocumentTarg
     {open ? <div className="kn-note-relations-popover">
       <div className="kn-note-relations-head"><strong>{t("nodeChats", { count: rows.length })}</strong><button type="button" aria-label={t("nodeChatClose")} onClick={() => setOpen(false)}>×</button></div>
       {loading ? <div className="kn-editor-dim">{t("nodeChatLoading")}</div> : rows.length ? rows.map(({ item, archived }) => <button className="kn-note-relation-item" type="button" key={item.sessionId} disabled={busy || archived} title={archived ? t("nodeChatArchivedHint") : undefined} onClick={() => { try { props.onOpen(item.sessionId); setOpen(false); } catch (e) { setError(e instanceof Error ? e.message : t("nodeChatFailed")); } }}><span>{nodeConversations.title(item.sessionId)}</span><small>{new Date(item.createdAt).toLocaleString()}{archived ? ` · ${t("nodeChatArchived")}` : ""}</small></button>) : <div className="kn-editor-dim">{t("nodeChatEmpty")}</div>}
-      {error ? <div className="kn-editor-error" role="alert">{error}</div> : null}
+      {error || listError ? <div className="kn-editor-error" role="alert">{error || listError}</div> : null}
       <div className="kn-node-chat-hint">{t("nodeChatHint")}</div>
       <button type="button" className="kn-note-relations-add" disabled={busy || loading} onClick={() => { void create(); }}>{t(busy ? "nodeChatCreating" : "nodeChatNew")}</button>
+      <button type="button" className="kn-note-relations-add" disabled={busy || loading} onClick={() => { void create("quiz"); }}>{t("nodePracticeQuiz")}</button>
+      <button type="button" className="kn-note-relations-add" disabled={busy || loading} onClick={() => { void create("explain"); }}>{t("nodePracticeExplain")}</button>
     </div> : null}
   </div>;
 }
