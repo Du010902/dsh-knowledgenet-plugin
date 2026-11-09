@@ -365,7 +365,8 @@ describe("原图预览：直接用宿主自带的 ImageLightbox ✓（不再自�
     for (const file of readdirSync(CLIENT_DIR)) {
       if (!/\.(tsx?)$/.test(file)) continue;
       const code = readFileSync(path.join(CLIENT_DIR, file), "utf8");
-      assert.ok(!code.includes("showModal("), `${file} 里还有自绘 modal ✗`);
+      // The learning-question capture dialog is independent of image preview.
+      if (file !== "QuestionCapture.tsx") assert.ok(!code.includes("showModal("), `${file} 里还有自绘 modal ✗`);
       assert.ok(!code.includes("knowledgenet-image-viewer-style"), `${file} 里还在注入自绘样式 ✗`);
     }
   });

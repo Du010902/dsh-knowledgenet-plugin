@@ -1,5 +1,5 @@
 import path, { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
@@ -559,6 +559,96 @@ async function copyConversationIdentity(root, from, to) {
 	for (const entry of nodes[from]) if (!byId.has(entry.sessionId)) byId.set(entry.sessionId, entry);
 	nodes[to] = [...byId.values()];
 	await writeConversationIndex(root, nodes);
+}
+//#endregion
+//#region src/shared/node-questions.ts
+function readQuestionSource(input) {
+	if (!input || typeof input !== "object") return void 0;
+	const value = input;
+	const nonempty = (text, max) => typeof text === "string" && text.trim() !== "" && text.length <= max && !text.includes("\0");
+	const index = (n, min) => typeof n === "number" && Number.isSafeInteger(n) && n >= min;
+	if (value.kind === "note" && nonempty(value.nodeId, 300) && nonempty(value.excerpt, 500) && index(value.block, 0)) return {
+		kind: "note",
+		nodeId: value.nodeId,
+		excerpt: value.excerpt,
+		block: value.block
+	};
+	if (!nonempty(value.sessionId, 300)) return void 0;
+	if (value.kind === "chat" && nonempty(value.messageKey, 500) && (value.seq === void 0 || index(value.seq, 0))) return {
+		kind: "chat",
+		sessionId: value.sessionId,
+		messageKey: value.messageKey,
+		...value.seq === void 0 ? {} : { seq: value.seq }
+	};
+	if (value.kind === "file" && nonempty(value.path, 4096) && !/[\\:]/.test(value.path) && value.path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && (value.line === void 0 || index(value.line, 1))) return {
+		kind: "file",
+		sessionId: value.sessionId,
+		path: value.path,
+		...value.line === void 0 ? {} : { line: value.line }
+	};
+}
+//#endregion
+//#region src/host/node-question-file.ts
+const FILE = "node-questions.json";
+async function readQuestionIndex(root) {
+	const nodes = Object.create(null);
+	let text;
+	try {
+		text = await readFile(join(root, FILE), "utf8");
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return nodes;
+		throw error;
+	}
+	const data = JSON.parse(text);
+	if (data?.version !== 1 || !data.nodes || typeof data.nodes !== "object" || Array.isArray(data.nodes)) throw new Error("Invalid node question index");
+	for (const [nodeId, entries] of Object.entries(data.nodes)) {
+		if (!Array.isArray(entries)) throw new Error("Invalid node question list");
+		const ids = /* @__PURE__ */ new Set();
+		nodes[nodeId] = entries.map((entry) => {
+			if (!entry || typeof entry.id !== "string" || !entry.id || ids.has(entry.id) || typeof entry.title !== "string" || !entry.title.trim() || typeof entry.processed !== "boolean") throw new Error("Invalid node question");
+			const source = readQuestionSource(entry.source);
+			if (entry.source !== void 0 && source === void 0) throw new Error("Invalid node question source");
+			ids.add(entry.id);
+			return {
+				id: entry.id,
+				title: entry.title,
+				processed: entry.processed,
+				...source ? { source } : {}
+			};
+		});
+	}
+	return nodes;
+}
+/** Caller holds the library write queue. */
+async function writeQuestionIndex(root, nodes) {
+	const target = join(root, FILE);
+	const temp = target + "." + randomUUID() + ".tmp";
+	await writeFile(temp, JSON.stringify({
+		version: 1,
+		nodes
+	}, null, 2) + "\n", { flag: "wx" });
+	try {
+		await rename(temp, target);
+	} catch (error) {
+		await unlink(temp).catch(() => void 0);
+		throw error;
+	}
+}
+/** Keep the temporary owner until the note file commits, and resolve note sources through the new ID. */
+async function copyQuestionIdentity(root, from, to) {
+	const nodes = await readQuestionIndex(root);
+	const owned = nodes[from];
+	if (!owned) return;
+	const entries = new Map(owned.map((entry) => [entry.id, entry.source?.kind === "note" && entry.source.nodeId === from ? {
+		...entry,
+		source: {
+			...entry.source,
+			nodeId: to
+		}
+	} : entry]));
+	for (const entry of nodes[to] ?? []) entries.set(entry.id, entry);
+	nodes[to] = [...entries.values()];
+	await writeQuestionIndex(root, nodes);
 }
 //#endregion
 //#region src/host/v3/frontmatter.ts
@@ -1399,6 +1489,7 @@ async function writeNoteLocked(base, input, now) {
 	if (id !== node.id) {
 		await copyUnderstandingIdentity(base, node.id, id);
 		await copyConversationIdentity(base, node.id, id);
+		await copyQuestionIdentity(base, node.id, id);
 	}
 	await writeAtomic(abs, text);
 	const normalizedBody = parseDocument(text).body;
@@ -5781,6 +5872,47 @@ async function recordNodeConversation(root, nodeId, sessionId) {
 	});
 }
 //#endregion
+//#region src/host/node-questions.ts
+async function questionFileSource(input, cwd) {
+	if (typeof input.absolutePath !== "string" || !isAbsolute(input.absolutePath)) return void 0;
+	const [base, file] = await Promise.all([realpath(cwd), realpath(input.absolutePath)]);
+	const path = relative(base, file);
+	if (path === "" || path === ".." || path.startsWith(".." + sep) || isAbsolute(path) || !(await stat(file)).isFile()) return;
+	return readQuestionSource({
+		...input,
+		path: path.split(sep).join("/")
+	});
+}
+async function listQuestions(root, nodeId) {
+	if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
+	return (await readQuestionIndex(root))[nodeId] ?? [];
+}
+async function changeQuestions(root, nodeId, change) {
+	return withLibraryWrite(root, async () => {
+		if (!(await readNodeFast(root, nodeId)).ok) throw new Error("没有找到这个知识点");
+		const nodes = await readQuestionIndex(root);
+		const entries = nodes[nodeId] ?? [];
+		let next;
+		if (change.kind === "add") {
+			if (entries.some((item) => item.id === change.item.id)) return entries;
+			next = [change.item, ...entries];
+		} else {
+			const index = entries.findIndex((item) => item.id === change.id);
+			if (index < 0 || change.kind === "process" && entries[index].processed === change.processed) return entries;
+			next = [...entries];
+			if (change.kind === "delete") next.splice(index, 1);
+			else next[index] = {
+				...entries[index],
+				processed: change.processed
+			};
+		}
+		if (next.length) nodes[nodeId] = next;
+		else delete nodes[nodeId];
+		await writeQuestionIndex(root, nodes);
+		return next;
+	});
+}
+//#endregion
 //#region src/host/understanding.ts
 /** Serialize each library's marks without changing note contents or conflict fingerprints. */
 async function setUnderstanding(root, id, understood) {
@@ -7011,6 +7143,114 @@ async function handleApiRequest(ctx, config, request, learningState = new Learni
 			};
 		}
 	}
+	if (record.kind === "list-node-questions" || record.kind === "add-node-question" || record.kind === "set-node-question-processed" || record.kind === "delete-node-question") {
+		const root = typeof record.root === "string" && record.root.trim() ? record.root : void 0;
+		const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId : void 0;
+		const fail = (code, message) => ({
+			status: 200,
+			body: {
+				ok: false,
+				error: {
+					code,
+					message
+				}
+			}
+		});
+		if (!root && !sessionId) return fail("library_unavailable", "找不到知识库");
+		const resolved = await resolveRequestedRoot(ctx, config, {
+			root,
+			sessionId
+		});
+		if (!resolved.root) return fail("library_unavailable", "找不到知识库");
+		const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+		try {
+			if (record.kind === "list-node-questions") {
+				if (!nodeId && sessionId) {
+					const library = await loadLibrary(resolved.root);
+					const nodes = library.snapshot.nodes.map(({ id, title }) => ({
+						id,
+						title
+					}));
+					const ownerNodeId = conversationOwners(await readConversationIndex(resolved.root)).get(sessionId);
+					return {
+						status: 200,
+						body: {
+							ok: true,
+							root: resolved.root,
+							libraryId: library.manifest.libraryId,
+							nodes,
+							ownerNodeId
+						}
+					};
+				}
+				if (!nodeId) return fail("bad_body", "缺少节点");
+				const questions = await listQuestions(resolved.root, nodeId);
+				if (record.questionId !== void 0) {
+					const source = questions.find((item) => item.id === record.questionId)?.source;
+					const scope = source?.kind === "file" ? await resolveRequestedRoot(ctx, config, { sessionId: source.sessionId }) : void 0;
+					if (!scope?.root || !scope.cwd || libraryKey(scope.root) !== libraryKey(resolved.root) || source?.kind !== "file" || !await questionFileSource({
+						...source,
+						absolutePath: resolve(scope.cwd, source.path)
+					}, scope.cwd).catch(() => void 0)) return fail("bad_source", "来源文件已移动或无法访问");
+				}
+				return {
+					status: 200,
+					body: {
+						ok: true,
+						questions
+					}
+				};
+			}
+			const id = typeof record.questionId === "string" ? record.questionId : "";
+			if (!nodeId || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)) return fail("bad_body", "疑问标识无效");
+			if (record.kind === "add-node-question") {
+				const title = typeof record.title === "string" ? record.title.trim() : "";
+				if (!title || title.length > 120 || /[\r\n\0]/.test(title)) return fail("bad_body", "请输入 1 到 120 字的知识点名称");
+				let source = readQuestionSource(record.source);
+				if (record.source !== void 0) {
+					const input = record.source;
+					if (input?.kind === "file" || input?.kind === "chat") {
+						const sourceScope = typeof input.sessionId === "string" && input.sessionId ? await resolveRequestedRoot(ctx, config, { sessionId: input.sessionId }) : void 0;
+						if (!sourceScope?.root || libraryKey(sourceScope.root) !== libraryKey(resolved.root)) return fail("bad_source", "来源不在当前知识库的工作区");
+						if (input.kind === "file") source = sourceScope.cwd ? await questionFileSource(input, sourceScope.cwd).catch(() => void 0) : void 0;
+					}
+					if (!source || source.kind === "note" && source.nodeId !== nodeId) return fail("bad_source", "找不到来源，或来源无法访问");
+				}
+				return {
+					status: 200,
+					body: {
+						ok: true,
+						questions: await changeQuestions(resolved.root, nodeId, {
+							kind: "add",
+							item: {
+								id,
+								title,
+								processed: false,
+								...source ? { source } : {}
+							}
+						})
+					}
+				};
+			}
+			if (record.kind === "set-node-question-processed" && typeof record.processed !== "boolean") return fail("bad_body", "疑问勾选状态无效");
+			return {
+				status: 200,
+				body: {
+					ok: true,
+					questions: await changeQuestions(resolved.root, nodeId, record.kind === "delete-node-question" ? {
+						kind: "delete",
+						id
+					} : {
+						kind: "process",
+						id,
+						processed: record.processed === true
+					})
+				}
+			};
+		} catch (error) {
+			return fail("node_questions_failed", error instanceof Error ? error.message : String(error));
+		}
+	}
 	if (record.kind === "set-understanding") {
 		if (typeof record.nodeId !== "string" || typeof record.understood !== "boolean") return {
 			status: 400,
@@ -7586,54 +7826,57 @@ async function handleApiRequest(ctx, config, request, learningState = new Learni
 				}
 			}
 		};
-		let library;
-		try {
-			library = await loadLibrary(resolved.root, { refresh: true });
-		} catch (error) {
+		const root = resolved.root;
+		return withLibraryWrite(root, async () => {
+			let library;
+			try {
+				library = await loadLibrary(root, { refresh: true });
+			} catch (error) {
+				return {
+					status: 200,
+					body: {
+						ok: false,
+						error: {
+							code: "library_unavailable",
+							message: error instanceof Error ? error.message : String(error)
+						}
+					}
+				};
+			}
+			const context = {
+				library,
+				snapshot: library.snapshot
+			};
+			const edit = record.kind === "add-prerequisite" ? await addPrerequisiteFromUi(context, root, {
+				fromId: typeof record.fromId === "string" ? record.fromId : "",
+				title: typeof record.title === "string" ? record.title : "",
+				create: record.create === true,
+				description: typeof record.description === "string" ? record.description : void 0,
+				snippet: typeof record.snippet === "string" ? record.snippet : void 0,
+				question: typeof record.question === "string" ? record.question : void 0
+			}) : await removePrerequisiteFromUi(context, root, {
+				fromId: typeof record.fromId === "string" ? record.fromId : "",
+				edgeId: typeof record.edgeId === "string" ? record.edgeId : ""
+			});
+			if (edit.ok) return {
+				status: 200,
+				body: {
+					ok: true,
+					added: edit.added,
+					removed: edit.removed
+				}
+			};
 			return {
 				status: 200,
 				body: {
 					ok: false,
-					error: {
-						code: "library_unavailable",
-						message: error instanceof Error ? error.message : String(error)
+					error: edit.error ?? {
+						code: "write_failed",
+						message: "写入失败"
 					}
 				}
 			};
-		}
-		const context = {
-			library,
-			snapshot: library.snapshot
-		};
-		const edit = record.kind === "add-prerequisite" ? await addPrerequisiteFromUi(context, resolved.root, {
-			fromId: typeof record.fromId === "string" ? record.fromId : "",
-			title: typeof record.title === "string" ? record.title : "",
-			create: record.create === true,
-			description: typeof record.description === "string" ? record.description : void 0,
-			snippet: typeof record.snippet === "string" ? record.snippet : void 0,
-			question: typeof record.question === "string" ? record.question : void 0
-		}) : await removePrerequisiteFromUi(context, resolved.root, {
-			fromId: typeof record.fromId === "string" ? record.fromId : "",
-			edgeId: typeof record.edgeId === "string" ? record.edgeId : ""
 		});
-		if (edit.ok) return {
-			status: 200,
-			body: {
-				ok: true,
-				added: edit.added,
-				removed: edit.removed
-			}
-		};
-		return {
-			status: 200,
-			body: {
-				ok: false,
-				error: edit.error ?? {
-					code: "write_failed",
-					message: "写入失败"
-				}
-			}
-		};
 	}
 	if (record.kind !== void 0 && record.kind !== "diag") return {
 		status: 200,
@@ -7675,7 +7918,7 @@ async function handleApiRequest(ctx, config, request, learningState = new Learni
 	};
 }
 /** 注册路由；没有 connection 服务（例如 headless 组合）时返回未注册与原因，不抛错 */
-function registerApi(ctx, config, learningState = new LearningState()) {
+function registerApi(ctx, config, learningState = new LearningState(), readSessionPersistence) {
 	const registrar = ctx;
 	const connection = registrar.get?.("connection") ?? registrar.connection;
 	if (connection === void 0) return {
@@ -7689,9 +7932,21 @@ function registerApi(ctx, config, learningState = new LearningState()) {
 		registered: false,
 		reason: "connection 服务没有 fetch.register"
 	};
+	const requestContext = {
+		get: registrar.get?.bind(registrar),
+		get agents() {
+			return registrar.agents;
+		},
+		get sessions() {
+			return registrar.sessions;
+		},
+		get sessionPersistence() {
+			return readSessionPersistence?.() ?? registrar.sessionPersistence;
+		}
+	};
 	const handler = async (request) => {
 		const head = request.method === "HEAD";
-		const { status, body, raw } = await handleApiRequest(registrar, config, {
+		const { status, body, raw } = await handleApiRequest(requestContext, config, {
 			url: request.url,
 			method: request.method,
 			json: () => request.json()
@@ -7931,28 +8186,40 @@ function apply(ctx, config = {}) {
 		docReads: [],
 		noteApi: []
 	});
-	if (typeof ctx.inject === "function") try {
-		ctx.inject(["connection"], (scoped) => {
-			patchRuntimeStatus({
-				api: registerApi(scoped ?? ctx, config, learningState),
-				mermaidRuntime: registerMermaidRuntime(scoped ?? ctx)
+	if (typeof ctx.inject === "function") {
+		let sessionPersistence;
+		try {
+			ctx.inject(["sessionPersistence"], (scoped) => {
+				const scope = scoped ?? ctx;
+				const service = scope.get?.("sessionPersistence") ?? scope.sessionPersistence;
+				sessionPersistence = service;
+				return () => {
+					if (sessionPersistence === service) sessionPersistence = void 0;
+				};
 			});
-		});
-	} catch (error) {
-		patchRuntimeStatus({
-			api: {
-				path: GRAPH_API_PATH,
-				registered: false,
-				reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`
-			},
-			mermaidRuntime: {
-				path: MERMAID_RUNTIME_API_PATH,
-				registered: false,
-				reason: "connection 服务注入失败"
-			}
-		});
-	}
-	else patchRuntimeStatus({
+		} catch {}
+		try {
+			ctx.inject(["connection"], (scoped) => {
+				patchRuntimeStatus({
+					api: registerApi(scoped ?? ctx, config, learningState, () => sessionPersistence),
+					mermaidRuntime: registerMermaidRuntime(scoped ?? ctx)
+				});
+			});
+		} catch (error) {
+			patchRuntimeStatus({
+				api: {
+					path: GRAPH_API_PATH,
+					registered: false,
+					reason: `ctx.inject('connection') 失败：${error instanceof Error ? error.message : String(error)}`
+				},
+				mermaidRuntime: {
+					path: MERMAID_RUNTIME_API_PATH,
+					registered: false,
+					reason: "connection 服务注入失败"
+				}
+			});
+		}
+	} else patchRuntimeStatus({
 		api: registerApi(ctx, config, learningState),
 		mermaidRuntime: registerMermaidRuntime(ctx)
 	});

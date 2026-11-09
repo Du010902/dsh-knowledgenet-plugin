@@ -1,4 +1,5 @@
 import { copyConversationIdentity } from "../node-conversation-file.ts";
+import { copyQuestionIdentity } from "../node-question-file.ts";
 /**
  * **v3 存储层**：一节点 = 一个 markdown，身份 = front-matter 里的 ULID（与标题/文件名无关）。
  *
@@ -862,6 +863,7 @@ async function writeNoteLocked(
   if (id !== node.id) {
     await copyUnderstandingIdentity(base, node.id, id);
     await copyConversationIdentity(base, node.id, id);
+    await copyQuestionIdentity(base, node.id, id);
   }
   await writeAtomic(abs, text);
   /*

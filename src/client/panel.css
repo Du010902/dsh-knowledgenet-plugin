@@ -947,6 +947,41 @@
   overflow-y: auto;
 }
 
+.kn-editor-content { display: flex; flex: 1; min-height: 0; }
+.kn-editor-content > .kn-editor-body { min-width: 0; }
+.kn-question-toggle[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.kn-question-toggle { white-space: nowrap; }
+.kn-questions { flex: 0 0 min(33%, 330px); min-width: 220px; min-height: 0; overflow: auto; padding: 12px; border-inline-start: 1px solid var(--line); background: var(--canvas); }
+.kn-questions-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.kn-questions-head small { grid-column: 1 / -1; }
+.kn-questions :is(small, p) { color: var(--muted); font-size: 12px; }
+.kn-questions ul { margin: 0; padding: 0; list-style: none; }
+.kn-question-row { display: flex; align-items: center; gap: 4px; min-height: 40px; }
+.kn-question-row + .kn-question-row { border-top: 1px solid var(--line); }
+.kn-question-row label { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.kn-question-row label:has(:checked) { color: var(--muted); }
+.kn-question-row input { width: 15px; height: 15px; margin: 0; flex: none; accent-color: var(--accent); }
+.kn-questions button, .kn-question-toggle { padding: 4px 8px; border: 0; border-radius: 6px; color: inherit; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.kn-questions button:hover:not(:disabled), .kn-question-toggle:hover { background: var(--accent-soft); }
+.kn-questions button:disabled { opacity: .5; cursor: default; }
+.kn-questions-head button, .kn-question-form button[type="submit"] { background: var(--accent-soft); color: var(--accent-text); }
+.kn-question-actions { display: grid; place-items: center; flex: none; width: 28px; height: 28px; }
+.kn-question-form { display: grid; gap: 7px; padding: 9px; margin-block: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.kn-question-form label { display: grid; gap: 4px; font-size: 12px; }
+.kn-question-form input { min-width: 0; padding: 5px; border: 1px solid var(--line); border-radius: 5px; color: inherit; background: transparent; font: inherit; }
+.kn-question-form > div { display: flex; justify-content: flex-end; gap: 4px; }
+.kn-question-menu { position: fixed; inset: auto; position-area: bottom span-left; position-try-fallbacks: flip-block; margin: 4px 0; width: min(220px, calc(100vw - 16px)); padding: 4px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); box-shadow: var(--shadow-soft); }
+.kn-question-menu button { display: block; width: 100%; padding: 6px 8px; text-align: start; }
+.kn-question-menu small { display: block; overflow-wrap: anywhere; }
+.kn-question-menu hr { margin: 2px 4px; border: 0; border-top: 1px solid var(--line); }
+.kn-question-menu .kn-question-delete, .kn-question-error { color: var(--dsw-alias-state-error-primary); }
+.kn-question-error { padding-block: 6px; font-size: 12px; }
+
+@container (max-width: 730px) {
+  .kn-editor-content { flex-direction: column; }
+  .kn-questions { order: -1; flex: 0 0 auto; min-width: 0; max-height: 43%; border-inline-start: 0; border-bottom: 1px solid var(--line); }
+}
+
 /* ===================== 表格操作：一个入口 + 按需弹出（`design/node-editor-design-implementation-review.md` P2 / `table-interaction-and-row-column-functions-review.md` P2a） ===================== */
 
 /*

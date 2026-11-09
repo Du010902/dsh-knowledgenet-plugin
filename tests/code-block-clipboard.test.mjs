@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { QUESTION_ZH } from "../src/client/node-questions-client.ts";
 
 import {
   KN_CODE_BLOCK_MAX_CHARS,
@@ -205,7 +206,7 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
     const modeNames = new Set(["source", "rich"]);
     const editorUsed = keysOf(editorSource);
     assert.ok(editorUsed.size > 10, `编辑器要能扫到一批键（实际 ${editorUsed.size} 个 ✓）`);
-    const editorMissing = [...editorUsed].filter((key) => !modeNames.has(key) && !(key in EDITOR_LITERAL));
+    const editorMissing = [...editorUsed].filter((key) => !modeNames.has(key) && !(key in EDITOR_LITERAL) && !(key in QUESTION_ZH));
     assert.deepEqual(editorMissing, [], `NodeDocumentEditor 缺回落文案 ✗：${editorMissing.join(", ")}`);
     const richUsed = keysOf(richSource);
     /*
@@ -214,7 +215,7 @@ describe("代码块载荷：编码 / 解析 / 边界 ✓", () => {
      * （最后一份只剩「链接输入框占位」+ 工具栏里的「添加前置节点」两个 key ✓；
      *   工具栏其它按钮的标签仍走 BLOCK_MENU_LITERAL 的 inline* 文案 ✓）。
      */
-    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !(key in BLOCK_MENU_LITERAL) && !(key in INLINE_FORMAT_LITERAL) && !richExtra.has(key));
+    const richMissing = [...richUsed].filter((key) => !modeNames.has(key) && !(key in TABLE_LITERAL) && !(key in BLOCK_MENU_LITERAL) && !(key in INLINE_FORMAT_LITERAL) && !(key in QUESTION_ZH) && !richExtra.has(key));
     assert.deepEqual(richMissing, [], `MarkdownRichEditor 缺回落文案 ✗：${richMissing.join(", ")}`);
     assert.ok(richExtra.size >= 3, `编辑器第二份回落字典要能扫到（实际 ${richExtra.size} 个 ✓）`);
     assert.ok("unsupportedNoticeRich" in EDITOR_LITERAL, "正文模式那句必须在这份字典里 ✓");

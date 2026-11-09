@@ -18,6 +18,9 @@ import { readZh, type LocaleServiceLike } from "./locale-choice.ts";
 import { attachPluginLocale, pluginTranslate, type PluginLocaleService } from "./plugin-locale.ts";
 import { prefersEnglish } from "./tab-definition.ts";
 import { registerGraphTab } from "./tab.ts";
+import { QuestionDocumentAction } from "./QuestionCapture.tsx";
+import { QUESTION_EN, QUESTION_ZH } from "./node-questions-client.ts";
+import { attachQuestionNavigation } from "./question-navigation.ts";
 
 export const name = "knowledgenet-client";
 
@@ -32,6 +35,7 @@ const VIEWS: Array<{ key: string; component: unknown }> = [
 ];
 
 const DICT_ZH: Record<string, string> = {
+  ...QUESTION_ZH,
   nodeChats: "对话 {count}", nodeChatNew: "打开新对话", nodeChatEmpty: "还没有从此节点打开过对话", nodeChatLoading: "加载中…", nodeChatCreating: "创建中…", nodeChatClose: "关闭对话列表", nodeChatFailed: "操作失败，请重试", nodeChatHint: "只在当前节点记录这些对话", nodeChatArchived: "已归档", nodeChatArchivedHint: "已归档的对话不能在侧栏直接打开：先在左侧栏取消归档",
   nodePracticeQuiz: "AI 提问",
   nodePracticeExplain: "自述理解",
@@ -340,6 +344,7 @@ const DICT_ZH: Record<string, string> = {
 };
 
 const DICT_EN: Record<string, string> = {
+  ...QUESTION_EN,
   nodeChats: "Chats {count}", nodeChatNew: "Open new chat", nodeChatEmpty: "No chats opened from this node yet", nodeChatLoading: "Loading…", nodeChatCreating: "Creating…", nodeChatClose: "Close chat list", nodeChatFailed: "Could not complete. Try again", nodeChatHint: "These chats are recorded only by this node", nodeChatArchived: "Archived", nodeChatArchivedHint: "An archived chat cannot be opened here: unarchive it in the left sidebar first",
   nodePracticeQuiz: "AI questions",
   nodePracticeExplain: "Explain your understanding",
@@ -686,6 +691,13 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
   });
   if (ctx.effect) ctx.effect(attach, "knowledgenet: node conversation navigation");
   else attach();
+  const attachQuestions = () => attachQuestionNavigation(() => ({
+    sessions: ctx.get?.("sessions"),
+    uiConversation: ctx.get?.("uiConversation"),
+    sidebarRight: ctx.get?.("sidebarRight"),
+  } as ReturnType<Parameters<typeof attachQuestionNavigation>[0]>));
+  if (ctx.effect) ctx.effect(attachQuestions, "knowledgenet: question source navigation");
+  else attachQuestions();
   const withLocale = (options: Record<string, unknown>): Record<string, unknown> =>
     ns === undefined ? options : { ...options, locale: ns };
 
@@ -785,6 +797,10 @@ export function apply(ctx: MinimalClientContext): void {  const ns = registerLoc
 
   // 对话里划词 → 浮条（添加前置 / 多选）→ 选目标节点（推荐 + 搜索）
   registerChatSelectionBar(ctx as never, selectionCopy);
+  ctx.slots.inject("sidebar.right.tab.document.actions", () => ctx.slots.register(
+    withLocale({ name: "sidebar.right.tab.document.actions", id: "knowledgenet.document-question", order: 90 }),
+    QuestionDocumentAction,
+  ));
   // 对话里的工具卡片（图谱本体不在这里——它在右侧栏；这里只有写入回执）
   ctx.slots.inject("tool.call.toolview", function* registerViews() {
     for (const view of VIEWS) {

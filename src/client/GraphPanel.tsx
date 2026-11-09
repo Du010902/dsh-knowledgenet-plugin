@@ -1,5 +1,8 @@
 import { nodeConversations } from "./node-conversations.ts";
 import { useViewFocus } from "./view-focus.ts";
+import type { ChatQuestionSource } from "../shared/node-questions.ts";
+import { locateChatQuestion } from "./question-navigation.ts";
+import { QUESTION_ZH } from "./node-questions-client.ts";
 /**
  * 右侧栏标签页里的知识库图谱面板：**三维空间视图**（默认为整张图）。
  *
@@ -46,7 +49,8 @@ import { pickWorkspacePath, resolvePanelTarget } from "./workspace-path.ts";
 /** 相机命令类型取自上游（`focusNode` / `fitAll` 都在里面），别在本地再写一份窄的 */
 import type { CameraCommand } from "../vendor/upstream/graph3d/types.ts";
 
-type EditAction = { kind: "open"; nodeId: string } | { kind: "close" } | { kind: "conversation"; sessionId: string };
+type EditAction = { kind: "open"; nodeId: string } | { kind: "close" }
+  | { kind: "conversation"; sessionId: string; source?: ChatQuestionSource };
 
 interface PanelPayload {
   understanding?: Record<string, boolean>;
@@ -228,7 +232,7 @@ function GraphPanelInner(props: {
    * ⇒ 请求回来 setState ⇒ 再渲染 ⇒ **自激取数循环**（会持续打宿主，并不断唤醒三维渲染）。
    * 两步一起做：`useMemo` 固化 `t`，并且 `load` 只通过 `tRef` 读它（不进依赖）。
    */
-  const t = useMemo(() => makeTranslator(props.t, LITERAL), [props.t]);
+  const t = useMemo(() => makeTranslator(props.t, { ...LITERAL, ...QUESTION_ZH }), [props.t]);
   const tRef = useRef(t);
   tRef.current = t;
   const [payload, setPayload] = useState<PanelPayload | null>(null);
@@ -299,14 +303,12 @@ function GraphPanelInner(props: {
    * 而且图谱高亮也跟着跳到被打开的那个节点 ✓（正是"跳转到对应节点"该有的样子 ✓）。
    */
   const applyEdit = useCallback((next: EditAction): void => {
-    /*
-     * **打开对话不关编辑器**（用户要求：编辑笔记的弹窗不受"打开新对话"影响 ✓）。
-     *
-     * 编辑器开着哪篇笔记记在**组件外**（`open-editor.ts`，按库身份 ✓）：
-     * 如果这次真的换了会话，本实例会被整体卸载（右侧栏停靠面按会话）⇒
-     * 新面板挂载后会把它恢复出来 ✓（见下面那条同步/恢复 effect）。
-     */
-    if (next.kind === "conversation") { nodeConversations.open(next.sessionId); return; }
+    // Opening a conversation preserves the current note and its cached draft.
+    if (next.kind === "conversation") {
+      nodeConversations.open(next.sessionId);
+      if (next.source) void locateChatQuestion(next.source, tRef.current("questionMissingChat"), tRef.current("questionUnavailable"));
+      return;
+    }
     /*
      * 关掉编辑器**必须先清掉"这个库还开着编辑器"的记忆** ✗ ——
      * 否则那条 effect 会看到"记录里有、state 是 null"又把编辑器恢复回来（关不掉 ✓）。
@@ -1481,7 +1483,8 @@ function GraphPanelInner(props: {
                  * 列表里那个节点的标签**当拍**就跟着出现 / 消失 ✓（不必等下一次刷新 ✓）。
                  */
                 understanding={payload?.understanding ?? {}}
-                onOpenConversation={(sessionId, dirty) => requestEdit({ kind: "conversation", sessionId }, dirty)}
+                questionsRoot={payload?.library?.root}
+                onOpenConversation={(sessionId, dirty, source) => requestEdit({ kind: "conversation", sessionId, ...(source ? { source } : {}) }, dirty)}
                 onUnderstandingSaved={updateUnderstanding}
                 target={editingTarget}
                 t={props.t}

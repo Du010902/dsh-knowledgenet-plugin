@@ -30,6 +30,7 @@ import {
   handleApiRequest,
   registerApi,
   resolveRequestedRoot,
+  type ConnectionRegistrar,
 } from "./api.ts";
 import {
   clampMaxNodes,
@@ -172,10 +173,20 @@ export function apply(ctx: MinimalContext, config: KnowledgeNetConfig = {}): voi
    * 服务缺席时插件照样激活——正好符合「路由是可选能力」的定位。
    */
   if (typeof ctx.inject === "function") {
+    let sessionPersistence: ConnectionRegistrar["sessionPersistence"];
+    // Source capture can start in a detached conversation whose workspace is known only to persistence.
+    try {
+      ctx.inject(["sessionPersistence"], (scoped: unknown) => {
+        const scope = (scoped ?? ctx) as ConnectionRegistrar;
+        const service = (scope.get?.("sessionPersistence") ?? scope.sessionPersistence) as ConnectionRegistrar["sessionPersistence"];
+        sessionPersistence = service;
+        return () => { if (sessionPersistence === service) sessionPersistence = undefined; };
+      });
+    } catch { /* The graph route also works with explicit library roots. */ }
     try {
       ctx.inject(["connection"], (scoped: unknown) => {
         patchRuntimeStatus({
-          api: registerApi(scoped ?? ctx, config, learningState),
+          api: registerApi(scoped ?? ctx, config, learningState, () => sessionPersistence),
           mermaidRuntime: registerMermaidRuntime(scoped ?? ctx),
         });
       });

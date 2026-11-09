@@ -326,21 +326,20 @@ async function diagnostics(harness, error) {
 }
 
 describe('行内格式（真实面板 UI：划词后的浮动工具栏 ✓）', () => {
-  it('a. 划词选中文字 ⇒ 浮动工具栏 8 个按钮（中文 title，含 clear 与「添加前置节点」）', async () => {
+  it('a. 划词工具栏保留格式操作，并提供记为疑问和添加前置节点', async () => {
     const harness = await startHarness();
     try {
       await harness.openNote();
       const toolbar = await showToolbar(harness);
       const buttons = toolbar.locator('button[data-toolbar-item]');
-      assert.equal(await buttons.count(), 8, '工具栏要有 8 个按钮（加粗/斜体/删除线/行内代码/行内公式/链接/清除格式/添加前置节点）');
+      assert.equal(await buttons.count(), 9);
       assert.deepEqual(
         await buttons.evaluateAll(els => els.map(el => el.getAttribute('data-toolbar-item'))),
-        ['bold', 'italic', 'strikethrough', 'code', 'latex', 'link', 'clear', 'add-prerequisite'],
-        '工具栏 8 个按钮（含 clear 与 add-prerequisite）',
+        ['bold', 'italic', 'strikethrough', 'code', 'latex', 'link', 'clear', 'record-question', 'add-prerequisite'],
       );
       const titles = await buttons.evaluateAll(els => els.map(el => el.getAttribute('title') ?? ''));
       for (const title of titles) assert.ok(/[\u4e00-\u9fff]/.test(title), `按钮 title 要是中文：${JSON.stringify(title)}`);
-      for (const want of ['加粗', '斜体', '删除线', '行内代码', '行内公式', '链接', '清除文字格式', '添加前置节点']) {
+      for (const want of ['加粗', '斜体', '删除线', '行内代码', '行内公式', '链接', '清除文字格式', '记为疑问', '添加前置节点']) {
         assert.ok(titles.some(title => title.includes(want)), `工具栏缺中文 title「${want}」：${JSON.stringify(titles)}`);
       }
       assert.equal(await harness.page.locator('.kn-note-selection').count(), 0, '选区旁不许再有独立的旧浮钮（已并进工具栏）');

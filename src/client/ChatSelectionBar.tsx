@@ -34,6 +34,10 @@ import {
   type StoredMemory,
 } from "./chat-selection.ts";
 import { notifyLibraryChanged, readCurrentContext, readLastWorkspacePath, readNodeTitle } from "./current-context.ts";
+import { QuestionCapture } from "./QuestionCapture.tsx";
+import { QUESTION_ZH } from "./node-questions-client.ts";
+import { chatQuestionSource } from "./question-navigation.ts";
+import type { ChatQuestionSource } from "../shared/node-questions.ts";
 
 /** 浮条当前的落点与所属浮层（`host` = 宿主的划词浮层；`null` = 自己定位 ✓） */
 interface SelectionBarState {
@@ -41,6 +45,7 @@ interface SelectionBarState {
   y: number;
   text: string;
   host: HTMLElement | null;
+  questionSource?: ChatQuestionSource;
 }
 
 export interface ChatSelectionBarProps {
@@ -464,7 +469,7 @@ const CHAT_LITERAL: Record<string, string> = {
  * @returns portal 出去的小条与弹窗（没有划词时什么都不渲染）。
  */
 export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
-  const tr = useMemo(() => makeTranslator(props.t, CHAT_LITERAL), [props.t]);
+  const tr = useMemo(() => makeTranslator(props.t, { ...CHAT_LITERAL, ...QUESTION_ZH }), [props.t]);
   /**
    * **补齐 `copy`** ✓：宿主给了的照用 ✗，没给的用 `tr("键")` ✓（英文界面下就是英文 ✓）。
    * 只补字符串字段 ✓（`multiCount` 那种函数型字段原样保留 ✓）。
@@ -486,6 +491,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
    * 两种形态用的是**同一颗胶囊**（`.kn-sel-action`）⇒ 外观一致 ✓，只是定位的负责人不同 ✓。
    */
   const [bar, setBar] = useState<SelectionBarState | null>(null);
+  const [questionCapture, setQuestionCapture] = useState<{ source: ChatQuestionSource; title: string }>();
   /**
    * 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
    *
@@ -540,6 +546,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const snapCountRef = useRef<number>(-1);
   /** 渲染期拿到的快照：只用来"按 id 查路径"，不用它判断"当前是哪个工作区"（它可能不刷新） */
   const snapRef = useRef<unknown>(undefined);
+  const gateAllowedRef = useRef(false);
+  const lastScopeRef = useRef("");
   const allowed = (() => {
     try {
       const identity = (snapshot: unknown): unknown => snapshot;
@@ -559,6 +567,7 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         gateAllowedRef.current = false;
         collecting.current = false;
         setBar(null);
+        setQuestionCapture(undefined);
       }
       const items = (snapshot as { items?: unknown[] } | undefined)?.items;
       snapCountRef.current = Array.isArray(items) ? items.length : -1;
@@ -570,16 +579,6 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   })();
   const allowedRef = useRef(allowed);
   allowedRef.current = allowed;
-  /*
-   * **最近一次门禁结论**：只有它为 true 时才允许渲染浮条 ✓。
-   *
-   * 为什么需要：浮条是 portal、"bar" 是组件状态 ⇒ 切换会话/工作区时旧的 bar 不会被清掉 ✗，
-   * 于是"在知识库会话里选过字、再切到**没有知识库**的仓库"仍会看到浮条（实测反馈 ✓）。
-   * 用一次真实的门禁判定当硬前提，比依赖"状态恰好被清掉"可靠 ✓。
-   */
-  const gateAllowedRef = useRef(false);
-  /** 上一次判定的「会话|工作区」：变化即作废旧状态（见上面的清理逻辑） */
-  const lastScopeRef = useRef("");
   /** 当前库根（有库时）；空串表示"还没有库" */
   const libraryRootRef = useRef("");
   /** 还没有库时，宿主建议的建库位置（`<工作区>/.dsh_knowledge`） */
@@ -1300,7 +1299,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
        */
       const showBar = (host: HTMLElement | null): void => {
         if (gateAllowedRef.current !== true) return;
-        setBar({ x: info.x, y: info.y, text: info.text, host });
+        const questionSource = chatQuestionSource(window.getSelection());
+        setBar({ x: info.x, y: info.y, text: info.text, host, ...(questionSource ? { questionSource } : {}) });
         setNote(null);
         report("bar-shown", { chars: info.text.length, host: host !== null });
       };
@@ -1725,9 +1725,17 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
           >
             {copy.addNode}
           </button>
+          {bar.questionSource ? <button type="button" className="kn-sel-action"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              if (bar.questionSource) setQuestionCapture({ source: bar.questionSource, title: bar.text });
+              setBar(null);
+            }}>{tr("questionCapture")}</button> : null}
         </div>,
         bar.host ?? document.body,
       )}
+      {questionCapture ? <QuestionCapture source={questionCapture.source} title={questionCapture.title}
+        t={props.t} onClose={() => setQuestionCapture(undefined)} /> : null}
 
       {/*
         * **收集知识点弹窗**（浮条点开后出现）：形态按设计稿 `knowledgenet-multiselect-design.html` ✓

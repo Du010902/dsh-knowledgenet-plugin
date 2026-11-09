@@ -18,6 +18,9 @@
  * 5. 失败要**可见** ✗（P2-6）：`onStatus` 上报 ready/failed，父面板显示错误并自动改用纯文本 ✓。
  */
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import type { NoteQuestionSource } from "../shared/node-questions.ts";
+import { findQuestionBlock, normalizedQuestionText, QUESTION_ZH } from "./node-questions-client.ts";
+import { markQuestionSource } from "./question-navigation.ts";
 import { Crepe, CrepeFeature } from "@milkdown/crepe";
 import {
   INLINE_FORMAT_LITERAL,
@@ -1064,6 +1067,7 @@ export interface MarkdownRichEditorHandle {
   insertCodeBlock: (code: string, language?: string) => void;
   /** 实例是否已就绪 ✓ */
   isReady: () => boolean;
+  locateQuestion: (source: NoteQuestionSource) => boolean;
 }
 
 /** 编辑器状态上报（父面板据此显示加载/失败提示 ✓） */
@@ -1182,6 +1186,7 @@ export function MarkdownRichEditor(props: {
    * 由 `NoteRelations` 打开"添加前置"面板 ✓。
    */
   onAddPrerequisite?: ((selectionText: string) => void) | undefined;
+  onRecordQuestion?: ((excerpt: string, block: number) => void) | undefined;
   onPasteText?: ((text: string) => void) | undefined;
   report?: ((step: string, detail?: unknown) => void) | undefined;
   /** 当前库目标 ✓（图片落盘要和笔记读写用同一个库 ✗） */
@@ -1193,7 +1198,7 @@ export function MarkdownRichEditor(props: {
    * 为什么要并进来 ✓：`makeTranslator` 的第三层就是这份 dict ✓ ——
    * 宿主 `t` 与插件 `bind` 都取不到时，界面不能空着 ✓（复查口径 ✓）。
    */
-  const t = useMemo(() => makeTranslator(props.t, { ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL, ...BLOCK_MENU_LITERAL, ...INLINE_FORMAT_LITERAL }), [props.t]);
+  const t = useMemo(() => makeTranslator(props.t, { ...TABLE_LITERAL, ...IMAGE_VIEWER_LITERAL, ...BLOCK_MENU_LITERAL, ...INLINE_FORMAT_LITERAL, ...QUESTION_ZH }), [props.t]);
   /** 渲染器 / 事件处理里**现取**文案 ✓（locale 切换后不用重建编辑器 ✓） */
   const tRef = useRef(t);
   tRef.current = t;
@@ -1220,6 +1225,8 @@ export function MarkdownRichEditor(props: {
   /** 「＋ 添加前置节点」回调现取 ✓（工具栏配置只在建编辑器时读一次 ✗ ⇒ 走 ref ✓） */
   const onAddPrerequisiteRef = useRef(props.onAddPrerequisite);
   onAddPrerequisiteRef.current = props.onAddPrerequisite;
+  const onRecordQuestionRef = useRef(props.onRecordQuestion);
+  onRecordQuestionRef.current = props.onRecordQuestion;
   /** 规范化图注后要"重报基线" ✓ —— 经 ref 拿 ✓（`reportBaseline` 声明在后面 ✓，直接引用会踩"先用后声明"守卫 ✗） */
   const baselineRef = useRef<((markdown: string) => void) | null>(null);
   /** 库内图片 ⇒ blob URL 的缓存 ✓（同一张只取一次 ✓；卸载时统一 revoke ✓） */
@@ -1997,6 +2004,22 @@ export function MarkdownRichEditor(props: {
              * 它以前是贴着选区的单独浮钮 ✗ ⇒ 和这条格式化工具栏互相遮挡（用户截图 ✓）。
              * 只有父面板给了回调才加这一项 ✓（独立挂编辑器的测试里不会多出一个死按钮 ✗）。
              */
+            if (onRecordQuestionRef.current !== undefined) {
+              builder.addGroup("kn-questions", t("questions")).addItem("record-question", {
+                label: t("questionCapture"),
+                icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor"/><path d="M9 9a3 3 0 1 1 4 3c-1 .5-1 1-1 2m0 3h.01" fill="none" stroke="currentColor" stroke-linecap="round"/></svg>',
+                active: () => false,
+                onRun: (ctx) => {
+                  const view = ctx.get(editorViewCtx) as ProseMirrorView;
+                  const { from, to, $from } = view.state.selection;
+                  if (from === to) return;
+                  const block = $from.index(0);
+                  const blockEnd = $from.depth > 0 ? $from.after(1) : to;
+                  const excerpt = normalizedQuestionText(view.state.doc.textBetween(from, Math.min(to, blockEnd), " ")).slice(0, 500);
+                  if (excerpt) onRecordQuestionRef.current?.(excerpt, block);
+                },
+              });
+            }
             if (onAddPrerequisiteRef.current === undefined) return;
             builder.addGroup("kn-relation", t("relAddFromSelection")).addItem("add-prerequisite", {
               label: t("relAddFromSelection"),
@@ -3312,6 +3335,21 @@ export function MarkdownRichEditor(props: {
   }, [props.syncToken, scheduleMenu]);
 
   useImperativeHandle(props.handleRef, () => ({
+    locateQuestion: (source) => {
+      const view = viewRef.current;
+      if (!view) return false;
+      const blocks: string[] = [];
+      const offsets: number[] = [];
+      view.state.doc.forEach((node, offset) => {
+        blocks.push(node.textBetween(0, node.content.size, " "));
+        offsets.push(offset);
+      });
+      const index = findQuestionBlock(blocks, source);
+      const dom = index < 0 ? undefined : view.nodeDOM(offsets[index]!);
+      if (!(dom instanceof HTMLElement)) return false;
+      markQuestionSource(dom);
+      return true;
+    },
     flush: (): string | null => {
       const crepe = crepeRef.current;
       /* 未就绪 / 失败 / 组合中 ⇒ **null** ✗：调用方不许拿旧正文代替 ✓（P1-1/P2-6/P2-7） */

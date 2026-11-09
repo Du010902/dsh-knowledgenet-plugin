@@ -2,6 +2,10 @@ import { NodeConversations } from "./NodeConversations.tsx";
 import { UnderstandingButton } from "./UnderstandingButton.tsx";
 import { NoteRelations } from "./NoteRelations.tsx";
 import { RevealInFileManager } from "./RevealInFileManager.tsx";
+import { NodeQuestions, type NoteQuestionDraft } from "./NodeQuestions.tsx";
+import type { ChatQuestionSource, NodeQuestion, QuestionSource } from "../shared/node-questions.ts";
+import { findQuestionBlock, normalizedQuestionText, postQuestion, QUESTION_ZH } from "./node-questions-client.ts";
+import { openFileQuestion, questionNotice } from "./question-navigation.ts";
 import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
 /**
  * **节点笔记编辑器**（`design/node-note-editor.html` 的界面语言 + `node-note-editor-plan.md` 的行为
@@ -16,7 +20,7 @@ import type { GraphSnapshot } from "../vendor/upstream/data/types.ts";
  * 5. 没有指纹的文档**不可编辑** ✓（宿主也会拒写 ✓）；
  * 6. 草稿按"库 + nodeId"缓存在组件外 ✓：面板卸载/切目标后能恢复，且不串库 ✓。
  */
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 
 import {
   readNodeDocument,
@@ -71,7 +75,8 @@ export function NodeDocumentEditor(props: {
   onRelationsChanged?: () => void;
   understood?: boolean;
   onUnderstandingSaved?: (states: Record<string, boolean>) => void;
-  onOpenConversation?: (sessionId: string, dirty: boolean) => void;
+  onOpenConversation?: (sessionId: string, dirty: boolean, source?: ChatQuestionSource) => void;
+  questionsRoot?: string;
   nodeId: string;
   libraryKey?: string | undefined;
   target?: DocumentTarget | undefined;
@@ -105,7 +110,13 @@ export function NodeDocumentEditor(props: {
   fetcher?: FetchLike;
   t?: unknown;
 }): ReactNode {
-  const t = useMemo(() => makeTranslator(props.t, EDITOR_LITERAL), [props.t]);
+  const t = useMemo(() => makeTranslator(props.t, { ...EDITOR_LITERAL, ...QUESTION_ZH }), [props.t]);
+  const questionsId = useId();
+  const [questionsOpen, setQuestionsOpen] = useState(false);
+  const [questionDraft, setQuestionDraft] = useState<NoteQuestionDraft | null>(null);
+  const [openPrerequisitesRequest, setOpenPrerequisitesRequest] = useState(0);
+  const [plainQuestion, setPlainQuestion] = useState<{ excerpt: string; block: number }>();
+  const { questionsRoot, nodeId } = props;
   const [state, dispatch] = useReducer(editorReducer, props.nodeId, initialEditorState);
   const [tab, setTab] = useState<"rich" | "source">("rich");
   const [confirmAdopt, setConfirmAdopt] = useState(false);
@@ -177,7 +188,7 @@ export function NodeDocumentEditor(props: {
    * 组合结束补跑时**必须重走同一条"取快照 → 再执行"的流程** ✓
    * （第三次复查 P2-1：直接跑原始闭包会跳过快照，等于拿旧正文离开 ✗）。
    */
-  const pendingConversationRef = useRef<{ sessionId: string; onError?: ((error: unknown) => void) | undefined } | null>(null);
+  const pendingConversationRef = useRef<{ sessionId: string; source?: ChatQuestionSource; onError?: ((error: unknown) => void) | undefined } | null>(null);
   const pendingActionRef = useRef<{ kind: "save" } | { kind: "source" } | { kind: "close" } | { kind: "conversation" } | null>(null);
   /**
    * 这份**当前草稿**里富编辑器可能无法原样保留的语法 ⇒ 自动改用纯文本兜底 ✓。
@@ -783,11 +794,11 @@ export function NodeDocumentEditor(props: {
     const act = (dirty: boolean, draft = state.draft): void => {
       if (kind === "source") setTab("source");
       else if (kind === "conversation" && pendingConversationRef.current) {
-        const { sessionId, onError } = pendingConversationRef.current;
+        const { sessionId, source, onError } = pendingConversationRef.current;
         pendingConversationRef.current = null;
         if (dirty) rememberDraft(cacheKeyRef.current, { draft, base: state.base, hash: state.hash, snapshot: state.snapshot });
         else forgetDraft(cacheKeyRef.current);
-        try { props.onOpenConversation?.(sessionId, dirty); }
+        try { props.onOpenConversation?.(sessionId, dirty, source); }
         catch (error) { if (onError) onError(error); else throw error; }
       }
       else props.onClose(dirty);
@@ -818,6 +829,44 @@ export function NodeDocumentEditor(props: {
     if (live === null) return; /* ready 却取不到 ⇒ 不执行会卸载编辑器的动作 ✗ */
     act(live !== state.snapshot, live);
   }, [snapshotDraft, tab, richStatus.composing, state.draft, state.base, state.hash, state.snapshot, props.onClose, props.onOpenConversation]);
+
+  function recordQuestion(excerpt: string, block: number): void {
+    setQuestionDraft({ id: crypto.randomUUID(), title: excerpt.slice(0, 120), source: { kind: "note", nodeId, excerpt, block } });
+    setQuestionsOpen(true);
+  }
+
+  async function locateQuestion(item: NodeQuestion & { source: QuestionSource }, signal: AbortSignal): Promise<void> {
+    const source = item.source;
+    if (source.kind === "chat") {
+      if (!props.onOpenConversation) throw new Error(t("questionUnavailable"));
+      pendingConversationRef.current = { sessionId: source.sessionId, source, onError: () => questionNotice(t("questionUnavailable")) };
+      leaveRich("conversation");
+      return;
+    }
+    if (source.kind === "file") {
+      await postQuestion<NodeQuestion[]>(props.target, { kind: "list-node-questions", nodeId, questionId: item.id }, props.fetcher, signal);
+      signal.throwIfAborted();
+      try { openFileQuestion(source); }
+      catch { throw new Error(t("questionUnavailable")); }
+      return;
+    }
+    if (source.nodeId === nodeId) {
+      if (tab === "rich" && richRef.current?.locateQuestion(source)) return;
+      const field = textareaRef.current;
+      if (tab === "source" && field) {
+        const parts = field.value.split(/(\r?\n(?:[ \t]*\r?\n)+)/);
+        const block = findQuestionBlock(parts.filter((_, index) => index % 2 === 0), source);
+        if (block >= 0) {
+          const offset = parts.slice(0, block * 2).join("").length;
+          field.focus();
+          field.setSelectionRange(offset, offset + parts[block * 2]!.length);
+          field.scrollTop = (field.value.slice(0, offset).split("\n").length - 1) * (parseFloat(getComputedStyle(field).lineHeight) || 22);
+          return;
+        }
+      }
+    }
+    questionNotice(t("questionMissingNote"));
+  }
 
   /** 放弃草稿并用最新正文（**二次确认之后**才走到这里；读不到就不动草稿、不写文件 ✓） */
   const adoptLatest = useCallback(async (): Promise<void> => {
@@ -959,7 +1008,9 @@ export function NodeDocumentEditor(props: {
         <div className="kn-editor-tools">
           {props.onUnderstandingSaved ? <UnderstandingButton nodeId={props.nodeId} understood={props.understood === true} target={props.target} t={props.t} onSaved={props.onUnderstandingSaved} /> : null}
           {props.onOpenConversation ? <NodeConversations nodeId={props.nodeId} title={title} target={props.target} t={props.t} onOpen={(sessionId, onError) => { pendingConversationRef.current = { sessionId, onError }; leaveRich("conversation"); }} /> : null}
-          <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} />
+          <NoteRelations nodeId={props.nodeId} graph={props.graph} understanding={props.understanding} target={props.target} onChanged={props.onRelationsChanged} onOpenNode={props.onOpenNode} t={props.t} selection={noteSelection} addRequest={addPrerequisiteRequest} openPrerequisitesRequest={openPrerequisitesRequest} />
+          <button type="button" className="kn-question-toggle" aria-expanded={questionsOpen} aria-controls={questionsOpen ? questionsId : undefined}
+            onClick={() => { if (questionsOpen) setQuestionDraft(null); setQuestionsOpen(!questionsOpen); }}>{t("questions")}</button>
         </div>
         {/*
          * **「在资源管理器中显示」**（用户 2026-10-29 要求 ✓）：
@@ -1116,6 +1167,7 @@ export function NodeDocumentEditor(props: {
         <div className="kn-editor-dim">{t("richLoading")}</div>
       ) : null}
 
+      <div className="kn-editor-content">
       <div className="kn-editor-body">
         {/* 载入中：只有在**还没有任何内容**时才占满（有草稿就必须露出来 ✓ —— 复查 P1-3 ✓） */}
         {state.phase === "loading" && state.draft === "" && state.base === "" ? (
@@ -1157,6 +1209,7 @@ export function NodeDocumentEditor(props: {
                  * 下面那条提示里就给一个"作为代码块插入"的一键补救 ✓（可撤销 ✓）。
                  */
                 onSelectionText={setNoteSelection}
+                onRecordQuestion={recordQuestion}
                 /*
                  * **选中文字 ⇒ 浮动工具栏的「＋ 添加前置节点」** ✓：把选中原文与一次 nonce 交给关系面板 ✓
                  * （工具栏和选区浮钮以前会互相遮挡 ✗ —— 现在只有一个工具栏 ✓）。
@@ -1189,6 +1242,10 @@ export function NodeDocumentEditor(props: {
                * **纯文本兜底**（只有两条自动路径会到这里 ✓，用户不挑模式 ✗）：
                * 同一份草稿的另一种编辑方式 ✓ —— 保留未知扩展、逐字不改写原文 ✓。
                */
+              <>
+              {plainQuestion ? <button type="button" className="kn-question-toggle" onClick={() => recordQuestion(plainQuestion.excerpt, plainQuestion.block)}>
+                {t("questionCapture")}
+              </button> : null}
               <textarea
                 ref={textareaRef}
                 className="kn-editor-text"
@@ -1198,7 +1255,14 @@ export function NodeDocumentEditor(props: {
                 readOnly={state.saving || state.frozen}
                 value={state.draft}
                 onChange={(event) => dispatch({ type: "edit", text: event.target.value })}
+                onSelect={(event) => {
+                  const { value, selectionStart, selectionEnd } = event.currentTarget;
+                  const excerpt = normalizedQuestionText(value.slice(selectionStart, selectionEnd).split(/\r?\n[ \t]*\r?\n/)[0] ?? "").slice(0, 500);
+                  const block = value.slice(0, selectionStart).split(/\r?\n(?:[ \t]*\r?\n)+/).length - 1;
+                  setPlainQuestion(excerpt ? { excerpt, block } : undefined);
+                }}
               />
+              </>
             )}
 
             {/* 保存失败：显示在输入框旁，**重试执行保存**（不是重新读取 ✗）✓ */}
@@ -1213,6 +1277,11 @@ export function NodeDocumentEditor(props: {
             ) : null}
           </>
         )}
+      </div>
+      {questionsOpen ? <NodeQuestions key={`${questionsRoot ?? props.libraryKey ?? ""}:${nodeId}`} id={questionsId}
+        nodeId={nodeId} nodeTitle={title} root={questionsRoot} target={props.target} graph={props.graph}
+        draft={questionDraft} fetcher={props.fetcher} t={props.t} onLocate={locateQuestion}
+        onPromoted={() => { props.onRelationsChanged?.(); setOpenPrerequisitesRequest((value) => value + 1); }} /> : null}
       </div>
 
       {confirmAdopt ? (

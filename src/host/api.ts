@@ -1,7 +1,10 @@
 import { listNodeConversations, recordNodeConversation } from "./node-conversations.ts";
+import { conversationOwners, readConversationIndex } from "./node-conversation-file.ts";
+import { changeQuestions, listQuestions, questionFileSource } from "./node-questions.ts";
+import { readQuestionSource } from "../shared/node-questions.ts";
 import { LearningState, libraryKey } from "./learning-state.ts";
 import { resolveLearningConfig } from "./learning-config.ts";
-import { dirname, basename, join } from "node:path";
+import { dirname, basename, join, resolve } from "node:path";
 import { readUnderstanding, setUnderstanding } from "./understanding.ts";
 /**
  * 宿主侧 HTTP（Fetch）路由：给**常驻面板**取数据用。
@@ -33,7 +36,7 @@ import { createSubdirectory } from "./create-dir.ts";
 import { createNodeFromUi } from "./mutate.ts";
 import { readNodeDocument, saveNodeDocument } from "./node-document.ts";
 /* 轻量格式检查住在 store 里（只读 library.json ✓；库模块带 Node 参数属性 ⇒ 单测导不进来 ✗） */
-import { checkLibraryFormat, readNodeFast } from "./v3/store.ts";
+import { checkLibraryFormat, readNodeFast, withLibraryWrite } from "./v3/store.ts";
 import { isLibrarySession } from "./isolation.ts";
 import { reevaluateIsolation } from "./isolation-state.ts";
 import { discardPlan, listPlans } from "./plans.ts";
@@ -52,7 +55,7 @@ interface SessionLike {
   session?: { header?: { cwd?: string } };
 }
 
-interface ConnectionRegistrar {
+export interface ConnectionRegistrar {
   get?(name: string): unknown;
   agents?: { get?(id: string): { session?: { header?: { cwd?: unknown } } } | undefined };
   /** 已装载会话的工作区元数据。 */
@@ -461,6 +464,9 @@ export async function handleApiRequest(
     snippet?: unknown;
     nodeId?: unknown;
     conversationId?: unknown;
+    questionId?: unknown;
+    processed?: unknown;
+    source?: unknown;
     entryHint?: unknown;
     viewId?: unknown;
     sequence?: unknown;
@@ -576,6 +582,72 @@ export async function handleApiRequest(
       const cwd = basename(resolved.root) === ".dsh_knowledge" ? dirname(resolved.root) : resolved.root;
       return { status: 200, body: { ok: true, root: resolved.root, cwd, conversations } };
     } catch (error) { return { status: 200, body: { ok: false, error: { code: "conversation_index_failed", message: error instanceof Error ? error.message : String(error) } } }; }
+  }
+  if (record.kind === "list-node-questions" || record.kind === "add-node-question"
+    || record.kind === "set-node-question-processed" || record.kind === "delete-node-question") {
+    const root = typeof record.root === "string" && record.root.trim() ? record.root : undefined;
+    const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId : undefined;
+    const fail = (code: string, message: string) => ({ status: 200, body: { ok: false, error: { code, message } } });
+    if (!root && !sessionId) return fail("library_unavailable", "找不到知识库");
+    const resolved = await resolveRequestedRoot(ctx, config, { root, sessionId });
+    if (!resolved.root) return fail("library_unavailable", "找不到知识库");
+    const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+    try {
+      if (record.kind === "list-node-questions") {
+        if (!nodeId && sessionId) {
+          const library = await loadLibrary(resolved.root);
+          const nodes = library.snapshot.nodes.map(({ id, title }) => ({ id, title }));
+          const ownerNodeId = conversationOwners(await readConversationIndex(resolved.root)).get(sessionId);
+          return { status: 200, body: { ok: true, root: resolved.root, libraryId: library.manifest.libraryId, nodes, ownerNodeId } };
+        }
+        if (!nodeId) return fail("bad_body", "缺少节点");
+        const questions = await listQuestions(resolved.root, nodeId);
+        if (record.questionId !== undefined) {
+          const source = questions.find((item) => item.id === record.questionId)?.source;
+          const scope = source?.kind === "file" ? await resolveRequestedRoot(ctx, config, { sessionId: source.sessionId }) : undefined;
+          if (!scope?.root || !scope.cwd || libraryKey(scope.root) !== libraryKey(resolved.root) || source?.kind !== "file"
+            || !(await questionFileSource({ ...source, absolutePath: resolve(scope.cwd, source.path) }, scope.cwd).catch(() => undefined))) {
+            return fail("bad_source", "来源文件已移动或无法访问");
+          }
+        }
+        return { status: 200, body: { ok: true, questions } };
+      }
+      const id = typeof record.questionId === "string" ? record.questionId : "";
+      if (!nodeId || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)) return fail("bad_body", "疑问标识无效");
+      if (record.kind === "add-node-question") {
+        const title = typeof record.title === "string" ? record.title.trim() : "";
+        if (!title || title.length > 120 || /[\r\n\0]/.test(title)) return fail("bad_body", "请输入 1 到 120 字的知识点名称");
+        let source = readQuestionSource(record.source);
+        if (record.source !== undefined) {
+          const input = record.source as Record<string, unknown> | null;
+          if (input?.kind === "file" || input?.kind === "chat") {
+            const sourceScope = typeof input.sessionId === "string" && input.sessionId
+              ? await resolveRequestedRoot(ctx, config, { sessionId: input.sessionId }) : undefined;
+            if (!sourceScope?.root || libraryKey(sourceScope.root) !== libraryKey(resolved.root)) {
+              return fail("bad_source", "来源不在当前知识库的工作区");
+            }
+            if (input.kind === "file") {
+              source = sourceScope.cwd ? await questionFileSource(input, sourceScope.cwd).catch(() => undefined) : undefined;
+            }
+          }
+          if (!source || (source.kind === "note" && source.nodeId !== nodeId)) {
+            return fail("bad_source", "找不到来源，或来源无法访问");
+          }
+        }
+        const questions = await changeQuestions(resolved.root, nodeId, {
+          kind: "add", item: { id, title, processed: false, ...(source ? { source } : {}) },
+        });
+        return { status: 200, body: { ok: true, questions } };
+      }
+      if (record.kind === "set-node-question-processed" && typeof record.processed !== "boolean") {
+        return fail("bad_body", "疑问勾选状态无效");
+      }
+      const questions = await changeQuestions(resolved.root, nodeId, record.kind === "delete-node-question"
+        ? { kind: "delete", id } : { kind: "process", id, processed: record.processed === true });
+      return { status: 200, body: { ok: true, questions } };
+    } catch (error) {
+      return fail("node_questions_failed", error instanceof Error ? error.message : String(error));
+    }
   }
   if (record.kind === "set-understanding") {
     if (typeof record.nodeId !== "string" || typeof record.understood !== "boolean") return { status: 400, body: { ok: false, error: { code: "bad_body", message: "理解状态不合法" } } };
@@ -1008,19 +1080,20 @@ export async function handleApiRequest(
         body: { ok: false, error: { code: resolved.sessionUnknown ? "session_unknown" : "library_unavailable", message: "找不到知识库" } },
       };
     }
-    let library;
-    try {
-      library = await loadLibrary(resolved.root, { refresh: true });
-    } catch (error) {
-      return {
-        status: 200,
-        body: { ok: false, error: { code: "library_unavailable", message: error instanceof Error ? error.message : String(error) } },
-      };
-    }
-    // `loadLibrary` 给的是 LoadedLibrary；写入口要的是 { library, snapshot }
-    const context = { library, snapshot: library.snapshot };
-    const edit = record.kind === "add-prerequisite"
-      ? await addPrerequisiteFromUi(context, resolved.root, {
+    const root = resolved.root;
+    return withLibraryWrite(root, async () => {
+      let library;
+      try {
+        library = await loadLibrary(root, { refresh: true });
+      } catch (error) {
+        return {
+          status: 200,
+          body: { ok: false, error: { code: "library_unavailable", message: error instanceof Error ? error.message : String(error) } },
+        };
+      }
+      const context = { library, snapshot: library.snapshot };
+      const edit = record.kind === "add-prerequisite"
+        ? await addPrerequisiteFromUi(context, root, {
           fromId: typeof record.fromId === "string" ? record.fromId : "",
           title: typeof record.title === "string" ? record.title : "",
           create: record.create === true,
@@ -1028,12 +1101,13 @@ export async function handleApiRequest(
           snippet: typeof record.snippet === "string" ? record.snippet : undefined,
           question: typeof record.question === "string" ? record.question : undefined,
         })
-      : await removePrerequisiteFromUi(context, resolved.root, {
+        : await removePrerequisiteFromUi(context, root, {
           fromId: typeof record.fromId === "string" ? record.fromId : "",
           edgeId: typeof record.edgeId === "string" ? record.edgeId : "",
         });
-    if (edit.ok) return { status: 200, body: { ok: true, added: edit.added, removed: edit.removed } };
-    return { status: 200, body: { ok: false, error: edit.error ?? { code: "write_failed", message: "写入失败" } } };
+      if (edit.ok) return { status: 200, body: { ok: true, added: edit.added, removed: edit.removed } };
+      return { status: 200, body: { ok: false, error: edit.error ?? { code: "write_failed", message: "写入失败" } } };
+    });
   }
 
   /*
@@ -1081,7 +1155,12 @@ export interface ApiRegistration {
 }
 
 /** 注册路由；没有 connection 服务（例如 headless 组合）时返回未注册与原因，不抛错 */
-export function registerApi(ctx: unknown, config: KnowledgeNetConfig, learningState = new LearningState()): ApiRegistration {
+export function registerApi(
+  ctx: unknown,
+  config: KnowledgeNetConfig,
+  learningState = new LearningState(),
+  readSessionPersistence?: () => ConnectionRegistrar["sessionPersistence"],
+): ApiRegistration {
   const registrar = ctx as ConnectionRegistrar;
   // Cordis 注入后的作用域里，服务既可以用 get() 取，也可以当属性读
   // （shipped 的 bundle/web-app 就是 `connectionCtx.connection.…`），这里两条都试。
@@ -1097,9 +1176,15 @@ export function registerApi(ctx: unknown, config: KnowledgeNetConfig, learningSt
     return { path: GRAPH_API_PATH, registered: false, reason: "connection 服务没有 fetch.register" };
   }
 
+  const requestContext: ConnectionRegistrar = {
+    get: registrar.get?.bind(registrar),
+    get agents() { return registrar.agents; },
+    get sessions() { return registrar.sessions; },
+    get sessionPersistence() { return readSessionPersistence?.() ?? registrar.sessionPersistence; },
+  };
   const handler = async (request: Request): Promise<Response> => {
     const head = request.method === "HEAD";
-    const { status, body, raw } = await handleApiRequest(registrar, config, {
+    const { status, body, raw } = await handleApiRequest(requestContext, config, {
       url: request.url,
       method: request.method,
       json: () => request.json() as Promise<unknown>,

@@ -71,6 +71,7 @@ export function NoteRelations(props: {
    * 选区旁只剩一条工具栏 ✓；这里用 `nonce` 接收"要打开添加前置"的请求 ✓。
    */
   addRequest?: { text: string; nonce: number } | null;
+  openPrerequisitesRequest?: number;
 }): ReactNode {
   /* `useMemo` 固化引用 ✓（否则每次渲染都是新函数，进依赖会引发自激效应 ✗ —— 有测试盯着 ✓） */
   const t = useMemo(() => makeTranslator(props.t, LITERAL), [props.t]);
@@ -81,6 +82,13 @@ export function NoteRelations(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const lastAddNonceRef = useRef(-1);
+  useEffect(() => {
+    if (props.openPrerequisitesRequest) {
+      setMode("pre");
+      setSnippet("");
+      setError("");
+    }
+  }, [props.openPrerequisitesRequest]);
   /** 关系面板根节点 ✓（判断"点外面"用 ✓：面板在 shadow DOM 里 ⇒ 要用 composedPath 认领 ✓） */
   const rootRef = useRef<HTMLDivElement | null>(null);
   /*
