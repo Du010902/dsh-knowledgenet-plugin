@@ -303,10 +303,10 @@ function GraphPanelInner(props: {
    * 而且图谱高亮也跟着跳到被打开的那个节点 ✓（正是"跳转到对应节点"该有的样子 ✓）。
    */
   const applyEdit = useCallback((next: EditAction): void => {
-    // Opening a conversation preserves the current note and its cached draft.
     if (next.kind === "conversation") {
       nodeConversations.open(next.sessionId);
-      if (next.source) void locateChatQuestion(next.source, tRef.current("questionMissingChat"), tRef.current("questionUnavailable"));
+      if (next.source) void locateChatQuestion(next.source, tRef.current("questionMissingChat"),
+        tRef.current("questionUnavailable"), tRef.current("questionMissingChatExcerpt"));
       return;
     }
     /*

@@ -1355,12 +1355,20 @@ window.__ModuleLoader__.load({
 		let services = () => ({});
 		let jump = 0;
 		let notice;
+		const CHAT_HIGHLIGHT = "knowledgenet-question-source";
+		let highlightTimer;
+		function clearChatHighlight() {
+			if (typeof window === "undefined") return;
+			window.clearTimeout(highlightTimer);
+			CSS.highlights?.delete(CHAT_HIGHLIGHT);
+		}
 		function attachQuestionNavigation(read) {
 			services = read;
 			return () => {
 				if (services === read) {
 					services = () => ({});
 					++jump;
+					clearChatHighlight();
 				}
 			};
 		}
@@ -1368,12 +1376,19 @@ window.__ModuleLoader__.load({
 			return node instanceof Element ? node : node?.parentElement ?? null;
 		}
 		function chatQuestionSource(selection) {
-			if (!selection || selection.rangeCount === 0) return void 0;
+			if (!selection || selection.isCollapsed || selection.rangeCount === 0) return void 0;
 			const range = selection.getRangeAt(0);
 			const row = elementOf(range.startContainer)?.closest("[data-chat-node-key]");
 			const messageKey = row?.getAttribute("data-chat-node-key");
 			const sessionId = row?.closest("[data-conversation-session]")?.getAttribute("data-conversation-session");
-			if (!messageKey || !sessionId || row !== elementOf(range.endContainer)?.closest("[data-chat-node-key]")) return void 0;
+			if (!row || !messageKey || !sessionId || row !== elementOf(range.endContainer)?.closest("[data-chat-node-key]")) return void 0;
+			const selected = range.toString();
+			const excerpt = selected.trim().slice(0, 500);
+			if (!excerpt) return void 0;
+			const before = document.createRange();
+			before.selectNodeContents(row);
+			before.setEnd(range.startContainer, range.startOffset);
+			const offset = before.toString().length + selected.length - selected.trimStart().length;
 			let seq;
 			try {
 				const { sessions, uiConversation } = services();
@@ -1385,6 +1400,8 @@ window.__ModuleLoader__.load({
 				kind: "chat",
 				sessionId,
 				messageKey,
+				excerpt,
+				offset,
 				...seq === void 0 ? {} : { seq }
 			};
 		}
@@ -1431,9 +1448,64 @@ window.__ModuleLoader__.load({
 				easing: "cubic-bezier(0.7, 0, 1, 1)"
 			});
 		}
+		function chatExcerptRange(row, excerpt, offset) {
+			const text = row.textContent ?? "";
+			let start;
+			let length = excerpt.length;
+			if (offset !== void 0 && text.startsWith(excerpt, offset)) start = offset;
+			else {
+				const escaped = excerpt.split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+				const pattern = new RegExp(escaped.join("\\s+"), "g");
+				const match = pattern.exec(text);
+				if (!match) return void 0;
+				pattern.lastIndex = match.index + 1;
+				if (pattern.exec(text)) return void 0;
+				start = match.index;
+				length = match[0].length;
+			}
+			const end = start + length;
+			const range = document.createRange();
+			const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+			let position = 0;
+			for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+				const next = position + node.length;
+				if (position <= start && start < next) range.setStart(node, start - position);
+				if (position < end && end <= next) {
+					range.setEnd(node, end - position);
+					return range;
+				}
+				position = next;
+			}
+		}
+		function revealChatExcerpt(row, source) {
+			const excerpt = source.excerpt?.trim();
+			if (!excerpt) return false;
+			const range = chatExcerptRange(row, excerpt, source.offset);
+			const rect = range && Array.from(range.getClientRects()).find((line) => line.width && line.height);
+			if (!range || !rect) return false;
+			const scroller = row.closest("[data-conversation-scroll]");
+			if (scroller) {
+				const top = scroller.getBoundingClientRect().top + scroller.clientTop;
+				scroller.scrollTop += rect.top + rect.height / 2 - top - scroller.clientHeight / 2;
+			} else window.scrollBy(0, rect.top + rect.height / 2 - window.innerHeight / 2);
+			if (CSS.highlights && typeof Highlight === "function") {
+				if (!document.getElementById(CHAT_HIGHLIGHT)) {
+					const style = document.createElement("style");
+					style.id = CHAT_HIGHLIGHT;
+					style.textContent = `::highlight(${CHAT_HIGHLIGHT}) { background-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent); }`;
+					document.head.append(style);
+				}
+				CSS.highlights.set(CHAT_HIGHLIGHT, new Highlight(range));
+				highlightTimer = window.setTimeout(clearChatHighlight, 4e3);
+			}
+			return true;
+		}
 		/** Called after the normal node-conversation navigation has been requested. */
-		async function locateChatQuestion(source, missing, unavailable = missing) {
+		async function locateChatQuestion(source, missing, unavailable = missing, missingExcerpt = missing) {
 			const request = ++jump;
+			clearChatHighlight();
+			notice?.remove();
+			notice = void 0;
 			const selector = `[data-conversation-session="${CSS.escape(source.sessionId)}"]`;
 			const rowSelector = `[data-chat-node-key="${CSS.escape(source.messageKey)}"]`;
 			const find = () => {
@@ -1443,11 +1515,8 @@ window.__ModuleLoader__.load({
 				(rows[0]?.closest("[hidden=\"until-found\"]"))?.dispatchEvent(new Event("beforematch", { bubbles: true }));
 			};
 			const immediate = find();
-			if (immediate) {
-				markQuestionSource(immediate);
-				return;
-			}
-			if (source.seq !== void 0) {
+			if (immediate && revealChatExcerpt(immediate, source)) return;
+			if (!immediate && source.seq !== void 0) {
 				let reference;
 				try {
 					reference = services().sessions?.retain?.(source.sessionId, { source: "controllerOperation" });
@@ -1459,15 +1528,23 @@ window.__ModuleLoader__.load({
 				}
 			}
 			const end = Date.now() + 1600;
+			let row = immediate;
 			while (request === jump && Date.now() < end) {
-				const row = find();
-				if (row) {
-					markQuestionSource(row);
-					return;
+				row = find();
+				if (row && (!source.excerpt || revealChatExcerpt(row, source))) {
+					if (source.excerpt) return;
+					break;
 				}
 				await new Promise((resolve) => window.setTimeout(resolve, 50));
 			}
-			if (request === jump) questionNotice(document.querySelector(selector) ? missing : unavailable);
+			if (request !== jump) return;
+			if (row) {
+				row.scrollIntoView({
+					block: "start",
+					inline: "nearest"
+				});
+				questionNotice(missingExcerpt);
+			} else questionNotice(document.querySelector(selector) ? missing : unavailable);
 		}
 		function openFileQuestion(source) {
 			const sidebar = services().sidebarRight;
@@ -1626,6 +1703,7 @@ window.__ModuleLoader__.load({
 			questionRetry: "重试",
 			questionMissingNote: "已打开笔记，原段落已修改或无法唯一定位。",
 			questionMissingChat: "已打开对话，未找到原消息。",
+			questionMissingChatExcerpt: "已定位到原消息，无法唯一匹配其中的原文。",
 			questionUnavailable: "无法打开来源，请确认它仍可访问。",
 			questionRecorded: "已记录学习疑问"
 		};
@@ -1654,6 +1732,7 @@ window.__ModuleLoader__.load({
 			questionRetry: "Retry",
 			questionMissingNote: "The note is open. The original passage changed or could not be matched uniquely.",
 			questionMissingChat: "The chat is open. The original message could not be found.",
+			questionMissingChatExcerpt: "The original message is open. The passage could not be matched uniquely.",
 			questionUnavailable: "The source could not be opened. Check that it is still accessible.",
 			questionRecorded: "Learning question recorded"
 		};
@@ -203129,7 +203208,10 @@ Expected function or array of functions, received type ${typeof value}.`);
 					if (!props.onOpenConversation) throw new Error(t("questionUnavailable"));
 					pendingConversationRef.current = {
 						sessionId: source.sessionId,
-						source,
+						source: source.excerpt ? source : {
+							...source,
+							excerpt: item.title
+						},
 						onError: () => questionNotice(t("questionUnavailable"))
 					};
 					leaveRich("conversation");
@@ -203857,7 +203939,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			const applyEdit = (0, react.useCallback)((next) => {
 				if (next.kind === "conversation") {
 					nodeConversations.open(next.sessionId);
-					if (next.source) locateChatQuestion(next.source, tRef.current("questionMissingChat"), tRef.current("questionUnavailable"));
+					if (next.source) locateChatQuestion(next.source, tRef.current("questionMissingChat"), tRef.current("questionUnavailable"), tRef.current("questionMissingChatExcerpt"));
 					return;
 				}
 				if (next.kind === "close") forgetOpenEditor(libraryKeyRef.current);

@@ -9,7 +9,9 @@ window.mountQuestions = () => {
   const target = { root: 'D:/library', sessionId: 'current' };
   window.plugin.rememberOpenEditor('root:' + target.root, 'node-a');
   const questions = [
-    { id: 'chat', title: 'Historical chat', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old', seq: 12 } },
+    { id: 'chat', title: 'Historical chat', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old', seq: 12, excerpt: 'key phrase', offset: 10 } },
+    { id: 'legacy', title: 'Legacy term', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old' } },
+    { id: 'ambiguous', title: 'key phrase', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old' } },
     { id: 'gone', title: 'Missing message', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'gone' } },
     { id: 'note', title: 'Note source', processed: false, source: { kind: 'note', nodeId: 'node-a', block: 0, excerpt: 'Attention scaling' } },
     { id: 'changed', title: 'Changed passage', processed: false, source: { kind: 'note', nodeId: 'node-a', block: 0, excerpt: 'not present' } },
@@ -25,6 +27,8 @@ window.mountQuestions = () => {
   document.body.prepend(chat);
   const session = document.createElement('div');
   session.dataset.conversationSession = 'history';
+  session.dataset.conversationScroll = '';
+  session.style.cssText = 'position: fixed; left: 850px; top: 60px; width: 300px; height: 230px; overflow: auto';
   document.body.append(session);
   const originalScroll = HTMLElement.prototype.scrollIntoView;
   HTMLElement.prototype.scrollIntoView = function (options) {
@@ -35,9 +39,9 @@ window.mountQuestions = () => {
     sessions: { binding: () => ({ session: {} }), retain: () => ({
       binding: { session: { loadThrough: async (seq) => {
         window.questionChecks.loads.push(seq);
-        const row = document.createElement('p');
+        const row = document.createElement('div');
         row.dataset.chatNodeKey = 'old';
-        row.textContent = 'Historical message body';
+        row.innerHTML = '<p>key phrase</p><div style="height: 650px"></div><p data-expected-passage>key <strong>phrase</strong></p><p>Legacy term</p><div style="height: 340px"></div>';
         session.append(row);
       } } }, release() { window.questionChecks.releases += 1; }
     }) },
@@ -102,7 +106,7 @@ window.mountQuestions = () => {
         onOpenConversation: (id, dirty, source) => {
           window.questionChecks.cached = window.plugin.recallDraft(window.plugin.draftKey('library', 'node-a'));
           window.questionChecks.dirty = dirty;
-          if (source) void window.plugin.locateChatQuestion(source, '未找到原消息');
+          if (source) void window.plugin.locateChatQuestion(source, '未找到原消息', '无法打开来源', '无法唯一匹配原文');
         },
       }));
   }
@@ -170,12 +174,27 @@ test("question panel, source navigation, and prerequisite promotion in the built
     await page.keyboard.press("End");
     await page.keyboard.insertText(" keep my draft");
     await locate("Historical chat");
-    await page.waitForFunction(() => window.questionChecks.scrolls.includes("old"));
+    await page.waitForFunction(() => {
+      const range = [...(CSS.highlights.get("knowledgenet-question-source") ?? [])][0];
+      if (!range) return false;
+      const rect = range.getBoundingClientRect();
+      const scroller = document.querySelector('[data-conversation-session="history"]');
+      const center = scroller.getBoundingClientRect().top + scroller.clientHeight / 2;
+      return range.toString() === "key phrase"
+        && range.startContainer.parentElement.closest("[data-expected-passage]") !== null
+        && Math.abs(rect.top + rect.height / 2 - center) < 2;
+    });
+    assert.equal(await page.locator('[data-chat-node-key="old"]').evaluate((row) => row.getAnimations().length), 0);
     const captured = await page.evaluate(() => window.questionChecks);
     assert.deepEqual(captured.loads, [12]);
     assert.equal(captured.releases, 1);
     assert.equal(captured.dirty, true);
     assert.ok(captured.cached.draft.includes("keep my draft"));
+    await locate("Legacy term");
+    await page.waitForFunction(() => [...(CSS.highlights.get("knowledgenet-question-source") ?? [])][0]?.toString() === "Legacy term");
+    await locate("key phrase");
+    await page.getByRole("status").filter({ hasText: "无法唯一匹配原文" }).waitFor();
+    assert.equal(await page.evaluate(() => CSS.highlights.has("knowledgenet-question-source")), false);
     await locate("Missing message");
     await page.getByRole("status").filter({ hasText: "未找到原消息" }).waitFor();
 
@@ -193,7 +212,7 @@ test("question panel, source navigation, and prerequisite promotion in the built
     await chatCapture.waitFor({ state: "detached" });
     await actions("Current chat excerpt").waitFor();
     const chatRequest = await page.evaluate(() => window.questionChecks.requests.find((request) => request.title === "Current chat excerpt"));
-    assert.deepEqual(chatRequest.source, { kind: "chat", sessionId: "current", messageKey: "current-message", seq: 42 });
+    assert.deepEqual(chatRequest.source, { kind: "chat", sessionId: "current", messageKey: "current-message", seq: 42, excerpt: "Current chat excerpt", offset: 0 });
 
     await page.locator("[data-textpreview-line]").evaluate((line) => {
       const range = document.createRange();

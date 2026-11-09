@@ -839,7 +839,11 @@ export function NodeDocumentEditor(props: {
     const source = item.source;
     if (source.kind === "chat") {
       if (!props.onOpenConversation) throw new Error(t("questionUnavailable"));
-      pendingConversationRef.current = { sessionId: source.sessionId, source, onError: () => questionNotice(t("questionUnavailable")) };
+      pendingConversationRef.current = {
+        sessionId: source.sessionId,
+        source: source.excerpt ? source : { ...source, excerpt: item.title },
+        onError: () => questionNotice(t("questionUnavailable")),
+      };
       leaveRich("conversation");
       return;
     }

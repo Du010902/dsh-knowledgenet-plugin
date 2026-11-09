@@ -574,11 +574,13 @@ function readQuestionSource(input) {
 		block: value.block
 	};
 	if (!nonempty(value.sessionId, 300)) return void 0;
-	if (value.kind === "chat" && nonempty(value.messageKey, 500) && (value.seq === void 0 || index(value.seq, 0))) return {
+	if (value.kind === "chat" && nonempty(value.messageKey, 500) && (value.seq === void 0 || index(value.seq, 0)) && (value.excerpt === void 0 || nonempty(value.excerpt, 500)) && (value.offset === void 0 || value.excerpt !== void 0 && index(value.offset, 0))) return {
 		kind: "chat",
 		sessionId: value.sessionId,
 		messageKey: value.messageKey,
-		...value.seq === void 0 ? {} : { seq: value.seq }
+		...value.seq === void 0 ? {} : { seq: value.seq },
+		...value.excerpt === void 0 ? {} : { excerpt: value.excerpt },
+		...value.offset === void 0 ? {} : { offset: value.offset }
 	};
 	if (value.kind === "file" && nonempty(value.path, 4096) && !/[\\:]/.test(value.path) && value.path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && (value.line === void 0 || index(value.line, 1))) return {
 		kind: "file",

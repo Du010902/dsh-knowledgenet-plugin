@@ -23,10 +23,18 @@ interface QuestionNavigation {
 let services: () => QuestionNavigation = () => ({});
 let jump = 0;
 let notice: HTMLElement | undefined;
+const CHAT_HIGHLIGHT = "knowledgenet-question-source";
+let highlightTimer: number | undefined;
+
+function clearChatHighlight(): void {
+  if (typeof window === "undefined") return;
+  window.clearTimeout(highlightTimer);
+  CSS.highlights?.delete(CHAT_HIGHLIGHT);
+}
 
 export function attachQuestionNavigation(read: () => QuestionNavigation): () => void {
   services = read;
-  return () => { if (services === read) { services = () => ({}); ++jump; } };
+  return () => { if (services === read) { services = () => ({}); ++jump; clearChatHighlight(); } };
 }
 
 function elementOf(node: Node | null | undefined): Element | null {
@@ -34,12 +42,19 @@ function elementOf(node: Node | null | undefined): Element | null {
 }
 
 export function chatQuestionSource(selection: Selection | null): ChatQuestionSource | undefined {
-  if (!selection || selection.rangeCount === 0) return undefined;
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return undefined;
   const range = selection.getRangeAt(0);
   const row = elementOf(range.startContainer)?.closest("[data-chat-node-key]");
   const messageKey = row?.getAttribute("data-chat-node-key");
   const sessionId = row?.closest("[data-conversation-session]")?.getAttribute("data-conversation-session");
-  if (!messageKey || !sessionId || row !== elementOf(range.endContainer)?.closest("[data-chat-node-key]")) return undefined;
+  if (!row || !messageKey || !sessionId || row !== elementOf(range.endContainer)?.closest("[data-chat-node-key]")) return undefined;
+  const selected = range.toString();
+  const excerpt = selected.trim().slice(0, 500);
+  if (!excerpt) return undefined;
+  const before = document.createRange();
+  before.selectNodeContents(row);
+  before.setEnd(range.startContainer, range.startOffset);
+  const offset = before.toString().length + selected.length - selected.trimStart().length;
   let seq: number | undefined;
   try {
     const { sessions, uiConversation } = services();
@@ -47,7 +62,7 @@ export function chatQuestionSource(selection: Selection | null): ChatQuestionSou
     const node = binding && uiConversation?.binding(binding).target("chat").getSnapshot()?.nodes.get(messageKey);
     seq = node?.location?.turn?.start?.seq ?? node?.anchorSeq;
   } catch { /* The message key still locates rows already in the loaded window. */ }
-  return { kind: "chat", sessionId, messageKey, ...(seq === undefined ? {} : { seq }) };
+  return { kind: "chat", sessionId, messageKey, excerpt, offset, ...(seq === undefined ? {} : { seq }) };
 }
 
 export function questionNotice(message: string): void {
@@ -75,9 +90,73 @@ export function markQuestionSource(row: HTMLElement): void {
   ], { duration: 2400, easing: "cubic-bezier(0.7, 0, 1, 1)" });
 }
 
+function chatExcerptRange(row: HTMLElement, excerpt: string, offset: number | undefined): Range | undefined {
+  const text = row.textContent ?? "";
+  let start: number;
+  let length = excerpt.length;
+  if (offset !== undefined && text.startsWith(excerpt, offset)) {
+    start = offset;
+  } else {
+    // Older titles may have collapsed whitespace from the rendered answer.
+    const escaped = excerpt.split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = new RegExp(escaped.join("\\s+"), "g");
+    const match = pattern.exec(text);
+    if (!match) return undefined;
+    pattern.lastIndex = match.index + 1;
+    if (pattern.exec(text)) return undefined;
+    start = match.index;
+    length = match[0].length;
+  }
+
+  const end = start + length;
+  const range = document.createRange();
+  const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+  let position = 0;
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    const next = position + node.length;
+    if (position <= start && start < next) range.setStart(node, start - position);
+    if (position < end && end <= next) {
+      range.setEnd(node, end - position);
+      return range;
+    }
+    position = next;
+  }
+  return undefined;
+}
+
+function revealChatExcerpt(row: HTMLElement, source: ChatQuestionSource): boolean {
+  const excerpt = source.excerpt?.trim();
+  if (!excerpt) return false;
+  const range = chatExcerptRange(row, excerpt, source.offset);
+  const rect = range && Array.from(range.getClientRects()).find((line) => line.width && line.height);
+  if (!range || !rect) return false;
+
+  const scroller = row.closest<HTMLElement>("[data-conversation-scroll]");
+  if (scroller) {
+    const top = scroller.getBoundingClientRect().top + scroller.clientTop;
+    scroller.scrollTop += rect.top + rect.height / 2 - top - scroller.clientHeight / 2;
+  } else {
+    window.scrollBy(0, rect.top + rect.height / 2 - window.innerHeight / 2);
+  }
+  if (CSS.highlights && typeof Highlight === "function") {
+    if (!document.getElementById(CHAT_HIGHLIGHT)) {
+      const style = document.createElement("style");
+      style.id = CHAT_HIGHLIGHT;
+      style.textContent = `::highlight(${CHAT_HIGHLIGHT}) { background-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent); }`;
+      document.head.append(style);
+    }
+    CSS.highlights.set(CHAT_HIGHLIGHT, new Highlight(range));
+    highlightTimer = window.setTimeout(clearChatHighlight, 4000);
+  }
+  return true;
+}
+
 /** Called after the normal node-conversation navigation has been requested. */
-export async function locateChatQuestion(source: ChatQuestionSource, missing: string, unavailable = missing): Promise<void> {
+export async function locateChatQuestion(source: ChatQuestionSource, missing: string, unavailable = missing, missingExcerpt = missing): Promise<void> {
   const request = ++jump;
+  clearChatHighlight();
+  notice?.remove();
+  notice = undefined;
   const selector = `[data-conversation-session="${CSS.escape(source.sessionId)}"]`;
   const rowSelector = `[data-chat-node-key="${CSS.escape(source.messageKey)}"]`;
   const find = (): HTMLElement | undefined => {
@@ -89,8 +168,8 @@ export async function locateChatQuestion(source: ChatQuestionSource, missing: st
     return undefined;
   };
   const immediate = find();
-  if (immediate) { markQuestionSource(immediate); return; }
-  if (source.seq !== undefined) {
+  if (immediate && revealChatExcerpt(immediate, source)) return;
+  if (!immediate && source.seq !== undefined) {
     let reference: SessionReference | undefined;
     try {
       reference = services().sessions?.retain?.(source.sessionId, { source: "controllerOperation" });
@@ -101,12 +180,20 @@ export async function locateChatQuestion(source: ChatQuestionSource, missing: st
     finally { reference?.release(); }
   }
   const end = Date.now() + 1600;
+  let row = immediate;
   while (request === jump && Date.now() < end) {
-    const row = find();
-    if (row) { markQuestionSource(row); return; }
+    row = find();
+    if (row && (!source.excerpt || revealChatExcerpt(row, source))) {
+      if (source.excerpt) return;
+      break;
+    }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
   }
-  if (request === jump) questionNotice(document.querySelector(selector) ? missing : unavailable);
+  if (request !== jump) return;
+  if (row) {
+    row.scrollIntoView({ block: "start", inline: "nearest" });
+    questionNotice(missingExcerpt);
+  } else questionNotice(document.querySelector(selector) ? missing : unavailable);
 }
 
 export function openFileQuestion(source: FileQuestionSource): void {

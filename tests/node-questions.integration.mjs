@@ -57,6 +57,10 @@ test("capture uses the conversation owner and validates real workspace file path
   assert.deepEqual(capture.nodes, [{ id: nodeId, title: "A" }]);
   const add = (questionId, source) => request({ kind: "add-node-question", nodeId, questionId, title: "来源", source });
   assert.equal((await add("cross", { kind: "chat", sessionId: "elsewhere", messageKey: "key" })).ok, false);
+  const chat = { kind: "chat", sessionId: "chat", messageKey: "key", seq: 10, excerpt: "原文片段", offset: 24 };
+  assert.equal((await add("chat", chat)).ok, true);
+  assert.deepEqual((await readQuestionIndex(fixture.root))[nodeId].find((item) => item.id === "chat").source, chat);
+  assert.equal((await add("invalid-offset", { ...chat, offset: -1 })).ok, false);
   assert.equal((await add("escape", { kind: "file", sessionId: "chat", absolutePath: foreign })).ok, false);
   const fileQuestion = await add("file", { kind: "file", sessionId: "chat", absolutePath: file, line: 2 });
   assert.deepEqual(fileQuestion.questions[0].source, { kind: "file", sessionId: "chat", path: "资料.txt", line: 2 });

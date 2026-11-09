@@ -27,6 +27,7 @@ export const QUESTION_ZH = {
   questionRetry: "重试",
   questionMissingNote: "已打开笔记，原段落已修改或无法唯一定位。",
   questionMissingChat: "已打开对话，未找到原消息。",
+  questionMissingChatExcerpt: "已定位到原消息，无法唯一匹配其中的原文。",
   questionUnavailable: "无法打开来源，请确认它仍可访问。",
   questionRecorded: "已记录学习疑问",
 };
@@ -56,6 +57,7 @@ export const QUESTION_EN: Record<keyof typeof QUESTION_ZH, string> = {
   questionRetry: "Retry",
   questionMissingNote: "The note is open. The original passage changed or could not be matched uniquely.",
   questionMissingChat: "The chat is open. The original message could not be found.",
+  questionMissingChatExcerpt: "The original message is open. The passage could not be matched uniquely.",
   questionUnavailable: "The source could not be opened. Check that it is still accessible.",
   questionRecorded: "Learning question recorded",
 };

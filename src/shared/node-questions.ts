@@ -1,5 +1,5 @@
 export type NoteQuestionSource = { kind: "note"; nodeId: string; excerpt: string; block: number };
-export type ChatQuestionSource = { kind: "chat"; sessionId: string; messageKey: string; seq?: number };
+export type ChatQuestionSource = { kind: "chat"; sessionId: string; messageKey: string; seq?: number; excerpt?: string; offset?: number };
 export type FileQuestionSource = { kind: "file"; sessionId: string; path: string; line?: number };
 export type QuestionSource = NoteQuestionSource | ChatQuestionSource | FileQuestionSource;
 export type QuestionSourceInput = NoteQuestionSource | ChatQuestionSource
@@ -23,8 +23,15 @@ export function readQuestionSource(input: unknown): QuestionSource | undefined {
     return { kind: "note", nodeId: value.nodeId, excerpt: value.excerpt, block: value.block };
   }
   if (!nonempty(value.sessionId, 300)) return undefined;
-  if (value.kind === "chat" && nonempty(value.messageKey, 500) && (value.seq === undefined || index(value.seq, 0))) {
-    return { kind: "chat", sessionId: value.sessionId, messageKey: value.messageKey, ...(value.seq === undefined ? {} : { seq: value.seq }) };
+  if (value.kind === "chat" && nonempty(value.messageKey, 500) && (value.seq === undefined || index(value.seq, 0))
+    && (value.excerpt === undefined || nonempty(value.excerpt, 500))
+    && (value.offset === undefined || (value.excerpt !== undefined && index(value.offset, 0)))) {
+    return {
+      kind: "chat", sessionId: value.sessionId, messageKey: value.messageKey,
+      ...(value.seq === undefined ? {} : { seq: value.seq }),
+      ...(value.excerpt === undefined ? {} : { excerpt: value.excerpt }),
+      ...(value.offset === undefined ? {} : { offset: value.offset }),
+    };
   }
   if (value.kind === "file" && nonempty(value.path, 4096) && !/[\\:]/.test(value.path)
     && value.path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
