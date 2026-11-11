@@ -10,6 +10,10 @@
  *    正在抓取的那一块按指针方向移动，球前球后都一致 ✓（上游绕 target 环绕时球背面必然反向 ✗）；
  * 2. 姿态用完整四元数 Q（含滚转），右/上轴由 Q 给出，没有极点翻转 ✓。
  *
+ * **平面模式**（用户 2026-11-11，节点数 ≤ `SPACE_FLAT_MAX_NODES`）：
+ * 引擎按节点数显式调用 `setFlat(true)` ⇒ 图谱 S 归位、相机固定正面、
+ * 拖动**不再旋转**（Shift 平移保留）；节点绘制与 UI 样式一律不变 ✓。
+ *
  * 渲染/标签/拾取全部走 `basis()` 给出的**等效相机基向量**（把 S 折进去），
  * 所以那些既有代码一行都不用改 ✓。
  */
@@ -60,6 +64,25 @@ const FRAME_INSETS = { top: 64, bottom: 64, left: 12, right: 12 } as const;
 const TARGET_COVERAGE = 0.86;
 /** 插在 `camera` 上的内部状态键：让上游的内存相机缓存也能带上完整状态 ✓ */
 const STATE_KEY = "knInterior";
+
+/**
+ * 平面模式（节点数 ≤ 3）的取景口径。
+ *
+ * 三维模式必须按「旋转安全球」留白（相机能转，任意朝向都不能裁切 ✗）；
+ * 平面模式**不能旋转** ⇒ 按节点在 x/y 平面上的真实包围盒取景即可，画面更满 ✓。
+ * 节点外观不变：屏幕半径由渲染层固定（构建期补丁 ✓），取景只改相机距离。
+ */
+const FLAT_TARGET_COVERAGE = 0.86;
+/** 平面取景时给节点边缘与标签留的边距（CSS 像素） */
+const FLAT_FRAME_PADDING_PX = 18;
+
+/**
+ * 平面模式的**正面姿态**：相机在 +Z 侧朝 −Z 看、世界 +Y 向上。
+ *
+ * 即单位四元数：`rotateVec(q, [0,0,-1]) = [0,0,-1]`、`rotateVec(q, [0,1,0]) = [0,1,0]` ✓。
+ * 用字面量而不是 `quatLookAt()`：后者要经过一次叉乘/分支，正面这个特例没必要绕一圈 ✓。
+ */
+const FRONT_VIEW: Quat = [0, 0, 0, 1];
 
 /**
  * 「用户按了重新整理」的窗口事件名。
@@ -184,6 +207,13 @@ export class InteriorNavigation {
    * 在 `setFrameContext()` 里重算一次距离（按包围球投影圆定距离，旋转时不变 ✓）。
    */
   private coveragePending = true;
+  /**
+   * 是否处于**平面模式**（节点数 ≤ 3）：
+   * 布局在 z=0 平面上（构建期补丁负责 ✓），相机固定正面、拖动不旋转 ✓。
+   */
+  private flat = false;
+  /** 刚进入平面模式：下一帧按**当前坐标**重采球心与半径（相机缓存可能来自另一张图 ✓） */
+  private flatRecentering = false;
   /** 收到明确的重新整理请求、正等新布局完成 ✓ */
   private relayoutPending = false;
   private relayoutDeadline = 0;
@@ -311,6 +341,149 @@ export class InteriorNavigation {
     return effectiveBasis(this.state);
   }
 
+  /** 当前是否处于平面模式（节点数 ≤ 3；单测与自检用 ✓） */
+  get flatMode(): boolean {
+    return this.flat;
+  }
+
+  /* ------------------------------ 平面模式 ------------------------------ */
+
+  /**
+   * 切换**平面模式**（引擎按节点数显式通知；阈值见 `src/client/space-flat.ts` ✓）。
+   *
+   * 进入平面模式时：
+   * - 图谱旋转 S 归位（不再绕球心转）✓；
+   * - 相机姿态 Q 归位到**正面**（+Z 看向 −Z）✓；
+   * - 球心/半径等下一帧按**当前坐标**重采一次（相机缓存可能来自另一张图 ✓）；
+   * - 清掉「用户动过相机 / 已采过球心」标记 —— 平面模式不能旋转，
+   *   球心应当始终跟着当前图的几何中心（布局收敛后 `fitAll("settle")` 会再校准一次 ✓）。
+   *
+   * 离开平面模式**只解除输入限制**：保留当前（正面）视角，用户可继续自由旋转 ✓；
+   * 不强制把视角转回某个"3D 默认角"，那反而会把人正在看的方向拽走 ✗。
+   *
+   * @param flat - 是否进入平面模式。
+   */
+  setFlat(flat: boolean): void {
+    const next = flat === true;
+    if (next === this.flat) return;
+    this.flat = next;
+    this.cancelPointer();
+    this.animation = null;
+    if (next) {
+      this.faceFront(this.state, Math.max(1, this.eyeDistance()));
+      this.flatRecentering = true;
+      this.coveragePending = true;
+      this.userInteracted = false;
+      this.centerAdopted = false;
+      this.radiusMeasured = false;
+    } else {
+      this.flatRecentering = false;
+    }
+    this.syncCamera();
+    this.options.onCameraChange();
+  }
+
+  /** 把相机放成正面姿态并把机位摆在球心正前方 `distance` 处（平面模式专用 ✓） */
+  private faceFront(state: InteriorState, distance: number): void {
+    state.scene = FRONT_VIEW;
+    state.view = FRONT_VIEW;
+    state.eye = [state.center[0], state.center[1], state.center[2] + distance];
+  }
+
+  /** 当前相机到球心的距离（显示世界；异常时退回持久化相机里的 distance ✓） */
+  private eyeDistance(): number {
+    const offset = [
+      this.state.eye[0] - this.state.center[0],
+      this.state.eye[1] - this.state.center[1],
+      this.state.eye[2] - this.state.center[2],
+    ];
+    const distance = Math.hypot(offset[0]!, offset[1]!, offset[2]!);
+    if (Number.isFinite(distance) && distance > 0) return distance;
+    return Number.isFinite(this.camera.distance) && this.camera.distance > 0 ? this.camera.distance : 1;
+  }
+
+  /**
+   * 平面模式下的**几何中心**：节点 x/y 包围盒的中心（z = 0）。
+   *
+   * 与 `boundsOf()` 的 center 数学上一致，但这里只认平面坐标、且**不**依赖旧的中心：
+   * 平面模式不能旋转，构图应该始终以当前图的几何中心为准 ✓。
+   *
+   * @param positions - 节点坐标。
+   * @param count - 节点数。
+   * @returns 中心点；没有有限坐标时返回 null ✓。
+   */
+  private flatBoxCenter(positions: Float32Array, count: number): Vec3 | null {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let index = 0; index < count; index += 1) {
+      const x = positions[index * 3];
+      const y = positions[index * 3 + 1];
+      if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    return [(minX + maxX) / 2, (minY + maxY) / 2, 0];
+  }
+
+  /**
+   * 平面模式的取景距离：按**节点在 x/y 平面上的真实包围盒**填满可用区域。
+   *
+   * 做法：先按"包围盒 + 四周边距"装进可用区域求出「屏幕像素 / 世界单位」，
+   * 再乘 `FLAT_TARGET_COVERAGE`（留一点呼吸感 ✓），最后用透视关系反解距离：
+   * `distance = focalPx / scale`（节点在 z=0 ⇒ 深度恒为距离 ✓）。
+   *
+   * 与三维的「旋转安全球」相比：三维要保证任意朝向都不裁切（所以只能按球算 ✓）；
+   * 平面模式不能旋转，按真实包围盒取景才能让两三个节点撑满画布、不缩成中间一小团 ✓。
+   * 节点外观不受影响：屏幕半径由渲染层固定（构建期补丁 ✓），这里只改相机距离。
+   *
+   * @param positions - 节点坐标（x/y/z 连续存放）。
+   * @param count - 节点数。
+   * @returns 相机到球心的距离；坐标不可用时返回 null（调用方退回旋转安全距离 ✓）。
+   */
+  private flatFitDistance(positions: Float32Array, count: number): number | null {
+    if (count <= 0 || positions.length < count * 3) return null;
+    const [centerX, centerY] = this.state.center;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let index = 0; index < count; index += 1) {
+      const x = positions[index * 3];
+      const y = positions[index * 3 + 1];
+      if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+      minX = Math.min(minX, x - centerX);
+      maxX = Math.max(maxX, x - centerX);
+      minY = Math.min(minY, y - centerY);
+      maxY = Math.max(maxY, y - centerY);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    const usableWidth = Math.max(80, this.viewport.width - FRAME_INSETS.left - FRAME_INSETS.right);
+    const usableHeight = Math.max(80, this.viewport.height - FRAME_INSETS.top - FRAME_INSETS.bottom);
+    const tanHalfV = Math.tan((FOV_DEG * Math.PI) / 360);
+    const focalPx = this.viewport.height / 2 / tanHalfV;
+    const boxW = Math.max(0, maxX - minX);
+    const boxH = Math.max(0, maxY - minY);
+    const paddingPx = FLAT_FRAME_PADDING_PX * 2;
+    let scale: number;
+    if (boxW <= 1e-6 && boxH <= 1e-6) {
+      /* 单节点：按一个"虚拟的节点 + 标签盒"取景，节点居中但不贴到相机上 ✓ */
+      scale = (FLAT_TARGET_COVERAGE * Math.min(usableWidth, usableHeight)) / paddingPx;
+    } else {
+      scale = Math.min(
+        (usableWidth - paddingPx) / Math.max(boxW, 1e-6),
+        (usableHeight - paddingPx) / Math.max(boxH, 1e-6),
+      ) * FLAT_TARGET_COVERAGE;
+    }
+    if (!(Number.isFinite(scale) && scale > 0)) return null;
+    const distance = focalPx / scale;
+    return Number.isFinite(distance) && distance > 0 ? distance : null;
+  }
+
   /** 外部（每帧）更新：包围体、视口、节点坐标（线段拾取要用世界坐标 ✓） */
   setFrameContext(bounds: Bounds, viewport: Viewport, positions?: Float32Array, count?: number): void {
     this.bounds = bounds;
@@ -321,6 +494,25 @@ export class InteriorNavigation {
     if (positions !== undefined) {
       this.positions = positions;
       this.positionCount = count ?? positions.length / 3;
+    }
+    /*
+     * 刚进入平面模式：球心/半径按**当前坐标**重采一次 ✓
+     * （相机缓存可能来自另一张更大的图；不能旋转时让球心落在当前图的几何中心附近，
+     *  随后布局收敛的 `fitAll("settle")` 还会再校准一次 ✓）。
+     */
+    if (this.flatRecentering) {
+      this.flatRecentering = false;
+      if (this.positions !== null && this.positionCount > 0
+        && Number.isFinite(bounds.radius) && bounds.radius > 0) {
+        this.state.center = [...bounds.center];
+        const radius = radiusAbout(this.positions, this.positionCount, this.state.center);
+        if (radius > 0) {
+          this.state.radius = radius;
+          this.radiusMeasured = true;
+        }
+        this.faceFront(this.state, Math.max(1, this.eyeDistance()));
+        this.coveragePending = true;
+      }
     }
     /*
      * **球心不在这里跟随**（文档：布局持续计算期间不要每帧重算操作球心 ✗）——
@@ -476,7 +668,13 @@ export class InteriorNavigation {
      * （用户 2026-10-30 最终口径）。
      */
     const framingRadius = this.state.radius > 0 ? this.state.radius : bounds.radius;
-    const distance = this.rotationSafeDistance(framingRadius);
+    /*
+     * 平面模式不能旋转 ⇒ 按**真实平面包围盒**取景（比"旋转安全球"更满 ✓）；
+     * 坐标不可用时退回旋转安全距离，构图不会失常 ✓。
+     */
+    const distance = this.flat
+      ? this.flatFitDistance(positions, count) ?? this.rotationSafeDistance(framingRadius)
+      : this.rotationSafeDistance(framingRadius);
     const from = { eye: [...this.state.eye] as Vec3, view: this.state.view };
     this.animateTo(from, this.fitTarget(framingRadius, distance), smooth);
   }
@@ -520,6 +718,10 @@ export class InteriorNavigation {
    *
    * 只在缓存相机恢复 / 布局结算 / 侧栏改宽时调用一次，只调距离，不动球心/朝向 ✓。
    *
+   * **平面模式例外**：不能旋转 ⇒ 球心也要跟着当前图的几何中心走 ✓
+   * （布局收敛那次取景读到的是插值中的坐标，最终位置可能差几个世界单位；
+   *  相机距离又很近，这点偏差在屏幕上会被放大成明显的偏心 + 顶部标签被裁掉 ✗）。
+   *
    * @param positions - 节点坐标；缺省用最近一帧的坐标。
    * @param count - 节点数。
    * @returns 是否真的改了相机。
@@ -527,10 +729,27 @@ export class InteriorNavigation {
   ensureCoverage(positions = this.positions, count = this.positionCount): boolean {
     if (this.disposed || this.pointer !== null || this.animation !== null) return false;
     if (positions === null || count <= 0 || this.viewport.width <= 0 || this.viewport.height <= 0) return false;
+    /* 平面模式：球心对准当前平面包围盒的中心（不能旋转 ⇒ 构图以几何中心为准 ✓） */
+    let recentered = false;
+    if (this.flat) {
+      const center = this.flatBoxCenter(positions, count);
+      if (center !== null
+        && (Math.abs(center[0] - this.state.center[0]) > 1e-3
+          || Math.abs(center[1] - this.state.center[1]) > 1e-3)) {
+        this.state.center = center;
+        recentered = true;
+      }
+    }
     /* 用**当前真实坐标**量球半径（缓存恢复的半径可能来自一张更大的旧图 ✗） */
     const radius = radiusAbout(positions, count, this.state.center);
     if (!(Number.isFinite(radius) && radius > 0)) return false;
-    const distance = this.rotationSafeDistance(radius);
+    /*
+     * 平面模式：按真实平面包围盒取景（不能旋转 ⇒ 不必按旋转安全球留白 ✓）；
+     * 其余情况仍按旋转安全距离 ✓。
+     */
+    const distance = this.flat
+      ? this.flatFitDistance(positions, count) ?? this.rotationSafeDistance(radius)
+      : this.rotationSafeDistance(radius);
     if (!(Number.isFinite(distance) && distance > 0)) return false;
     const offset: Vec3 = [
       this.state.eye[0] - this.state.center[0],
@@ -538,10 +757,12 @@ export class InteriorNavigation {
       this.state.eye[2] - this.state.center[2],
     ];
     const current = Math.hypot(offset[0], offset[1], offset[2]);
-    if (current > 0 && Math.abs(distance - current) <= Math.max(0.5, current * 0.005)) return false;
+    if (!recentered && current > 0 && Math.abs(distance - current) <= Math.max(0.5, current * 0.005)) return false;
     this.state.radius = radius;
     this.radiusMeasured = true;
     fitSphere(this.state, radius, distance);
+    /* 平面模式：fitSphere 会沿"当前机位方向"放机位；平面要求严格的正面姿态 ✓ */
+    if (this.flat) this.faceFront(this.state, Math.max(1, distance));
     this.syncCamera();
     this.options.onCameraChange();
     return true;
@@ -690,6 +911,8 @@ export class InteriorNavigation {
   private fitTarget(radius: number, distance: number): { eye: Vec3; view: Quat } {
     const draft = this.draftState();
     fitSphere(draft, radius, distance);
+    /* 平面模式：取景也必须保持正面姿态（fitSphere 只沿"当前机位方向"退到球外 ✓） */
+    if (this.flat) this.faceFront(draft, Math.max(1, distance));
     return { eye: draft.eye, view: draft.view };
   }
 
@@ -722,7 +945,7 @@ export class InteriorNavigation {
      * 必须用**按下那一刻**的指针位置取锚点 —— 等到越过阈值才取的话，
      * 指针已经离开节点几十像素，节点上就抓不到了（实测会退化成球面锚点 ✗）。
      */
-    this.grab = event.shiftKey ? null : this.buildGrab(point.x, point.y);
+    this.grab = this.flat || event.shiftKey ? null : this.buildGrab(point.x, point.y);
     /* 每次按下都从"抓取阶段"开始 ✓（连续阶段只在一次拖动里切一次 ✓） */
     this.dragPhase = "grab";
     this.spinGain = null;
@@ -750,15 +973,28 @@ export class InteriorNavigation {
         /* 真的开始拖了才捕获指针：在 pointerdown 就捕获会把随后的 click 一并重定向 ✗ */
         this.options.element.setPointerCapture(event.pointerId);
         pointer.captured = true;
-        this.userInteracted = true;
-        this.interactedSinceRelayout = true;
+        /*
+         * 只有**真的动过相机**才算"用户接管了视角" ✓：
+         * 平面模式的普通拖动不旋转（不该被记成动过相机，否则后续取景/复核会误以为有人在操控 ✗）；
+         * Shift 平移（任何模式）与三维模式的拖动才算 ✓。
+         */
+        if (pointer.panning || !this.flat) {
+          this.userInteracted = true;
+          this.interactedSinceRelayout = true;
+        }
       }
       if (pointer.moved) {
-        this.options.onUserCameraInput?.();
+        /*
+         * 平面模式（节点数 ≤ 3）：**拖动不旋转图谱**（用户 2026-11-11 要求：
+         * "无法用鼠标拖动旋转查看"）；Shift 平移保留 —— 它只动机位、不改朝向 ✓。
+         * 短点击/悬停/右键不受影响（它们走下面的 click 与悬停路径 ✓）。
+         */
+        const cameraMoved = pointer.panning || !this.flat;
+        if (cameraMoved) this.options.onUserCameraInput?.();
         if (pointer.panning) {
           const unit = clampNum(this.state.radius, 30, 400) * 0.0016;
           panEye(this.state, point.x - pointer.lastX, point.y - pointer.lastY, unit);
-        } else if (this.grab !== null) {
+        } else if (cameraMoved && this.grab !== null) {
           if (this.dragPhase === "grab") {
             /*
              * 第一阶段：**抓取点跟手**（局部投影约束）。
@@ -796,8 +1032,10 @@ export class InteriorNavigation {
            * （用户 2026-10-30："旋转过程中整个节点显示区域缩小和放大，体验不好"）。
            */
         }
-        this.syncCamera();
-        this.options.onCameraChange();
+        if (cameraMoved) {
+          this.syncCamera();
+          this.options.onCameraChange();
+        }
         this.setHover(null);
       }
       pointer.lastX = point.x;

@@ -2,6 +2,7 @@ import { patchLatexInlineTooltip } from "./scripts/latex-inline-tooltip-patch.mj
 import { patchCrepeBlockMenu } from "./scripts/slash-menu-patch.mjs";
 import { patchSpaceVisuals } from "./scripts/space-visual-patch.mjs";
 import { patchCodeBlockPreview } from "./scripts/code-block-preview-patch.mjs";
+import { patchFlatLayoutCore, patchFlatTopology } from "./scripts/space-flat-patch.mjs";
 /**
  * 构建四个产物：
  * - `index.js`   Host 半（Node ESM；内联 vendor 的 v2 引擎，external 只有宿主包与 Node 内建）
@@ -306,10 +307,82 @@ const NAV_IMPORT_NEEDLE = 'import { SpaceNavigation, type ContextHit } from "./n
 const NAV_IMPORT_PATCHED = [
   'import { type ContextHit } from "./navigation.ts";',
   'import { InteriorNavigation as SpaceNavigation } from "../../../client/interior-controller.ts";',
+  'import { isFlatGraph as knIsFlatGraph } from "../../../client/space-flat.ts";',
 ].join("\n");
 
 /** 视图缓存（按库身份分区）的导入：与上面那条导入一起注入 ✓ */
 const VIEW_CACHE_IMPORT = 'import { cachedView as knCachedView, storeView as knStoreView } from "../../../client/view-cache.ts";';
+
+/**
+ * `engine.ts` 的**平面模式**接线（补丁点，用户 2026-11-11 要求）。
+ *
+ * 节点数 ≤ `SPACE_FLAT_MAX_NODES`（见 `src/client/space-flat.ts`，补丁里不写死数字 ✗）时：
+ * - `syncGraph()`：按节点数设置 `knFlat`，并把开关交给导航控制器
+ *   （相机与输入的唯一所有者是控制器，引擎不自己动相机 ✓）；
+ * - `startLayout()`：布局参数带上 `flat: true`（Worker 只在 x/y 上迭代、z 恒为 0 ✓）；
+ *   **跳过布局缓存**（旧坐标可能来自 3D 视图，压平后节点会互相重叠 ✗）；
+ * - **结算后始终自动取景**：平面模式不能旋转，球心/距离应当跟着当前图的几何走 ✓
+ *   （否则恢复出来的缓存相机可能对着另一张图 ✗）。
+ *
+ * 为什么阈值要走 `knIsFlatGraph`：与控制器、单测共用同一份定义 ⇒ 不会出现
+ * 「控制器按 ≤3 切平面、引擎按 ≤2 排布局」这种漂移 ✗。
+ */
+const FLAT_SYNC_NEEDLE = [
+  "    this.graph = graph;",
+  "    if (structureChanged) {",
+].join("\n");
+const FLAT_SYNC_PATCHED = [
+  "    this.graph = graph;",
+  "    /*",
+  "     * 平面模式（节点数 ≤ SPACE_FLAT_MAX_NODES）：布局压到 z=0 平面、相机固定正面、",
+  "     * 拖动不再旋转图谱 ✓。阈值与控制器共用 `src/client/space-flat.ts` ✓。",
+  "     */",
+  "    const knFlat = knIsFlatGraph(graph.ids.length);",
+  "    if (knFlat !== this.knFlat) {",
+  "      this.knFlat = knFlat;",
+  "      this.navigation.setFlat(knFlat);",
+  "    }",
+  "    if (structureChanged) {",
+].join("\n");
+
+const FLAT_LAYOUT_HEAD_NEEDLE = [
+  "  private startLayout(graph: SpaceGraph): void {",
+  "    const count = graph.ids.length;",
+].join("\n");
+const FLAT_LAYOUT_HEAD_PATCHED = [
+  "  private startLayout(graph: SpaceGraph): void {",
+  "    const count = graph.ids.length;",
+  "    /* 平面模式：布局参数带 flat（Worker 只在 x/y 上迭代、z 恒为 0 ✓） */",
+  "    const knParams = this.knFlat ? { ...DEFAULT_LAYOUT_PARAMS, flat: true } : DEFAULT_LAYOUT_PARAMS;",
+].join("\n");
+
+/**
+ * `startLayout()` 里必须换成「平面参数 / 跳过缓存 / 强制取景」的调用点 ✓。
+ *
+ * 注意顺序：这批替换要在 `LAYOUT_KEY_SUBSTITUTIONS` **之前**跑 ——
+ * 后者会把 `alignedCachedPositions(graph.ids)` 补成带身份的调用，
+ * 这里的 needle 用的是带缓存分支的原文 ✓。
+ */
+const FLAT_SUBSTITUTIONS = [
+  [
+    "const initial = initialPositions(topology, DEFAULT_LAYOUT_PARAMS);",
+    "const initial = initialPositions(topology, knParams);",
+  ],
+  [
+    "const cached = isLayoutCacheUsable(graph.ids) ? alignedCachedPositions(graph.ids) : null;",
+    "/* 平面模式跳过布局缓存：旧坐标可能来自 3D 视图，压平后会互相重叠 ✗ */\n"
+    + "    const cached = this.knFlat ? null : isLayoutCacheUsable(graph.ids) ? alignedCachedPositions(graph.ids) : null;",
+  ],
+  [
+    "        params: DEFAULT_LAYOUT_PARAMS,",
+    "        params: knParams,",
+  ],
+  [
+    "    this.autoFit = !this.cameraRestored;",
+    "    /* 平面模式不能旋转 ⇒ 结算后总要按当前几何重新取景（缓存相机可能对着旧图 ✓） */\n"
+    + "    this.autoFit = !this.cameraRestored || this.knFlat;",
+  ],
+];
 
 /**
  * `GraphUniverse.tsx`：把库身份从插件**显式**接过来、交给引擎（补丁点）✓
@@ -584,6 +657,8 @@ const CAMERA_FIELD_PATCHED = [
   "  private layoutSettled = false;",
   "  /** 本实例绑定的知识库身份（构造时取一次）：缓存读写都按它分区 ✓ */",
   "  private knLibraryKey = \"\";",
+  "  /** 平面模式（节点数 ≤ 3）：布局在 z=0 平面上、拖动不旋转 ✓ */",
+  "  private knFlat = false;",
 ].join("\n");
 
 const CAMERA_STORE_NEEDLE = "    storeCamera(this.navigation.camera, this.layoutSettled);";
@@ -919,6 +994,30 @@ function anchorSpacingPatchPlugin() {  return {
 }
 
 /**
+ * **平面模式布局补丁**（用户 2026-11-11）：节点数 ≤ 3 时布局压成 2D
+ * （z 恒为 0、d3-force-3d 只在 x/y 上迭代 ✓）。
+ *
+ * 补丁点住在 `scripts/space-flat-patch.mjs`（测试用**同一份字符串**在临时副本上量 z 坐标 ✓）。
+ * `topology.ts` 同时进**布局 Worker**与**客户端主包**（引擎在主线程调 `initialPositions` ✓），
+ * `layoutCore.ts` 只进 Worker ⇒ 两个构建都要挂这个插件 ✓；补丁点匹配不到直接抛错 ✓。
+ */
+function flatLayoutPatchPlugin() {
+  return {
+    name: "kn-space-flat-layout",
+    transform(code, id) {
+      const clean = String(id).split("?")[0].replaceAll("\\", "/");
+      if (clean.endsWith("/vendor/upstream/graph3d/topology.ts")) {
+        return { code: patchFlatTopology(code), map: null };
+      }
+      if (clean.endsWith("/vendor/upstream/graph3d/layoutCore.ts")) {
+        return { code: patchFlatLayoutCore(code), map: null };
+      }
+      return null;
+    },
+  };
+}
+
+/**
  * **只在布局 Worker 里生效**的补丁：节点半径统一（大小不再由连接数/根节点决定）。
  *
  * 为什么单独一个插件：`adapter.ts`（`buildSpaceGraph` 算半径的地方）只被 **Worker** 构建引用 ✗，
@@ -1036,6 +1135,8 @@ function freeRotationPatchPlugin() {
           [RELAYOUT_ARM_NEEDLE, "重排入口"],
           [SETTLE_BRANCH_NEEDLE, "布局结算分支"],
           [SETTLE_FIT_BLOCK_NEEDLE, "结算取景块"],
+          [FLAT_SYNC_NEEDLE, "平面模式同步入口"],
+          [FLAT_LAYOUT_HEAD_NEEDLE, "平面模式布局参数"],
         ]) {
           if (!code.includes(needle)) {
             throw new Error(
@@ -1054,8 +1155,10 @@ function freeRotationPatchPlugin() {
           .replace(NAV_OPTIONS_NEEDLE, NAV_OPTIONS_PATCHED)
           .replace(RELAYOUT_ARM_NEEDLE, RELAYOUT_ARM_PATCHED)
           .replace(SETTLE_BRANCH_NEEDLE, SETTLE_BRANCH_PATCHED)
-          .replace(SETTLE_FIT_BLOCK_NEEDLE, SETTLE_FIT_BLOCK_PATCHED);
-        for (const [needle, replacement] of [...LAYOUT_KEY_SUBSTITUTIONS, ...FIT_REASON_SUBSTITUTIONS]) {
+          .replace(SETTLE_FIT_BLOCK_NEEDLE, SETTLE_FIT_BLOCK_PATCHED)
+          .replace(FLAT_SYNC_NEEDLE, FLAT_SYNC_PATCHED)
+          .replace(FLAT_LAYOUT_HEAD_NEEDLE, FLAT_LAYOUT_HEAD_PATCHED);
+        for (const [needle, replacement] of [...FLAT_SUBSTITUTIONS, ...LAYOUT_KEY_SUBSTITUTIONS, ...FIT_REASON_SUBSTITUTIONS]) {
           if (!patched.includes(needle)) {
             throw new Error(
               "上游 engine.ts 的缓存/取景调用点写法变了：请同步更新 build.mjs 的补丁点。\n"
@@ -1315,7 +1418,8 @@ async function buildWorkerCode(rolldown) {
     transform: { define: { "import.meta.env.DEV": "false" } },
     // 节点半径在这里补：adapter.ts 只被 Worker 构建引用（见 nodeSizePatchPlugin 注释）
     // 分量锚点间距也在这里补：topology.ts 只被 Worker 的 layoutCore 引用（见 anchorSpacingPatchPlugin 注释）
-    plugins: [atAliasPlugin(), nodeSizePatchPlugin(), anchorSpacingPatchPlugin()],
+    // 平面模式布局（z 恒为 0 / 2D 迭代）同样在 Worker 里生效（layoutCore 只进 Worker ✓）
+    plugins: [atAliasPlugin(), nodeSizePatchPlugin(), anchorSpacingPatchPlugin(), flatLayoutPatchPlugin()],
   });
   try {
     const { output } = await bundle.generate({ format: "iife", entryFileNames: "kn-layout-worker.js" });
@@ -1443,6 +1547,8 @@ async function buildClient(rolldown, css, workerSource, mermaidRuntimeRev) {
       freeRotationPatchPlugin(),
       /* 客户端这一侧也挂上：万一 topology.ts 也进了主图，锚点间距必须是同一套 ✓ */
       anchorSpacingPatchPlugin(),
+      /* 平面模式布局补丁：topology.ts 在主线程被 initialPositions 引用（引擎第一次摆点 ✓） */
+      flatLayoutPatchPlugin(),
       atAliasPlugin(),
       /* 浏览器产物里清掉 lodash 的 Node 专用探测（它不是宿主基线模块，见插件注释 ✓） */
       browserUtilProbePatchPlugin(),
