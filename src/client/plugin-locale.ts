@@ -54,6 +54,23 @@ interface Registration {
   done: Set<string>;
   /** 绑定好的翻译函数（拿到 `bind` 之后才有 ✓） */
   bound: PluginTranslate | null;
+  /**
+   * 上次补注册时宿主声明的语言 id 快照 ✓（`declared.join("|")`）。
+   *
+   * 用途：`makeTranslator` 每次渲染、每条文案都会调进来 ✓ —— 已经绑好且宿主语言清单没变时
+   * 直接返回，不必每次重算注册清单 ✓（清单变了才补注册新语言 ✓）。
+   */
+  signature: string;
+  /**
+   * 每门语言注册成功后拿到的**注销函数** ✓。
+   *
+   * 为什么必须留着（用户实测 2026-11 ✗）：宿主对同一命名空间**重复注册会抛** ✓，
+   * 而插件热重载/升级后旧实例注册的字典还留在宿主里 ⇒ 新实例的注册全部失败（被 catch 掉）✓
+   * ⇒ **这一版新增的键在宿主字典里永远没有** ⇒ `makeTranslator` 两层都取不到 ⇒ 回落到中文字面 ✓
+   * —— 表现就是"新功能那个按钮不跟随语言切换"（用户反馈的原话 ✓）。
+   * 所以旧实例的 effect 清理里必须把这些注册撤掉，让新实例能重新注册完整字典 ✓。
+   */
+  disposers: Map<string, () => void>;
 }
 
 let registration: Registration | null = null;
@@ -65,14 +82,29 @@ let registration: Registration | null = null;
  * @param ns - 命名空间 ✓。
  * @param zh - 中文字典 ✓。
  * @param en - 英文字典 ✓。
+ * @returns 注销函数 ✓：撤销这次登记（宿主字典 + 模块状态）✓ ——
+ *          插件卸载/热重载时必须由 `ctx.effect` 调它，否则下一次 apply 的字典注册会被宿主拒掉 ✓
+ *          （宿主同一命名空间只允许注册一次 ✓，见 {@link Registration.disposers} 的说明 ✓）。
  */
 export function attachPluginLocale(
   service: () => PluginLocaleService | undefined,
   ns: string,
   zh: Record<string, string>,
   en: Record<string, string>,
-): void {
-  registration = { service, ns, zh, en, done: new Set(), bound: null };
+): () => void {
+  const attached: Registration = { service, ns, zh, en, done: new Set(), bound: null, signature: "", disposers: new Map() };
+  registration = attached;
+  return () => {
+    if (registration !== attached) return;
+    registration = null;
+    for (const dispose of attached.disposers.values()) {
+      try { dispose(); } catch { /* 注销失败不该拖垮插件卸载 ✓ */ }
+    }
+    attached.disposers.clear();
+    attached.done.clear();
+    attached.bound = null;
+    attached.signature = "";
+  };
 }
 
 /** 语言 id 是不是中文 ✓（`zh` / `zh-CN` / `ZH-hans` 都算 ✓） */
@@ -105,14 +137,16 @@ export function localeRegistrations(
 /**
  * 尽量把字典注册上、并拿到翻译函数 ✓（**幂等** ✓，可以每次取用时都调 ✓）。
  *
+ * **绑好之后不能提前返回** ✗：宿主后来才声明的新语言（`addLanguage` ✓）也要能补注册 ✓
+ * —— 旧实现 `if (bound !== null) return bound;` 永远跳过补注册 ✓，只是这次没撞上 ✓。
+ *
  * @returns 翻译函数；服务还没到 / 注册被拒 ⇒ `null` ✓（调用方回落到字面文案 ✓）。
  */
 export function pluginTranslate(): PluginTranslate | null {
   const current = registration;
   if (current === null) return null;
-  if (current.bound !== null) return current.bound;
   const service = current.service();
-  if (service?.register === undefined) return null;
+  if (service?.register === undefined) return current.bound;
   let declared: string[] = [];
   try {
     declared = (service.getLocale?.()?.locales ?? [])
@@ -121,16 +155,20 @@ export function pluginTranslate(): PluginTranslate | null {
   } catch {
     declared = [];
   }
+  const signature = declared.join("|");
+  if (current.bound !== null && signature === current.signature) return current.bound;
+  current.signature = signature;
   for (const [locale, dict] of localeRegistrations(declared, current.zh, current.en)) {
     if (current.done.has(locale)) continue;
     try {
-      service.register(current.ns, locale, dict);
+      const dispose = service.register(current.ns, locale, dict);
       current.done.add(locale);
+      if (typeof dispose === "function") current.disposers.set(locale, dispose as () => void);
     } catch {
       /* 重名 / 这门外语宿主不认 ✓ ⇒ 跳过这一门 ✓，下次再试 ✓（其它语言继续 ✓） */
     }
   }
-  if (typeof service.bind === "function") {
+  if (current.bound === null && typeof service.bind === "function") {
     try {
       current.bound = service.bind(current.ns);
     } catch {
@@ -138,6 +176,41 @@ export function pluginTranslate(): PluginTranslate | null {
     }
   }
   return current.bound;
+}
+
+/**
+ * 取一条插件文案：**宿主 `t` → 插件自己的词典（按宿主当前语言选）→ `null`** ✓。
+ *
+ * 为什么还要"插件自己的词典"这一层（用户实测 2026-11 ✗）：
+ * "学习疑问"这个按钮切到英文后仍然是中文 ✓ —— 根因是**宿主命名空间字典里没有这个新键**：
+ * 插件升级/热重载后，旧实例注册的字典仍然占着命名空间 ✓，宿主对重复注册**直接抛** ✓
+ * ⇒ 这一版新增的键（学习疑问是随问题功能一起加的新键 ✓）永远进不了宿主字典 ✓。
+ * 此时 `makeTranslator` 的两层（宿主 `t`、`pluginTranslate`）**都**走宿主字典 ⇒ 一起失败 ✓
+ * ⇒ 回落到中文字面 ✓。所以这里在宿主字典取不到时，直接用**本模块自带的最新字典** ✓
+ * （它一定跟这一版代码同源 ✓）。
+ *
+ * 顺序保持"宿主优先" ✓：宿主的 `common` 命名空间里有一些通用词是插件没有的 ✓；
+ * 而且宿主字典正常时与插件字典内容一致 ✓，谁先都一样 ✓。
+ *
+ * @param key - 词典键 ✓。
+ * @returns 文案；宿主与插件字典都没有（或语言未知）⇒ `null` ✓（调用方再回落到字面文案 ✓）。
+ */
+export function pluginLocaleText(key: string): string | null {
+  const current = registration;
+  if (current === null || typeof key !== "string" || key === "") return null;
+  const bound = pluginTranslate();
+  if (bound !== null) {
+    try {
+      const text = bound(key);
+      if (typeof text === "string" && text !== "" && text !== key) return text;
+    } catch {
+      /* 宿主的绑定函数抛错 ⇒ 继续用自家词典 ✓ */
+    }
+  }
+  const zh = pluginIsZh();
+  if (zh === undefined) return null;
+  const text = (zh ? current.zh : current.en)[key];
+  return typeof text === "string" && text !== "" ? text : null;
 }
 
 /**

@@ -6542,7 +6542,8 @@ function graphPayload(context, options = {}) {
 		library: {
 			root: context.library.root,
 			name: context.library.manifest.title,
-			formatVersion: context.library.manifest.formatVersion
+			formatVersion: context.library.manifest.formatVersion,
+			libraryId: context.library.manifest.libraryId
 		},
 		focusId: options.focusId ?? focusOf(snapshot, options.rootId),
 		goals: snapshot.goals.map((goal) => ({

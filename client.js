@@ -591,15 +591,32 @@ window.__ModuleLoader__.load({
 		* @param ns - 命名空间 ✓。
 		* @param zh - 中文字典 ✓。
 		* @param en - 英文字典 ✓。
+		* @returns 注销函数 ✓：撤销这次登记（宿主字典 + 模块状态）✓ ——
+		*          插件卸载/热重载时必须由 `ctx.effect` 调它，否则下一次 apply 的字典注册会被宿主拒掉 ✓
+		*          （宿主同一命名空间只允许注册一次 ✓，见 {@link Registration.disposers} 的说明 ✓）。
 		*/
 		function attachPluginLocale(service, ns, zh, en) {
-			registration = {
+			const attached = {
 				service,
 				ns,
 				zh,
 				en,
 				done: /* @__PURE__ */ new Set(),
-				bound: null
+				bound: null,
+				signature: "",
+				disposers: /* @__PURE__ */ new Map()
+			};
+			registration = attached;
+			return () => {
+				if (registration !== attached) return;
+				registration = null;
+				for (const dispose of attached.disposers.values()) try {
+					dispose();
+				} catch {}
+				attached.disposers.clear();
+				attached.done.clear();
+				attached.bound = null;
+				attached.signature = "";
 			};
 		}
 		/** 语言 id 是不是中文 ✓（`zh` / `zh-CN` / `ZH-hans` 都算 ✓） */
@@ -626,33 +643,69 @@ window.__ModuleLoader__.load({
 		/**
 		* 尽量把字典注册上、并拿到翻译函数 ✓（**幂等** ✓，可以每次取用时都调 ✓）。
 		*
+		* **绑好之后不能提前返回** ✗：宿主后来才声明的新语言（`addLanguage` ✓）也要能补注册 ✓
+		* —— 旧实现 `if (bound !== null) return bound;` 永远跳过补注册 ✓，只是这次没撞上 ✓。
+		*
 		* @returns 翻译函数；服务还没到 / 注册被拒 ⇒ `null` ✓（调用方回落到字面文案 ✓）。
 		*/
 		function pluginTranslate() {
 			const current = registration;
 			if (current === null) return null;
-			if (current.bound !== null) return current.bound;
 			const service = current.service();
-			if (service?.register === void 0) return null;
+			if (service?.register === void 0) return current.bound;
 			let declared = [];
 			try {
 				declared = (service.getLocale?.()?.locales ?? []).map((item) => typeof item?.id === "string" ? item.id : "").filter((id) => id !== "");
 			} catch {
 				declared = [];
 			}
+			const signature = declared.join("|");
+			if (current.bound !== null && signature === current.signature) return current.bound;
+			current.signature = signature;
 			for (const [locale, dict] of localeRegistrations(declared, current.zh, current.en)) {
 				if (current.done.has(locale)) continue;
 				try {
-					service.register(current.ns, locale, dict);
+					const dispose = service.register(current.ns, locale, dict);
 					current.done.add(locale);
+					if (typeof dispose === "function") current.disposers.set(locale, dispose);
 				} catch {}
 			}
-			if (typeof service.bind === "function") try {
+			if (current.bound === null && typeof service.bind === "function") try {
 				current.bound = service.bind(current.ns);
 			} catch {
 				current.bound = null;
 			}
 			return current.bound;
+		}
+		/**
+		* 取一条插件文案：**宿主 `t` → 插件自己的词典（按宿主当前语言选）→ `null`** ✓。
+		*
+		* 为什么还要"插件自己的词典"这一层（用户实测 2026-11 ✗）：
+		* "学习疑问"这个按钮切到英文后仍然是中文 ✓ —— 根因是**宿主命名空间字典里没有这个新键**：
+		* 插件升级/热重载后，旧实例注册的字典仍然占着命名空间 ✓，宿主对重复注册**直接抛** ✓
+		* ⇒ 这一版新增的键（学习疑问是随问题功能一起加的新键 ✓）永远进不了宿主字典 ✓。
+		* 此时 `makeTranslator` 的两层（宿主 `t`、`pluginTranslate`）**都**走宿主字典 ⇒ 一起失败 ✓
+		* ⇒ 回落到中文字面 ✓。所以这里在宿主字典取不到时，直接用**本模块自带的最新字典** ✓
+		* （它一定跟这一版代码同源 ✓）。
+		*
+		* 顺序保持"宿主优先" ✓：宿主的 `common` 命名空间里有一些通用词是插件没有的 ✓；
+		* 而且宿主字典正常时与插件字典内容一致 ✓，谁先都一样 ✓。
+		*
+		* @param key - 词典键 ✓。
+		* @returns 文案；宿主与插件字典都没有（或语言未知）⇒ `null` ✓（调用方再回落到字面文案 ✓）。
+		*/
+		function pluginLocaleText(key) {
+			const current = registration;
+			if (current === null || typeof key !== "string" || key === "") return null;
+			const bound = pluginTranslate();
+			if (bound !== null) try {
+				const text = bound(key);
+				if (typeof text === "string" && text !== "" && text !== key) return text;
+			} catch {}
+			const zh = pluginIsZh();
+			if (zh === void 0) return null;
+			const text = (zh ? current.zh : current.en)[key];
+			return typeof text === "string" && text !== "" ? text : null;
 		}
 		/**
 		* 现在是不是中文界面 ✓（读宿主快照的 `active` ✓）。
@@ -848,8 +901,7 @@ window.__ModuleLoader__.load({
 				};
 				const fromPlugin = () => {
 					try {
-						const text = pluginTranslate()?.(key);
-						return typeof text === "string" && text !== "" && text !== key ? text : null;
+						return pluginLocaleText(key);
 					} catch {
 						return null;
 					}
@@ -1800,7 +1852,7 @@ window.__ModuleLoader__.load({
 				postQuestion({ sessionId }, { kind: "list-node-questions" }, fetch, abort.signal).then((result) => {
 					if (abort.signal.aborted) return;
 					setContext(result);
-					setNodeId([openEditorNode(libraryKeyOf(result)), result.ownerNodeId].find((candidate) => result.nodes.some((node) => node.id === candidate)) ?? "");
+					setNodeId([openEditorNode(libraryKeyOf(result)) ?? openEditorNode(libraryKeyOf({ root: result.root })), result.ownerNodeId].find((candidate) => result.nodes.some((node) => node.id === candidate)) ?? "");
 				}).catch((failure) => {
 					if (!abort.signal.aborted) setError(failure.message);
 				});
@@ -2224,6 +2276,15 @@ window.__ModuleLoader__.load({
 			* 两种形态用的是**同一颗胶囊**（`.kn-sel-action`）⇒ 外观一致 ✓，只是定位的负责人不同 ✓。
 			*/
 			const [bar, setBar] = (0, react.useState)(null);
+			/**
+			* 当前浮条挂进去的那条**宿主浮层**（DOM 节点 ✓；没挂就 null）。
+			*
+			* 为什么要有 ref：`pointerdown` / `mouseup` 的监听器只在挂载时注册一次（空依赖 ✓），
+			* 里面读不到最新的 `bar` state ✓ ⇒ 用 ref 现读 ✓。判定"这一按是不是按在我们**同一条浮层**上"
+			* 就靠它（宿主那颗「引用」也在里面 ✓ —— 见 `pressRef.current.hostSurface` 的说明 ✓）。
+			*/
+			const barHostRef = (0, react.useRef)(null);
+			barHostRef.current = bar?.host ?? null;
 			const [questionCapture, setQuestionCapture] = (0, react.useState)();
 			/**
 			* 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
@@ -2320,7 +2381,10 @@ window.__ModuleLoader__.load({
 			const draggingRef = (0, react.useRef)(false);
 			/**
 			* 按下那一刻的现场（在**捕获阶段**记下）：松开时用它判断"这一按到底是不是划词"。
-			* `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）。
+			* `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）；
+			* `hostSurface` = 按在**宿主那条划词浮层**里（我们的胶囊并排挂在其中 ✓ ——
+			* 比如「引用」按钮）。它和我们同一条浮条 ⇒ **不能当成"点别处"收掉胶囊** ✗
+			* （收了整条浮层会变窄、宿主重排位置 ⇒ 这一次点击落空 ⇒ 用户要点两次才能引用 ✗）。
 			*/
 			const pressRef = (0, react.useRef)(null);
 			/** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
@@ -2868,7 +2932,12 @@ window.__ModuleLoader__.load({
 							return;
 						}
 						const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
-						if (press.text === info.text && (press.insideSelection || !moved)) {
+						const sameText = press.text === info.text;
+						if (press.hostSurface && sameText) {
+							report("blocked-by-gate", { source: "press-inside-host-surface" });
+							return;
+						}
+						if (sameText && (press.insideSelection || !moved)) {
 							report("blocked-by-gate", { source: press.insideSelection ? "press-inside-selection" : "click-not-drag" });
 							setBar(null);
 							return;
@@ -2955,6 +3024,23 @@ window.__ModuleLoader__.load({
 					return target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
 				};
 				/**
+				* 这一按是不是落在**我们并排挂进去的那条宿主划词浮层**里？（宿主那颗「引用」就在里面 ✓）
+				*
+				* 用的同一个 `composedPath()` 判据 ✓：宿主浮层是 light DOM，但侧栏/面板有 Shadow DOM，
+				* 事件重定向后 `closest` 不可靠 ✓。
+				*
+				* @returns 是 ⇒ 按在**同一条浮条**上（不能当成"点别处"把我们的胶囊收掉 ✓）。
+				*/
+				const insideHostSurface = (event) => {
+					const host = barHostRef.current;
+					if (host === null) return false;
+					try {
+						if ((typeof event.composedPath === "function" ? event.composedPath() : []).includes(host)) return true;
+					} catch {}
+					const target = event.target;
+					return target !== null && host.contains(target);
+				};
+				/**
 				* 这个点（视口坐标）是否落在**当前选区**的包围盒里？
 				*
 				* 用来区分两种长得一样但意图相反的序列（见 `onMouseUp` 里那条判据）：
@@ -2972,15 +3058,17 @@ window.__ModuleLoader__.load({
 				};
 				const onPressCapture = (event) => {
 					const inside = insideBar(event);
+					const hostSurface = !inside && insideHostSurface(event);
 					suppressBarRef.current = false;
 					pressRef.current = {
 						x: event.clientX,
 						y: event.clientY,
 						text: inside ? "" : normalizeSnippet(window.getSelection()?.toString() ?? "").trim(),
 						inside,
-						insideSelection: inside ? false : pointInsideSelection(event.clientX, event.clientY)
+						insideSelection: inside ? false : pointInsideSelection(event.clientX, event.clientY),
+						hostSurface
 					};
-					if (!inside) setBar(null);
+					if (!inside && !hostSurface) setBar(null);
 				};
 				document.addEventListener("pointerdown", onPressCapture, true);
 				document.addEventListener("mousedown", onPressCapture, true);
@@ -204087,7 +204175,7 @@ Expected function or array of functions, received type ${typeof value}.`);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ErrorBoundary, {
 				fallback: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "kn-msg",
-					children: pluginTranslate()?.("panelCrashed") ?? LITERAL.panelCrashed
+					children: pluginLocaleText("panelCrashed") ?? LITERAL.panelCrashed
 				}),
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GraphPanelInner, { ...props })
 			});
@@ -205841,9 +205929,15 @@ Expected function or array of functions, received type ${typeof value}.`);
 		* ⇒ 英文界面里满屏中文 ✓（用户实测："当前插件的语言似乎没有跟随系统变化"✓）。
 		* 现在 `attachPluginLocale` 只登记"现读服务的函数"✓，**每次取用都会补试注册** ✓，
 		* 而且会按宿主已声明的语言 id（`en-US` / `zh-CN` ✓）各注册一份 ✓。
+		*
+		* **注销必须挂到 `ctx.effect` 上** ✓（2026-11，用户实测"学习疑问按钮无法切换语言"✗）：
+		* 宿主对同一命名空间**重复注册会抛** ✓ —— 插件热重载/升级后旧实例注册的字典还占着命名空间 ✓，
+		* 新实例的注册全被拒 ⇒ **这一版新增的键在宿主字典里永远没有** ⇒ 那些新文案回落到中文字面 ✓
+		* （其它老键有旧字典 ⇒ 仍然是英文 ✓，于是看起来"只有这个按钮不跟随语言"✓）。
 		*/
 		function registerLocale(ctx) {
-			attachPluginLocale(() => ctx.get?.("locale") ?? void 0, NS, DICT_ZH, DICT_EN);
+			const dispose = attachPluginLocale(() => ctx.get?.("locale") ?? void 0, NS, DICT_ZH, DICT_EN);
+			if (ctx.effect) ctx.effect(() => dispose, "knowledgenet: locale dictionaries");
 			try {
 				pluginTranslate();
 			} catch {}

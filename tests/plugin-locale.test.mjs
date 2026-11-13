@@ -22,6 +22,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 import {
   attachPluginLocale,
   localeRegistrations,
+  pluginLocaleText,
   pluginTranslate,
   resetPluginLocaleForTests,
 } from "../src/client/plugin-locale.ts";
@@ -130,6 +131,86 @@ describe("插件语言跟随系统 ✓", () => {
  * ② `.tsx` 里**直接写在 JSX 上的中文**（文本节点 / `aria-label` / `title` / `placeholder` ✓）——
  *    一律不许有 ✓（要显示中文也得走词典 ✓）。
  */
+/*
+ * **插件自带词典兜底** ✓（用户实测 2026-11："学习疑问"按钮切到英文后仍是中文 ✗）。
+ *
+ * 根因（宿主字典停在旧版 ✓）：宿主对同一命名空间**重复注册会抛** ✓ ——
+ * 插件热重载/升级后旧实例注册的字典仍占着命名空间 ✓ ⇒ 新实例的注册全部失败（被 catch 掉）✓
+ * ⇒ **这一版新增的键**（问题功能的"学习疑问"等 ✓）在宿主字典里永远没有 ✓。
+ * 而 `makeTranslator` 的前两层（宿主 `t` / `pluginTranslate`）都走宿主字典 ⇒ 一起失败 ✓
+ * ⇒ 回落到中文字面 ✓；老键有旧字典 ⇒ 仍是英文 ✓ ⇒ 看起来"只有这个新按钮不跟随语言"✓。
+ *
+ * 修法两层：
+ * ① `pluginLocaleText` 在宿主字典取不到时，直接用**插件自带的最新字典**（按当前语言选 ✓）；
+ * ② `attachPluginLocale` 返回注销函数，插件卸载时撤掉宿主字典 ⇒ 下一次 apply 能注册完整字典 ✓。
+ */
+describe("插件自带词典兜底 ✓（宿主字典落后于插件这一版时）", () => {
+  /** 模拟"旧实例还占着命名空间"的宿主：register 全抛、bind 只能翻出旧键 */
+  const staleService = () => {
+    const state = { active: "en" };
+    const hostZh = { oldKey: "旧键" };
+    const hostEn = { oldKey: "Old key" };
+    const service = {
+      register: () => { throw new Error("locale namespace already has locale (stale plugin instance)"); },
+      getLocale: () => ({ active: state.active, locales: [{ id: "zh" }, { id: "en" }] }),
+      bind: () => (key) => (state.active === "zh" ? hostZh : hostEn)[key] ?? key,
+    };
+    return { service, state };
+  };
+
+  it("宿主字典缺的新键 ⇒ 用插件自带字典按当前语言翻译 ✓（切换语言立即跟随 ✓）", () => {
+    resetPluginLocaleForTests();
+    const { service, state } = staleService();
+    const ZH = { oldKey: "旧键", questions: "学习疑问" };
+    const EN = { oldKey: "Old key", questions: "Learning questions" };
+    attachPluginLocale(() => service, "kn", ZH, EN);
+    const t = makeTranslator(undefined, ZH);
+    assert.equal(t("oldKey"), "Old key", "宿主字典有的键照旧用宿主 ✓");
+    assert.equal(t("questions"), "Learning questions", "宿主字典缺的新键必须由插件自带字典补成英文 ✓");
+    state.active = "zh";
+    assert.equal(t("questions"), "学习疑问", "切回中文后下一次调用立即跟随 ✓");
+    assert.equal(pluginLocaleText("questions"), "学习疑问", "pluginLocaleText 也跟随当前语言 ✓");
+    resetPluginLocaleForTests();
+  });
+
+  it("**注销**：插件卸载要撤掉宿主字典，重新登记（新一版含新键）才能注册 ✓", () => {
+    resetPluginLocaleForTests();
+    const dicts = new Map();
+    const service = {
+      register: (ns, locale, dict) => {
+        const key = `${ns}::${locale}`;
+        if (dicts.has(key)) throw new Error(`duplicate ${key}`);
+        dicts.set(key, dict);
+        return () => { dicts.delete(key); };
+      },
+      getLocale: () => ({ active: "en", locales: [{ id: "zh" }, { id: "en" }] }),
+      bind: (ns) => (key) => dicts.get(`${ns}::en`)?.[key] ?? key,
+    };
+    const dispose = attachPluginLocale(() => service, "kn", { questions: "学习疑问" }, { questions: "Learning questions" });
+    assert.equal(pluginTranslate()("questions"), "Learning questions");
+    assert.ok(dicts.has("kn::zh") && dicts.has("kn::en"), "正常注册两份字典 ✓");
+    dispose();
+    assert.equal(dicts.size, 0, "卸载时必须把宿主字典**撤掉**（否则下一次 apply 注册不上 ✗）");
+    assert.equal(pluginTranslate(), null, "注销后不能再返回旧翻译函数 ✓");
+    /* 模拟热重载后的新一版：字典里多了新键，能重新注册成功 ✓ */
+    attachPluginLocale(() => service, "kn", { questions: "学习疑问", extra: "新问题" }, { questions: "Learning questions", extra: "New question" });
+    assert.equal(pluginTranslate()("extra"), "New question", "重新登记后新键也要能查到 ✓");
+    resetPluginLocaleForTests();
+  });
+
+  it("语言未知时不瞎猜（交给调用方的字面文案兜底）✓", () => {
+    resetPluginLocaleForTests();
+    const service = {
+      register: () => () => {},
+      getLocale: () => ({ locales: [] }),
+      bind: () => (key) => key,
+    };
+    attachPluginLocale(() => service, "kn", { questions: "学习疑问" }, { questions: "Learning questions" });
+    assert.equal(pluginLocaleText("questions"), null, "拿不到 active 时不能硬猜成中/英 ✓");
+    resetPluginLocaleForTests();
+  });
+});
+
 describe("硬编码中文不许再漏 ✓", () => {
   const dir = path.join(HERE, "..", "src", "client");
   const dict = readFileSync(path.join(dir, "index.ts"), "utf8");

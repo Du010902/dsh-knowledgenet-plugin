@@ -7,7 +7,13 @@ const setup = `
 window.mountQuestions = () => {
   const doc = { nodeId: 'node-a', title: 'Attention', path: 'Nodes/A.md', text: 'Attention scaling\u005cn\u005cnSoftmax axes', hash: 'hash', revision: 1 };
   const target = { root: 'D:/library', sessionId: 'current' };
-  window.plugin.rememberOpenEditor('root:' + target.root, 'node-a');
+  /*
+   * 面板与问句弹窗必须**按同一个库身份**记/查"当前打开的节点" ✓：
+   * 面板载荷带 libraryId（graphPayload ✓）⇒ 记的是 id:<libraryId>；
+   * /list-node-questions 也回 libraryId ✓ ⇒ 查的也是 id:<libraryId> ✓
+   * （用户实测：两边对不上时默认归属节点退成"对话所属节点" ✗）。
+   */
+  window.plugin.rememberOpenEditor('id:lib-1', 'node-a');
   const questions = [
     { id: 'chat', title: 'Historical chat', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old', seq: 12, excerpt: 'key phrase', offset: 10 } },
     { id: 'legacy', title: 'Legacy term', processed: false, source: { kind: 'chat', sessionId: 'history', messageKey: 'old' } },
@@ -58,6 +64,7 @@ window.mountQuestions = () => {
     if (request.kind === 'read-node-document') body.document = doc;
     if (request.kind === 'list-node-questions' && !request.nodeId) {
       body.root = target.root;
+      body.libraryId = 'lib-1';
       body.nodes = [base, prerequisite];
       body.ownerNodeId = prerequisite.id;
     } else if (request.kind === 'list-node-questions') body.questions = questions;
@@ -115,7 +122,7 @@ window.mountQuestions = () => {
 
 test("question panel, source navigation, and prerequisite promotion in the built client", async () => {
   const browser = await startEditorBrowser({
-    extraExports: ["QuestionDocumentAction", "ChatSelectionBar", "attachQuestionNavigation", "locateChatQuestion", "recallDraft", "draftKey", "rememberOpenEditor"],
+    extraExports: ["QuestionDocumentAction", "ChatSelectionBar", "attachQuestionNavigation", "locateChatQuestion", "recallDraft", "draftKey", "rememberOpenEditor", "forgetOpenEditor"],
     setup,
   });
   const { page } = browser;
@@ -208,12 +215,29 @@ test("question panel, source navigation, and prerequisite promotion in the built
     });
     await page.locator(".kn-sel-bar").getByRole("button", { name: "记为疑问" }).click();
     const chatCapture = page.getByRole("dialog", { name: "记为疑问" });
+    /*
+     * **默认归属节点 = 当前打开的节点** ✓（用户要求 2026-11）。
+     * 这里当前打开的是 node-a（`rememberOpenEditor` ✓），而对话所属节点（`ownerNodeId`）故意设成 node-b ✓ ——
+     * 若两边的库身份键对不上，默认就会退成 node-b ✗（用户实测的那一幕 ✓）。
+     */
+    const chatOwner = chatCapture.getByRole("combobox", { name: "归属节点" });
+    await chatOwner.waitFor();
+    assert.equal(await chatOwner.inputValue(), "node-a", "划词加疑问的默认归属节点必须是**当前打开的节点**（不是对话所属节点 ✗）");
     await chatCapture.getByRole("button", { name: "添加", exact: true }).click();
     await chatCapture.waitFor({ state: "detached" });
     await actions("Current chat excerpt").waitFor();
     const chatRequest = await page.evaluate(() => window.questionChecks.requests.find((request) => request.title === "Current chat excerpt"));
     assert.deepEqual(chatRequest.source, { kind: "chat", sessionId: "current", messageKey: "current-message", seq: 42, excerpt: "Current chat excerpt", offset: 0 });
 
+    /*
+     * 第二种形状（**兜底** ✓）：面板手上还没有 `libraryId`（例如宿主半是旧版 —— 只刷新页面时 ✓）
+     * ⇒ 它把"当前打开的节点"记成 `root:<root>` 键 ✓，而问句上下文仍然回的是 `libraryId` ✓。
+     * 弹窗必须能再按 root 兜一次 ✓（否则默认又退回对话所属节点 ✗）。
+     */
+    await page.evaluate(() => {
+      window.plugin.forgetOpenEditor("id:lib-1");
+      window.plugin.rememberOpenEditor("root:D:/library", "node-a");
+    });
     await page.locator("[data-textpreview-line]").evaluate((line) => {
       const range = document.createRange();
       range.selectNodeContents(line);
@@ -222,7 +246,8 @@ test("question panel, source navigation, and prerequisite promotion in the built
     });
     await page.locator("[data-question-document-action]").click();
     const dialog = page.getByRole("dialog", { name: "记为疑问" });
-    assert.equal(await dialog.getByRole("combobox", { name: "归属节点" }).inputValue(), "node-a");
+    assert.equal(await dialog.getByRole("combobox", { name: "归属节点" }).inputValue(), "node-a",
+      "面板用 root 键记、问句上下文用 libraryId ⇒ 必须按 root 兜回来（仍是当前打开的节点 ✓）");
     await dialog.getByRole("button", { name: "添加", exact: true }).click();
     await dialog.waitFor({ state: "detached" });
     await locate("Workspace source");

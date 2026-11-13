@@ -653,14 +653,21 @@ interface MinimalClientContext {
  * ⇒ 英文界面里满屏中文 ✓（用户实测："当前插件的语言似乎没有跟随系统变化"✓）。
  * 现在 `attachPluginLocale` 只登记"现读服务的函数"✓，**每次取用都会补试注册** ✓，
  * 而且会按宿主已声明的语言 id（`en-US` / `zh-CN` ✓）各注册一份 ✓。
+ *
+ * **注销必须挂到 `ctx.effect` 上** ✓（2026-11，用户实测"学习疑问按钮无法切换语言"✗）：
+ * 宿主对同一命名空间**重复注册会抛** ✓ —— 插件热重载/升级后旧实例注册的字典还占着命名空间 ✓，
+ * 新实例的注册全被拒 ⇒ **这一版新增的键在宿主字典里永远没有** ⇒ 那些新文案回落到中文字面 ✓
+ * （其它老键有旧字典 ⇒ 仍然是英文 ✓，于是看起来"只有这个按钮不跟随语言"✓）。
  */
 function registerLocale(ctx: MinimalClientContext): string | undefined {
-  attachPluginLocale(
+  const dispose = attachPluginLocale(
     () => (ctx.get?.("locale") ?? undefined) as PluginLocaleService | undefined,
     NS,
     DICT_ZH,
     DICT_EN,
   );
+  /* 插件卸载/热重载时把宿主字典撤掉，下一次 apply 才能注册这一版的完整字典 ✓ */
+  if (ctx.effect) ctx.effect(() => dispose, "knowledgenet: locale dictionaries");
   /* 立刻试一次（能把失败挡在最前面 ✓）；失败也没关系 ✓ —— 取用时还会再试 ✓ */
   try {
     pluginTranslate();

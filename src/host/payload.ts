@@ -25,7 +25,21 @@ export const MAX_EDGE_DESCRIPTION = 240;
 export const MAX_PAYLOAD_BYTES = 1_800_000;
 
 export interface GraphPayload {
-  library: { root: string; name: string; formatVersion: number };
+  library: {
+    root: string;
+    name: string;
+    formatVersion: number;
+    /**
+     * 库的稳定身份（v3 `library.json` 的 ULID ✓，空串 = 这个库没有身份字段 ✓）。
+     *
+     * **面板必须拿到它**（用户实测 2026-11 ✗）：面板用 `libraryKeyOf(payload.library)`
+     * 给"当前打开的是哪个节点"的记忆打键 ✓，而问句弹窗拿的是 `/list-node-questions`
+     * 返回的 `libraryId` ✓ —— 两边若一个用 `root:`、一个用 `id:` 就会**对不上** ✓
+     * ⇒ 弹窗的默认归属节点永远退回"对话所属节点"，而不是"当前打开的节点"（用户反馈 ✗）。
+     * 载荷里带上 `libraryId` ⇒ 两边都用 `id:` ⇒ 对得上 ✓。
+     */
+    libraryId: string;
+  };
   focusId: string | null;
   goals: Array<{ id: string; title: string; rootNodeId: string }>;
   nodes: NodeSummary[];
@@ -93,6 +107,7 @@ export function graphPayload(
       root: context.library.root,
       name: context.library.manifest.title,
       formatVersion: context.library.manifest.formatVersion,
+      libraryId: context.library.manifest.libraryId,
     },
     focusId: options.focusId ?? focusOf(snapshot, options.rootId),
     goals: snapshot.goals.map((goal) => ({

@@ -35,7 +35,18 @@ export function QuestionCapture({ source, title: initial, t: locale, onClose }: 
       .then((result) => {
         if (abort.signal.aborted) return;
         setContext(result);
-        const opened = openEditorNode(libraryKeyOf(result));
+        /*
+         * 默认归属节点 = **当前已经打开的节点** ✓（用户要求 2026-11）。
+         *
+         * 两个键都试（这是用户实测"默认成了对话所属节点"的根因 ✗）：
+         * - 面板按 `libraryKeyOf(payload.library)` 记"编辑器开着谁" ✓；
+         * - 问句上下文（`/list-node-questions`）回的是 `{ root, libraryId }` ✓；
+         * 面板载荷过去没有 `libraryId` ⇒ 记的是 `root:`、这里算的是 `id:` ⇒ **对不上** ✓
+         * ⇒ `openEditorNode` 恒为 null ⇒ 退到 `ownerNodeId`（对话所属节点 ✗）。
+         * 现在面板载荷补了 `libraryId`（两边都用 `id:` ✓），这里再按 root 兜一次，
+         * 兼容"载荷里暂时没有身份字段"的情况 ✓。
+         */
+        const opened = openEditorNode(libraryKeyOf(result)) ?? openEditorNode(libraryKeyOf({ root: result.root }));
         const preferred = [opened, result.ownerNodeId].find((candidate) => result.nodes.some((node) => node.id === candidate));
         setNodeId(preferred ?? "");
       })

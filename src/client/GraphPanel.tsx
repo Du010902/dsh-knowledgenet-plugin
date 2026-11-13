@@ -28,7 +28,7 @@ import { GraphUniverse } from "../vendor/upstream/components/GraphUniverse.tsx";
 import { GRAPH_API_ROUTE } from "../shared/routes.ts";
 import { buildKnowledgeMap, islandSnapshot } from "./knowledge-map.ts";
 import { makeTranslator } from "./card-model.ts";
-import { pluginTranslate } from "./plugin-locale.ts";
+import { pluginLocaleText } from "./plugin-locale.ts";
 import { GraphContextMenu, requestCanvasMenu } from "./GraphContextMenu.tsx";
 import { reportDiag, reportDiagOnce } from "./diag.ts";
 import { rememberFocusNode } from "./ChatSelectionBar.tsx";
@@ -208,7 +208,7 @@ export function GraphPanel(props: Parameters<typeof GraphPanelInner>[0]): ReactN
     <ErrorBoundary
       fallback={
         <div className="kn-msg">
-          {pluginTranslate()?.("panelCrashed") ?? LITERAL.panelCrashed}
+          {pluginLocaleText("panelCrashed") ?? LITERAL.panelCrashed}
         </div>
       }
     >

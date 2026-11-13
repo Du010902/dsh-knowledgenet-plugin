@@ -329,6 +329,26 @@ describe("划词添加前置：三条回归的守门", () => {
     assert.ok(code.includes("Math.hypot(event.clientX - press.x"), "判据是「按下到松开有没有移动」");
   });
 
+  /*
+   * 回归（用户反馈 2026-11）：**「引用」要点两次** ✓。
+   *
+   * 现象：划词后浮条上「引用 + 添加节点」并排 ✓；第一次点「引用」后浮条只剩一个按钮（我们的胶囊没了 ✓），
+   * 第二次点才真的把文本引用进输入框 ✓。
+   * 根因：按下「引用」时被当成"点别处" ⇒ 立刻 `setBar(null)` ⇒ 整条**宿主浮层变窄** ⇒
+   * 宿主按新宽度重新居中/夹取 ⇒ 被点的按钮**位移** ⇒ 这一次 `click` 落在空处 ✗。
+   * 修法：按下点落在**我们并排挂着的那条宿主浮层**里（含「引用」✓）时**不许收胶囊** ✓，
+   * mouseup 里也不许把它收掉/弹回来 ✓ —— 浮层收起交给宿主自己（它 dismiss 后我们跟着收 ✓）。
+   */
+  it("按在宿主浮层里（「引用」）时不许收掉我们的胶囊（否则引用要点两次）", () => {
+    assert.ok(code.includes("barHostRef"), "要有个 ref 现读当前挂进去的宿主浮层（事件监听器只注册一次 ✓）");
+    assert.ok(code.includes("insideHostSurface"), "要判定按下点是否在同一条宿主浮层里（composedPath ✓）");
+    assert.ok(code.includes("hostSurface"), "按下现场要记下 hostSurface");
+    assert.ok(code.includes('source: "press-inside-host-surface"'), "这条拦截要能上报（诊断里能区分 ✓）");
+    assert.ok(code.includes("if (!inside && !hostSurface) setBar(null)"), "按在宿主浮层里时**不许**收胶囊 ✗");
+    assert.ok(code.includes("if (press.hostSurface && sameText)"), "mouseup 里同样不许收/重弹 ✓");
+    assert.ok(code.includes("path.includes(host)"), "判定要用 composedPath（Shadow DOM 里 target 会被重定向 ✓）");
+  });
+
   it("注入的样式表必须跟着这一版走（热更新不能留下上一版的 <style>）", () => {
     /*
      * 实测 ✗：插件重新安装后页面没有整体刷新，上一版留在 head 里的 `<style id="knowledgenet-selection-style">`

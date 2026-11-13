@@ -491,6 +491,15 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
    * 两种形态用的是**同一颗胶囊**（`.kn-sel-action`）⇒ 外观一致 ✓，只是定位的负责人不同 ✓。
    */
   const [bar, setBar] = useState<SelectionBarState | null>(null);
+  /**
+   * 当前浮条挂进去的那条**宿主浮层**（DOM 节点 ✓；没挂就 null）。
+   *
+   * 为什么要有 ref：`pointerdown` / `mouseup` 的监听器只在挂载时注册一次（空依赖 ✓），
+   * 里面读不到最新的 `bar` state ✓ ⇒ 用 ref 现读 ✓。判定"这一按是不是按在我们**同一条浮层**上"
+   * 就靠它（宿主那颗「引用」也在里面 ✓ —— 见 `pressRef.current.hostSurface` 的说明 ✓）。
+   */
+  const barHostRef = useRef<HTMLElement | null>(null);
+  barHostRef.current = bar?.host ?? null;
   const [questionCapture, setQuestionCapture] = useState<{ source: ChatQuestionSource; title: string }>();
   /**
    * 弹窗当前是哪种动作（用户要求 2026-09：**两层弹窗合并成一层** ✓）。
@@ -605,9 +614,14 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
   const draggingRef = useRef(false);
   /**
    * 按下那一刻的现场（在**捕获阶段**记下）：松开时用它判断"这一按到底是不是划词"。
-   * `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）。
+   * `inside` = 按在浮条自己身上（那种情况交给浮条自己的 click 处理，不在 mouseup 里重弹 ✓）；
+   * `hostSurface` = 按在**宿主那条划词浮层**里（我们的胶囊并排挂在其中 ✓ ——
+   * 比如「引用」按钮）。它和我们同一条浮条 ⇒ **不能当成"点别处"收掉胶囊** ✗
+   * （收了整条浮层会变窄、宿主重排位置 ⇒ 这一次点击落空 ⇒ 用户要点两次才能引用 ✗）。
    */
-  const pressRef = useRef<{ x: number; y: number; text: string; inside: boolean; insideSelection: boolean } | null>(null);
+  const pressRef = useRef<{
+    x: number; y: number; text: string; inside: boolean; insideSelection: boolean; hostSurface: boolean;
+  } | null>(null);
   /** 弹窗位置（拖动标题后固定；null = 居中 ✓） */
   const [multiPos, setMultiPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -1218,6 +1232,17 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
         const sameText = press.text === info.text;
         /*
+         * **按在同一条宿主浮层里（「引用」等）且选区没变 ⇒ 交给宿主自己的点击处理** ✓，
+         * 而且**不许收掉我们的胶囊** ✗ —— 用户实测 2026-11："引用"要点两次：
+         * 第一次按下时我们把胶囊收掉 ⇒ 浮层变窄 ⇒ 宿主按新宽度重新居中 ⇒ 被点的按钮位移
+         * ⇒ 这一次 click 落空（看起来"第一次点击后只剩一个按钮"✓）；第二次才点中。
+         * 浮层收起由宿主自己负责（它 dismiss 后我们的 `MutationObserver` 跟着收 ✓）。
+         */
+        if (press.hostSurface && sameText) {
+          report("blocked-by-gate", { source: "press-inside-host-surface" });
+          return;
+        }
+        /*
          * 两种"不是在选新东西"的情况都不许把浮条弹回来：
          *  ① **没移动 + 选区没变** ⇒ 那只是一次点击（老规则 ✓）；
          *  ② **按下点落在已有选区里面 + 选区没变** ⇒ 用户只是在那段**已经选中的文字**上点了一下、
@@ -1349,6 +1374,27 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
       return target !== null && typeof target.closest === "function" && target.closest(".kn-sel-bar") !== null;
     };
 
+    /**
+     * 这一按是不是落在**我们并排挂进去的那条宿主划词浮层**里？（宿主那颗「引用」就在里面 ✓）
+     *
+     * 用的同一个 `composedPath()` 判据 ✓：宿主浮层是 light DOM，但侧栏/面板有 Shadow DOM，
+     * 事件重定向后 `closest` 不可靠 ✓。
+     *
+     * @returns 是 ⇒ 按在**同一条浮条**上（不能当成"点别处"把我们的胶囊收掉 ✓）。
+     */
+    const insideHostSurface = (event: Event): boolean => {
+      const host = barHostRef.current;
+      if (host === null) return false;
+      try {
+        const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+        if (path.includes(host)) return true;
+      } catch {
+        // 忽略：退到下面的 contains 判断
+      }
+      const target = event.target as Node | null;
+      return target !== null && host.contains(target);
+    };
+
     /*
      * **点别处 ⇒ 浮条立即消失，而且不许再弹回来** ✓。
      *
@@ -1359,6 +1405,11 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
      * 2. 记下这一按的**起点与按下时的选区**：`mouseup` 才是显示浮条的地方，而"点别处"的事件序列是
      *    `按下（收浮条）→ 松开（又弹回来）` ✗ —— 用户实测：选中文字后点右侧栏的放大按钮，浮条又冒出来了。
      *    所以【没移动 + 选区文字没变】就不许再弹（那只是一次点击，不是划词）✓。
+     *
+     * ⚠️ 例外（用户实测 2026-11 ✗，"引用要点两次"）：按在**同一条宿主浮层**里的「引用」上时
+     * **绝不能收掉我们的胶囊** ✓ —— 收了这条浮层会瞬间变窄，宿主按浮层宽度重新居中/定位 ✓，
+     * 按钮跟着位移 ⇒ 这一次 `click` 落在空处 ⇒ 用户看到的第一次点击"只把浮条变成了一个按钮" ✗，
+     * 第二次（浮条已经不在了）才真的引用 ✓。所以这种按下标记成 `hostSurface` ✓（见 `onMouseUp` ✓）。
      */
     /**
      * 这个点（视口坐标）是否落在**当前选区**的包围盒里？
@@ -1379,6 +1430,8 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
 
     const onPressCapture = (event: MouseEvent): void => {
       const inside = insideBar(event);      /* 用户开始新的交互 ⇒ 解除"切换后禁止弹出"（这是新的一次划词机会 ✓） */
+      /* 按在同一条宿主浮层里（「引用」等）⇒ 也是"同一条浮条"，不能收 ✓（见上面的 ⚠️ 说明） */
+      const hostSurface = !inside && insideHostSurface(event);
       suppressBarRef.current = false;
       pressRef.current = {
         x: event.clientX,
@@ -1387,8 +1440,10 @@ export function ChatSelectionBar(props: ChatSelectionBarProps): ReactNode {
         inside,
         /* 按下那一刻光标是不是已经在**已有选区**里（两种序列的意图完全不同，见 `onMouseUp`）✓ */
         insideSelection: inside ? false : pointInsideSelection(event.clientX, event.clientY),
+        hostSurface,
       };
-      if (!inside) setBar(null);
+      /* 只在真的"点别处"时收 ✓ —— 按在宿主浮层里（含「引用」）不收 ✓ */
+      if (!inside && !hostSurface) setBar(null);
     };
     document.addEventListener("pointerdown", onPressCapture, true);
     /* 某些环境（老浏览器/合成事件）不发 pointerdown ⇒ 再用 mousedown 兜一次（同一个处理器，幂等 ✓） */

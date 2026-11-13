@@ -173,6 +173,14 @@ describe("v3：面板 Fetch 路由", () => {
     }
     assert.equal(body.counts.nodes, 2);
     assert.equal(body.library.formatVersion, 3);
+    /*
+     * **面板载荷必须带库身份** ✓（用户实测 2026-11："划词加疑问"的默认归属节点不是当前打开的节点 ✗）：
+     * 面板用 `libraryKeyOf(payload.library)` 记"编辑器开着哪个节点"；问句上下文返回 `libraryId` ✓ ——
+     * 载荷少了 `libraryId` 时面板记的是 `root:`、问句侧算的是 `id:` ⇒ 永远对不上 ✗。
+     */
+    const manifest = JSON.parse(await readFile(join(fx.root, "library.json"), "utf8"));
+    assert.equal(typeof body.library.libraryId, "string", "载荷的 library 必须带 libraryId");
+    assert.equal(body.library.libraryId, manifest.libraryId, "载荷里的库身份必须与 library.json 一致（两边都用它打键 ✓）");
   });
 
   it("会话 cwd 指向有库的工作区时能取到数据", async () => {

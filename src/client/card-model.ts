@@ -1,4 +1,4 @@
-import { pluginTranslate } from "./plugin-locale.ts";
+import { pluginLocaleText } from "./plugin-locale.ts";
 
 /**
  * 工具卡片的**纯数据模型**（无 JSX、无 React）。
@@ -207,8 +207,10 @@ export function makeTranslator(
     let template = dict[key] ?? key;
     /*
      * **三级取词** ✓（用户实测：英文界面下插件满屏中文 ✗）：
-     * ① 宿主注入的 `t` ✓；② **插件自己 bind 的翻译函数** ✓（`plugin-locale.ts` ✓）；
-     * ③ 组件内字面文案 ✓。实测英文界面里 ① 没能解析出我们的命名空间 ✗ ⇒ 只靠 ① 会一直中文 ✓。
+     * ① 宿主注入的 `t` ✓；② **插件自己 bind 的翻译函数 + 插件自带最新词典** ✓（`plugin-locale.ts` ✓）；
+     * ③ 组件内字面文案 ✓。实测英文界面里 ① 没能解析出我们的命名空间 ✗ ⇒ 只靠 ① 会一直中文 ✓；
+     * 而插件字典里**新增的键**可能在宿主字典里不存在（插件热重载后宿主拒绝重复注册 ✓，
+     * 见 `pluginLocaleText` 的说明 ✓）⇒ ② 里必须有"自家字典"这一层 ✓。
      */
     const fromHost = (): string | null => {
       if (bind === null) return null;
@@ -222,8 +224,7 @@ export function makeTranslator(
     };
     const fromPlugin = (): string | null => {
       try {
-        const text = pluginTranslate()?.(key);
-        return typeof text === "string" && text !== "" && text !== key ? text : null;
+        return pluginLocaleText(key);
       } catch {
         return null;
       }
